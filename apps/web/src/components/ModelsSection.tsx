@@ -9,7 +9,12 @@ type Kind = "language" | "transcription" | "align";
 const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language" | "transcription" }> = [
   { kind: "language", title: "Language model", help: "Names, disfluencies, finding and scoring moments, titles.", catalog: "language" },
   { kind: "transcription", title: "Transcription", help: "Speech to words with timestamps. Must return word timestamps.", catalog: "transcription" },
-  { kind: "align", title: "Alignment", help: "Re-aligns each cut on a short window. A bigger whisper here is cheap; keep it on the same server or vendor as transcription.", catalog: "transcription" },
+  {
+    kind: "align",
+    title: "Alignment",
+    help: "Re-aligns each cut on a short window. A bigger whisper here is cheap; keep it on the same server or vendor as transcription.",
+    catalog: "transcription",
+  },
 ];
 
 function fmtBytes(n: number) {
@@ -25,7 +30,10 @@ function fmtBytes(n: number) {
 export function ModelsSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const state = useQuery({ ...trpc.admin.models.get.queryOptions(), refetchInterval: (q) => (q.state.data?.pulls.some((p) => p.status === "running") ? 1000 : 10_000) });
+  const state = useQuery({
+    ...trpc.admin.models.get.queryOptions(),
+    refetchInterval: (q) => (q.state.data?.pulls.some((p) => p.status === "running") ? 1000 : 10_000),
+  });
   const language = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "language" }));
   const transcription = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "transcription" }));
   const catalogs = { language, transcription };
@@ -35,9 +43,20 @@ export function ModelsSection() {
     void qc.invalidateQueries({ queryKey: trpc.admin.models.catalog.pathKey() });
     void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
   };
-  const saveCredentials = useMutation(trpc.admin.providers.set.mutationOptions({ onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()), onError: (e) => toast.error(e.message) }));
-  const clearCredentials = useMutation(trpc.admin.providers.clear.mutationOptions({ onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()), onError: (e) => toast.error(e.message) }));
-  const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => saveCredentials.mutateAsync({ provider, ...patch });
+  const saveCredentials = useMutation(
+    trpc.admin.providers.set.mutationOptions({
+      onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()),
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const clearCredentials = useMutation(
+    trpc.admin.providers.clear.mutationOptions({
+      onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()),
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) =>
+    saveCredentials.mutateAsync({ provider, ...patch });
   const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });
 
   const s = state.data;
@@ -62,7 +81,8 @@ export function ModelsSection() {
   );
   const test = useMutation(
     trpc.admin.models.test.mutationOptions({
-      onSuccess: (r, input) => toast(r.ok ? `${input.id} answered in ${(r.ms / 1000).toFixed(1)} s${r.reply ? `: “${r.reply}”` : ""}` : `${input.id}: ${r.error}`),
+      onSuccess: (r, input) =>
+        toast(r.ok ? `${input.id} answered in ${(r.ms / 1000).toFixed(1)} s${r.reply ? `: “${r.reply}”` : ""}` : `${input.id}: ${r.error}`),
       onError: (e) => toast.error(e.message),
     }),
   );
@@ -87,7 +107,12 @@ export function ModelsSection() {
   }, [runningKey]);
   const pulling = useMemo(() => new Set(running.map((p) => `${p.provider}:${p.model}`)), [running]);
 
-  const sourceOf = (k: Kind) => (s?.override[k] ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : k === "align" && s?.env.align === s?.env.transcription ? "follows transcription" : "from .env");
+  const sourceOf = (k: Kind) =>
+    s?.override[k]
+      ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""}`
+      : k === "align" && s?.env.align === s?.env.transcription
+        ? "follows transcription"
+        : "from .env";
 
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
@@ -96,7 +121,9 @@ export function ModelsSection() {
         <span className="text-xs text-ink3">{s?.updatedAt ? `changed ${new Date(s.updatedAt).toLocaleString()}` : "as configured in .env"}</span>
       </div>
       <p className="text-[13px] text-ink2">
-        Switch models without a restart. Pick a provider, enter its key or server URL right there if it has none (stored encrypted; <span className="font-mono text-xs">.env</span> stays the default), and its models appear. A change applies to the next stage that starts; running stages finish with the model they began with.
+        Switch models without a restart. Pick a provider, enter its key or server URL right there if it has none (stored encrypted;{" "}
+        <span className="font-mono text-xs">.env</span> stays the default), and its models appear. A change applies to the next stage that starts; running
+        stages finish with the model they began with.
       </p>
       {s && Object.keys(s.ignored).length > 0 && (
         <div className="rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[13px]">
@@ -144,11 +171,22 @@ export function ModelsSection() {
               />
               <p className="flex-1 text-[11px] leading-4 text-ink3">{help}</p>
               <div className="mt-auto flex min-w-0 gap-1 pt-1">
-                <button type="button" className="btn-quiet text-xs" disabled={!value || test.isPending} onClick={() => test.mutate({ kind: catalog, id: value })}>
+                <button
+                  type="button"
+                  className="btn-quiet text-xs"
+                  disabled={!value || test.isPending}
+                  onClick={() => test.mutate({ kind: catalog, id: value })}
+                >
                   {test.isPending && test.variables?.id === value ? "Testing…" : "Test"}
                 </button>
                 {s?.override[kind] && (
-                  <button type="button" className="btn-quiet min-w-0 max-w-full text-xs" title={`Back to .env: ${s.env[kind]} (applied when you Save)`} disabled={save.isPending || draft[kind] === s.env[kind]} onClick={() => setDraft((d) => ({ ...d, [kind]: s.env[kind] }))}>
+                  <button
+                    type="button"
+                    className="btn-quiet min-w-0 max-w-full text-xs"
+                    title={`Back to .env: ${s.env[kind]} (applied when you Save)`}
+                    disabled={save.isPending || draft[kind] === s.env[kind]}
+                    onClick={() => setDraft((d) => ({ ...d, [kind]: s.env[kind] }))}
+                  >
                     <span className="block truncate">
                       Back to .env <span className="font-mono">({s.env[kind]})</span>
                     </span>
@@ -192,14 +230,21 @@ export function ModelsSection() {
         </div>
       )}
       <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-[12px] text-ink3">{dirty.length ? `${dirty.length} change${dirty.length === 1 ? "" : "s"} to save; each is checked first (key, server, word timestamps)` : ""}</span>
+        <span className="text-[12px] text-ink3">
+          {dirty.length ? `${dirty.length} change${dirty.length === 1 ? "" : "s"} to save; each is checked first (key, server, word timestamps)` : ""}
+        </span>
         <span className="flex gap-2">
           {dirty.length > 0 && (
             <button type="button" className="btn-quiet" onClick={() => setDraft({})}>
               Discard
             </button>
           )}
-          <button type="button" className="btn-primary min-w-[6.5rem]" disabled={!dirty.length || save.isPending} onClick={() => save.mutate(Object.fromEntries(dirty.map(({ kind }) => [kind, draft[kind]!])))}>
+          <button
+            type="button"
+            className="btn-primary min-w-[6.5rem]"
+            disabled={!dirty.length || save.isPending}
+            onClick={() => save.mutate(Object.fromEntries(dirty.map(({ kind }) => [kind, draft[kind]!])))}
+          >
             {save.isPending ? "Checking…" : "Save"}
           </button>
         </span>

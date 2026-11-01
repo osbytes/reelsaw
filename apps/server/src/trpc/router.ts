@@ -1,48 +1,150 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
+import { mediaLinksRouter, webhooksRouter } from "./integrations.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
-import { applyProjectFraming, deleteClip, deleteClips, deleteOwnedProject, deletedClips, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
+import {
+  decisionSummary,
+  EXPORT_MAX,
+  exportDecisions,
+  fixDecisions,
+  forgetDecisions,
+  LIST_MAX,
+  listDecisions,
+  recordDecisions,
+  setLearning,
+} from "../decisions/service.js";
+import { DECISION_KINDS, emailPreferencesPatchSchema } from "@reelsaw/shared";
+import {
+  applyProjectFraming,
+  createProject,
+  deleteClip,
+  deleteClips,
+  deleteOwnedProject,
+  deletedClips,
+  findProject,
+  projectBumpersInput,
+  projectStyleInput,
+  purgeOwnedClip,
+  purgeOwnedProject,
+  reanalyzeProject,
+  refineInput,
+  refineProject,
+  restoreClip,
+  restoreProject,
+  retryOwnedProject,
+  setProjectBumpers,
+  setProjectSourceText,
+  updateProject,
+  updateProjectStyle,
+} from "../projects/service.js";
+import {
+  clipBumpersManyInput,
+  createClip,
+  createClipInput,
+  rerenderClip,
+  rerenderClips,
+  rerenderManyInput,
+  setClipBumpers,
+  updateClip,
+  updateClipInput,
+} from "../clips/service.js";
+import { peekUrlMeta } from "../projects/peek.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
-import { listWorkers } from "../ops/workers.js";
+import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, PASSWORD_MAX_LENGTH, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, sectionModeSchema, sectionAdjustSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, layerTemplateNameSchema, layerTemplateLayersSchema, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import {
+  CLEARABLE_SETTINGS,
+  projectMetadataSchema,
+  createProjectInputSchema,
+  projectSettingsPatchSchema,
+  defaultProjectSettings,
+  PASSWORD_MAX_LENGTH,
+  userProjectDefaultsSchema,
+  bumperSecondsSchema,
+  sectionModeSchema,
+  sectionAdjustSchema,
+  overlayKind,
+  TEXT_OVERLAY_DEFAULTS,
+  ASSET_OVERLAY_DEFAULT_W,
+  CLIP_AUDIO_DEFAULTS,
+  clipAudioList,
+  TEXT_FONTS,
+  styleSchema,
+  clipLayers,
+  layersToLegacy,
+  assetTagsSchema,
+  assetProvenanceSchema,
+  SFX_MAX_SEC,
+  layerTemplateNameSchema,
+  layerTemplateLayersSchema,
+  type ClipLayer,
+  type ClipOverlay,
+  type ClipAudio,
+  type EventsReplayed,
+  type ProjectEvent,
+  type TranscriptFlag,
+  type Word,
+} from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
+import { lockProjectClips, requestRender } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload, restoreOwnedAsset, purgeOwnedAsset } from "../library/service.js";
-import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
-import { cleanLayers } from "../library/layers.js";
-import { applyLayerTemplate, applyLayerTemplateInput, createLayerTemplate, getLayerTemplate, layerTemplateFromClip, listLayerTemplates, publicTemplate, purgeLayerTemplate, removeLayerTemplate, restoreLayerTemplate, templateIdSchema, updateLayerTemplate } from "../library/templates.js";
-import { assetVisibleTo } from "../library/visible.js";
+import {
+  projectBumperSummaries,
+  bumperUsageCounts,
+  bumperAssetUsage,
+  bumperNameSchema,
+  updateBumperAsset,
+  createAsset,
+  setBumperDefault,
+  requireOneSource,
+  downloadAsUpload,
+  restoreOwnedAsset,
+  purgeOwnedAsset,
+} from "../library/service.js";
+import { templateBumpersSchema } from "@reelsaw/shared";
+import {
+  applyLayerTemplate,
+  applyLayerTemplateInput,
+  createLayerTemplate,
+  getLayerTemplate,
+  layerTemplateFromClip,
+  listLayerTemplates,
+  publicTemplate,
+  purgeLayerTemplate,
+  removeLayerTemplate,
+  restoreLayerTemplate,
+  templateIdSchema,
+  updateLayerTemplate,
+} from "../library/templates.js";
 import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
-import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
-import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
+import { userDefaults } from "../pipeline/settings.js";
+import { assetVisibleTo } from "../library/visible.js";
+import { PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
 import { touchLastActive } from "../presence.js";
 import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
-import { needsPrepare } from "../pipeline/manual.js";
-import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
-import { decodeCursor, pageOf } from "../pagination.js";
-import { checkProjectQuota, limitsDetail, LIMIT_KEYS, limitUsage, periodFor, recordProjectCreated, usageByUser, watermarkFor } from "../quota.js";
+import { decodeCursor, LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
+import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
@@ -57,9 +159,18 @@ import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
 /** Base URLs in force (environment or entered by an admin), for local-vs-cloud decisions. */
-const localConfig = (svc: Services) => ({ OPENAI_BASE_URL: svc.providers.get("openai").baseUrl, OPENAI_COMPATIBLE_BASE_URL: svc.providers.get(svc.config.OPENAI_COMPATIBLE_NAME).baseUrl, OPENAI_COMPATIBLE_NAME: svc.config.OPENAI_COMPATIBLE_NAME });
+const localConfig = (svc: Services) => ({
+  OPENAI_BASE_URL: svc.providers.get("openai").baseUrl,
+  OPENAI_COMPATIBLE_BASE_URL: svc.providers.get(svc.config.OPENAI_COMPATIBLE_NAME).baseUrl,
+  OPENAI_COMPATIBLE_NAME: svc.config.OPENAI_COMPATIBLE_NAME,
+});
 
-const modelId = z.string().trim().min(3).max(200).regex(/^[a-z0-9_-]+:[^\s]+$/i, "a model id looks like provider:model, e.g. anthropic:claude-haiku-4.5");
+const modelId = z
+  .string()
+  .trim()
+  .min(3)
+  .max(200)
+  .regex(/^[a-z0-9_-]+:[^\s]+$/i, "a model id looks like provider:model, e.g. anthropic:claude-haiku-4.5");
 
 function publicClip(c: schema.Clip) {
   return {
@@ -112,8 +223,12 @@ function publicProject(p: schema.Project) {
     status: p.status,
     stage: p.stage,
     stageProgress: p.stageProgress,
+    /** checkpointed stages: { done, total, etaSec, unitMs } (13 of 43 parts, seconds left), else null */
+    stageDetail: p.stageDetail,
     error: p.error,
     settings: p.settings,
+    /** the creator's own key/value pairs (create_project metadata), echoed in webhooks */
+    metadata: p.metadata,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
     /** retention removed the stored source; Retry downloads it again */
     sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
@@ -127,44 +242,62 @@ function publicProject(p: schema.Project) {
  * text) or a correction (kind entity, replacement text). Overlapping fixes are absorbed into it and
  * come back if it is deleted. Cuts refuse to swallow name fixes; corrections replace anything.
  */
-async function addManualFix(svc: Services, userId: string, input: { projectId: string; start: number; end: number; rerender: boolean }, what: { kind: "disfluency" | "entity"; text: string }) {
+async function addManualFix(
+  svc: Services,
+  userId: string,
+  input: { projectId: string; start: number; end: number; rerender: boolean },
+  what: { kind: "disfluency" | "entity"; text: string },
+) {
   return withTranscript(svc, userId, input.projectId, async (u, p, t) => {
-  const raw = t.rawWords ?? t.words;
-  const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
-  if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
-  let from = idx[0]!.i;
-  let to = idx.at(-1)!.i;
-  const hits = (f: TranscriptFlag) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
-  if (what.kind === "disfluency" && t.flags.some((f) => f.kind === "entity" && hits(f))) throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a correction. Delete that first, or select around it." });
-  // cuts grow to cover overlapping cuts; a correction replaces exactly the words you selected
-  const merged = t.flags.filter(hits);
-  if (what.kind === "disfluency")
-    for (const f of merged) {
-      from = Math.min(from, f.wordIndex);
-      to = Math.max(to, f.wordIndex + f.span - 1);
-    }
-  else if (merged.some((f) => f.wordIndex < from || f.wordIndex + f.span - 1 > to))
-    throw new TRPCError({ code: "BAD_REQUEST", message: "The selection cuts through another fix. Select all of its words, or delete it first." });
-  const span = raw.slice(from, to + 1);
-  const flag: TranscriptFlag = {
-    id: randomUUID(),
-    kind: what.kind,
-    subkind: "manual",
-    wordIndex: from,
-    span: span.length,
-    start: span[0]!.start,
-    end: span.at(-1)!.end,
-    heard: span.map((w) => w.text).join(" "),
-    suggested: what.text,
-    ...(what.text ? { replacement: what.text } : {}),
-    confidence: 1,
-    status: "accepted",
-    // a growing cut swallows other cuts' contents; a correction keeps each fix whole so deleting it restores them as they were
-    absorbed: merged.flatMap((f) => (what.kind === "disfluency" && f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
-  };
-  const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
-  const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
-  return { ok: true, flagId: flag.id, rerendered };
+    const raw = t.rawWords ?? t.words;
+    const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
+    if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
+    let from = idx[0]!.i;
+    let to = idx.at(-1)!.i;
+    const hits = (f: TranscriptFlag) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
+    if (what.kind === "disfluency" && t.flags.some((f) => f.kind === "entity" && hits(f)))
+      throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a correction. Delete that first, or select around it." });
+    // cuts grow to cover overlapping cuts; a correction replaces exactly the words you selected
+    const merged = t.flags.filter(hits);
+    if (what.kind === "disfluency")
+      for (const f of merged) {
+        from = Math.min(from, f.wordIndex);
+        to = Math.max(to, f.wordIndex + f.span - 1);
+      }
+    else if (merged.some((f) => f.wordIndex < from || f.wordIndex + f.span - 1 > to))
+      throw new TRPCError({ code: "BAD_REQUEST", message: "The selection cuts through another fix. Select all of its words, or delete it first." });
+    const span = raw.slice(from, to + 1);
+    const flag: TranscriptFlag = {
+      id: randomUUID(),
+      kind: what.kind,
+      subkind: "manual",
+      wordIndex: from,
+      span: span.length,
+      start: span[0]!.start,
+      end: span.at(-1)!.end,
+      heard: span.map((w) => w.text).join(" "),
+      suggested: what.text,
+      ...(what.text ? { replacement: what.text } : {}),
+      confidence: 1,
+      status: "accepted",
+      // a growing cut swallows other cuts' contents; a correction keeps each fix whole so deleting it restores them as they were
+      absorbed: merged.flatMap((f) => (what.kind === "disfluency" && f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
+    };
+    const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
+    const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
+    // a cut drawn over the detector's unreviewed cuts implies they were right, but only implies it: the user may have cut a
+    // whole passage without looking at them, so each gets an inferred fix.accept (kept, never an eval label) next to the fix.manual
+    const confirmed =
+      what.kind === "disfluency"
+        ? merged.filter((f) => f.kind === "disfluency" && f.subkind !== "manual" && (f.status === "pending" || f.status === "auto"))
+        : [];
+    await recordDecisions(svc, u.db, p, () =>
+      fixDecisions(u.db, p.id, raw, [
+        ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const }, explicit: false })),
+        { kind: "fix.manual", flag, before: null, after: flag },
+      ]),
+    );
+    return { ok: true, flagId: flag.id, rerendered };
   });
 }
 
@@ -175,7 +308,12 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
  * whole (words are one jsonb value); writes go through writeTranscript, which sends only changed columns.
  * Chunked transcript storage, so an edit touches only the window it changes, is Phase 2 (docs/specs/scale.md).
  */
-async function withTranscript<T>(svc: Services, userId: string, projectId: string, fn: (u: UnitOfWork, p: schema.Project, t: schema.Transcript) => Promise<T>): Promise<T> {
+async function withTranscript<T>(
+  svc: Services,
+  userId: string,
+  projectId: string,
+  fn: (u: UnitOfWork, p: schema.Project, t: schema.Transcript) => Promise<T>,
+): Promise<T> {
   return svc.tx(async (u) => {
     const p = await ownedProject(u.db, userId, projectId);
     const [t] = await u.db.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
@@ -191,7 +329,10 @@ function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string)
   if (!f) return { flags, deletedFlags: deleted };
   return {
     flags: flags.flatMap((x) => (x.id === id ? restoreAbsorbed(x) : [x])).sort((a, b) => a.wordIndex - b.wordIndex),
-    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }], // the live list is capped (and the overflow archived) when saved, see saveFlags
+    deletedFlags: [
+      ...deleted.filter((x) => x.id !== id),
+      { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() },
+    ], // the live list is capped (and the overflow archived) when saved, see saveFlags
   };
 }
 
@@ -199,15 +340,32 @@ function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string)
  * Write back only the transcript columns that changed (rawWords and often words stay as they are), after
  * moving deleted flags beyond the live cap into the archive in the same transaction.
  */
-async function writeTranscript(u: UnitOfWork, projectId: string, t: schema.Transcript, next: { words: Word[]; rawWords: Word[]; flags: TranscriptFlag[]; deletedFlags: DeletedFlag[]; segments: ReturnType<typeof toSentences>; text: string }) {
+async function writeTranscript(
+  u: UnitOfWork,
+  projectId: string,
+  t: schema.Transcript,
+  next: { words: Word[]; rawWords: Word[]; flags: TranscriptFlag[]; deletedFlags: DeletedFlag[]; segments: ReturnType<typeof toSentences>; text: string },
+) {
   const { keep, overflow } = splitDeleted(next.deletedFlags);
   await archiveDeletedFlags(u.db, projectId, overflow);
-  const patch = changedColumns<Record<string, unknown>>({ words: t.words, rawWords: t.rawWords ?? undefined, flags: t.flags, deletedFlags: t.deletedFlags ?? [], segments: t.segments, text: t.text }, { ...next, deletedFlags: keep });
+  const patch = changedColumns<Record<string, unknown>>(
+    { words: t.words, rawWords: t.rawWords ?? undefined, flags: t.flags, deletedFlags: t.deletedFlags ?? [], segments: t.segments, text: t.text },
+    { ...next, deletedFlags: keep },
+  );
   if (Object.keys(patch).length) await u.db.update(schema.transcripts).set(patch).where(eq(schema.transcripts.projectId, projectId));
 }
 
 /** Persist new flag lists, rebuild the cleaned words, re-render clips whose words changed around `f`. */
-async function saveFlags(svc: Services, u: UnitOfWork, p: schema.Project, t: schema.Transcript, flags: TranscriptFlag[], deletedFlags: DeletedFlag[], f: TranscriptFlag, rerender: boolean) {
+async function saveFlags(
+  svc: Services,
+  u: UnitOfWork,
+  p: schema.Project,
+  t: schema.Transcript,
+  flags: TranscriptFlag[],
+  deletedFlags: DeletedFlag[],
+  f: TranscriptFlag,
+  rerender: boolean,
+) {
   const db = u.db;
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
@@ -238,49 +396,16 @@ async function rerenderOverlapping(svc: Services, u: UnitOfWork, p: schema.Proje
   return n;
 }
 
-/** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. */
-async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: schema.Clip) => boolean = (c) => c.status === "done" || c.status === "failed") {
-  let n = 0;
-  await lockProjectClips(u, projectId);
-  for (const c of await listClips(u.db, projectId)) if (which(c) && (await requestRender(svc, u, projectId, c.id)) !== null) n++;
-  return n;
-}
-
-/** Every asset id is one of the user's library (an id the clip already uses stays valid even if it was removed since). */
-async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
-  const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
-  if (!want.length) return;
-  const rows = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
-  if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
-}
-
 /**
- * The user's project, or NOT_FOUND. A mutation calls it with `u.db` inside the unit of work that writes, so ownership
- * is checked in the same transaction as the write (a check made before the transaction can be stale at commit).
+ * The user's project, or NOT_FOUND with a sentence. Services check ownership themselves (`findProject`); this is for the
+ * reads that stay in this file.
  */
-async function ownedProject(db: Db, userId: string, projectId: string) {
+function ownedProject(db: Db, userId: string, projectId: string) {
   // a deleted project is gone for every procedure until it is restored (projects.restore)
-  const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)) });
-  if (!p) throw new TRPCError({ code: "NOT_FOUND" });
-  return p;
+  return findProject(db, { id: userId, admin: false }, projectId, { deleted: false });
 }
 
-/**
- * A clip of one of the user's projects, locked `for update` in the caller's unit of work, with its project (read, not
- * locked: clip before project). NOT_FOUND when the clip is gone, replaced (soft-deleted: it is restored before it is
- * edited), or belongs to someone else (ownedProject also refuses a deleted project).
- */
-async function ownedClip(u: UnitOfWork, userId: string, clipId: string): Promise<{ clip: schema.Clip; project: schema.Project }> {
-  const [clip] = await u.db
-    .select()
-    .from(schema.clips)
-    .where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt), sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${userId})`))
-    .for("update");
-  if (!clip) throw new TRPCError({ code: "NOT_FOUND" });
-  return { clip, project: await ownedProject(u.db, userId, clip.projectId) };
-}
-
-const actorOf = (user: { id: string; role?: string | null }): Actor => ({ id: user.id, admin: user.role === "admin" });
+const actorOf = (user: { id: string; role?: string | null }): { id: string; admin: boolean } => ({ id: user.id, admin: user.role === "admin" });
 /** The billing service, or the sentence a self-hosted instance answers with. */
 function billingOf(svc: Services) {
   if (!svc.ee) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Billing is not enabled on this Reelsaw (REELSAW_EE is off)." });
@@ -293,30 +418,6 @@ const periodOf = (g: Parameters<typeof periodFor>[0]) => {
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 
-/** Best-effort title + thumbnail for a URL before ingest runs (YouTube/Vimeo oEmbed, 4 s budget). */
-async function peekUrlMeta(url: string): Promise<{ title?: string; thumbnail?: string; uploader?: string }> {
-  let host = "";
-  try {
-    host = new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return {};
-  }
-  const oembed = /(^|\.)(youtube\.com|youtu\.be)$/.test(host)
-    ? `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`
-    : /(^|\.)vimeo\.com$/.test(host)
-      ? `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`
-      : null;
-  if (!oembed) return { title: host };
-  try {
-    const res = await fetch(oembed, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return { title: host };
-    const j = (await res.json()) as { title?: string; thumbnail_url?: string; author_name?: string };
-    return { title: j.title, thumbnail: j.thumbnail_url, uploader: j.author_name };
-  } catch {
-    return { title: host };
-  }
-}
-
 // appRouter is three routers merged (head, bumpers, rest) so the library router can be mounted under two names
 // (`bumpers` and `library`) without moving its code.
 const headRouter = router({
@@ -325,8 +426,8 @@ const headRouter = router({
   /** Public: what the sign-in page and the top bar need before/without an approved account. */
   system: router({
     status: publicProcedure.query(async ({ ctx }) => {
-      const r = await ctx.svc.resources.snapshot();
-      const paused = !r.ok.memory ? "memory" : !r.ok.cpu ? "CPU" : !r.ok.disk ? "disk" : null;
+      // the processes that run jobs, from their heartbeats: an HTTP-only process's own machine says nothing about them
+      const paused = await fleetPaused(ctx.svc);
       const s = ctx.svc.settings.get();
       return {
         version: ctx.svc.config.REELSAW_VERSION,
@@ -390,32 +491,34 @@ const headRouter = router({
     }),
     /** Turn optional mail on or off (Settings → Account). Same service as MCP `set_email_preferences` and the unsubscribe link. */
     updateEmailPreferences: signedInProcedure
-      .input(z.object({ readyEmail: z.boolean().optional() }))
-      .mutation(({ ctx, input }) => setEmailPreferences(ctx.svc, ctx.user.id, input)),
+      .input(emailPreferencesPatchSchema)
+      .mutation(({ ctx, input }) => setEmailPreferences(ctx.svc, ctx.user.id, input, "settings")),
     /**
      * After `reelsaw set-password --must-change`: pick a new password without the current one.
      * The session is the proof they knew the temporary password. Other devices stay signed out.
      */
-    completePasswordChange: signedInProcedure
-      .input(z.object({ password: z.string().min(1).max(PASSWORD_MAX_LENGTH) }))
-      .mutation(async ({ ctx, input }) => {
-        if (ctx.who.via !== "session" || !ctx.who.session) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose the new password in the browser after signing in." });
-        }
-        return setUserPassword(ctx.svc, ctx.user.id, ctx.user.id, input.password, {
-          mustChange: false,
-          keepSessionId: ctx.who.session.session.id,
-          rejectReuse: true,
-        });
-      }),
+    completePasswordChange: signedInProcedure.input(z.object({ password: z.string().min(1).max(PASSWORD_MAX_LENGTH) })).mutation(async ({ ctx, input }) => {
+      if (ctx.who.via !== "session" || !ctx.who.session) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Choose the new password in the browser after signing in." });
+      }
+      return setUserPassword(ctx.svc, ctx.user.id, ctx.user.id, input.password, {
+        mustChange: false,
+        keepSessionId: ctx.who.session.session.id,
+        rejectReuse: true,
+      });
+    }),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
-      const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`
+      const { introAssetId: _i, outroAssetId: _o, ...rest } = input; // intro/outro change only through `bumpers.*`
       const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
       return ctx.svc.tx(async (u) => {
         // the default layer template must be one of the user's live templates
         if (typeof clean.layerTemplateId === "string") await getLayerTemplate(u.db, ctx.user.id, clean.layerTemplateId);
-        const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
+        const [cur] = await u.db
+          .select({ d: schema.userSettings.projectDefaults })
+          .from(schema.userSettings)
+          .where(eq(schema.userSettings.userId, ctx.user.id))
+          .for("update");
         const keep = Object.fromEntries((["introAssetId", "outroAssetId"] as const).filter((k) => cur?.d?.[k]).map((k) => [k, cur!.d[k]]));
         const next = { ...clean, ...keep };
         await u.db
@@ -425,6 +528,51 @@ const headRouter = router({
         return { ok: true, projectDefaults: next };
       });
     }),
+    /**
+     * A new API key for this account (Settings → API keys). Permissions can only be set on the server, so the
+     * Settings page asks here instead of calling the auth client. A key can administer the instance only when an
+     * admin ticked it; a key cannot mint keys.
+     */
+    createApiKey: protectedProcedure
+      .input(z.object({ name: z.string().trim().min(1).max(32), admin: z.boolean().default(false) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.who.via !== "session") throw new TRPCError({ code: "FORBIDDEN", message: "Create keys from the Settings page after signing in." });
+        if (input.admin && ctx.user.role !== "admin")
+          throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can create a key that administers the instance." });
+        const created = await ctx.svc.auth.api.createApiKey({
+          body: { name: input.name, userId: ctx.user.id, permissions: { admin: input.admin ? ["write"] : [] } },
+        });
+        ctx.log.info({ keyId: created.id, admin: input.admin }, "api key created");
+        return { id: created.id, key: created.key, name: input.name };
+      }),
+    /** Apps (MCP connectors) this account has allowed through the OAuth consent screen. Empty unless MCP_OAUTH is on. */
+    oauthGrants: protectedProcedure.query(async ({ ctx }) => {
+      const rows = await ctx.svc.database.db
+        .select({
+          clientId: schema.oauthConsent.clientId,
+          grantedAt: schema.oauthConsent.createdAt,
+          scopes: schema.oauthConsent.scopes,
+          name: schema.oauthClient.name,
+          uri: schema.oauthClient.uri,
+          redirectUris: schema.oauthClient.redirectUris,
+        })
+        .from(schema.oauthConsent)
+        .innerJoin(schema.oauthClient, eq(schema.oauthClient.clientId, schema.oauthConsent.clientId))
+        .where(eq(schema.oauthConsent.userId, ctx.user.id))
+        .orderBy(desc(schema.oauthConsent.createdAt));
+      return rows.map(({ redirectUris, ...r }) => ({ ...r, redirectHosts: redirectHosts(redirectUris) }));
+    }),
+    /** Take an app's access away: its consent and every token it holds for this account. Its next request fails. */
+    revokeOauthGrant: protectedProcedure.input(z.object({ clientId: z.string().min(1).max(200) })).mutation(({ ctx, input }) =>
+      ctx.svc.tx(async (u) => {
+        const mine = (table: { userId: AnyPgColumn; clientId: AnyPgColumn }) => and(eq(table.userId, ctx.user.id), eq(table.clientId, input.clientId));
+        await u.db.delete(schema.oauthAccessToken).where(mine(schema.oauthAccessToken));
+        await u.db.delete(schema.oauthRefreshToken).where(mine(schema.oauthRefreshToken));
+        const gone = await u.db.delete(schema.oauthConsent).where(mine(schema.oauthConsent)).returning({ id: schema.oauthConsent.id });
+        ctx.log.info({ clientId: input.clientId, consents: gone.length }, "oauth grant revoked");
+        return { ok: true };
+      }),
+    ),
   }),
 
   /**
@@ -436,7 +584,9 @@ const headRouter = router({
     /** Your plan, subscription, period, the limits in force and what you have used, the watermark decision, and the plan list. */
     get: protectedProcedure.query(({ ctx }) => billingOf(ctx.svc).stateFor(ctx.user)),
     /** A Stripe Checkout URL for a plan (or, with a live subscription, the Billing Portal's confirm-change page). Open it in a browser. */
-    checkout: protectedProcedure.input(z.object({ plan: z.string().min(1).max(40), interval: z.enum(["month", "year"]).default("month") })).mutation(({ ctx, input }) => billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval)),
+    checkout: protectedProcedure
+      .input(z.object({ plan: z.string().min(1).max(40), interval: z.enum(["month", "year"]).default("month") }))
+      .mutation(({ ctx, input }) => billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval)),
     /** The Stripe Billing Portal (invoices, card, cancel at period end). */
     portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
   }),
@@ -445,6 +595,12 @@ const headRouter = router({
 type UsageCounts = Awaited<ReturnType<typeof bumperUsageCounts>>;
 
 /** One library row as the screens read it. `owner` is "shared" for catalog / provider imports (`user_id` null). */
+/** The hosts an OAuth app sends people back to: what the consent screen and the connected-apps list show. */
+function redirectHosts(uris: string[]): string[] {
+  const hosts = uris.flatMap((u) => (URL.canParse(u) ? [new URL(u).host] : []));
+  return [...new Set(hosts)];
+}
+
 function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts, me: string) {
   return {
     id: r.id,
@@ -469,20 +625,57 @@ function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts,
   };
 }
 
-/** The library as the screens and tools list it: the account's own uploads, with usage, and the removals of the last 30 days. Catalog / provider files are instance-shared and listed by search, not here. */
-async function listLibrary(svc: Services, userId: string) {
-    const db = svc.database.db;
-    const rows = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId)).orderBy(desc(schema.assets.createdAt));
-    const usage = await bumperUsageCounts(db, userId);
-    const pub = (r: (typeof rows)[number]) => toLibraryItem(r, usage, userId);
-    // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
-    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-    return {
-      assets: rows.filter((r) => !r.deletedAt).map(pub),
-      deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
-    };
+/**
+ * One keyset page of the library, newest upload first: the account's own live uploads with usage (`items`, `nextCursor`,
+ * `total` of all live ones) and the removals of the last 30 days (`deleted`, at most 200). Catalog / provider files are
+ * instance-shared and listed by search, not here.
+ */
+async function libraryPage(svc: Services, userId: string, opts: { limit?: number; cursor?: string | undefined }) {
+  const db = svc.database.db;
+  const A = schema.assets;
+  const limit = opts.limit ?? LIST_LIMIT_DEFAULT;
+  const cur = pageCursor(opts.cursor, 2);
+  const live = and(eq(A.userId, userId), isNull(A.deletedAt));
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+  const [fetched, [counted], removed, usage] = await Promise.all([
+    db
+      .select({ row: A, ts: sql<string>`${A.createdAt}::text` })
+      .from(A)
+      .where(and(live, cur ? sql`(${A.createdAt}, ${A.id}) < (${String(cur[0])}::timestamptz, ${String(cur[1])})` : undefined))
+      .orderBy(desc(A.createdAt), desc(A.id))
+      .limit(limit + 1),
+    db.select({ total: sql<number>`count(*)::int` }).from(A).where(live),
+    db
+      .select()
+      .from(A)
+      .where(and(eq(A.userId, userId), isNotNull(A.deletedAt), gt(A.deletedAt, cutoff)))
+      .orderBy(desc(A.createdAt), desc(A.id))
+      .limit(200),
+    bumperUsageCounts(db, userId),
+  ]);
+  const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.ts, r.row.id]);
+  return {
+    items: items.map((r) => toLibraryItem(r.row, usage, userId)),
+    nextCursor,
+    total: counted?.total ?? 0,
+    deleted: removed.map((r) => toLibraryItem(r, usage, userId)),
+  };
 }
-type LibraryRow = Awaited<ReturnType<typeof listLibrary>>["assets"][number];
+
+/** The whole library, for the search that filters in memory: the account's own uploads, with usage, and the removals of the last 30 days. Catalog / provider files are instance-shared and listed by search, not here. */
+async function listLibrary(svc: Services, userId: string) {
+  const db = svc.database.db;
+  const rows = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId)).orderBy(desc(schema.assets.createdAt));
+  const usage = await bumperUsageCounts(db, userId);
+  const pub = (r: (typeof rows)[number]) => toLibraryItem(r, usage, userId);
+  // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
+  const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+  return {
+    assets: rows.filter((r) => !r.deletedAt).map(pub),
+    deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
+  };
+}
+type LibraryRow = ReturnType<typeof toLibraryItem>;
 
 const LIBRARY_GET_MAX = 40;
 
@@ -491,7 +684,10 @@ async function getLibraryAssets(svc: Services, userId: string, ids: string[]) {
   const want = [...new Set(ids.filter(Boolean))].slice(0, LIBRARY_GET_MAX);
   if (!want.length) return { assets: [] as LibraryRow[] };
   const db = svc.database.db;
-  const rows = await db.select().from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId)));
+  const rows = await db
+    .select()
+    .from(schema.assets)
+    .where(and(inArray(schema.assets.id, want), assetVisibleTo(userId)));
   const usage = await bumperUsageCounts(db, userId);
   return { assets: rows.map((r) => toLibraryItem(r, usage, userId)) };
 }
@@ -528,125 +724,167 @@ function addedAsset(r: ImportedAsset, owner: "me" | "shared"): AddedAsset {
 
 /** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
 const libraryRouter = router({
-    /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
-    list: protectedProcedure.query(({ ctx }) => listLibrary(ctx.svc, ctx.user.id)),
-    /**
-     * Rows these ids name that this account may read: its own uploads (removed ones included, so a clip that still
-     * uses them has a name), and instance-shared catalog / provider imports. `library.list` does not include shared
-     * rows; the editor looks them up here. Missing or foreign ids are omitted. At most 40 ids.
-     */
-    get: protectedProcedure.input(z.object({ ids: z.array(z.string().min(1).max(100)).max(LIBRARY_GET_MAX) })).query(({ ctx, input }) => getLibraryAssets(ctx.svc, ctx.user.id, input.ids)),
-    /**
-     * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
-     * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
-     */
-    usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-      const db = ctx.svc.database.db;
-      // an instance-shared row is readable by everyone; bumperAssetUsage only ever reports the caller's own projects
-      const [asset] = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), assetVisibleTo(ctx.user.id)));
-      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-      return bumperAssetUsage(db, ctx.user.id, input.id);
+  /** A page of live assets with how many projects use each (`items`, `nextCursor`, `total`), and the ones removed in the last 30 days (`deleted`, restorable). */
+  list: protectedProcedure.input(listPageInput).query(({ ctx, input }) => libraryPage(ctx.svc, ctx.user.id, input ?? {})),
+  /**
+   * Rows these ids name that this account may read: its own uploads (removed ones included, so a clip that still
+   * uses them has a name), and instance-shared catalog / provider imports. `library.list` does not include shared
+   * rows; the editor looks them up here. Missing or foreign ids are omitted. At most 40 ids.
+   */
+  get: protectedProcedure
+    .input(z.object({ ids: z.array(z.string().min(1).max(100)).max(LIBRARY_GET_MAX) }))
+    .query(({ ctx, input }) => getLibraryAssets(ctx.svc, ctx.user.id, input.ids)),
+  /**
+   * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
+   * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
+   */
+  usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const db = ctx.svc.database.db;
+    // an instance-shared row is readable by everyone; bumperAssetUsage only ever reports the caller's own projects
+    const [asset] = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, input.id), assetVisibleTo(ctx.user.id)));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    return bumperAssetUsage(db, ctx.user.id, input.id);
+  }),
+  /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
+  update: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().min(1).max(100),
+        name: bumperNameSchema.optional(),
+        imageSeconds: bumperSecondsSchema.optional(),
+        tags: assetTagsSchema.optional(),
+      }),
+    )
+    .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, tags: input.tags })),
+  /**
+   * Add from exactly one source: an `uploadId` (POST /api/upload) or a public `url` (downloaded server-side) becomes
+   * this account's library row; a catalog / provider result (`provider` + `externalId`) materializes one instance-shared
+   * copy (not listed in this library). The file is probed and limited like every upload; `setDefault` also makes an
+   * own upload the intro or outro.
+   */
+  add: protectedProcedure
+    .input(
+      z.object({
+        uploadId: z.string().min(1).max(100).optional(),
+        url: z.url().optional(),
+        provider: z.string().min(1).max(40).optional(),
+        externalId: z.string().min(1).max(200).optional(),
+        color: z.string().max(9).optional(),
+        imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(),
+        setDefault: z.enum(["intro", "outro"]).optional(),
+        name: bumperNameSchema.optional(),
+        tags: assetTagsSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }): Promise<AddedAsset> => {
+      try {
+        requireOneSource(input);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : String(err) });
+      }
+      if (input.provider) {
+        if (input.setDefault || input.imageSeconds)
+          throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
+        const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
+        return addedAsset(r, "shared");
+      }
+      const uploadId =
+        input.uploadId ??
+        (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then(
+          (d) => d.uploadId,
+          (err) => asTrpc(err),
+        ));
+      const created = await createAsset(ctx.svc, {
+        uploadId,
+        imageSeconds: input.imageSeconds,
+        setDefault: input.setDefault,
+        name: input.name,
+        tags: input.tags,
+        userId: ctx.user.id,
+        actorId: ctx.user.id,
+      });
+      return addedAsset(created, "me");
     }),
-    /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
-    update: protectedProcedure
-      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional(), tags: assetTagsSchema.optional() }))
-      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, tags: input.tags })),
-    /**
-     * Add from exactly one source: an `uploadId` (POST /api/upload) or a public `url` (downloaded server-side) becomes
-     * this account's library row; a catalog / provider result (`provider` + `externalId`) materializes one instance-shared
-     * copy (not listed in this library). The file is probed and limited like every upload; `setDefault` also makes an
-     * own upload the intro or outro.
-     */
-    add: protectedProcedure
-      .input(
-        z.object({
-          uploadId: z.string().min(1).max(100).optional(),
-          url: z.url().optional(),
-          provider: z.string().min(1).max(40).optional(),
-          externalId: z.string().min(1).max(200).optional(),
-          color: z.string().max(9).optional(),
-          imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(),
-          setDefault: z.enum(["intro", "outro"]).optional(),
-          name: bumperNameSchema.optional(),
-          tags: assetTagsSchema.optional(),
-        }),
-      )
-      .mutation(async ({ ctx, input }): Promise<AddedAsset> => {
-        try {
-          requireOneSource(input);
-        } catch (err) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : String(err) });
-        }
-        if (input.provider) {
-          if (input.setDefault || input.imageSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
-          const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
-          return addedAsset(r, "shared");
-        }
-        const uploadId = input.uploadId ?? (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then((d) => d.uploadId, (err) => asTrpc(err)));
-        const created = await createAsset(ctx.svc, { uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, name: input.name, tags: input.tags, userId: ctx.user.id, actorId: ctx.user.id });
-        return addedAsset(created, "me");
+  /**
+   * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or
+   * "catalog" = the Reelsaw catalog; otherwise a provider an admin enabled (see `providers`). Same hit shape for all.
+   */
+  search: protectedProcedure
+    .input(
+      z.object({
+        q: z.string().max(200).default(""),
+        source: z.string().min(1).max(40).optional().describe('"library", "catalog" (default) or a provider id'),
+        kind: z.enum(["video", "image", "audio"]).optional(),
+        cursor: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(60).default(24),
+        license: z.enum(["cc0", "by"]).optional(),
+        /** library only: your deleted items (restorable with `restore`) instead of the live ones */
+        deleted: z.boolean().optional(),
       }),
-    /**
-     * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or
-     * "catalog" = the Reelsaw catalog; otherwise a provider an admin enabled (see `providers`). Same hit shape for all.
-     */
-    search: protectedProcedure
-      .input(
-        z.object({
-          q: z.string().max(200).default(""),
-          source: z.string().min(1).max(40).optional().describe('"library", "catalog" (default) or a provider id'),
-          kind: z.enum(["video", "image", "audio"]).optional(),
-          cursor: z.string().max(200).optional(),
-          limit: z.number().int().min(1).max(60).default(24),
-          license: z.enum(["cc0", "by"]).optional(),
-          /** library only: the items removed in the last 30 days (restorable with `restore`) instead of the live ones */
-          removed: z.boolean().optional(),
-        }),
-      )
-      .query(async ({ ctx, input }) => {
-        const { source, removed: _removed, ...rest } = input;
-        if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
-        const q = input.q.trim().toLowerCase();
-        const lib = await listLibrary(ctx.svc, ctx.user.id);
-        const hits = (input.removed ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
-        const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
-        const page = hits.slice(from, from + input.limit);
-        return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
-      }),
-    /** The sources search and add accept besides "library": the catalog and the providers an admin switched on. */
-    providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
-    /** Make a library asset the user's default intro or outro for new projects (assetId null clears it). */
-    setDefault: protectedProcedure.input(z.object({ slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() })).mutation(async ({ ctx, input }) => {
+    )
+    .query(async ({ ctx, input }) => {
+      const { source, deleted: _deleted, ...rest } = input;
+      if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
+      const q = input.q.trim().toLowerCase();
+      const lib = await listLibrary(ctx.svc, ctx.user.id);
+      const hits = (input.deleted ? lib.deleted : lib.assets).filter(
+        (r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))),
+      );
+      const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
+      const page = hits.slice(from, from + input.limit);
+      return {
+        provider: "library",
+        items: page.map(libraryHit),
+        nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined,
+        unavailable: undefined as string | undefined,
+      };
+    }),
+  /** The sources search and add accept besides "library": the catalog and the providers an admin switched on. */
+  providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
+  /** Make a library asset the user's default intro or outro for new projects (assetId null clears it). */
+  setDefault: protectedProcedure
+    .input(z.object({ slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() }))
+    .mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         await setBumperDefault(u.db, ctx.user.id, input.slot, input.assetId);
         return { ok: true };
       });
     }),
-    /** Soft delete one of your uploads: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
-    remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      return ctx.svc.tx(async (u) => {
-        const gone = await u.db
-          .update(schema.assets)
-          .set({ deletedAt: new Date() })
-          .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
-          .returning({ id: schema.assets.id });
-        if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-        for (const key of ["introAssetId", "outroAssetId"]) {
-          await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
-        }
-        return { ok: true };
-      });
-    }),
-    /** Undo a removal of one of your uploads. */
-    restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(({ ctx, input }) => restoreOwnedAsset(ctx.svc, ctx.user.id, input.id)),
-    /** Remove an already-deleted library upload for good so its storage is freed. Refused while something still names it. */
-    purge: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(({ ctx, input }) => purgeOwnedAsset(ctx.svc, ctx.user.id, input.id)),
+  /** Soft delete one of your uploads: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
+  delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    return ctx.svc.tx(async (u) => {
+      const gone = await u.db
+        .update(schema.assets)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
+        .returning({ id: schema.assets.id });
+      if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+      for (const key of ["introAssetId", "outroAssetId"]) {
+        await u.db.execute(
+          sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`,
+        );
+      }
+      return { ok: true };
+    });
+  }),
+  /** Undo a removal of one of your uploads. */
+  restore: protectedProcedure
+    .input(z.object({ id: z.string().min(1).max(100) }))
+    .mutation(({ ctx, input }) => restoreOwnedAsset(ctx.svc, ctx.user.id, input.id)),
+  /** Remove an already-deleted library upload for good so its storage is freed. Refused while something still names it. */
+  purge: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(({ ctx, input }) => purgeOwnedAsset(ctx.svc, ctx.user.id, input.id)),
 });
 
 const restRouter = router({
   /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
   catalog: router({
-    status: adminProcedure.query(async ({ ctx }) => ({ ...(await libraryProviders(ctx.svc).catalog.status()), providers: libraryProviders(ctx.svc).registry.list() })),
+    status: adminProcedure.query(async ({ ctx }) => ({
+      ...(await libraryProviders(ctx.svc).catalog.status()),
+      providers: libraryProviders(ctx.svc).registry.list(),
+    })),
     refresh: adminProcedure.mutation(async ({ ctx }) => {
       try {
         return (await libraryProviders(ctx.svc).catalog.refresh({ force: true })).status;
@@ -675,7 +913,13 @@ const restRouter = router({
       /** the GPU this process sees, the ffmpeg encoder renders use and where each on-device model runs (ONNX_EXECUTION_PROVIDER; the VAD is always cpu) */
       gpu: ctx.svc.resources.gpu(),
       videoEncoder: ctx.svc.media.encoder(),
-      onDevice: { requested: ctx.svc.config.ONNX_EXECUTION_PROVIDER, faces: ctx.svc.faces?.provider ?? null, text: ctx.svc.text?.provider ?? null, vad: ctx.svc.vad ? ("cpu" as const) : null, aligner: ctx.svc.aligner?.provider ?? null },
+      onDevice: {
+        requested: ctx.svc.config.ONNX_EXECUTION_PROVIDER,
+        faces: ctx.svc.faces?.provider ?? null,
+        text: ctx.svc.text?.provider ?? null,
+        vad: ctx.svc.vad ? ("cpu" as const) : null,
+        aligner: ctx.svc.aligner?.provider ?? null,
+      },
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,
       resources: await ctx.svc.resources.snapshot(),
@@ -715,7 +959,16 @@ const restRouter = router({
        * account's all-time usage from one grouped query per metric table (see `usageByUser`).
        */
       list: adminProcedure
-        .input(z.object({ q: z.string().max(200).optional(), flagged: z.boolean().optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50) }).optional())
+        .input(
+          z
+            .object({
+              q: z.string().max(200).optional(),
+              flagged: z.boolean().optional(),
+              cursor: z.string().max(300).optional(),
+              limit: z.number().int().min(1).max(100).default(50),
+            })
+            .optional(),
+        )
         .query(async ({ ctx, input }) => {
           const db = ctx.svc.database.db;
           const limit = input?.limit ?? 50;
@@ -736,7 +989,7 @@ const restRouter = router({
             after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
           }
           const pageSize = ws.length ? SEARCH_USERS : limit;
-          const [fetched, [{ total }]] = await db.transaction(async (tx) => {
+          const [fetched, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
             await setSearchThreshold(tx);
             return Promise.all([
               tx
@@ -763,11 +1016,19 @@ const restRouter = router({
               tx.select({ total: sql<number>`count(*)::int` }).from(U).where(and(match, onlyFlagged)),
             ]);
           });
-          const { items, nextCursor } = ws.length ? { items: fetched.slice(0, pageSize), nextCursor: null } : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
+          const { items, nextCursor } = ws.length
+            ? { items: fetched.slice(0, pageSize), nextCursor: null }
+            : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
           const ids = items.map((r) => r.id);
           const [usage, sessions, plans] = await Promise.all([
             usageByUser(db, null, ids),
-            ids.length ? db.select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` }).from(schema.session).where(inArray(schema.session.userId, ids)).groupBy(schema.session.userId) : [],
+            ids.length
+              ? db
+                  .select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` })
+                  .from(schema.session)
+                  .where(inArray(schema.session.userId, ids))
+                  .groupBy(schema.session.userId)
+              : [],
             ctx.svc.ee ? ctx.svc.ee.billing.plansOf(ids) : new Map<string, { plan: string; status: string }>(),
           ]);
           const usageOf = new Map(usage.map((u) => [u.id, u]));
@@ -796,23 +1057,36 @@ const restRouter = router({
           };
         }),
       flaggedCount: adminProcedure.query(async ({ ctx }) => {
-        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
+        const [{ n } = { n: 0 }] = await ctx.svc.database.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.user)
+          .where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
         return n;
       }),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
-        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
+        const [{ n } = { n: 0 }] = await ctx.svc.database.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.user)
+          .where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
         return n;
       }),
       approve: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => approveUser(ctx.svc, ctx.user.id, input.id)),
-      setRole: adminProcedure.input(z.object({ id: z.string(), role: z.enum(USER_ROLES) })).mutation(({ ctx, input }) => setUserRole(ctx.svc, ctx.user.id, input.id, input.role)),
-      ban: adminProcedure.input(z.object({ id: z.string(), reason: z.string().max(300).optional() })).mutation(({ ctx, input }) => banUser(ctx.svc, ctx.user.id, input.id, input.reason?.trim() || null)),
+      setRole: adminProcedure
+        .input(z.object({ id: z.string(), role: z.enum(USER_ROLES) }))
+        .mutation(({ ctx, input }) => setUserRole(ctx.svc, ctx.user.id, input.id, input.role)),
+      ban: adminProcedure
+        .input(z.object({ id: z.string(), reason: z.string().max(300).optional() }))
+        .mutation(({ ctx, input }) => banUser(ctx.svc, ctx.user.id, input.id, input.reason?.trim() || null)),
       unban: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => unbanUser(ctx.svc, ctx.user.id, input.id)),
       remove: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => removeUser(ctx.svc, ctx.user.id, input.id)),
       /** Per-user quota overrides; null = back to the instance setting. */
       /** One account's numbers: the instance values, the plan's, the overrides, what is in force and why, what is used now; plus the watermark decision. */
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
         const db = ctx.svc.database.db;
-        const [row, user] = await Promise.all([db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true } }), db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } })]);
+        const [row, user] = await Promise.all([
+          db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true } }),
+          db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } }),
+        ]);
         if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
         const d = await limitsDetail(db, ctx.svc.settings.get(), input.id, ctx.svc.entitlements);
         const wm = await watermarkFor(db, ctx.svc.settings.get(), user, ctx.svc.entitlements);
@@ -832,11 +1106,15 @@ const restRouter = router({
         .input(z.object({ id: z.string(), limits: z.partialRecord(z.enum(LIMIT_KEYS), z.number().int().min(0).nullable()) }))
         .mutation(({ ctx, input }) => setUserLimits(ctx.svc, ctx.user.id, input.id, input.limits)),
       /** true = always watermark, false = never, null = follow the plan and the instance setting */
-      setWatermark: adminProcedure.input(z.object({ id: z.string(), watermark: z.boolean().nullable() })).mutation(({ ctx, input }) => setUserWatermark(ctx.svc, ctx.user.id, input.id, input.watermark)),
+      setWatermark: adminProcedure
+        .input(z.object({ id: z.string(), watermark: z.boolean().nullable() }))
+        .mutation(({ ctx, input }) => setUserWatermark(ctx.svc, ctx.user.id, input.id, input.watermark)),
     }),
     /** Billing administration (ee): complimentary grants, and a re-read of Stripe for one account. */
     billing: router({
-      setPlan: adminProcedure.input(z.object({ id: z.string(), plan: z.string().min(1).max(40).nullable() })).mutation(({ ctx, input }) => billingOf(ctx.svc).setComplimentary(ctx.user.id, input.id, input.plan)),
+      setPlan: adminProcedure
+        .input(z.object({ id: z.string(), plan: z.string().min(1).max(40).nullable() }))
+        .mutation(({ ctx, input }) => billingOf(ctx.svc).setComplimentary(ctx.user.id, input.id, input.plan)),
       sync: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => billingOf(ctx.svc).reconcile({ userId: input.id })),
     }),
     /** Usage per user over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
@@ -855,14 +1133,25 @@ const restRouter = router({
     providers: router({
       get: adminProcedure.query(({ ctx }) => ctx.svc.providers.state()),
       set: adminProcedure
-        .input(z.object({ provider: z.string().min(1).max(40), apiKey: z.string().trim().min(1).max(500).nullable().optional(), baseUrl: z.string().trim().url().max(500).nullable().optional() }))
+        .input(
+          z.object({
+            provider: z.string().min(1).max(40),
+            apiKey: z.string().trim().min(1).max(500).nullable().optional(),
+            baseUrl: z.string().trim().url().max(500).nullable().optional(),
+          }),
+        )
         .mutation(async ({ ctx, input }) => {
           const known = ctx.svc.providers.describe().find((d) => d.provider === input.provider);
           if (!known) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown provider "${input.provider}"` });
           if (input.baseUrl !== undefined && !known.baseUrlEnv) throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} has no base URL to set` });
-          if (input.apiKey && known.keyEnv.length === 0 && input.provider !== ctx.svc.config.OPENAI_COMPATIBLE_NAME) throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} takes no API key` });
+          if (input.apiKey && known.keyEnv.length === 0 && input.provider !== ctx.svc.config.OPENAI_COMPATIBLE_NAME)
+            throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} takes no API key` });
           const now = ctx.svc.providers.get(input.provider);
-          const next = { ...now, ...(input.apiKey === undefined ? {} : input.apiKey ? { apiKey: input.apiKey } : { apiKey: undefined }), ...(input.baseUrl === undefined ? {} : input.baseUrl ? { baseUrl: input.baseUrl } : { baseUrl: undefined }) };
+          const next = {
+            ...now,
+            ...(input.apiKey === undefined ? {} : input.apiKey ? { apiKey: input.apiKey } : { apiKey: undefined }),
+            ...(input.baseUrl === undefined ? {} : input.baseUrl ? { baseUrl: input.baseUrl } : { baseUrl: undefined }),
+          };
           // try before saving, unless this clears everything
           if (next.apiKey || next.baseUrl) {
             const probe = await ctx.svc.catalog.probe(input.provider, next);
@@ -893,7 +1182,15 @@ const restRouter = router({
       }),
       /** `null` removes the override. */
       set: adminProcedure
-        .input(z.object({ global: z.enum(PICKABLE_LEVELS), modules: z.array(z.object({ module: z.string().max(40), level: z.enum(PICKABLE_LEVELS) })).max(40), forMinutes: z.union([z.literal(15), z.literal(60), z.literal(240), z.literal(1440)]) }).nullable())
+        .input(
+          z
+            .object({
+              global: z.enum(PICKABLE_LEVELS),
+              modules: z.array(z.object({ module: z.string().max(40), level: z.enum(PICKABLE_LEVELS) })).max(40),
+              forMinutes: z.union([z.literal(15), z.literal(60), z.literal(240), z.literal(1440)]),
+            })
+            .nullable(),
+        )
         .mutation(async ({ ctx, input }) => {
           try {
             const spec = input ? specFromStructured(input, knownModules(ctx.svc.log)) : null;
@@ -907,7 +1204,9 @@ const restRouter = router({
     }),
     models: router({
       get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
-      catalog: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), refresh: z.boolean().optional() })).query(({ ctx, input }) => ctx.svc.catalog.list(input.kind, { refresh: input.refresh })),
+      catalog: adminProcedure
+        .input(z.object({ kind: z.enum(["language", "transcription"]), refresh: z.boolean().optional() }))
+        .query(({ ctx, input }) => ctx.svc.catalog.list(input.kind, { refresh: input.refresh })),
       set: adminProcedure
         .input(z.object({ language: modelId.nullable().optional(), transcription: modelId.nullable().optional(), align: modelId.nullable().optional() }))
         .mutation(async ({ ctx, input }) => {
@@ -924,7 +1223,12 @@ const restRouter = router({
         try {
           await ctx.svc.ai.verify(input.kind, input.id);
           if (input.kind === "language") {
-            const r = await generateText({ model: await ctx.svc.ai.languageModel(input.id), prompt: "Reply with the single word: ready", maxOutputTokens: 8, abortSignal: AbortSignal.timeout(60_000) });
+            const r = await generateText({
+              model: await ctx.svc.ai.languageModel(input.id),
+              prompt: "Reply with the single word: ready",
+              maxOutputTokens: 8,
+              abortSignal: AbortSignal.timeout(60_000),
+            });
             return { ok: true as const, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };
           }
           return { ok: true as const, ms: Date.now() - t0, reply: null };
@@ -976,16 +1280,26 @@ const restRouter = router({
         .query(({ ctx, input }) => getFailure(ctx.svc, input.kind, input.id)),
       retry: adminProcedure
         .input(
-          z.object({
-            q: z.string().max(200).optional(),
-            stage: z.enum(FAILURE_STAGES).optional(),
-            since: z.string().max(40).optional(),
-            ids: z.array(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) })).max(50).optional(),
-            limit: z.number().int().min(1).max(50).optional(),
-          }).optional(),
+          z
+            .object({
+              q: z.string().max(200).optional(),
+              stage: z.enum(FAILURE_STAGES).optional(),
+              since: z.string().max(40).optional(),
+              ids: z
+                .array(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) }))
+                .max(50)
+                .optional(),
+              limit: z.number().int().min(1).max(50).optional(),
+            })
+            .optional(),
         )
         .mutation(({ ctx, input }) =>
-          retryFailures(ctx.svc, { q: input?.q, stage: input?.stage, since: input?.since }, { id: ctx.user.id, email: ctx.user.email }, { ids: input?.ids, limit: input?.limit }),
+          retryFailures(
+            ctx.svc,
+            { q: input?.q, stage: input?.stage, since: input?.since },
+            { id: ctx.user.id, email: ctx.user.email },
+            { ids: input?.ids, limit: input?.limit },
+          ),
         ),
     }),
   }),
@@ -999,10 +1313,49 @@ const restRouter = router({
     list: protectedProcedure.query(({ ctx }) => listDeleted(ctx.svc, ctx.user.id)),
     restore: protectedProcedure
       .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
-      .mutation(({ ctx, input }) => restoreDeleted(ctx.svc, { id: ctx.user.id, admin: false }, input.items)),
+      .mutation(({ ctx, input }) => restoreDeleted(ctx.svc, actorOf(ctx.user), input.items)),
     purge: protectedProcedure
-      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
-      .mutation(({ ctx, input }) => purgeDeleted(ctx.svc, { id: ctx.user.id, admin: false }, input.items)),
+      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => purgeDeleted(ctx.svc, actorOf(ctx.user), input.items, { forgetDecisions: input.forgetDecisions })),
+  }),
+
+  /**
+   * The decision log (docs/specs/decision-log.md): what the user accepted, rejected, cut and edited, kept after the
+   * project is deleted so Reelsaw can learn from it. Settings → Learning, MCP list_decisions / export_decisions /
+   * forget_decisions and `reelsaw decisions` call the same service.
+   */
+  decisions: router({
+    summary: protectedProcedure.query(({ ctx }) => decisionSummary(ctx.svc.database.db, ctx.user.id)),
+    list: protectedProcedure
+      .input(
+        z.object({
+          kind: z.enum(DECISION_KINDS).optional(),
+          projectId: z.string().max(100).optional(),
+          cursor: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(LIST_MAX).default(50),
+        }),
+      )
+      .query(({ ctx, input }) => listDecisions(ctx.svc.database.db, ctx.user.id, input)),
+    export: protectedProcedure
+      .input(
+        z.object({
+          kind: z.enum(DECISION_KINDS).optional(),
+          since: z.string().datetime({ offset: true }).optional(),
+          cursor: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(EXPORT_MAX).default(200),
+        }),
+      )
+      .query(({ ctx, input }) => exportDecisions(ctx.svc.database.db, ctx.user.id, { ...input, since: input.since ? new Date(input.since) : undefined })),
+    /** Forget one project's decisions (`projectId`, live or purged) or all of them. */
+    forget: protectedProcedure.input(z.object({ projectId: z.string().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
+      const forgotten = await ctx.svc.tx((u) => forgetDecisions(u.db, ctx.user.id, input));
+      ctx.log.info({ projectId: input.projectId ?? null, forgotten }, "decisions forgotten");
+      return { ok: true as const, forgotten, message: forgotten ? `Forgot ${forgotten} decision${forgotten === 1 ? "" : "s"}.` : "Nothing to forget." };
+    }),
+    /** Turn recording on or off; what is already kept stays until forgotten. */
+    setLearning: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx, input }) => setLearning(ctx.svc.database.db, ctx.user.id, input.enabled)),
   }),
 
   /** ⌘K palette before anything is typed: the 20 projects changed most recently, with their clip counts. */
@@ -1014,21 +1367,54 @@ const restRouter = router({
    * `links` instead lists projects whose source link contains one of the needles (a pasted link).
    */
   search: protectedProcedure
-    .input(z.object({ q: z.string().max(200), limit: z.number().int().min(1).max(50).default(SEARCH_CLIPS), links: z.array(z.string().min(1).max(300)).max(50).optional() }))
+    .input(
+      z.object({
+        q: z.string().max(200),
+        limit: z.number().int().min(1).max(50).default(SEARCH_CLIPS),
+        links: z.array(z.string().min(1).max(300)).max(50).optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const res = await searchLibrary(ctx.svc.database.db, ctx.user.id, input);
-      ctx.log.debug({ qLength: input.q.length, links: input.links?.length ?? 0, projects: res.projects.length, clips: res.clips.length, truncated: res.truncated }, "search");
+      ctx.log.debug(
+        { qLength: input.q.length, links: input.links?.length ?? 0, projects: res.projects.length, clips: res.clips.length, truncated: res.truncated },
+        "search",
+      );
       return res;
     }),
 
   projects: router({
     /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
     list: protectedProcedure
-      .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional(), deleted: z.boolean().optional().describe("true = only deleted projects that can still be restored") }).optional())
+      .input(
+        z
+          .object({
+            cursor: z.string().max(300).optional(),
+            limit: z.number().int().min(1).max(100).default(24),
+            status: z.enum(PROJECT_STATUSES).optional(),
+            deleted: z.boolean().optional().describe("true = only deleted projects that can still be restored"),
+          })
+          .optional(),
+      )
       .query(async ({ ctx, input }) => {
-        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status, deleted: input?.deleted });
+        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, {
+          cursor: input?.cursor,
+          limit: input?.limit ?? 24,
+          status: input?.status,
+          deleted: input?.deleted,
+        });
         const keepDays = ctx.svc.settings.get().DELETED_RETENTION_DAYS;
-        ctx.log.debug({ limit: input?.limit ?? 24, cursor: !!input?.cursor, status: input?.status ?? null, items: page.rows.length, hasMore: !!page.nextCursor, total: page.total }, "projects page");
+        ctx.log.debug(
+          {
+            limit: input?.limit ?? 24,
+            cursor: !!input?.cursor,
+            status: input?.status ?? null,
+            items: page.rows.length,
+            hasMore: !!page.nextCursor,
+            total: page.total,
+          },
+          "projects page",
+        );
         return {
           items: page.rows.map(({ p, ...card }) => ({
             ...publicProject(p),
@@ -1042,15 +1428,43 @@ const restRouter = router({
     /** Header numbers: all projects, how many are processing, clips rendered. */
     stats: protectedProcedure.query(({ ctx }) => projectStats(ctx.svc.database.db, ctx.user.id)),
     /** Projects processing right now (id, status, stage, progress): the Projects page polls this, not the list. */
-    active: protectedProcedure.query(async ({ ctx }) => (await activeProjects(ctx.svc.database.db, ctx.user.id)).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }))),
+    active: protectedProcedure.query(async ({ ctx }) =>
+      (await activeProjects(ctx.svc.database.db, ctx.user.id)).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() })),
+    ),
 
     get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
       // facts only: the words, segments and flags come from transcripts.get, so a clip event never re-sends megabytes
-      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, flags: true } });
-      const transcript = t ? { language: t.language, flagCount: t.flags.length, pendingFlags: t.flags.filter((f) => f.status === "pending").length } : null;
+      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, flags: true, refine: true } });
+      // a refine step that gave up (optional work, the project went on without it) with the plain reason from its final stage.failed event
+      const refineFailed: Array<{ step: string; error: string }> = [];
+      for (const [step, status] of Object.entries(t?.refine ?? {})) {
+        if (status !== "failed") continue;
+        const [ev] = await db
+          .select({ error: sql<string | null>`${schema.projectEvents.payload}->>'error'` })
+          .from(schema.projectEvents)
+          .where(
+            and(
+              eq(schema.projectEvents.projectId, p.id),
+              eq(schema.projectEvents.type, "stage.failed"),
+              sql`${schema.projectEvents.payload}->>'step' = ${step}`,
+            ),
+          )
+          .orderBy(desc(schema.projectEvents.id))
+          .limit(1);
+        refineFailed.push({ step, error: ev?.error ?? "The step gave up after its retries." });
+      }
+      const transcript = t
+        ? {
+            language: t.language,
+            flagCount: t.flags.length,
+            pendingFlags: t.flags.filter((f) => f.status === "pending").length,
+            refine: t.refine,
+            refineFailed,
+          }
+        : null;
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
@@ -1060,50 +1474,9 @@ const restRouter = router({
       return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers };
     }),
 
-    create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      const db = svc.database.db;
-      if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a sourceUrl or an uploadId" });
-      const quotaReached = (err: unknown) => {
-        ctx.log.warn({ reason: (err as Error).message }, "project quota reached");
-        throw err;
-      };
-      // early refusal before the URL peek; the binding check runs again, locked, in the transaction that inserts
-      await checkProjectQuota(db, svc.settings.get(), ctx.user.id, { ent: svc.entitlements }).catch(quotaReached);
-      let sourceMeta: schema.Project["sourceMeta"] = null;
-      let title = input.title?.trim() || "";
-      if (input.uploadId) {
-        const u = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
-        if (!u) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
-        sourceMeta = { uploadId: u.id, filename: u.filename };
-        title ||= u.filename.replace(/\.[^.]+$/, "");
-      } else if (input.sourceUrl) {
-        const peek = await peekUrlMeta(input.sourceUrl);
-        sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
-        title ||= peek.title ?? "";
-      }
-      title ||= "Untitled";
-      const id = randomUUID();
-      // row, event and first job together: never a "queued" project with no job behind it
-      const p = await svc.tx(async (u) => {
-        // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
-        await checkProjectQuota(u.db, svc.settings.get(), ctx.user.id, { lock: true, ent: svc.entitlements }).catch(quotaReached);
-        // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
-        const settings = await resolveProjectSettings(u.db, ctx.user.id, input.settings);
-        if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
-        const [row] = await u.db
-          .insert(schema.projects)
-          .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
-          .returning();
-        await recordProjectCreated(u.db, ctx.user.id, id, row!.createdAt);
-        await syncProjectRefs(u.db, row!); // the defaults' intro/outro
-        await u.emit(id, "project.created", { title });
-        await startRun(u, id, { reason: "created", status: "queued" });
-        await u.enqueue(QUEUES.ingest, { projectId: id });
-        return row!;
-      });
-      return publicProject(p);
-    }),
+    create: protectedProcedure
+      .input(createProjectInputSchema)
+      .mutation(async ({ ctx, input }) => publicProject(await createProject(ctx.svc, ctx.user.id, input))),
 
     /** The project transcript as an SRT / VTT file (one cue per segment; VTT can carry word times). */
     transcriptFile: protectedProcedure
@@ -1112,97 +1485,39 @@ const restRouter = router({
 
     /** Use an SRT / VTT file as the transcript instead of transcribing; the project must be idle or just created. */
     importTranscript: protectedProcedure
-      .input(z.object({ id: z.string(), uploadId: z.string().optional(), text: z.string().max(MAX_SUBTITLE_BYTES).optional(), format: z.enum(["auto", "srt", "vtt"]).default("auto"), language: z.string().trim().min(2).max(12).optional() }))
+      .input(
+        z.object({
+          id: z.string(),
+          uploadId: z.string().optional(),
+          text: z.string().max(MAX_SUBTITLE_BYTES).optional(),
+          format: z.enum(["auto", "srt", "vtt"]).default("auto"),
+          language: z.string().trim().min(2).max(12).optional(),
+        }),
+      )
       .mutation(({ ctx, input }) => importTranscript(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Resume from the furthest completed stage; each stage skips work that already exists. */
-    retry: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      return svc.tx(async (u) => {
-        const p = await ownedProject(u.db, ctx.user.id, input.id);
-        const r = await retryProject(svc, u, p.id);
-        if (!r) throw new TRPCError({ code: "NOT_FOUND" });
-        return r;
-      });
-    }),
+    retry: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx, input }) => retryOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
     refine: protectedProcedure
-      .input(z.object({ id: z.string(), steps: z.array(z.enum(REFINE_STEPS)).optional(), vocabulary: z.string().max(1000).optional() }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const steps = input.steps?.length ? input.steps : [...REFINE_STEPS];
-        await svc.tx(async (u) => {
-          const p = await ownedProject(u.db, ctx.user.id, input.id);
-          // transcript first, then the project row (vocabulary, startRun)
-          const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
-          if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
-          if (input.vocabulary !== undefined) {
-            const vocabulary = input.vocabulary || undefined;
-            projectSettingsSchema.parse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
-            const settings = vocabulary ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb` : sql`${schema.projects.settings} - 'vocabulary'`;
-            await u.db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-          }
-          for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
-          await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
-          const refine = { ...cur.refine };
-          for (const s of steps) delete refine[s];
-          await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
-          await enqueueRefine(svc, p.id, steps, u);
-        });
-        return { ok: true, steps };
-      }),
+      .input(z.object({ id: z.string(), ...refineInput }))
+      .mutation(({ ctx, input }) => refineProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
-    /** Keep the transcript, discard clips, pick new moments (optionally with new settings). */
     /** Hide or keep text burned into the source (captions, logos); re-renders finished clips. */
-    setSourceText: protectedProcedure.input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep", "always"]) })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      const rerendered = await svc.tx(async (u) => {
-        const p = await ownedProject(u.db, ctx.user.id, input.id);
-        // clips first (locked in id order), the project row last; the jobs only start once this commits with the new setting
-        const n = await rerenderClips(svc, u, p.id);
-        // atomic JSON merge: no read-modify-write, so concurrent settings edits can't drop each other
-        await u.db.update(schema.projects).set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText: input.sourceText })}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-        return n;
-      });
-      return { ok: true, rerendered };
-    }),
+    setSourceText: protectedProcedure
+      .input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep", "always"]) }))
+      .mutation(({ ctx, input }) => setProjectSourceText(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input.sourceText)),
 
     /**
      * Per-project intro/outro: for each slot "default" (the user's current default), "none" (even if the
      * default has one) or a library asset id. Re-renders every finished clip only when `rerender` is set.
      */
     setBumpers: protectedProcedure
-      .input(z.object({ id: z.string(), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const rerendered = await svc.tx(async (u) => {
-          const p = await ownedProject(u.db, ctx.user.id, input.id);
-          const mine = await userDefaults(u.db, ctx.user.id);
-          let expr = sql`${schema.projects.settings}`;
-          const patch: Record<string, string | number | null> = {};
-          for (const [slot, key, choice, secs] of [["intro", "introAssetId", input.intro, input.introSec], ["outro", "outroAssetId", input.outro, input.outroSec]] as const) {
-            if (choice === undefined) continue;
-            expr = sql`(${expr}) - ${key}::text - ${`${slot}Sec`}::text`;
-            if (secs !== undefined && choice !== "none") patch[`${slot}Sec`] = secs;
-            if (choice === "none") patch[key] = null;
-            else if (choice === "default") {
-              if (mine[key]) patch[key] = mine[key]!;
-            } else {
-              // a library asset of this user; the one the project already uses stays valid even if it was since removed
-              const [asset] = await u.db.select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt }).from(schema.assets).where(and(eq(schema.assets.id, choice), assetVisibleTo(ctx.user.id)));
-              if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
-              patch[key] = choice;
-            }
-          }
-          // clips first, the project row last (lock order clip → project)
-          const n = input.rerender ? await rerenderClips(svc, u, p.id) : 0;
-          const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
-          await syncProjectRefs(u.db, after!);
-          return n;
-        });
-        return { ok: true, rerendered };
-      }),
+      .input(projectBumpersInput.extend({ id: z.string() }))
+      .mutation(({ ctx, input }) => setProjectBumpers(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** oEmbed title/thumbnail for the new-project preview, before anything is created. */
     peek: protectedProcedure.input(z.object({ url: z.url() })).query(async ({ input }) => peekUrlMeta(input.url)),
@@ -1212,26 +1527,8 @@ const restRouter = router({
      * and re-renders every finished clip so the whole set stays consistent.
      */
     updateStyle: protectedProcedure
-      .input(z.object({ id: z.string(), style: styleOverrideSchema, keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const rerendered = await svc.tx(async (u) => {
-          const p = await ownedProject(u.db, ctx.user.id, input.id);
-          // validate against the whole settings object, but write only the changed keys (atomic merge)
-          const merged = projectSettingsSchema.parse({ ...p.settings, ...input.style });
-          const patch = Object.fromEntries(Object.keys(input.style).map((k) => [k, merged[k as keyof typeof merged]]));
-          // clips first (locked in id order, then cleared and re-rendered), the project row last
-          await lockProjectClips(u, p.id);
-          if (!input.keepOverrides) await u.db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
-          const n = input.rerender ? await rerenderClips(svc, u, p.id) : 0;
-          await u.db
-            .update(schema.projects)
-            .set({ settings: sql`(${schema.projects.settings} - 'captionPosition') || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() })
-            .where(eq(schema.projects.id, p.id));
-          return n;
-        });
-        return { ok: true, rerendered };
-      }),
+      .input(projectStyleInput.extend({ id: z.string() }))
+      .mutation(({ ctx, input }) => updateProjectStyle(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Pick moments again on the same transcript. Clips the user made or edited stay; untouched AI picks are replaced (restorable). */
     reanalyze: protectedProcedure
@@ -1240,22 +1537,42 @@ const restRouter = router({
 
     /** Title and settings without re-running anything (selection settings apply on the next reanalyze, style on the next render). */
     update: protectedProcedure
-      .input(z.object({ id: z.string(), title: z.string().trim().min(1).max(200).optional(), settings: projectSettingsPatchSchema.optional(), clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional() }))
+      .input(
+        z.object({
+          id: z.string(),
+          title: z.string().trim().min(1).max(200).optional(),
+          settings: projectSettingsPatchSchema.optional(),
+          clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional(),
+          metadata: projectMetadataSchema.optional(),
+        }),
+      )
       .mutation(({ ctx, input }) => updateProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** One framing (a section's mode and adjustment) for the whole project: set as the project's default, clips' own sections cleared, finished clips re-rendered. */
     applyFraming: protectedProcedure
-      .input(z.object({ id: z.string(), reframe: sectionModeSchema, adjust: sectionAdjustSchema.optional(), keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) }))
+      .input(
+        z.object({
+          id: z.string(),
+          reframe: sectionModeSchema,
+          adjust: sectionAdjustSchema.optional(),
+          keepOverrides: z.boolean().optional(),
+          rerender: z.boolean().default(true),
+        }),
+      )
       .mutation(({ ctx, input }) => applyProjectFraming(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. Storage still counts until purge. */
-    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    delete: protectedProcedure
+      .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
 
     /** Undo a delete (the owner, or an admin for anyone's project). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),
 
     /** Remove a deleted project for good: files go, storage is freed. Minutes already used stay counted. */
-    purge: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => purgeOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    purge: protectedProcedure
+      .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => purgeOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
 
     /**
      * SSE stream of project events. It replays the newest `EVENT_REPLAY_LIMIT` non-progress events (after
@@ -1279,7 +1596,13 @@ const restRouter = router({
         // the replay can hold many done events; one forced stamp covers them all
         if (history.events.some(isDone)) seen();
         for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
-        const marker: EventsReplayed = { type: "events.replayed", shown: history.events.length, total, oldestId: history.events[0]?.id ?? null, hasMore: history.hasMore };
+        const marker: EventsReplayed = {
+          type: "events.replayed",
+          shown: history.events.length,
+          total,
+          oldestId: history.events[0]?.id ?? null,
+          hasMore: history.hasMore,
+        };
         let lastId = Math.max(headId, after);
         yield tracked(String(lastId), marker);
         // from here on everything newer than the head, in pages: list() returns at most 500 rows
@@ -1305,11 +1628,13 @@ const restRouter = router({
       }
     }),
 
-    /** Older events for the Activity panel: up to `limit` non-progress events with an id below `before`, oldest first. */
-    eventsPage: protectedProcedure.input(z.object({ id: z.string(), before: z.number().int().positive(), limit: z.number().int().min(1).max(500).default(200) })).query(async ({ ctx, input }) => {
-      await ownedProject(ctx.svc.database.db, ctx.user.id, input.id);
-      return ctx.svc.events.history(input.id, { limit: input.limit, before: input.before });
-    }),
+    /** Older events for the Activity panel: up to `limit` non-progress events with an id below `before` (omitted = the newest), oldest first. Same read as MCP get_project_events. */
+    eventsPage: protectedProcedure
+      .input(z.object({ id: z.string(), before: z.number().int().positive().optional(), limit: z.number().int().min(1).max(500).default(200) }))
+      .query(async ({ ctx, input }) => {
+        await ownedProject(ctx.svc.database.db, ctx.user.id, input.id);
+        return ctx.svc.events.history(input.id, { limit: input.limit, before: input.before });
+      }),
 
     /** Failed work across the account, for the palette's "Retry all failed clips / Resume failed projects". */
     counts: protectedProcedure.query(({ ctx }) => failedCounts(ctx.svc.database.db, ctx.user.id)),
@@ -1320,7 +1645,22 @@ const restRouter = router({
     get: protectedProcedure.input(z.object({ projectId: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.projectId);
-      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, segments: true, words: true, rawWords: true, flags: true, deletedFlags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true } });
+      const t = await db.query.transcripts.findFirst({
+        where: eq(schema.transcripts.projectId, p.id),
+        columns: {
+          language: true,
+          segments: true,
+          words: true,
+          rawWords: true,
+          flags: true,
+          deletedFlags: true,
+          entities: true,
+          refine: true,
+          sceneCuts: true,
+          overlays: true,
+          textProfile: true,
+        },
+      });
       return t ?? null;
     }),
     /**
@@ -1337,31 +1677,48 @@ const restRouter = router({
       )
       .mutation(async ({ ctx, input }) =>
         withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
-        const svc = ctx.svc;
-        const db = u.db;
-        const raw = t.rawWords ?? t.words;
-        const changed: Array<{ start: number; end: number }> = [];
-        const flags = t.flags.map((f) => {
-          const d = input.decisions.find((x) => x.id === f.id);
-          if (!d) return f;
-          const replacement = d.replacement?.trim() || undefined;
-          const wasApplied = f.status === "auto" || f.status === "accepted";
-          const willApply = d.status === "accepted";
-          const textChanged = willApply && (replacement ?? f.suggested) !== (f.replacement ?? f.suggested);
-          if (d.status === f.status && !textChanged) return f;
-          if (wasApplied !== willApply || textChanged) changed.push({ start: f.start, end: f.end });
-          return { ...f, status: d.status, replacement };
-        });
-        // rejecting your own cut deletes it (soft): it moves to deletedFlags and gives back what it replaced
-        let live = flags;
-        let deletedFlags = t.deletedFlags ?? [];
-        for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected")) ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
-        const words = applyFlags(raw, live);
-        const segments = toSentences(words);
-        await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
-        const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
-        await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
-        return { ok: true, changed: changed.length, rerendered };
+          const svc = ctx.svc;
+          const db = u.db;
+          const raw = t.rawWords ?? t.words;
+          const changed: Array<{ start: number; end: number }> = [];
+          const decided: Array<{ before: TranscriptFlag; after: TranscriptFlag }> = [];
+          const flags = t.flags.map((f) => {
+            const d = input.decisions.find((x) => x.id === f.id);
+            if (!d) return f;
+            const replacement = d.replacement?.trim() || undefined;
+            const wasApplied = f.status === "auto" || f.status === "accepted";
+            const willApply = d.status === "accepted";
+            const textChanged = willApply && (replacement ?? f.suggested) !== (f.replacement ?? f.suggested);
+            if (d.status === f.status && !textChanged) return f;
+            if (wasApplied !== willApply || textChanged) changed.push({ start: f.start, end: f.end });
+            const next = { ...f, status: d.status, replacement };
+            decided.push({ before: f, after: next });
+            return next;
+          });
+          // rejecting your own cut deletes it (soft): it moves to deletedFlags and gives back what it replaced
+          let live = flags;
+          let deletedFlags = t.deletedFlags ?? [];
+          for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected"))
+            ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
+          const words = applyFlags(raw, live);
+          const segments = toSentences(words);
+          await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
+          const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
+          await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+          // rejecting your own fix is deleting it: one fix.delete, like deleteFlag
+          await recordDecisions(svc, db, p, () =>
+            fixDecisions(
+              db,
+              p.id,
+              raw,
+              decided.map(({ before, after }) =>
+                before.subkind === "manual" && after.status === "rejected"
+                  ? { kind: "fix.delete" as const, flag: before, before, after: null }
+                  : { kind: after.status === "accepted" ? ("fix.accept" as const) : ("fix.reject" as const), flag: before, before, after },
+              ),
+            ),
+          );
+          return { ok: true, changed: changed.length, rerendered };
         }),
       ),
     /** Mark a span of the transcript to cut from the video (a manual disfluency flag, already accepted). */
@@ -1370,7 +1727,15 @@ const restRouter = router({
       .mutation(({ ctx, input }) => addManualFix(ctx.svc, ctx.user.id, input, { kind: "disfluency", text: "" })),
     /** Correct mistranscribed words: captions use `text` for the selected span (a manual entity flag, already accepted). */
     addCorrection: protectedProcedure
-      .input(z.object({ projectId: z.string(), start: z.number().min(0), end: z.number().min(0), text: z.string().trim().min(1).max(200), rerender: z.boolean().default(true) }))
+      .input(
+        z.object({
+          projectId: z.string(),
+          start: z.number().min(0),
+          end: z.number().min(0),
+          text: z.string().trim().min(1).max(200),
+          rerender: z.boolean().default(true),
+        }),
+      )
       .mutation(({ ctx, input }) => addManualFix(ctx.svc, ctx.user.id, input, { kind: "entity", text: input.text })),
     /** Soft-delete a fix: it moves to deletedFlags (restorable). A manual cut gives back the detector fixes it replaced. */
     deleteFlag: protectedProcedure
@@ -1381,6 +1746,9 @@ const restRouter = router({
           if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
           const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
           const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
+          await recordDecisions(ctx.svc, u.db, p, () =>
+            fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.delete", flag: f, before: f, after: null }]),
+          );
           return { ok: true, rerendered };
         }),
       ),
@@ -1389,26 +1757,43 @@ const restRouter = router({
       .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))
       .mutation(async ({ ctx, input }) =>
         withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
-        const svc = ctx.svc;
-        // past the live cap (200) deleted fixes live in the archive (stage_artifacts); taking one from there removes it from there
-        const d = t.deletedFlags?.find((x) => x.id === input.flagId) ?? (await takeArchivedFlag<DeletedFlag>(u.db, p.id, input.flagId));
-        if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
-        const { deletedAt: _deletedAt, ...flag } = d;
-        void _deletedAt;
-        const hits = (x: TranscriptFlag) => x.wordIndex <= flag.wordIndex + flag.span - 1 && x.wordIndex + x.span - 1 >= flag.wordIndex;
-        const overlapping = t.flags.filter(hits);
-        let live = t.flags;
-        if (flag.subkind === "manual") {
-          if (overlapping.some((x) => x.kind === "entity")) throw new TRPCError({ code: "BAD_REQUEST", message: "A name fix now overlaps this cut. Delete it first." });
-          if (overlapping.some((x) => x.subkind === "manual")) throw new TRPCError({ code: "BAD_REQUEST", message: "Another of your cuts now overlaps this one." });
-          flag.absorbed = overlapping as unknown as Array<Record<string, unknown>>;
-          live = t.flags.filter((x) => !overlapping.includes(x));
-        } else if (overlapping.length) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: `It overlaps ${overlapping[0]!.subkind === "manual" ? "one of your cuts" : "another fix"} (“${overlapping[0]!.heard}”). Delete that first.` });
-        }
-        live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
-        const rerendered = await saveFlags(svc, u, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
-        return { ok: true, rerendered };
+          const svc = ctx.svc;
+          // past the live cap (200) deleted fixes live in the archive (stage_artifacts); taking one from there removes it from there
+          const d = t.deletedFlags?.find((x) => x.id === input.flagId) ?? (await takeArchivedFlag<DeletedFlag>(u.db, p.id, input.flagId));
+          if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
+          const { deletedAt: _deletedAt, ...flag } = d;
+          void _deletedAt;
+          const hits = (x: TranscriptFlag) => x.wordIndex <= flag.wordIndex + flag.span - 1 && x.wordIndex + x.span - 1 >= flag.wordIndex;
+          const overlapping = t.flags.filter(hits);
+          let live = t.flags;
+          if (flag.subkind === "manual") {
+            if (overlapping.some((x) => x.kind === "entity"))
+              throw new TRPCError({ code: "BAD_REQUEST", message: "A name fix now overlaps this cut. Delete it first." });
+            if (overlapping.some((x) => x.subkind === "manual"))
+              throw new TRPCError({ code: "BAD_REQUEST", message: "Another of your cuts now overlaps this one." });
+            flag.absorbed = overlapping as unknown as Array<Record<string, unknown>>;
+            live = t.flags.filter((x) => !overlapping.includes(x));
+          } else if (overlapping.length) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `It overlaps ${overlapping[0]!.subkind === "manual" ? "one of your cuts" : "another fix"} (“${overlapping[0]!.heard}”). Delete that first.`,
+            });
+          }
+          live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
+          const rerendered = await saveFlags(
+            svc,
+            u,
+            p,
+            t,
+            live,
+            (t.deletedFlags ?? []).filter((x) => x.id !== d.id),
+            flag,
+            input.rerender,
+          );
+          await recordDecisions(svc, u.db, p, () =>
+            fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]),
+          );
+          return { ok: true, rerendered };
         }),
       ),
   }),
@@ -1419,89 +1804,14 @@ const restRouter = router({
       .input(z.object({ id: z.string(), format: z.enum(["srt", "vtt"]).default("srt"), words: z.boolean().optional() }))
       .query(({ ctx, input }) => clipCaptionsFile(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
-    /** Edit title/hook/bounds. Changing bounds invalidates the render; pass rerender=true to queue it. */
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.string(),
-          title: z.string().min(1).max(120).optional(),
-          hook: z.string().max(80).optional(),
-          caption: z.string().max(300).optional(),
-          hashtags: z.array(z.string().min(1).max(40)).max(20).optional(),
-          layoutOverride: reframeModeSchema.nullable().optional(),
-          /** Forced framing per section, absolute source seconds; [] or null = all auto. */
-          layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional(),
-          /** Per-clip caption/hook style; null = follow the project. */
-          style: styleOverrideSchema.nullable().optional(),
-          /** Words the captions emphasise. */
-          emphasis: z.array(z.string().min(1).max(40)).max(30).optional(),
-          /** This clip's own intro/outro choice, replacing the whole value: a missing key inherits the project, null is none. */
-          bumpers: clipBumpersSchema.nullable().optional(),
-          /** Everything laid over or played under the clip (assets, text, sounds), replacing the whole list; null or [] = none. */
-          layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional(),
-          startSec: z.number().min(0).optional(),
-          endSec: z.number().min(0).optional(),
-          rerender: z.boolean().optional(),
-        }),
-      )
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const updated = await svc.tx(async (u) => {
-        // ownership and the row under lock: what changed is decided against the current row, not an earlier snapshot
-        const { clip: c, project: p } = await ownedClip(u, ctx.user.id, input.id);
-        const startSec = input.startSec ?? c.startSec;
-        const endSec = input.endSec ?? c.endSec;
-        const boundsChanged = startSec !== c.startSec || endSec !== c.endSec;
-        if (boundsChanged) {
-          if (endSec - startSec < 3) throw new TRPCError({ code: "BAD_REQUEST", message: "Clip must be at least 3 seconds" });
-          if (p.durationSec && endSec > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "Clip ends after the video" });
-        }
-        const hookChanged = input.hook !== undefined && input.hook !== c.hook;
-        const layoutChanged = input.layoutOverride !== undefined && input.layoutOverride !== c.layoutOverride;
-        const sectionsChanged = input.layoutSections !== undefined && JSON.stringify(input.layoutSections ?? []) !== JSON.stringify(c.layoutSections ?? []);
-        const styleChanged = input.style !== undefined && JSON.stringify(input.style ?? null) !== JSON.stringify(c.style ?? null);
-        const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
-        const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
-        const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
-        // layers replace the whole list
-        const currentLayers = clipLayers(c);
-        const nextLayers: ClipLayer[] | undefined = input.layers !== undefined ? (input.layers ?? []) : undefined;
-        const cleanedLayers = nextLayers !== undefined ? cleanLayers(nextLayers, { startSec, endSec }) : undefined;
-        const layersChanged = cleanedLayers !== undefined && JSON.stringify(cleanedLayers) !== JSON.stringify(currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
-        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || layersChanged; // these are burned into the video
-        const cur = c;
-        // ownership of the chosen assets is checked in the unit of work that writes
-        if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
-        if (layersChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedLayers ?? []).flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), currentLayers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), "library item");
-        const [row] = await u.db
-          .update(schema.clips)
-          .set({
-            title: input.title ?? cur.title,
-            hook: input.hook ?? cur.hook,
-            caption: input.caption ?? cur.caption,
-            ...(input.hashtags !== undefined ? { hashtags: input.hashtags.map((h) => h.replace(/^#+/, "")).filter(Boolean) } : {}),
-            ...(input.layoutOverride !== undefined ? { layoutOverride: input.layoutOverride } : {}),
-            ...(input.layoutSections !== undefined ? { layoutSections: input.layoutSections?.length ? input.layoutSections : null } : {}),
-            ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),
-            ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
-            ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
-            // a clip saved with layers no longer carries the two old lists (clipLayers reads either)
-            ...(cleanedLayers !== undefined ? { layers: cleanedLayers, overlays: null, audio: null } : {}),
-            startSec: Number(startSec.toFixed(2)),
-            endSec: Number(endSec.toFixed(2)),
-            editedAt: new Date(), // a clip the user touched survives a re-analyze
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.clips.id, c.id))
-          .returning();
-        // the edit and its re-render (generation bump, job, project reopened) commit together
-        if (needsRender && input.rerender) await requestRender(svc, u, p.id, c.id);
-        const [fresh] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id));
-        if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, fresh ?? row!);
-        return fresh ?? row!;
-        });
-        return publicClip(updated);
-      }),
+    /**
+     * Edit title/hook/caption/bounds/framing/style/emphasis/bumpers/layers. A burned-in change re-renders the clip unless
+     * `rerender` is false. Answers the clip plus what changed and whether a re-render was needed and queued.
+     */
+    update: protectedProcedure.input(updateClipInput).mutation(async ({ ctx, input }) => {
+      const r = await updateClip(ctx.svc, { id: ctx.user.id, admin: false }, input);
+      return { ...publicClip(r.clip), changed: r.changed, needsRerender: r.needsRerender, rerendered: r.rerendered };
+    }),
 
     /**
      * Set the intro and/or outro of several clips at once. Per slot: "inherit" (follow the project), "none",
@@ -1509,90 +1819,27 @@ const restRouter = router({
      * with a render request per clip only when `rerender` is set.
      */
     setBumpersMany: protectedProcedure
-      .input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        return svc.tx(async (u) => {
-          const p = await ownedProject(u.db, ctx.user.id, input.projectId);
-          const clips = await u.db.select({ id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(and(eq(schema.clips.projectId, p.id), inArray(schema.clips.id, input.clipIds), isNull(schema.clips.deletedAt))).orderBy(schema.clips.id).for("update"); // id order, like lockProjectClips; replaced clips are not edited
-          if (clips.length !== new Set(input.clipIds).size) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
-          await assertOwnedBumpers(u.db, ctx.user.id, [input.intro, input.outro].map((x) => (x === "none" || x === "inherit" ? null : x)));
-          const ids = clips.map((c) => c.id);
-          for (const [slot, choice, secs] of [["intro", input.intro, input.introSec], ["outro", input.outro, input.outroSec]] as const) {
-            if (choice === undefined) continue;
-            const patch = choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice, ...(secs !== undefined && choice !== "none" ? { [`${slot}Sec`]: secs } : {}) };
-            await u.db
-              .update(schema.clips)
-              .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
-              .where(inArray(schema.clips.id, ids));
-          }
-          await syncClipsRefs(u.db, p.id, await u.db.select({ id: schema.clips.id, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.id, ids)));
-          let rerendered = 0;
-          if (input.rerender) for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
-          return { ok: true, updated: ids.length, rerendered };
-        });
-      }),
+      .input(clipBumpersManyInput)
+      .mutation(({ ctx, input }) => setClipBumpers(ctx.svc, { id: ctx.user.id, admin: false }, input)),
 
     /**
      * New clip from a transcript selection. mode "exact" keeps the bounds; "ai" searches inside them.
      * Metadata (and bounds for "ai") are filled in by the clip.prepare job, then it renders.
      */
-    create: protectedProcedure
-      .input(z.object({ projectId: z.string(), startSec: z.number().min(0), endSec: z.number().min(0), mode: z.enum(["exact", "ai"]) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const len = input.endSec - input.startSec;
-        if (len < (input.mode === "ai" ? 8 : 3)) throw new TRPCError({ code: "BAD_REQUEST", message: input.mode === "ai" ? "Select at least 8 seconds for the AI to search" : "A clip must be at least 3 seconds" });
-        if (input.mode === "exact" && len > 600) throw new TRPCError({ code: "BAD_REQUEST", message: "A clip can be at most 10 minutes" });
-        const row = await svc.tx(async (u) => {
-        const db = u.db;
-        const p = await ownedProject(db, ctx.user.id, input.projectId);
-        if (p.durationSec && input.endSec > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "Selection ends after the video" });
-        const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
-        if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });
-        const existing = await db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id), columns: { index: true } });
-        const index = existing.reduce((m, c) => Math.max(m, c.index + 1), 0);
-        const [inserted] = await u.db
-          .insert(schema.clips)
-          .values({
-            id: randomUUID(),
-            projectId: p.id,
-            index,
-            title: input.mode === "ai" ? "Finding the best moment…" : "New clip",
-            hook: "",
-            startSec: Number(input.startSec.toFixed(2)),
-            endSec: Number(input.endSec.toFixed(2)),
-            score: 0,
-            reasoning: "",
-            hashtags: [],
-            status: "preparing",
-            origin: input.mode === "ai" ? "manual-ai" : "manual",
-          })
-          .returning();
-        // born "preparing": the prepare job and the run start go through the one prepare path
-        await requestPrepare(svc, u, p.id, inserted!.id, { mode: input.mode, reason: "clip_added" });
-        await u.emit(p.id, "clip.created", { clipId: inserted!.id, index, title: inserted!.title });
-        return inserted!;
-        });
-        return publicClip(row);
-      }),
-
-    rerender: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      return svc.tx(async (u) => {
-        const { clip: c, project: p } = await ownedClip(u, ctx.user.id, input.id);
-        if (needsPrepare(c)) {
-          // never prepared (e.g. the model was down): redo preparation, which renders afterwards
-          await requestPrepare(svc, u, p.id, c.id, { reason: "rerender" });
-          return { ok: true, step: "prepare" as const };
-        }
-        await requestRender(svc, u, p.id, c.id);
-        return { ok: true, step: "render" as const };
-      });
+    create: protectedProcedure.input(createClipInput).mutation(async ({ ctx, input }) => {
+      const r = await createClip(ctx.svc, { id: ctx.user.id, admin: false }, input);
+      return { ...publicClip(r.clip), queued: r.queued };
     }),
 
+    /** Queue one clip to render again (a never-prepared clip is prepared first). */
+    rerender: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx, input }) => rerenderClip(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+
     /** Soft-delete one clip; restorable with clips.restore until the purge (DELETED_RETENTION_DAYS). */
-    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteClip(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx, input }) => deleteClip(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /** Soft-delete several clips of one live project (the selection bar). Already-deleted ids are skipped. */
     deleteMany: protectedProcedure
@@ -1609,18 +1856,7 @@ const restRouter = router({
      * Re-render several clips of a project at once (the selection bar, "Retry failed"). One transaction, one run:
      * finished and failed clips are queued; clips still rendering or never prepared are counted as skipped.
      */
-    rerenderMany: protectedProcedure.input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200) })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      return svc.tx(async (u) => {
-        const p = await ownedProject(u.db, ctx.user.id, input.projectId);
-        try {
-          return { ok: true, ...(await requestRenders(svc, u, p.id, input.clipIds)) };
-        } catch (e) {
-          if (e instanceof RenderManyMissing) throw new TRPCError({ code: "NOT_FOUND", message: e.message });
-          throw e;
-        }
-      });
-    }),
+    rerenderMany: protectedProcedure.input(rerenderManyInput).mutation(({ ctx, input }) => rerenderClips(ctx.svc, { id: ctx.user.id, admin: false }, input)),
   }),
 });
 
@@ -1630,19 +1866,40 @@ const restRouter = router({
  * Same service functions as the `*_layer_template` MCP tools and `reelsaw templates`.
  */
 const layerTemplatesRouter = router({
-  list: protectedProcedure.query(({ ctx }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id)),
-  get: protectedProcedure.input(z.object({ id: templateIdSchema })).query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
-  create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
-  update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
-  remove: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  /** A page of the account's templates (`items`, `nextCursor`, `total`) plus the ones removed in the last 30 days (`deleted`). */
+  list: protectedProcedure.input(listPageInput).query(({ ctx, input }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id, input ?? {})),
+  get: protectedProcedure
+    .input(z.object({ id: templateIdSchema }))
+    .query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
+  create: protectedProcedure
+    .input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema, bumpers: templateBumpersSchema.nullable().optional() }))
+    .mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
+  /** `bumpers` replaces the template's intro / outro (null = it sets neither); left out = unchanged. */
+  update: protectedProcedure
+    .input(
+      z.object({
+        id: templateIdSchema,
+        name: layerTemplateNameSchema.optional(),
+        layers: layerTemplateLayersSchema.optional(),
+        bumpers: templateBumpersSchema.nullable().optional(),
+      }),
+    )
+    .mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers, bumpers: input.bumpers })),
+  delete: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   /** Hard-delete a removed template (no media files). */
   purge: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => purgeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
-  /** A new template from one clip's layers: a layer that spans the clip fills, the rest anchor to the nearer edge with their length. */
-  fromClip: protectedProcedure.input(z.object({ clipId: z.string(), name: layerTemplateNameSchema })).mutation(({ ctx, input }) => layerTemplateFromClip(ctx.svc, ctx.user.id, input)),
-  /** Materialise a template on clips of one project (all of them, or `clipIds`), replacing or adding to their layers. (`apply` is a word tRPC reserves.) */
+  /** A new template from one clip's layers (a layer that spans the clip fills, the rest anchor to the nearer edge with their length) and the intro / outro it renders with. */
+  fromClip: protectedProcedure
+    .input(z.object({ clipId: z.string(), name: layerTemplateNameSchema }))
+    .mutation(({ ctx, input }) => layerTemplateFromClip(ctx.svc, ctx.user.id, input)),
+  /** Materialise a template on clips of one project (all of them, or `clipIds`): replacing or adding to their layers, and setting the intro / outro slots it names. (`apply` is a word tRPC reserves.) */
   applyToClips: protectedProcedure.input(z.object(applyLayerTemplateInput)).mutation(({ ctx, input }) => applyLayerTemplate(ctx.svc, ctx.user.id, input)),
 });
 
-export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter, layerTemplates: layerTemplatesRouter }), restRouter);
+export const appRouter = mergeRouters(
+  headRouter,
+  router({ library: libraryRouter, layerTemplates: layerTemplatesRouter, mediaLinks: mediaLinksRouter, webhooks: webhooksRouter }),
+  restRouter,
+);
 export type AppRouter = typeof appRouter;

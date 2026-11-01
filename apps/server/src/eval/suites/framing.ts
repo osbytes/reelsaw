@@ -35,7 +35,16 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { speakerCrop, cropX, isFullFrame, contentSide, verticalCrop } from "@reelsaw/shared";
-import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, dropStaticFaces, forcedDecision, type FaceSample } from "../../pipeline/layout.js";
+import {
+  decideLayout,
+  segmentLayouts,
+  sampleFaces,
+  tripodTrack,
+  trackCenter,
+  dropStaticFaces,
+  forcedDecision,
+  type FaceSample,
+} from "../../pipeline/layout.js";
 import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadFaceDetector } from "../../vision/faces.js";
@@ -101,7 +110,8 @@ interface FramingCase {
 }
 
 const fmtBox = (b: { x1: number; y1: number; x2: number; y2: number }) => [b.x1, b.y1, b.x2, b.y2].map((v) => v.toFixed(2)).join(",");
-const boxErr = (b: { x1: number; y1: number; x2: number; y2: number }, want: [number, number, number, number]) => Math.max(...[b.x1, b.y1, b.x2, b.y2].map((v, i) => Math.abs(v - want[i]!)));
+const boxErr = (b: { x1: number; y1: number; x2: number; y2: number }, want: [number, number, number, number]) =>
+  Math.max(...[b.x1, b.y1, b.x2, b.y2].map((v, i) => Math.abs(v - want[i]!)));
 
 /**
  * A webcam tile over a screen share or in a meeting layout: the auto segmentation must stack the
@@ -125,7 +135,10 @@ function judgeTile(id: string, c: FramingCase, raw: FaceSample[], config: Parame
   const want = c.expect.tile;
   const tol = want?.tol ?? 0.03;
   let worst = 0;
-  for (const [label, d] of [["auto", auto], ["forced", forced]] as const) {
+  for (const [label, d] of [
+    ["auto", auto],
+    ["forced", forced],
+  ] as const) {
     if (!d) {
       fails.push(`${label}: no stack piece`);
       continue;
@@ -142,12 +155,15 @@ function judgeTile(id: string, c: FramingCase, raw: FaceSample[], config: Parame
       if (err > tol) fails.push(`${label}: tile ${fmtBox(d.tile)}, expected ${want.box.join(",")} (+-${tol})`);
       if (want.content) {
         if (!d.content || isFullFrame(d.content)) fails.push(`${label}: the whole frame on top, expected the region ${want.content.join(",")}`);
-        else if (boxErr(d.content, want.content) > tol) fails.push(`${label}: region ${fmtBox(d.content)} on top, expected ${want.content.join(",")} (+-${tol})`);
+        else if (boxErr(d.content, want.content) > tol)
+          fails.push(`${label}: region ${fmtBox(d.content)} on top, expected ${want.content.join(",")} (+-${tol})`);
       } else if (d.content && !isFullFrame(d.content)) fails.push(`${label}: region ${fmtBox(d.content)} on top, expected the whole frame`);
     }
     // the faces the detector did see sit inside the tile
     const faces = samples.filter((s) => s.box);
-    const inside = faces.filter((s) => s.box!.x1 >= d.tile!.x1 - 0.02 && s.box!.x2 <= d.tile!.x2 + 0.02 && s.box!.y1 >= d.tile!.y1 - 0.02 && s.box!.y2 <= d.tile!.y2 + 0.02).length;
+    const inside = faces.filter(
+      (s) => s.box!.x1 >= d.tile!.x1 - 0.02 && s.box!.x2 <= d.tile!.x2 + 0.02 && s.box!.y1 >= d.tile!.y1 - 0.02 && s.box!.y2 <= d.tile!.y2 + 0.02,
+    ).length;
     const inTile = faces.length ? inside / faces.length : 1;
     checks[`${label}.facesInTile`] = Number(inTile.toFixed(2));
     if (inTile < 0.9) fails.push(`${label}: only ${(inTile * 100).toFixed(0)}% of the detected faces lie inside the tile`);
@@ -163,14 +179,24 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   const media = await materialize(ctx, c.source);
   const det = await loadFaceDetector(ctx.config().FACE_MODEL_PATH);
   try {
-    let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4, srcAspect: c.srcW / c.srcH });
+    let samples = await sampleFaces(det, {
+      ffmpegPath: ctx.config().FFMPEG_PATH,
+      source: media,
+      startSec: c.start,
+      durationSec: c.end - c.start,
+      sampleFps: 4,
+      srcAspect: c.srcW / c.srcH,
+    });
     if (c.kind === "content" || c.kind === "shots") {
       // content cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
       const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
       try {
         const frames = await sampleClipText({ detector: text, ffmpegPath: ctx.config().FFMPEG_PATH }, media, c.start, c.end - c.start, 2);
         const r3 = (v: number) => Number(v.toFixed(3));
-        samples = attachText(samples, frames.map((f) => ({ t: f.t, all: f.all.map((b) => ({ x1: r3(b.x1), y1: r3(b.y1), x2: r3(b.x2), y2: r3(b.y2) })) })));
+        samples = attachText(
+          samples,
+          frames.map((f) => ({ t: f.t, all: f.all.map((b) => ({ x1: r3(b.x1), y1: r3(b.y1), x2: r3(b.x2), y2: r3(b.y2) })) })),
+        );
       } finally {
         await text.release();
       }
@@ -193,7 +219,8 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
     segments: segs.map((sg) => `${sg.decision.layout}@${sg.start.toFixed(1)}`).join(","),
     faceFrames: Number(faceFrames.toFixed(3)),
   };
-  if (c.expect.maxFaceFrames !== undefined && faceFrames > c.expect.maxFaceFrames) fails.push(`faces in ${(faceFrames * 100).toFixed(0)}% of frames, expected at most ${(c.expect.maxFaceFrames * 100).toFixed(0)}%`);
+  if (c.expect.maxFaceFrames !== undefined && faceFrames > c.expect.maxFaceFrames)
+    fails.push(`faces in ${(faceFrames * 100).toFixed(0)}% of frames, expected at most ${(c.expect.maxFaceFrames * 100).toFixed(0)}%`);
   const tol = c.expect.faceTol ?? 0.08;
   let scored = 0;
   let agreed = 0;
@@ -209,7 +236,10 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
       if (w.uncertain || !w.faces?.length || sg.decision.layout === "fit" || sg.decision.layout === "center" || sg.decision.layout === "none") continue;
       // where the crop sits inside this window: one track per framed person, left to right
       const inWin = (tr: Array<{ t: number; x: number; y: number }> | undefined) => (tr ?? []).filter((p) => p.t >= a - 1e-6 && p.t <= b + 1e-6);
-      const xs = [inWin(sg.decision.track), inWin(sg.decision.track2)].filter((tr) => tr.length).map((tr) => trackCenter(tr).x).sort((p, q) => p - q);
+      const xs = [inWin(sg.decision.track), inWin(sg.decision.track2)]
+        .filter((tr) => tr.length)
+        .map((tr) => trackCenter(tr).x)
+        .sort((p, q) => p - q);
       for (let i = 0; i < Math.min(xs.length, w.faces.length); i++) worstFace = Math.max(worstFace, Math.abs(xs[i]! - w.faces[i]!));
     }
     const span = w.to - w.from;
@@ -222,7 +252,8 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   checks.agreement = Number(agreement.toFixed(3));
   checks.faceErr = Number(worstFace.toFixed(3));
   const minAgree = c.expect.minAgreement ?? 0.8;
-  if (agreement < minAgree) fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);
+  if (agreement < minAgree)
+    fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);
   if (worstFace > tol) fails.push(`crop ${worstFace.toFixed(2)} of the width off a labelled face (tolerance ${tol})`);
   if (c.expect.tile) {
     // every stack piece must frame the webcam tile, at the labelled bounds
@@ -238,7 +269,8 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   if (c.expect.minCropWidth !== undefined) {
     const share = verticalCrop(c.srcW, c.srcH).w / c.srcW;
     checks.cropWidth = Number(share.toFixed(3));
-    if (segs.some((sg) => sg.decision.layout === "face") && share < c.expect.minCropWidth) fails.push(`face crop keeps ${(share * 100).toFixed(0)}% of the width`);
+    if (segs.some((sg) => sg.decision.layout === "face") && share < c.expect.minCropWidth)
+      fails.push(`face crop keeps ${(share * 100).toFixed(0)}% of the width`);
     const wide = segs.filter((sg) => sg.decision.layout === "split" || sg.decision.layout === "stack");
     if (wide.length) fails.push(`${wide.map((sg) => sg.decision.layout).join(",")} on a source that already fits the output`);
   }
@@ -301,10 +333,13 @@ export const framingSuite: Suite = {
       } else if (c.kind === "content") {
         // the way a render does it: segment the clip (with its scene cuts), judge the stack piece
         const segs = segmentLayouts(samples, lcfg, c.sceneCuts ?? [], c.end - c.start);
-        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.content && !isFullFrame(sg.decision.content))?.decision ?? decideLayout(samples, lcfg, c.sceneCuts ?? []);
+        const d =
+          segs.find((sg) => sg.decision.layout === "stack" && sg.decision.content && !isFullFrame(sg.decision.content))?.decision ??
+          decideLayout(samples, lcfg, c.sceneCuts ?? []);
         const fails: string[] = [];
         const checks: Record<string, number | string> = { layout: d.layout, share: d.contentSignals?.share ?? 0 };
-        if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.contentSignals?.rejected ? ` (${d.contentSignals.rejected})` : ""}`);
+        if (c.expect.layout && d.layout !== c.expect.layout)
+          fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.contentSignals?.rejected ? ` (${d.contentSignals.rejected})` : ""}`);
         const want = c.expect.content;
         if (want) {
           const r = d.content;
@@ -315,7 +350,8 @@ export const framingSuite: Suite = {
             checks.contentX = `${r.x1}-${r.x2}`;
             checks.reason = d.reason;
             if (want.side && side !== want.side) fails.push(`content on the ${side}, expected ${want.side}`);
-            if (want.box && [r.x1, r.y1, r.x2, r.y2].some((v, i) => Math.abs(v - want.box![i]!) > 0.03)) fails.push(`content ${r.x1},${r.y1},${r.x2},${r.y2}, expected ${want.box.join(",")}`);
+            if (want.box && [r.x1, r.y1, r.x2, r.y2].some((v, i) => Math.abs(v - want.box![i]!) > 0.03))
+              fails.push(`content ${r.x1},${r.y1},${r.x2},${r.y2}, expected ${want.box.join(",")}`);
             if (r.x2 - r.x1 < want.minWidth) fails.push(`content ${(r.x2 - r.x1).toFixed(2)} wide, expected at least ${want.minWidth}`);
           }
         }
@@ -347,7 +383,8 @@ export const framingSuite: Suite = {
         for (let i = 0; i < track.length; i++) {
           const s = samples.find((x) => Math.abs(x.t - track[i]!.t) < 1e-6);
           // a hard cut (two points a few ms apart) is a snap, not a pan
-          if (i > 0 && track[i]!.t - track[i - 1]!.t >= 0.01) maxSpeed = Math.max(maxSpeed, (Math.abs(track[i]!.x - track[i - 1]!.x) * c.srcW) / (track[i]!.t - track[i - 1]!.t));
+          if (i > 0 && track[i]!.t - track[i - 1]!.t >= 0.01)
+            maxSpeed = Math.max(maxSpeed, (Math.abs(track[i]!.x - track[i - 1]!.x) * c.srcW) / (track[i]!.t - track[i - 1]!.t));
           if (!s?.box || track[i]!.t - t0 < settle) continue;
           errs.push(Math.abs(track[i]!.x - (s.box.x1 + s.box.x2) / 2) * c.srcW);
         }
@@ -359,12 +396,26 @@ export const framingSuite: Suite = {
         let recentreErr = 0;
         if (rc) {
           // the face must be framed by `within` seconds after the shot change, and stay framed for the next second and a half
-          const late = track.flatMap((tp, i) => (tp.t - t0 >= rc.at + rc.within && tp.t - t0 <= rc.at + rc.within + 1.5 && samples[i]?.box ? [Math.abs(tp.x - (samples[i]!.box!.x1 + samples[i]!.box!.x2) / 2) * c.srcW] : []));
+          const late = track.flatMap((tp, i) =>
+            tp.t - t0 >= rc.at + rc.within && tp.t - t0 <= rc.at + rc.within + 1.5 && samples[i]?.box
+              ? [Math.abs(tp.x - (samples[i]!.box!.x1 + samples[i]!.box!.x2) / 2) * c.srcW]
+              : [],
+          );
           recentreErr = late.length ? Math.max(...late) : NaN;
           if (!(recentreErr <= maxErrPx * 2)) fails.push(`${recentreErr.toFixed(0)}px off the face ${rc.within}s after the shot change`);
         }
         if (maxSpeed > maxPanPxPerSec) fails.push(`pans at ${maxSpeed.toFixed(0)}px/s`);
-        out.push({ id: name, pass: !fails.length, metrics: { medianErrPx: Number(median.toFixed(1)), maxPanPxPerSec: Math.round(maxSpeed), points: errs.length, ...(rc ? { recentreErrPx: Math.round(recentreErr) } : {}) }, notes: fails.join("; ") || c.note || "" });
+        out.push({
+          id: name,
+          pass: !fails.length,
+          metrics: {
+            medianErrPx: Number(median.toFixed(1)),
+            maxPanPxPerSec: Math.round(maxSpeed),
+            points: errs.length,
+            ...(rc ? { recentreErrPx: Math.round(recentreErr) } : {}),
+          },
+          notes: fails.join("; ") || c.note || "",
+        });
       }
     }
     return out;
@@ -372,8 +423,14 @@ export const framingSuite: Suite = {
   summarize(results) {
     const offs = results.flatMap((r) => ["A.offset", "B.offset"].map((k) => r.metrics?.[k]).filter((v): v is number => typeof v === "number"));
     const errs = results.map((r) => r.metrics?.medianErrPx).filter((v): v is number => typeof v === "number");
-    const agree = results.filter((r) => !r.skipped).map((r) => r.metrics?.agreement).filter((v): v is number => typeof v === "number");
-    const tileErrs = results.filter((r) => !r.skipped).map((r) => r.metrics?.tileErr).filter((v): v is number => typeof v === "number");
+    const agree = results
+      .filter((r) => !r.skipped)
+      .map((r) => r.metrics?.agreement)
+      .filter((v): v is number => typeof v === "number");
+    const tileErrs = results
+      .filter((r) => !r.skipped)
+      .map((r) => r.metrics?.tileErr)
+      .filter((v): v is number => typeof v === "number");
     return {
       worstShotAgreement: { value: agree.length ? Math.min(...agree) : 1, better: "higher", tolerance: 0.05 },
       worstTileErr: { value: tileErrs.length ? Math.max(...tileErrs) : 0, better: "lower", tolerance: 0.01 },

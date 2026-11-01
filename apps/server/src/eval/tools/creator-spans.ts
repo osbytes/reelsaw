@@ -105,7 +105,11 @@ export function alignSpans(short: CapWord[], episode: CapWord[], o: { n?: number
   const merge = o.merge ?? 10;
   const minHits = o.minHits ?? 10;
   const gap = o.gap ?? 20;
-  const gram = (ws: CapWord[], i: number) => ws.slice(i, i + n).map((w) => w.key).join(" ");
+  const gram = (ws: CapWord[], i: number) =>
+    ws
+      .slice(i, i + n)
+      .map((w) => w.key)
+      .join(" ");
   const index = new Map<string, number[]>();
   for (let j = 0; j + n <= episode.length; j++) {
     const k = gram(episode, j);
@@ -129,7 +133,15 @@ export function alignSpans(short: CapWord[], episode: CapWord[], o: { n?: number
       const j1 = Math.max(...c.map((h) => h.j)) + n - 1;
       const i0 = Math.min(...c.map((h) => h.i));
       const i1 = Math.max(...c.map((h) => h.i)) + n - 1;
-      return { start: r2(episode[j0]!.start), end: r2(episode[j1]!.end), hits: c.length, shortStart: r2(short[i0]!.start), shortEnd: r2(short[i1]!.end), pieces: 1, strong: c.length >= minHits };
+      return {
+        start: r2(episode[j0]!.start),
+        end: r2(episode[j1]!.end),
+        hits: c.length,
+        shortStart: r2(short[i0]!.start),
+        shortEnd: r2(short[i1]!.end),
+        pieces: 1,
+        strong: c.length >= minHits,
+      };
     })
     .sort((a, b) => a.start - b.start);
   const spans: Array<AlignedSpan & { strong: boolean }> = [];
@@ -143,7 +155,14 @@ export function alignSpans(short: CapWord[], episode: CapWord[], o: { n?: number
     const apart = last ? s.start - last.end : Infinity;
     const bothStrong = last && last.strong && s.strong;
     if (last && (bothStrong ? apart <= merge : continues && apart <= 2 * merge)) {
-      Object.assign(last, { end: Math.max(last.end, s.end), hits: last.hits + s.hits, shortStart: Math.min(last.shortStart, s.shortStart), shortEnd: Math.max(last.shortEnd, s.shortEnd), pieces: last.pieces + 1, strong: last.strong || s.strong });
+      Object.assign(last, {
+        end: Math.max(last.end, s.end),
+        hits: last.hits + s.hits,
+        shortStart: Math.min(last.shortStart, s.shortStart),
+        shortEnd: Math.max(last.shortEnd, s.shortEnd),
+        pieces: last.pieces + 1,
+        strong: last.strong || s.strong,
+      });
     } else spans.push({ ...s });
   }
   return spans.filter((s) => s.strong).map(({ strong: _s, ...s }) => s);
@@ -163,7 +182,15 @@ export function json3Segments(j: Json3, track: "manual" | "auto"): TranscriptSeg
   if (track === "manual") {
     const cues = (j.events ?? [])
       .filter((e) => e.segs?.length && !e.aAppend)
-      .map((e) => ({ start: (e.tStartMs ?? 0) / 1000, end: ((e.tStartMs ?? 0) + (e.dDurationMs ?? 0)) / 1000, text: (e.segs ?? []).map((s) => s.utf8 ?? "").join("").replace(/\n/g, " ").trim() }))
+      .map((e) => ({
+        start: (e.tStartMs ?? 0) / 1000,
+        end: ((e.tStartMs ?? 0) + (e.dDurationMs ?? 0)) / 1000,
+        text: (e.segs ?? [])
+          .map((s) => s.utf8 ?? "")
+          .join("")
+          .replace(/\n/g, " ")
+          .trim(),
+      }))
       .filter((c) => c.text);
     for (let i = 0; i < cues.length - 1; i++) cues[i]!.end = Math.min(cues[i]!.end, cues[i + 1]!.start);
     let cur: { start: number; end: number; text: string } | null = null;
@@ -204,7 +231,14 @@ export function json3Segments(j: Json3, track: "manual" | "auto"): TranscriptSeg
     }
     if (to >= words.length) cut = words.length - 1;
     if (cut < from) cut = Math.min(words.length - 1, Math.max(from, to - 1));
-    push(words[from]!.start, words[cut]!.end, words.slice(from, cut + 1).map((w) => w.text).join(" "));
+    push(
+      words[from]!.start,
+      words[cut]!.end,
+      words
+        .slice(from, cut + 1)
+        .map((w) => w.text)
+        .join(" "),
+    );
     from = cut + 1;
   }
   return segs;
@@ -215,7 +249,12 @@ export function json3Segments(j: Json3, track: "manual" | "auto"): TranscriptSeg
  * `negative`-second stretch as far as possible from all of them. The negative stretch starts no
  * earlier than 300 s: cold opens replay the best moments and would be positives in disguise.
  */
-export function fixtureWindows(spans: Array<[number, number]>, durationSec: number, pad = 600, negative = 900): { windows: Array<[number, number]>; negative: [number, number] | null } {
+export function fixtureWindows(
+  spans: Array<[number, number]>,
+  durationSec: number,
+  pad = 600,
+  negative = 900,
+): { windows: Array<[number, number]>; negative: [number, number] | null } {
   const raw = spans.map(([s, e]) => [Math.max(0, s - pad), Math.min(durationSec, e + pad)] as [number, number]).sort((a, b) => a[0] - b[0]);
   const windows: Array<[number, number]> = [];
   for (const w of raw) {
@@ -263,7 +302,23 @@ async function fetchCaptions(id: string, cache: string, pauseSec: number, manual
     process.stderr.write(`  fetching captions for ${id}\n`);
     const ytdlp = process.env.YTDLP_PATH || "yt-dlp";
     await fs.mkdir(cache, { recursive: true });
-    await exec(ytdlp, ["--js-runtimes", "node", "-q", "--no-warnings", "--skip-download", "--write-info-json", "--write-auto-subs", ...(manual ? ["--write-subs"] : []), "--sub-langs", manual ? "en,en-orig" : "en-orig", "--sub-format", "json3", "-o", base, `https://www.youtube.com/watch?v=${id}`]);
+    await exec(ytdlp, [
+      "--js-runtimes",
+      "node",
+      "-q",
+      "--no-warnings",
+      "--skip-download",
+      "--write-info-json",
+      "--write-auto-subs",
+      ...(manual ? ["--write-subs"] : []),
+      "--sub-langs",
+      manual ? "en,en-orig" : "en-orig",
+      "--sub-format",
+      "json3",
+      "-o",
+      base,
+      `https://www.youtube.com/watch?v=${id}`,
+    ]);
   }
   const meta = JSON.parse(await fs.readFile(info, "utf8")) as Info & { subtitles?: Record<string, unknown> };
   return {
@@ -285,7 +340,9 @@ async function main() {
   }
   const [episodeId, ...shortIds] = ids;
   if (!episodeId || !shortIds.length) {
-    console.error("usage: creator-spans <episodeId> <shortId>… [--fixture name] [--split dev|heldout] [--cache dir] [--sleep 12] [--min-hits 10] [--gap 20] [--merge 10] [--pad 600] [--negative 900]");
+    console.error(
+      "usage: creator-spans <episodeId> <shortId>… [--fixture name] [--split dev|heldout] [--cache dir] [--sleep 12] [--min-hits 10] [--gap 20] [--merge 10] [--pad 600] [--negative 900]",
+    );
     process.exit(2);
   }
   const num = (k: string, d: number) => (flags.has(k) ? Number(flags.get(k)) : d);
@@ -299,9 +356,27 @@ async function main() {
     const sh = await fetchCaptions(shortId, cache, pause, false);
     const spans = alignSpans(json3Words(sh.auto), epWords, { minHits: num("min-hits", 10), gap: num("gap", 20), merge: num("merge", 10) });
     if (!spans.length) process.stderr.write(`  ! ${shortId}: no span with ≥ ${num("min-hits", 10)} matching 5-grams (voice-over, wrong episode?)\n`);
-    const pick = { episodeId, shortId, hook: sh.info.title, url: `https://www.youtube.com/shorts/${shortId}`, spans: spans.map((s) => [s.start, s.end] as [number, number]), hits: spans.map((s) => s.hits), pieces: spans.map((s) => s.pieces) };
+    const pick = {
+      episodeId,
+      shortId,
+      hook: sh.info.title,
+      url: `https://www.youtube.com/shorts/${shortId}`,
+      spans: spans.map((s) => [s.start, s.end] as [number, number]),
+      hits: spans.map((s) => s.hits),
+      pieces: spans.map((s) => s.pieces),
+    };
     picks.push(pick);
-    console.log(JSON.stringify({ episodeId, shortId, hook: pick.hook, spans: pick.spans, hits: pick.hits, pieces: pick.pieces, shortRanges: spans.map((s) => [s.shortStart, s.shortEnd]) }));
+    console.log(
+      JSON.stringify({
+        episodeId,
+        shortId,
+        hook: pick.hook,
+        spans: pick.spans,
+        hits: pick.hits,
+        pieces: pick.pieces,
+        shortRanges: spans.map((s) => [s.shortStart, s.shortEnd]),
+      }),
+    );
   }
 
   const name = flags.get("fixture");
@@ -323,7 +398,14 @@ async function main() {
   const url = `https://www.youtube.com/watch?v=${episodeId}`;
   await fs.writeFile(
     path.join(dir, "transcript.json"),
-    JSON.stringify({ source: url, title: ep.info.title, durationSec: duration, captionTrack: track === "manual" ? "en (manual)" : "en-orig (auto)", windows: keep, segments }) + "\n",
+    JSON.stringify({
+      source: url,
+      title: ep.info.title,
+      durationSec: duration,
+      captionTrack: track === "manual" ? "en (manual)" : "en-orig (auto)",
+      windows: keep,
+      segments,
+    }) + "\n",
   );
   await fs.writeFile(
     path.join(dir, "picks.json"),

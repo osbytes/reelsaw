@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { deletedProjectsPath } from "@reelsaw/shared";
-import { quotaRefusal, upgradeCapacityLabel, type Grants, type Limits, type LimitsDetail } from "../src/quota.js";
+import { checkJobLimits, QuotaExceededError, quotaRefusal, upgradeCapacityLabel, type Grants, type Limits, type LimitsDetail } from "../src/quota.js";
 
 const limits = {
   MAX_PROJECTS_PER_USER: 10,
@@ -82,5 +82,33 @@ describe("upgradeCapacityLabel", () => {
     assert.equal(upgradeCapacityLabel(starterUpgrade, "MAX_STORAGE_MB"), "Starter gives 10 GB of storage");
     assert.equal(upgradeCapacityLabel(starterUpgrade, "MAX_SOURCE_MINUTES_PER_MONTH"), "Starter gives 100 minutes a month");
     assert.equal(upgradeCapacityLabel(starterUpgrade, "MAX_PROJECTS_PER_USER"), "Starter gives 50 projects");
+  });
+});
+
+describe("job limits", () => {
+  it("the hourly cap names re-renders and re-runs", () => {
+    const l = { ...limits, MAX_RERENDERS_PER_HOUR: 5, MAX_LIVE_JOBS_PER_USER: 0 };
+    assert.throws(
+      () => checkJobLimits(l, { userId: "u", live: 0, userLive: 0, userRendersLastHour: 5 }, true),
+      /5 re-renders and re-runs requested in the last hour/,
+    );
+    assert.doesNotThrow(() => checkJobLimits(l, { userId: "u", live: 0, userLive: 0, userRendersLastHour: 5 }, false));
+  });
+  it("the at-once cap counts only what the user asked for, not the pipeline's own jobs", () => {
+    const l = { ...limits, MAX_RERENDERS_PER_HOUR: 0, MAX_LIVE_JOBS_PER_USER: 5 };
+    // a new project's 20 renders are hand-offs: the user's next request still goes through
+    assert.doesNotThrow(() => checkJobLimits(l, { userId: "u", live: 20, userLive: 1, userRendersLastHour: 0 }, false));
+    assert.throws(
+      () => checkJobLimits(l, { userId: "u", live: 20, userLive: 5, userRendersLastHour: 0 }, false),
+      /You have 5 requests queued or running, the most this account may have at once \(5\)/,
+    );
+  });
+});
+
+describe("QuotaExceededError", () => {
+  it("is an Error the stage worker can tell from a fault", () => {
+    const e = new QuotaExceededError("This video is 90 minutes.");
+    assert.ok(e instanceof Error);
+    assert.equal(e.message, "This video is 90 minutes.");
   });
 });

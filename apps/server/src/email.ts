@@ -56,7 +56,15 @@ export function createEmail(config: Config, log: Logger): Email {
     if (driver === "smtp") {
       if (!transport) transport = (await import("nodemailer")).default.createTransport(config.SMTP_URL!);
       const messageId = idempotencyKey ? `<${idempotencyKey}@${messageIdDomain(from, config.APP_URL)}>` : undefined;
-      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html, ...(messageId ? { messageId } : {}), ...(mail.headers ? { headers: mail.headers } : {}) });
+      await transport.sendMail({
+        from,
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        ...(messageId ? { messageId } : {}),
+        ...(mail.headers ? { headers: mail.headers } : {}),
+      });
       return "sent";
     }
     if (driver === "resend") {
@@ -67,7 +75,14 @@ export function createEmail(config: Config, log: Logger): Email {
           "content-type": "application/json",
           ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
         },
-        body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html, ...(mail.headers ? { headers: mail.headers } : {}) }),
+        body: JSON.stringify({
+          from,
+          to: [mail.to],
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          ...(mail.headers ? { headers: mail.headers } : {}),
+        }),
         signal: AbortSignal.timeout(15_000),
       });
       if (res.ok) return "sent";
@@ -88,7 +103,10 @@ export function createEmail(config: Config, log: Logger): Email {
         await transport.verify();
       }
       if (driver === "resend") {
-        const res = await fetch("https://api.resend.com/domains", { headers: { authorization: `Bearer ${config.RESEND_API_KEY}` }, signal: AbortSignal.timeout(10_000) });
+        const res = await fetch("https://api.resend.com/domains", {
+          headers: { authorization: `Bearer ${config.RESEND_API_KEY}` },
+          signal: AbortSignal.timeout(10_000),
+        });
         if (res.status === 401 || res.status === 403) throw new Error("RESEND_API_KEY was rejected");
       }
     },
@@ -102,7 +120,9 @@ export function createEmail(config: Config, log: Logger): Email {
         if (r === "duplicate") log.info({ to: mail.to, subject: mail.subject, idempotencyKey: opts?.idempotencyKey }, "email already sent; repeat dropped");
         else log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
-        log.error({ err, to: mail.to, subject: mail.subject }, "email failed");
+        // reported (log.ts): a sign-up waiting on its verification or reset mail is stuck until someone looks.
+        // Only `driver` becomes a tag; the address and subject stay in the log.
+        log.error({ err, driver, to: mail.to, subject: mail.subject }, "email failed");
         if (opts?.strict) throw err;
       }
     },
@@ -156,9 +176,7 @@ function linkFallback(href: string): string {
 /** Muted footer under the card: brand + source repo (no tracking). */
 function footerHtml(): string {
   const href = escapeHtml(REPO_URL);
-  return (
-    `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`
-  );
+  return `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`;
 }
 
 function footerText(): string {
@@ -214,6 +232,26 @@ export const templates = {
         linkFallback(url),
     });
   },
+  webhookDisabled: (appUrl: string, endpoint: string, reason: string) => {
+    const url = `${appUrl.replace(/\/$/, "")}/settings#webhooks`;
+    return message({
+      subject: "A Reelsaw webhook was turned off",
+      preheader: `${endpoint} stopped receiving events.`,
+      title: "Webhook turned off",
+      text: `Reelsaw stopped sending events to ${endpoint}.
+
+${reason}
+
+Fix the receiver, then turn the webhook back on and resend what it missed: ${url}
+`,
+      bodyHtml:
+        `<p style="margin:0 0 12px">Reelsaw stopped sending events to <b>${escapeHtml(endpoint)}</b>.</p>` +
+        `<p style="margin:0 0 12px">${escapeHtml(reason)}</p>` +
+        `<p style="margin:0 0 12px">Fix the receiver, then turn the webhook back on and resend what it missed from its delivery log.</p>` +
+        ctaButton(url, "Open webhooks") +
+        linkFallback(url),
+    });
+  },
   approved: (appUrl: string) => {
     const url = `${appUrl.replace(/\/$/, "")}/login`;
     return message({
@@ -222,9 +260,7 @@ export const templates = {
       title: "You're in",
       text: `An admin approved your account. Sign in: ${url}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">An admin approved your account. You can sign in and start cutting.</p>` +
-        ctaButton(url, "Sign in") +
-        linkFallback(url),
+        `<p style="margin:0 0 12px">An admin approved your account. You can sign in and start cutting.</p>` + ctaButton(url, "Sign in") + linkFallback(url),
     });
   },
   resetPassword: (url: string) =>
@@ -279,20 +315,24 @@ export const templates = {
           : `${n} projects are ready`;
     const one = opts.projects[0];
     const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : `${n} projects, ${clipCount(clips)}`;
-    const intro = n === 1
-      ? allRerender ? "A new render finished while you were away." : "This finished while you were away."
-      : allRerender ? "New renders finished while you were away." : "These finished while you were away.";
+    const intro =
+      n === 1
+        ? allRerender
+          ? "A new render finished while you were away."
+          : "This finished while you were away."
+        : allRerender
+          ? "New renders finished while you were away."
+          : "These finished while you were away.";
     const hi = opts.greeting ? `Hi ${escapeHtml(opts.greeting)} — ` : "";
-    const firstLine = first
-      ? n === 1 ? "This is the first project you've finished." : "These are the first projects you've finished."
-      : null;
+    const firstLine = first ? (n === 1 ? "This is the first project you've finished." : "These are the first projects you've finished.") : null;
     const milestoneLine = opts.milestone && opts.milestone > 1 ? `That's ${opts.milestone} projects finished.` : null;
     const home = `${base}/`;
     const open = n === 1 && one ? `${base}/p/${encodeURIComponent(one.id)}` : home;
     const blocks = opts.projects.map((p) => projectBlock(base, p)).join("");
-    const more = opts.hidden > 0
-      ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
-      : "";
+    const more =
+      opts.hidden > 0
+        ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
+        : "";
     const stop = opts.unsubscribeUrl
       ? `<p style="margin:20px 0 0;font-size:12px;color:${ink3}">You get this because a project finished while you were away. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:${ink3};text-decoration:underline">Stop these emails</a> or change it under <a href="${escapeHtml(`${base}/settings#email`)}" style="color:${ink3};text-decoration:underline">Settings → Account</a>.</p>`
       : "";
@@ -308,7 +348,9 @@ export const templates = {
         opts.hidden > 0 ? `And ${opts.hidden} more: ${home}` : null,
         n === 1 ? `Open: ${open}` : `Open your projects: ${home}`,
         opts.unsubscribeUrl ? `Stop these emails: ${opts.unsubscribeUrl}` : null,
-      ].filter((s): s is string => !!s).join("\n\n"),
+      ]
+        .filter((s): s is string => !!s)
+        .join("\n\n"),
       bodyHtml:
         `<p style="margin:0 0 12px">${hi}${intro}</p>` +
         (firstLine ? `<p style="margin:0 0 12px">${firstLine}</p>` : "") +

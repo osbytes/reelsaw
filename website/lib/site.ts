@@ -7,7 +7,7 @@ export const SITE = {
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "https://reelsaw.com").replace(/\/+$/, ""),
   title: "Reelsaw: AI video clipper you self-host or run hosted",
   description:
-    "Turn long videos into vertical 9:16 clips. Self-host with no meter, or use app.reelsaw.com (Free, then $12 / $29 / $59 a month). Open source (AGPL-3.0), fully local with no API keys or any AI provider, MCP on every plan.",
+    "Turn long videos into vertical 9:16 clips. Open source (AGPL-3.0): self-host with no meter and no API keys, or use app.reelsaw.com from $0. MCP included.",
   /** the hosted service (docs/specs/ee.md) */
   app: (process.env.NEXT_PUBLIC_HOSTED_URL ?? "https://app.reelsaw.com").replace(/\/+$/, ""),
   github: "https://github.com/osbytes/reelsaw",
@@ -27,3 +27,12 @@ export const SITE = {
   installSh: "curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash",
   installPs1: "irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex",
 } as const;
+
+/**
+ * A link into the hosted app, tagged with where on the site it was clicked. The site and the app are separate
+ * analytics projects, so the UTM tags (kept as the app's first-touch properties) are what ties a sign-up to the site.
+ */
+export function appLink(path: string, cta: string, params: Record<string, string> = {}): string {
+  const q = new URLSearchParams({ ...params, utm_source: "reelsaw.com", utm_medium: "website", utm_content: cta });
+  return `${SITE.app}${path}?${q}`;
+}

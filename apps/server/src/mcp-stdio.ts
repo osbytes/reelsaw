@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -41,7 +42,8 @@ export type RemoteFactory = (url: URL, apiKey: string) => Promise<Client>;
 
 export const connectRemote: RemoteFactory = async (url, apiKey) => {
   const client = new Client({ name: "reelsaw-stdio", version: "0" });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${apiKey}` } } }));
+  // the SDK's own transport declares `sessionId: string | undefined` against `sessionId?: string` (exactOptionalPropertyTypes)
+  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${apiKey}` } } }) as Transport);
   return client;
 };
 
@@ -66,10 +68,15 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
 
   let remote: Promise<Client> | undefined;
   const client = () => {
-    if (!apiKey) throw new Error(`REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${url.origin} and pass it in the environment of this command.`);
+    if (!apiKey)
+      throw new Error(
+        `REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${url.origin} and pass it in the environment of this command.`,
+      );
     remote ??= connect(url, apiKey).catch((err) => {
       remote = undefined; // the next call tries again (the instance may still be starting)
-      throw new Error(`Cannot reach Reelsaw at ${url} (${err instanceof Error ? err.message : String(err)}). Set REELSAW_URL to the address of a running instance.`);
+      throw new Error(
+        `Cannot reach Reelsaw at ${url} (${err instanceof Error ? err.message : String(err)}). Set REELSAW_URL to the address of a running instance.`,
+      );
     });
     return remote;
   };

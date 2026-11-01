@@ -142,14 +142,33 @@ describe("loadReleasesFeed", () => {
         calls.push(url);
         if (url.includes("/releases")) {
           return json([
-            { tag_name: "v0.19.1", name: "v0.19.1", html_url: "https://github.com/osbytes/reelsaw/releases/tag/v0.19.1", published_at: "2026-10-24T05:31:02Z", draft: false, prerelease: false, body: "### Patch Changes\n\n- #151 `d579380` Giphy GIFs play.\n" },
-            { tag_name: "nightly", name: "nightly", html_url: "https://example.test/nightly", published_at: "2026-10-23T00:00:00Z", draft: true, prerelease: false, body: "" },
+            {
+              tag_name: "v0.19.1",
+              name: "v0.19.1",
+              html_url: "https://github.com/osbytes/reelsaw/releases/tag/v0.19.1",
+              published_at: "2026-10-24T05:31:02Z",
+              draft: false,
+              prerelease: false,
+              body: "### Patch Changes\n\n- #151 `d579380` Giphy GIFs play.\n",
+            },
+            {
+              tag_name: "nightly",
+              name: "nightly",
+              html_url: "https://example.test/nightly",
+              published_at: "2026-10-23T00:00:00Z",
+              draft: true,
+              prerelease: false,
+              body: "",
+            },
           ]);
         }
         if (url.includes("page=2") || url.includes("sha=")) {
           return json([{ sha: "b".repeat(40), commit: { committer: { date: "2026-10-23T18:00:00Z" }, author: { date: "2026-10-23T18:00:00Z" } } }]);
         }
-        return json([{ sha: "a".repeat(40), commit: { committer: { date: "2026-10-24T01:00:00Z" }, author: { date: "2026-10-24T01:00:00Z" } } }], '<https://api.github.com/repos/osbytes/reelsaw/commits?page=2>; rel="next"');
+        return json(
+          [{ sha: "a".repeat(40), commit: { committer: { date: "2026-10-24T01:00:00Z" }, author: { date: "2026-10-24T01:00:00Z" } } }],
+          '<https://api.github.com/repos/osbytes/reelsaw/commits?page=2>; rel="next"',
+        );
       },
     });
     assert.equal(feed.releases.length, 1);
@@ -172,7 +191,17 @@ describe("createReleaseFeed", () => {
         n++;
         if (fail) return { ok: false, status: 503, headers: { get: () => null }, json: async () => ({}) };
         if (url.includes("/releases")) {
-          return json([{ tag_name: "v0.19.1", name: "v0.19.1", html_url: "https://github.com/osbytes/reelsaw/releases/tag/v0.19.1", published_at: "2026-10-24T05:31:02Z", draft: false, prerelease: false, body: "### Patch Changes\n\n- hello\n" }]);
+          return json([
+            {
+              tag_name: "v0.19.1",
+              name: "v0.19.1",
+              html_url: "https://github.com/osbytes/reelsaw/releases/tag/v0.19.1",
+              published_at: "2026-10-24T05:31:02Z",
+              draft: false,
+              prerelease: false,
+              body: "### Patch Changes\n\n- hello\n",
+            },
+          ]);
         }
         return json([]);
       },

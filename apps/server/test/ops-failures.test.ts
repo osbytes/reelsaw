@@ -35,7 +35,12 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
 
   async function failProject(stage: string, error: string, agoMs = 0) {
     const id = await h.makeProject(userId, "failed");
-    await h.pool.query(`update projects set stage = $2, error = $3, updated_at = now() - ($4::int * interval '1 millisecond') where id = $1`, [id, stage, error, agoMs]);
+    await h.pool.query(`update projects set stage = $2, error = $3, updated_at = now() - ($4::int * interval '1 millisecond') where id = $1`, [
+      id,
+      stage,
+      error,
+      agoMs,
+    ]);
     return id;
   }
   async function failClip(projectStatus: string, error: string) {
@@ -82,7 +87,7 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
 
     const ev = await h.pool.query(`select type, payload from admin_events where type = 'failures.retried' and user_id = $1 order by id desc limit 1`, [userId]);
     assert.equal(ev.rows[0]?.type, "failures.retried");
-    assert.equal((ev.rows[0]?.payload as { retried: number }).retried, 2);
+    assert.equal((ev.rows[0]!.payload as { retried: number }).retried, 2);
 
     const rest = await retryFailures(h.svc, { q: "disk full", stage: "ingest" }, { id: userId, email });
     assert.equal(rest.retried, 1);

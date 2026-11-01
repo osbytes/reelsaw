@@ -14,7 +14,12 @@ import { ZipArchive, type ZipEntryData } from "archiver";
 import type { Readable } from "node:stream";
 import type { Storage } from "./storage/index.js";
 import type { Paths } from "./config.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { schema } from "./db/index.js";
 import type { Clip, Project } from "./db/schema.js";
+import type { Services } from "./services.js";
+import { findProject, type Actor } from "./projects/service.js";
 import { formatTime, toSrt, toVtt } from "@reelsaw/shared";
 
 export const YOUTUBE_TITLE_MAX = 100;
@@ -27,7 +32,7 @@ export interface ExportInput {
   clips: Clip[];
   language: string | null;
   /** set when the zip holds only the clips the user picked, not every rendered clip */
-  subset?: { requested: number; total: number };
+  subset?: { requested: number; total: number } | undefined;
 }
 
 export interface ClipExport {
@@ -52,7 +57,14 @@ export interface ClipExport {
     status: { privacyStatus: "private" | "unlisted" | "public"; selfDeclaredMadeForKids: boolean };
   };
   tiktok: {
-    post_info: { title: string; privacy_level: "SELF_ONLY" | "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR"; disable_duet: boolean; disable_comment: boolean; disable_stitch: boolean; video_cover_timestamp_ms: number };
+    post_info: {
+      title: string;
+      privacy_level: "SELF_ONLY" | "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR";
+      disable_duet: boolean;
+      disable_comment: boolean;
+      disable_stitch: boolean;
+      video_cover_timestamp_ms: number;
+    };
   };
   text: string;
 }
@@ -73,7 +85,14 @@ export const EXPORT_CLIP_IDS_MAX = 200;
 /** The `?clips=a,b` allow-list: trimmed, de-duplicated, empty when absent. Null when it is malformed or too long. */
 export function parseClipIds(raw: string | null | undefined): string[] | null {
   if (raw === undefined || raw === null || raw.trim() === "") return [];
-  const ids = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  const ids = [
+    ...new Set(
+      raw
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    ),
+  ];
   if (ids.length > EXPORT_CLIP_IDS_MAX || ids.some((x) => !/^[\w-]{1,64}$/.test(x))) return null;
   return ids;
 }
@@ -87,6 +106,36 @@ export function pickExportClips(clips: Clip[], ids: string[]): { clips: Clip[]; 
   return { clips: clips.filter((c) => want.has(c.id)), unknown: ids.filter((x) => !have.has(x)), subset: { requested: ids.length, total } };
 }
 
+/**
+ * What an export would contain, or why it cannot be made: the one precondition check behind the zip route
+ * (`/api/projects/:id/export.zip`), the MCP export_project tool and `reelsaw export`. The project must be the actor's and
+ * live, every picked id a clip of it, and at least one picked clip rendered (done with its file). `clipIds` null = a
+ * malformed list (see `parseClipIds`); empty = every clip. NOT_FOUND / BAD_REQUEST / CONFLICT carry plain sentences.
+ */
+export async function exportPlan(svc: Services, actor: Actor, projectId: string, clipIds: string[] | null = []) {
+  const ids = clipIds === null ? null : [...new Set(clipIds)];
+  if (!ids || ids.length > EXPORT_CLIP_IDS_MAX || ids.some((x) => !/^[\w-]{1,64}$/.test(x)))
+    throw new TRPCError({ code: "BAD_REQUEST", message: `The clip list is not valid: give up to ${EXPORT_CLIP_IDS_MAX} clip ids of this project.` });
+  const db = svc.database.db;
+  const project = await findProject(db, actor, projectId, { deleted: false });
+  const [clips, transcript] = await Promise.all([
+    db.query.clips.findMany({ where: and(eq(schema.clips.projectId, project.id), isNull(schema.clips.deletedAt)) }),
+    db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, project.id), columns: { language: true } }),
+  ]);
+  const picked = pickExportClips(clips, ids);
+  if (picked.unknown.length)
+    throw new TRPCError({ code: "NOT_FOUND", message: `Not clips of this project: ${picked.unknown.join(", ")}. get_project lists its clips.` });
+  const rendered = picked.clips.filter((c) => c.status === "done" && c.outputKey).length;
+  if (!rendered)
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: ids.length
+        ? "None of those clips is rendered yet. Wait for them to finish (or re-render failed ones), then export."
+        : "No clip is rendered yet. Wait for the project to finish (wait_for_project), then export.",
+    });
+  return { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset, rendered, notRendered: picked.clips.length - rendered };
+}
+
 /** Extract a YouTube video id from the common URL shapes; null for anything else. */
 export function youtubeVideoId(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -97,7 +146,7 @@ export function youtubeVideoId(url: string | null | undefined): string | null {
     if (host === "youtube.com" || host === "music.youtube.com") {
       if (u.pathname === "/watch") return u.searchParams.get("v");
       const m = /^\/(?:shorts|live|embed|v)\/([\w-]{6,})/.exec(u.pathname);
-      if (m) return m[1];
+      if (m) return m[1] ?? null;
     }
   } catch {
     /* not a url */
@@ -160,8 +209,14 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
     "",
     hashLine,
   ];
-  const description = descriptionLines.join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, YOUTUBE_DESCRIPTION_MAX);
-  const ytTags = fitYoutubeTags([...hashtags, ...((project.sourceMeta?.tags as string[] | undefined) ?? [])].map((t) => t.trim()).filter((t, i, a) => t && a.indexOf(t) === i));
+  const description = descriptionLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, YOUTUBE_DESCRIPTION_MAX);
+  const ytTags = fitYoutubeTags(
+    [...hashtags, ...((project.sourceMeta?.tags as string[] | undefined) ?? [])].map((t) => t.trim()).filter((t, i, a) => t && a.indexOf(t) === i),
+  );
 
   const tiktokCaption = [clip.caption.trim() || clip.hook.trim(), hashtags.map((h) => `#${h}`).join(" ")]
     .filter(Boolean)
@@ -202,7 +257,9 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
     startSec: clip.startSec,
     endSec: clip.endSec,
     durationSec: Math.round((clip.endSec - clip.startSec) * 100) / 100,
-    renderedDurationSec: clip.diagnostics ? Math.round((clip.diagnostics.outDurationSec + (clip.diagnostics.bumpers?.introSec ?? 0) + (clip.diagnostics.bumpers?.outroSec ?? 0)) * 100) / 100 : null,
+    renderedDurationSec: clip.diagnostics
+      ? Math.round((clip.diagnostics.outDurationSec + (clip.diagnostics.bumpers?.introSec ?? 0) + (clip.diagnostics.bumpers?.outroSec ?? 0)) * 100) / 100
+      : null,
     score: clip.score,
     layout: clip.layout,
     parent: { url: parentUrl, atUrl, startSec: start },
@@ -262,13 +319,38 @@ export function buildManifest(input: ExportInput): ExportManifest {
   };
 }
 
-function csvCell(v: unknown) {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+/**
+ * One CSV field. Text a spreadsheet would run as a formula (a title or caption that starts with = + - @, a tab or a
+ * carriage return; titles come from videos and models) gets a leading apostrophe, which Excel, Sheets and Numbers show as plain text.
+ * Numbers are written as they are: a negative one is not text.
+ */
+export function csvCell(v: unknown) {
+  let s = v == null ? "" : String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function buildCsv(m: ExportManifest) {
-  const header = ["file", "thumbnail", "title", "hook", "caption", "hashtags", "start_sec", "end_sec", "duration_sec", "rendered_duration_sec", "score", "layout", "parent_url", "parent_timestamp_url", "youtube_title", "youtube_description", "youtube_tags", "tiktok_caption"];
+  const header = [
+    "file",
+    "thumbnail",
+    "title",
+    "hook",
+    "caption",
+    "hashtags",
+    "start_sec",
+    "end_sec",
+    "duration_sec",
+    "rendered_duration_sec",
+    "score",
+    "layout",
+    "parent_url",
+    "parent_timestamp_url",
+    "youtube_title",
+    "youtube_description",
+    "youtube_tags",
+    "tiktok_caption",
+  ];
   const rows = m.clips.map((c) => [
     `clips/${c.video}`,
     c.thumbnail ? `clips/${c.thumbnail}` : "",
@@ -338,7 +420,10 @@ LINKING SHORTS TO THE PARENT VIDEO
  * responsible for piping it. Temp copies pulled from remote storage are removed when the archive
  * finishes or errors.
  */
-export async function createExportZip(deps: { storage: Storage; paths: Paths; log?: Logger }, input: ExportInput): Promise<{ stream: Readable; filename: string; manifest: ExportManifest }> {
+export async function createExportZip(
+  deps: { storage: Storage; paths: Paths; log?: Logger },
+  input: ExportInput,
+): Promise<{ stream: Readable; filename: string; manifest: ExportManifest }> {
   const manifest = buildManifest(input);
   const byIndex = new Map(input.clips.map((c) => [c.index, c]));
   const tmpDir = path.join(deps.paths.tmp, `export-${randomUUID()}`);
@@ -371,7 +456,8 @@ export async function createExportZip(deps: { storage: Storage; paths: Paths; lo
       for (const c of manifest.clips) {
         const clip = byIndex.get(c.index)!;
         archive.file(await localFile(clip.outputKey!, c.video), { name: `clips/${c.video}`, store: true } as ZipEntryData);
-        if (clip.thumbnailKey && c.thumbnail) archive.file(await localFile(clip.thumbnailKey, c.thumbnail), { name: `clips/${c.thumbnail}`, store: true } as ZipEntryData);
+        if (clip.thumbnailKey && c.thumbnail)
+          archive.file(await localFile(clip.thumbnailKey, c.thumbnail), { name: `clips/${c.thumbnail}`, store: true } as ZipEntryData);
         archive.append(c.text, { name: `clips/${c.base}.txt` });
         archive.append(JSON.stringify(c.youtube, null, 2), { name: `clips/${c.base}.youtube.json` });
         archive.append(JSON.stringify(c.tiktok, null, 2), { name: `clips/${c.base}.tiktok.json` });

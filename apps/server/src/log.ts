@@ -13,12 +13,16 @@
  *  - errors go in `err` so pino serialises the stack: `log.error({ err }, "render failed")`
  *  - levels: fatal = cannot continue; error = a person must act; warn = degraded or recovered;
  *    info = one countable line per milestone; debug = decisions and inputs; trace = per-item loops
+ *  - an `error` or `fatal` line with an `err` is also an error report: when Sentry is on (telemetry.ts sets the
+ *    sink), it goes there with the line's ids as tags. So a retry that will be tried again is `warn`, not `error`.
  *
  * Levels are a spec, `info,render=debug,http=warn`: a global level plus per-module overrides (the
  * `module` binding). The spec can be changed while running (`reelsaw log-level`), see LogControl.
  */
 import { pino, type DestinationStream, type Logger, type LoggerOptions } from "pino";
+import os from "node:os";
 import { forwardPinoLine } from "./otel-log.js";
+import { logFileFor, pruneOldLogs } from "./log-read.js";
 
 export type { Logger };
 
@@ -30,12 +34,75 @@ export interface LogConfig {
   LOG_LEVEL?: string;
   LOG_FORMAT?: "json" | "pretty" | "auto";
   /** also write JSON lines here, rotated daily (7 kept), so logs survive container re-creation */
-  LOG_FILE?: string;
+  LOG_FILE?: string | undefined;
+  /** the process's worker id (config WORKER_ID); names its file under LOG_FILE, default `hostname:pid` */
+  WORKER_ID?: string | undefined;
 }
 
 export interface LogLevels {
   global: LogLevel;
   modules: Record<string, LogLevel>;
+}
+
+/** An error line handed to error reporting: the error, the line's constant message and its id fields. */
+export interface ErrorReport {
+  err: unknown;
+  message: string;
+  level: "error" | "fatal";
+  tags: Record<string, string>;
+}
+export type ErrorSink = (report: ErrorReport) => void;
+
+let errorSink: ErrorSink | null = null;
+/** Where `error` and `fatal` lines with an `err` also go (telemetry.ts, when SENTRY_DSN is set); null for nowhere. */
+export function setErrorSink(sink: ErrorSink | null): void {
+  errorSink = sink;
+}
+
+/**
+ * The fields of a line (its own and its logger's bindings) that may become error-report tags: ids, names and
+ * counts. Anything else on the line (an address, a subject, a reason sentence) stays in the log.
+ */
+const REPORT_TAG_KEYS = [
+  "module",
+  "requestId",
+  "userId",
+  "projectId",
+  "clipId",
+  "jobId",
+  "queue",
+  "stage",
+  "step",
+  "attempt",
+  "tool",
+  "route",
+  "method",
+  "procedure",
+  "type",
+  "code",
+  "where",
+  "driver",
+  "status",
+  "requeues",
+  "uploadId",
+  "subscriptionId",
+  "priceId",
+] as const;
+
+/** Pure: the report for a logged line, or null when the line is not one (no `err`). */
+export function errorReportOf(bindings: Record<string, unknown>, args: readonly unknown[], level: number): ErrorReport | null {
+  const [first, second] = args;
+  const fields: Record<string, unknown> =
+    first instanceof Error ? { err: first } : first && typeof first === "object" ? (first as Record<string, unknown>) : {};
+  if (fields.err === undefined || fields.err === null) return null;
+  const message = typeof second === "string" ? second : typeof first === "string" ? first : "";
+  const tags: Record<string, string> = {};
+  for (const k of REPORT_TAG_KEYS) {
+    const v = fields[k] ?? bindings[k];
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") tags[k] = String(v).slice(0, 200);
+  }
+  if (message) tags.log = message.slice(0, 200);
+  return { err: fields.err, message, level: level >= 60 ? "fatal" : "error", tags };
 }
 
 const isLevel = (s: string): s is LogLevel => (LOG_LEVELS as readonly string[]).includes(s);
@@ -106,11 +173,41 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
     base: { app: "reelsaw", ...base },
     timestamp: pino.stdTimeFunctions.isoTime,
     redact: {
-      paths: ["*.password", "*.apiKey", "*.authorization", "*.cookie", "*.token", "*.secret", "password", "apiKey", "token", "secret", "headers.cookie", "headers.authorization", 'headers["x-api-key"]'],
+      paths: [
+        "*.password",
+        "*.apiKey",
+        "*.authorization",
+        "*.cookie",
+        "*.token",
+        "*.secret",
+        "password",
+        "apiKey",
+        "token",
+        "secret",
+        "headers.cookie",
+        "headers.authorization",
+        'headers["x-api-key"]',
+        // webhooks (webhooks/deliver.ts)
+        "*.signature",
+        "signature",
+        'headers["webhook-signature"]',
+      ],
       censor: "[redacted]",
     },
     serializers: { err: pino.stdSerializers.err },
     hooks: {
+      // runs only for a level the logger lets through; the original error object goes to the sink, not its JSON
+      logMethod(args, method, level) {
+        if (level >= 50 && errorSink) {
+          try {
+            const report = errorReportOf(this.bindings(), args, level);
+            if (report) errorSink(report);
+          } catch {
+            /* reporting an error must not stop the line */
+          }
+        }
+        return method.apply(this, args);
+      },
       // `s` is the line after redaction and err serialisation, and only if the level allowed it.
       // Return it unchanged so the local line still has prompts.
       streamWrite(s) {
@@ -123,22 +220,31 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
       },
     },
   };
-  const console = pretty ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } : { target: "pino/file", options: { destination: 1 } };
+  const console = pretty
+    ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } }
+    : { target: "pino/file", options: { destination: 1 } };
+  // same id ops/workers.ts registers under; each process writes its own files so rotation never prunes another's
+  const logFile = env.LOG_FILE && !dest ? logFileFor(env.LOG_FILE, env.WORKER_ID?.trim() || `${os.hostname()}:${process.pid}`) : undefined;
+  if (env.LOG_FILE && logFile) pruneOldLogs(env.LOG_FILE, 7);
   const root = dest
     ? pino(opts, dest)
-    : env.LOG_FILE
-    ? pino({
-        ...opts,
-        transport: {
-          targets: [
-            { ...console, level: "trace" },
-            { target: "pino-roll", level: "trace", options: { file: env.LOG_FILE, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" } },
-          ],
-        },
-      })
-    : pretty
-      ? pino({ ...opts, transport: console })
-      : pino(opts);
+    : logFile
+      ? pino({
+          ...opts,
+          transport: {
+            targets: [
+              { ...console, level: "trace" },
+              {
+                target: "pino-roll",
+                level: "trace",
+                options: { file: logFile, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" },
+              },
+            ],
+          },
+        })
+      : pretty
+        ? pino({ ...opts, transport: console })
+        : pino(opts);
 
   let current = envLevels;
   const levelFor = (module: string | undefined): LogLevel => (module && current.modules[module]) || current.global;

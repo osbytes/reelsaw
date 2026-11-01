@@ -41,7 +41,7 @@ export interface LlmUsage {
   ms: number;
   ok: boolean;
   /** USD the provider reported (AI Gateway), else undefined */
-  costUsd?: number;
+  costUsd?: number | undefined;
 }
 export interface LlmTracer {
   sinks: TraceSink[];
@@ -55,8 +55,8 @@ export interface LlmTracer {
 interface TraceConfig {
   LLM_TRACE: string;
   LLM_TRACE_MAX_CHARS: number;
-  LANGFUSE_PUBLIC_KEY?: string;
-  LANGFUSE_SECRET_KEY?: string;
+  LANGFUSE_PUBLIC_KEY?: string | undefined;
+  LANGFUSE_SECRET_KEY?: string | undefined;
   LANGFUSE_BASE_URL: string;
 }
 
@@ -64,7 +64,12 @@ type Prompt = Array<{ role: string; content: unknown }>;
 function promptText(prompt: Prompt): Array<{ role: string; content: string }> {
   return prompt.map((m) => ({
     role: m.role,
-    content: typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.map((p: { type?: string; text?: string }) => (p.type === "text" ? p.text : `[${p.type}]`)).join("") : String(m.content),
+    content:
+      typeof m.content === "string"
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content.map((p: { type?: string; text?: string }) => (p.type === "text" ? p.text : `[${p.type}]`)).join("")
+          : String(m.content),
   }));
 }
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… [+${s.length - n} chars]` : s);
@@ -78,9 +83,16 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
   let langfuse: import("langfuse").Langfuse | undefined;
   const traces = new Map<string, ReturnType<import("langfuse").Langfuse["trace"]>>();
   if (sinks.includes("langfuse")) {
-    if (!config.LANGFUSE_PUBLIC_KEY || !config.LANGFUSE_SECRET_KEY) throw new Error("LLM_TRACE includes langfuse but LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are not set");
+    if (!config.LANGFUSE_PUBLIC_KEY || !config.LANGFUSE_SECRET_KEY)
+      throw new Error("LLM_TRACE includes langfuse but LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are not set");
     const { Langfuse } = await import("langfuse");
-    langfuse = new Langfuse({ publicKey: config.LANGFUSE_PUBLIC_KEY, secretKey: config.LANGFUSE_SECRET_KEY, baseUrl: config.LANGFUSE_BASE_URL, flushAt: 10, flushInterval: 5000 });
+    langfuse = new Langfuse({
+      publicKey: config.LANGFUSE_PUBLIC_KEY,
+      secretKey: config.LANGFUSE_SECRET_KEY,
+      baseUrl: config.LANGFUSE_BASE_URL,
+      flushAt: 10,
+      flushInterval: 5000,
+    });
     langfuse.on("error", (err: unknown) => log.warn({ err }, "langfuse export error"));
   }
   const traceLog = log.child({ module: "llm" });
@@ -89,7 +101,12 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
     const key = c.jobId ?? `${c.projectId ?? "none"}:${c.stage ?? "none"}`;
     let t = traces.get(key);
     if (!t) {
-      t = langfuse!.trace({ name: c.stage ?? "llm", sessionId: c.projectId, metadata: { projectId: c.projectId, clipId: c.clipId, jobId: c.jobId }, tags: ["reelsaw", ...(c.stage ? [c.stage] : [])] });
+      t = langfuse!.trace({
+        name: c.stage ?? "llm",
+        ...(c.projectId ? { sessionId: c.projectId } : {}),
+        metadata: { projectId: c.projectId, clipId: c.clipId, jobId: c.jobId },
+        tags: ["reelsaw", ...(c.stage ? [c.stage] : [])],
+      });
       traces.set(key, t);
       if (traces.size > 500) traces.delete(traces.keys().next().value!);
     }
@@ -107,27 +124,72 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
         const output = res.content.map((p) => (p.type === "text" ? p.text : `[${p.type}]`)).join("");
         const usage = { input: res.usage.inputTokens.total ?? 0, output: res.usage.outputTokens.total ?? 0 };
         const ms = Date.now() - startTime.getTime();
-        tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: usage.input, outputTokens: usage.output, ms, ok: true, costUsd: reportedCost(res.providerMetadata) });
+        tracer.onUsage?.({
+          ctx,
+          model: model.modelId,
+          inputTokens: usage.input,
+          outputTokens: usage.output,
+          ms,
+          ok: true,
+          costUsd: reportedCost(res.providerMetadata),
+        });
         // tokens and latency per call are in llm_usage (and the AI SDK spans); a cut-off answer is in neither
         const fr = res.finishReason as unknown;
         const finish = typeof fr === "string" ? fr : (fr as { unified?: string } | undefined)?.unified;
-        if (finish && finish !== "stop" && finish !== "tool-calls") traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, finishReason: finish, outputTokens: usage.output }, "llm answer did not finish normally");
+        if (finish && finish !== "stop" && finish !== "tool-calls")
+          traceLog.warn(
+            { ...ctx, model: model.modelId, provider: model.provider, finishReason: finish, outputTokens: usage.output },
+            "llm answer did not finish normally",
+          );
         if (sinks.includes("logs")) {
           traceLog.info(
-            { ...ctx, model: model.modelId, provider: model.provider, ms, usage, settings, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })), response: clip(output, config.LLM_TRACE_MAX_CHARS) },
+            {
+              ...ctx,
+              model: model.modelId,
+              provider: model.provider,
+              ms,
+              usage,
+              settings,
+              prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })),
+              response: clip(output, config.LLM_TRACE_MAX_CHARS),
+            },
             "llm call",
           );
         }
         if (langfuse) {
-          traceFor(ctx).generation({ name: ctx.call ?? ctx.stage ?? "generate", model: model.modelId, modelParameters: settings as Record<string, string | number>, input, output, startTime, endTime: new Date(), usageDetails: usage, metadata: { ...ctx, provider: model.provider } });
+          traceFor(ctx).generation({
+            name: ctx.call ?? ctx.stage ?? "generate",
+            model: model.modelId,
+            modelParameters: settings as Record<string, string | number>,
+            input,
+            output,
+            startTime,
+            endTime: new Date(),
+            usageDetails: usage,
+            metadata: { ...ctx, provider: model.provider },
+          });
         }
         return res;
       } catch (err) {
         const ms = Date.now() - startTime.getTime();
         tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: 0, outputTokens: 0, ms, ok: false });
         if (!sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, ms, err }, "llm call failed");
-        if (sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, ms, err, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })) }, "llm call failed");
-        if (langfuse) traceFor(ctx).generation({ name: ctx.call ?? ctx.stage ?? "generate", model: model.modelId, input, startTime, endTime: new Date(), level: "ERROR", statusMessage: (err as Error).message?.slice(0, 1000), metadata: ctx });
+        if (sinks.includes("logs"))
+          traceLog.warn(
+            { ...ctx, model: model.modelId, ms, err, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })) },
+            "llm call failed",
+          );
+        if (langfuse)
+          traceFor(ctx).generation({
+            name: ctx.call ?? ctx.stage ?? "generate",
+            model: model.modelId,
+            input,
+            startTime,
+            endTime: new Date(),
+            level: "ERROR",
+            statusMessage: (err as Error).message?.slice(0, 1000),
+            metadata: ctx,
+          });
         throw err;
       }
     },
@@ -135,16 +197,17 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
 
   tracer.middleware = middleware;
   tracer.check = async () => {
-      if (!langfuse) return;
-      // fail fast on wrong keys/URL instead of silently dropping traces
-      const res = await fetch(`${config.LANGFUSE_BASE_URL.replace(/\/$/, "")}/api/public/projects`, {
-        headers: { Authorization: `Basic ${Buffer.from(`${config.LANGFUSE_PUBLIC_KEY}:${config.LANGFUSE_SECRET_KEY}`).toString("base64")}` },
-        signal: AbortSignal.timeout(8000),
-      }).catch((err: Error) => {
-        throw new Error(`cannot reach Langfuse at ${config.LANGFUSE_BASE_URL}: ${err.message}`);
-      });
-      if (res.status === 401 || res.status === 403) throw new Error(`Langfuse rejected the keys (HTTP ${res.status}); check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY`);
-      if (!res.ok) throw new Error(`Langfuse check failed: HTTP ${res.status}`);
+    if (!langfuse) return;
+    // fail fast on wrong keys/URL instead of silently dropping traces
+    const res = await fetch(`${config.LANGFUSE_BASE_URL.replace(/\/$/, "")}/api/public/projects`, {
+      headers: { Authorization: `Basic ${Buffer.from(`${config.LANGFUSE_PUBLIC_KEY}:${config.LANGFUSE_SECRET_KEY}`).toString("base64")}` },
+      signal: AbortSignal.timeout(8000),
+    }).catch((err: Error) => {
+      throw new Error(`cannot reach Langfuse at ${config.LANGFUSE_BASE_URL}: ${err.message}`);
+    });
+    if (res.status === 401 || res.status === 403)
+      throw new Error(`Langfuse rejected the keys (HTTP ${res.status}); check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY`);
+    if (!res.ok) throw new Error(`Langfuse check failed: HTTP ${res.status}`);
   };
   tracer.shutdown = async () => {
     await langfuse?.shutdownAsync().catch(() => {});

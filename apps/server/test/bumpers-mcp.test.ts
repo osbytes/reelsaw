@@ -10,7 +10,20 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { addAssetInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/library/service.js";
+import {
+  addAssetInput,
+  assetMap,
+  bumperNameSchema,
+  clipBumpersCall,
+  downloadAsUpload,
+  effectiveBumpers,
+  FETCH_MAX_BYTES,
+  isPrivateAddress,
+  projectBumpersCall,
+  requireOneSource,
+  setClipBumpersInput,
+  setProjectBumpersInput,
+} from "../src/library/service.js";
 import type { Services } from "../src/services.js";
 
 const clipIn = z.object(setClipBumpersInput);
@@ -59,7 +72,12 @@ describe("add_asset input", () => {
 
 describe("input -> procedure mapping", () => {
   it("project: projectId becomes id, the rest passes through", () => {
-    assert.deepEqual(projectBumpersCall({ projectId: "p1", intro: "default", outroSec: 2, rerender: true }), { id: "p1", intro: "default", outroSec: 2, rerender: true });
+    assert.deepEqual(projectBumpersCall({ projectId: "p1", intro: "default", outroSec: 2, rerender: true }), {
+      id: "p1",
+      intro: "default",
+      outroSec: 2,
+      rerender: true,
+    });
   });
   it("clips: default is an alias of inherit, ids are kept", () => {
     const c = clipBumpersCall({ projectId: "p1", clipIds: ["a", "b"], intro: "default", outro: "x", rerender: false });
@@ -97,6 +115,16 @@ describe("downloadAsUpload", () => {
       storage: { putFile: async (k: string) => void put.push(k) },
       log: createLogger({ LOG_LEVEL: "silent", LOG_FORMAT: "json" }),
       database: { db: { insert: () => ({ values: async (v: Record<string, unknown>) => void rows.push(v) }) } },
+      settings: { get: () => ({}) },
+      // the unit of work: the same fake table, no storage limit, the lock and settings reads answered empty
+      tx: async (fn: (u: unknown) => Promise<unknown>) =>
+        fn({
+          db: {
+            insert: () => ({ values: async (v: Record<string, unknown>) => void rows.push(v) }),
+            execute: async () => ({ rows: [] }),
+            query: { userSettings: { findFirst: async () => undefined } },
+          },
+        }),
     } as unknown as Services;
     return { svc, rows, put, dir };
   }
@@ -110,6 +138,34 @@ describe("downloadAsUpload", () => {
     assert.match(h.put[0]!, /^uploads\/.+\.png$/);
     assert.deepEqual(await fs.readdir(h.dir), []);
   });
+  it("refuses a file the account has no storage room for, and removes the stored object again", async () => {
+    const h = await harness();
+    const removed: string[] = [];
+    const full = {
+      ...h.svc,
+      settings: { get: () => ({ MAX_STORAGE_MB: 1 }) },
+      storage: { putFile: async () => {}, delete: async (k: string) => void removed.push(k) },
+      // the account already stores 5 MB (the sum query's answer)
+      tx: async (fn: (u: unknown) => Promise<unknown>) =>
+        fn({
+          db: {
+            insert: () => ({
+              values: async () => {
+                throw new Error("row must not be inserted");
+              },
+            }),
+            execute: async () => ({ rows: [{ bytes: 5_000_000 }] }),
+            query: { userSettings: { findFirst: async () => undefined } },
+          },
+        }),
+    } as unknown as Services;
+    await assert.rejects(
+      downloadAsUpload(full, "u1", "https://cdn.test/x", { fetch: async () => png(), lookup: pub }),
+      /stores 5 MB, the most allowed is 1 MB/,
+    );
+    assert.equal(removed.length, 1);
+    assert.match(removed[0]!, /^uploads\/.+\.png$/);
+  });
   it("refuses private hosts, odd schemes, redirects into private space and unknown types", async () => {
     const h = await harness();
     const f = async () => png();
@@ -118,12 +174,24 @@ describe("downloadAsUpload", () => {
     await assert.rejects(downloadAsUpload(h.svc, "u", "file:///etc/passwd", { fetch: f, lookup: pub }), /http/);
     const redirect = async () => new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } });
     await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/a.png", { fetch: redirect, lookup: pub }), /not reachable/);
-    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/page", { fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }), lookup: pub }), /Use a video/);
+    await assert.rejects(
+      downloadAsUpload(h.svc, "u", "https://cdn.test/page", {
+        fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }),
+        lookup: pub,
+      }),
+      /Use a video/,
+    );
     assert.equal(h.rows.length, 0);
   });
   it("enforces the size limit by header and while streaming", async () => {
     const h = await harness();
-    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/a.mp4", { fetch: async () => new Response("x", { headers: { "content-length": String(FETCH_MAX_BYTES + 1) } }), lookup: pub }), /limit is 50 MB/);
+    await assert.rejects(
+      downloadAsUpload(h.svc, "u", "https://cdn.test/a.mp4", {
+        fetch: async () => new Response("x", { headers: { "content-length": String(FETCH_MAX_BYTES + 1) } }),
+        lookup: pub,
+      }),
+      /limit is 50 MB/,
+    );
     const big = new ReadableStream({
       start(c) {
         c.enqueue(new Uint8Array(FETCH_MAX_BYTES + 10));
@@ -135,7 +203,20 @@ describe("downloadAsUpload", () => {
     assert.deepEqual(await fs.readdir(h.dir), []);
   });
   it("private address ranges", () => {
-    for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:10.0.0.1"]) assert.ok(isPrivateAddress(ip), ip);
+    for (const ip of [
+      "127.0.0.1",
+      "10.1.2.3",
+      "172.16.0.1",
+      "192.168.1.1",
+      "169.254.169.254",
+      "::1",
+      "fd00::1",
+      "::ffff:10.0.0.1",
+      new URL("http://[::ffff:169.254.169.254]/").hostname.slice(1, -1),
+      "::a9fe:a9fe",
+      "fe90::1",
+    ])
+      assert.ok(isPrivateAddress(ip), ip);
     for (const ip of ["8.8.8.8", "93.184.216.34", "2606:4700::1111"]) assert.ok(!isPrivateAddress(ip), ip);
   });
 });

@@ -26,7 +26,7 @@ import type { UnitOfWork } from "../uow.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { templates } from "../email.js";
-import { emailPreferences, unsubscribeUrl } from "./preferences.js";
+import { unsubscribeUrl, wantsEmail } from "./preferences.js";
 
 /** Round numbers worth a line in the note. 1 is "your first", announced ahead of any higher one crossed in the same batch. */
 export const MILESTONES = [1, 10, 25, 50, 100] as const;
@@ -132,7 +132,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     return;
   }
   // read when the job runs, not when it was queued: turning it off during the delay holds the note
-  if (!(await emailPreferences(db, userId)).readyEmail) {
+  if (!(await wantsEmail(db, userId, "ready"))) {
     log.debug({ reason: "turned off" }, "completion notice skipped");
     return;
   }
@@ -149,14 +149,16 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     })
     .from(schema.projectEvents)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.projectEvents.projectId))
-    .where(and(
-      eq(schema.projects.userId, userId),
-      isNull(schema.projects.deletedAt),
-      eq(schema.projectEvents.type, "project.done"),
-      gt(schema.projectEvents.createdAt, cutoff),
-      lastActiveAt ? gt(schema.projectEvents.createdAt, lastActiveAt) : sql`true`,
-      sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id})`,
-    ))
+    .where(
+      and(
+        eq(schema.projects.userId, userId),
+        isNull(schema.projects.deletedAt),
+        eq(schema.projectEvents.type, "project.done"),
+        gt(schema.projectEvents.createdAt, cutoff),
+        lastActiveAt ? gt(schema.projectEvents.createdAt, lastActiveAt) : sql`true`,
+        sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id})`,
+      ),
+    )
     .orderBy(asc(schema.projectEvents.createdAt))
     .limit(FETCH_LIMIT);
 
@@ -181,7 +183,15 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   const clipRows = await db
     .select({ projectId: schema.clips.projectId, title: schema.clips.title, hook: schema.clips.hook, status: schema.clips.status })
     .from(schema.clips)
-    .where(and(inArray(schema.clips.projectId, projects.map((p) => p.id)), isNull(schema.clips.deletedAt)))
+    .where(
+      and(
+        inArray(
+          schema.clips.projectId,
+          projects.map((p) => p.id),
+        ),
+        isNull(schema.clips.deletedAt),
+      ),
+    )
     .orderBy(asc(schema.clips.startSec));
   const byProject = new Map<string, Array<{ hook: string; title: string; status: string }>>();
   for (const c of clipRows) {
@@ -197,7 +207,10 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   const [counts] = await db
     .select({
       finished: sql<number>`count(*)::int`,
-      firstTime: sql<number>`(count(*) filter (where ${inArray(F.firstEventId, mine.map((e) => e.eventId))}))::int`,
+      firstTime: sql<number>`(count(*) filter (where ${inArray(
+        F.firstEventId,
+        mine.map((e) => e.eventId),
+      )}))::int`,
     })
     .from(F)
     .where(eq(F.userId, userId));
@@ -230,7 +243,16 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   // events, same key) lets Resend drop the repeat if this run dies before the record below commits.
   try {
     await svc.email.send(
-      { to: user.email, ...templates.clipsReady(svc.config.APP_URL, { greeting: greetingName(user.name), projects: mailProjects, hidden: projects.length - shown.length, milestone, unsubscribeUrl: unsubscribeUrl(svc.config.APP_URL, svc.config.BETTER_AUTH_SECRET, userId, "ready") }) },
+      {
+        to: user.email,
+        ...templates.clipsReady(svc.config.APP_URL, {
+          greeting: greetingName(user.name),
+          projects: mailProjects,
+          hidden: projects.length - shown.length,
+          milestone,
+          unsubscribeUrl: unsubscribeUrl(svc.config.APP_URL, svc.config.BETTER_AUTH_SECRET, userId, "ready"),
+        }),
+      },
       { strict: true, idempotencyKey: completionIdempotencyKey(userId, sent) },
     );
   } catch (err) {
@@ -241,7 +263,10 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   // when this batch is recorded as mailed, so neither a failed record nor a crash leaves a second run
   // re-sending it (the idempotency key only dedups on Resend).
   const followUp = await svc.tx(async (u) => {
-    await u.db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
+    await u.db
+      .insert(schema.completionNotices)
+      .values(sent.map((eventId) => ({ eventId, userId })))
+      .onConflictDoNothing();
     return truncated && again ? again(u) : null;
   });
   log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");

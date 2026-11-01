@@ -18,9 +18,15 @@ describe("foldCounts", () => {
       [...QUEUE_ORDER, "billing.sync"],
     );
     const ingest = rows.find((r) => r.queue === QUEUES.ingest)!;
-    assert.deepEqual({ waiting: ingest.waiting, running: ingest.running, retrying: ingest.retrying, failed: ingest.failed }, { waiting: 2, running: 1, retrying: 0, failed: 0 });
+    assert.deepEqual(
+      { waiting: ingest.waiting, running: ingest.running, retrying: ingest.retrying, failed: ingest.failed },
+      { waiting: 2, running: 1, retrying: 0, failed: 0 },
+    );
     const render = rows.find((r) => r.queue === QUEUES.render)!;
-    assert.deepEqual({ waiting: render.waiting, running: render.running, retrying: render.retrying, failed: render.failed }, { waiting: 0, running: 0, retrying: 3, failed: 4 });
+    assert.deepEqual(
+      { waiting: render.waiting, running: render.running, retrying: render.retrying, failed: render.failed },
+      { waiting: 0, running: 0, retrying: 3, failed: 4 },
+    );
     assert.equal(queueLabel(QUEUES.refineDisfluency), "fillers");
   });
 });

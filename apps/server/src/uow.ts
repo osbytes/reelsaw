@@ -10,19 +10,20 @@
  * row first (`for("update")`) inside the unit so concurrent writers serialize instead of losing
  * each other's changes.
  */
-import pg from "pg";
+import type pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
 import type { ProjectEventPayloadArg, ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
-import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
+import { USER_RERUN_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
 import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
+import { isWebhookEvent, writeDeliveries } from "./webhooks/outbox.js";
 
 /**
  * Who asked for the work running now. Set around every approved user's tRPC call (protectedProcedure, which MCP
@@ -30,19 +31,23 @@ import { checkJobLimits, limitsFor } from "./quota.js";
  * Jobs a unit enqueues for that user's own projects are their requests: tagged `by: "user"` and admitted against
  * MAX_LIVE_JOBS_PER_USER / MAX_RERENDERS_PER_HOUR. Pipeline hand-offs are never refused.
  */
-const requestedBy = new AsyncLocalStorage<{ userId: string }>();
-export function asUserRequest<T>(userId: string, fn: () => T): T {
-  return requestedBy.run({ userId }, fn);
+const requestedBy = new AsyncLocalStorage<{ userId: string; surface: Surface }>();
+export function asUserRequest<T>(userId: string, surface: Surface, fn: () => T): T {
+  return requestedBy.run({ userId, surface }, fn);
 }
+
+/** Where a person's request came in: the browser, an API key over tRPC, an MCP client, or the operator CLI. */
+export type Surface = "web" | "api" | "mcp" | "cli";
 
 export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
   emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<number>;
-  enqueue(queue: QueueName, data: JobData): Promise<string | null>;
+  /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
+  enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
-  send(queue: string, data: object, opts?: { singletonKey?: string; startAfter?: number }): Promise<string | null>;
+  send(queue: string, data: object, opts?: { singletonKey?: string; startAfterSeconds?: number }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
   /** record what a stage decided and which models ran (see schema.stageArtifacts) */
@@ -96,14 +101,55 @@ export function isRetryableTxError(err: unknown): boolean {
 
 const TX_ATTEMPTS = 3;
 
-/** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
-const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
+/**
+ * A committed project event as a product event (telemetry.ts), or null when it is not one. Each event names the
+ * properties PostHog may see: ids, counts, durations and enum values, never a title or an error message (those
+ * stay in the event feed and the log). A run stopped by deleting the project is `project.cancelled`, not a failure.
+ */
+export function productEvent(type: string, payload: Record<string, unknown>): { event: string; properties: Record<string, string | number | boolean> } | null {
+  const pick = (...keys: string[]) => {
+    const out: Record<string, string | number | boolean> = {};
+    for (const k of keys) {
+      const v = payload[k];
+      // strings here are enums and ids (stage, runReason, errorKind); a long one is not, so it stays out
+      if (typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length <= 64)) out[k] = v;
+    }
+    return out;
+  };
+  switch (type) {
+    case "project.created":
+      return { event: type, properties: pick("sourceType") };
+    case "project.done":
+      return { event: type, properties: pick("clips", "failed", "runSec", "renderSec", "runReason", "runSeq") };
+    case "project.failed":
+      return {
+        event: payload.cancelled === true ? "project.cancelled" : type,
+        properties: pick("stage", "errorKind", "runSec", "renderSec", "runReason", "runSeq"),
+      };
+    case "clip.done":
+      return { event: type, properties: pick("clipId", "renderSec") };
+    case "clip.failed":
+      return { event: type, properties: pick("clipId", "errorKind") };
+    default:
+      return null;
+  }
+}
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, eventHandlers?: { handlers: EventHandlerMap; deps: () => EventHandlerDeps }): RunInTx {
+export function createUnitOfWork(
+  pool: pg.Pool,
+  queue: Queue,
+  log: Logger,
+  instanceLimits?: () => InstanceLimits,
+  entitlements: () => Entitlements | null = () => null,
+  telemetry?: Telemetry,
+  eventHandlers?: { handlers: EventHandlerMap; deps: () => EventHandlerDeps },
+): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
     const emitted: EmittedEvent[] = [];
+    /** jobs a person asked for in this unit (product analytics, sent after commit) */
+    const requested: Array<{ queue: QueueName; projectId: string; clipId?: string }> = [];
     let result;
     try {
       await client.query("BEGIN");
@@ -117,15 +163,17 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
           emitted.push({ id: row!.id, projectId, type, payload } as unknown as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
+          // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
+          if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, row!.id, projectId, type);
           return row!.id;
         },
-        async enqueue(q, data) {
+        async enqueue(q, data, opts) {
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
           // the owner's plan may lift the job (hosted Pro); one indexed read, nothing self-hosted
           const ent = entitlements();
           const priorityBoost = ent && a.userId ? ((await ent.grantsFor(db, a.userId))?.queuePriority ?? 0) : 0;
-          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost });
+          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost, ...opts });
           if (instanceLimits) {
             const limits = await limitsFor(db, instanceLimits(), a.userId, entitlements());
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
@@ -133,20 +181,20 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               await client.query(TX_LOCK_SQL, [txLock.jobs(a.userId)]);
               a = await queue.admission(data, exec);
               try {
-                checkJobLimits(limits, a, USER_RENDER_QUEUES.includes(q));
+                checkJobLimits(limits, a, USER_RERUN_QUEUES.includes(q));
               } catch (err) {
-                log.warn({ userId: a.userId, queue: q, live: a.live, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
+                log.warn(
+                  { userId: a.userId, queue: q, live: a.live, userLive: a.userLive, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message },
+                  "job limit reached",
+                );
                 throw err;
               }
             }
           }
-          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost });
+          requested.push({ queue: q, projectId: data.projectId, ...("clipId" in data && typeof data.clipId === "string" ? { clipId: data.clipId } : {}) });
+          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost, ...opts });
         },
-        send: (q, data, opts) => queue.send(q, data, {
-          ...exec,
-          ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}),
-          ...(opts?.startAfter != null ? { startAfter: opts.startAfter } : {}),
-        }),
+        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey, startAfterSeconds: opts?.startAfterSeconds }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {
@@ -158,9 +206,12 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
       if (eventHandlers && emitted.length) {
         for (const r of await eventHandlerJobs(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
-          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfter: r.startAfter });
+          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfterSeconds: r.startAfter });
           // null: the handler coalesces and a job is already waiting for this key
-          log.debug({ handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId }, jobId ? "event handler job queued" : "event handler job already queued");
+          log.debug(
+            { handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId },
+            jobId ? "event handler job queued" : "event handler job already queued",
+          );
         }
       }
       await client.query("COMMIT");
@@ -171,16 +222,22 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       client.release();
     }
     // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
+    const who = requestedBy.getStore();
     for (const e of emitted) {
       const level = EVENT_LEVEL[e.type] ?? "debug";
       log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
-      if (telemetry?.enabled.posthog && PRODUCT_EVENTS.has(e.type)) {
+      const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
+      if (telemetry && product) {
+        // the owner is the distinct id (an admin acting on someone's project is not them); the surface is the request's
+        const properties = { projectId: e.projectId, ...product.properties, ...(who ? { surface: who.surface } : {}) };
         void pool
           .query<{ user_id: string }>("select user_id from projects where id = $1", [e.projectId])
-          .then((r) => r.rows[0] && telemetry.capture(e.type, r.rows[0].user_id, { projectId: e.projectId, ...eventFields(e.payload) }))
+          .then((r) => r.rows[0] && telemetry.capture(product.event, r.rows[0].user_id, properties))
           .catch(() => {});
       }
     }
+    // the user's own jobs only (admission above checked the owner), so the requester is the distinct id
+    if (who) for (const j of requested) telemetry?.capture("job.requested", who.userId, { ...j, surface: who.surface });
     for (const f of after) {
       try {
         await f();

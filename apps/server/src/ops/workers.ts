@@ -4,13 +4,17 @@
  * actually run work, not only the process that served the page.
  */
 import os from "node:os";
-import { eq, lt, and, ne, inArray } from "drizzle-orm";
-import { schema } from "../db/index.js";
+import { randomBytes } from "node:crypto";
+import { eq, gt, lt, and, ne, inArray } from "drizzle-orm";
+import { schema, type Db } from "../db/index.js";
+import type { Logger } from "../log.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
-import { QUEUES } from "../queue/boss.js";
-import { inflightJobs } from "../queue/inflight.js";
+import type { QueueName } from "../queue/boss.js";
+import { inflightJobs, listeningQueues } from "../queue/inflight.js";
+import { LEASE_STALE_MS, releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
+import { pausedReason, type PausedReason } from "../resources.js";
 
 export const WORKER_HEARTBEAT_MS = 15_000;
 /** last_seen older than this → not live (three missed beats) */
@@ -31,6 +35,33 @@ export function workerIdOf(c: Pick<Config, "WORKER_ID">, hostname = os.hostname(
   return pinned && pinned.length ? pinned : `${hostname}:${pid}`;
 }
 
+/** A heartbeat row for the same id this recent means another live process is using the pinned WORKER_ID. */
+export const WORKER_ID_IN_USE_MS = 30_000;
+
+/** Pure: the pinned id, or the pinned id plus `-<4 hex>` when a live process already beats under it. */
+export function disambiguateWorkerId(pinned: string, lastBeatAt: Date | null, now: Date, suffix: string): string {
+  const inUse = lastBeatAt !== null && now.getTime() - lastBeatAt.getTime() <= WORKER_ID_IN_USE_MS;
+  return inUse ? `${pinned}-${suffix}` : pinned;
+}
+
+/**
+ * Boot: two replicas started with the same pinned WORKER_ID (`docker compose --scale worker=N`) would overwrite each
+ * other's heartbeat row and release each other's disk leases. When a row under the pinned id was updated in the last
+ * 30 s, this process takes `<id>-<4 hex>` instead (config.WORKER_ID is rewritten, so every `workerIdOf` caller agrees).
+ * Unpinned ids (`hostname:pid`) are already unique. Two replicas that start within the same moment can still both pass.
+ */
+export async function claimWorkerId(config: Config, db: Db, log: Logger): Promise<string> {
+  const pinned = config.WORKER_ID?.trim();
+  if (!pinned) return workerIdOf(config);
+  const [row] = await db.select({ updatedAt: schema.workerInstances.updatedAt }).from(schema.workerInstances).where(eq(schema.workerInstances.id, pinned));
+  const id = disambiguateWorkerId(pinned, row?.updatedAt ?? null, new Date(), randomBytes(2).toString("hex"));
+  if (id !== pinned) {
+    config.WORKER_ID = id;
+    log.warn({ pinned, workerId: id }, "WORKER_ID is already in use by a live process; using the suffixed id");
+  }
+  return id;
+}
+
 export interface WorkerView {
   id: string;
   role: WorkerRole;
@@ -44,6 +75,10 @@ export interface WorkerView {
   memTotalMB: number;
   diskFreeMB: number;
   diskTotalMB: number;
+  /** the filesystem its DATA_DIR is on; processes with the same volume share one disk (and its leases) */
+  volume: string | null;
+  /** MB of that free space already leased to jobs in flight on the volume (disk-leases.ts) */
+  diskLeasedMB: number;
   gpu: WorkerGpu | null;
   renders: WorkerRenders;
   queues: string[];
@@ -67,6 +102,8 @@ export function classifyWorkers(
     memTotalMB: number;
     diskFreeMB: number;
     diskTotalMB: number;
+    volume?: string | null;
+    diskLeasedMB?: number;
     gpu: WorkerGpu | null;
     renders: WorkerRenders;
     queues: string[] | null;
@@ -91,6 +128,8 @@ export function classifyWorkers(
       memTotalMB: r.memTotalMB,
       diskFreeMB: r.diskFreeMB,
       diskTotalMB: r.diskTotalMB,
+      volume: r.volume ?? null,
+      diskLeasedMB: r.diskLeasedMB ?? 0,
       gpu: r.gpu,
       renders: r.renders,
       queues: r.queues ?? [],
@@ -100,7 +139,9 @@ export function classifyWorkers(
       thisProcess: r.id === selfId,
     };
   });
-  views.sort((a, b) => Number(b.live) - Number(a.live) || ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.hostname.localeCompare(b.hostname) || a.id.localeCompare(b.id));
+  views.sort(
+    (a, b) => Number(b.live) - Number(a.live) || ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.hostname.localeCompare(b.hostname) || a.id.localeCompare(b.id),
+  );
   return views;
 }
 
@@ -124,6 +165,78 @@ export async function listWorkers(svc: Services): Promise<{ items: WorkerView[];
   return { items, live: items.filter((w) => w.live).length, stale: items.filter((w) => !w.live).length };
 }
 
+/**
+ * Pure: another live process that listens on `queue` and reported at least `requiredMB` free net of
+ * what jobs in flight have leased on its volume (an unmeasurable disk, -1, counts as room: it never
+ * refuses work). Null when nobody does.
+ */
+export function pickWorkerWithRoom(
+  rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number; diskLeasedMB?: number }>,
+  now: Date,
+  selfId: string,
+  queue: QueueName,
+  requiredMB: number,
+  staleMs = WORKER_STALE_MS,
+): { workerId: string } | null {
+  for (const r of rows) {
+    if (r.id === selfId || now.getTime() - r.lastSeenAt.getTime() > staleMs) continue;
+    if (!r.queues?.includes(queue)) continue;
+    if (r.diskFreeMB >= 0 && r.diskFreeMB - (r.diskLeasedMB ?? 0) < requiredMB) continue;
+    return { workerId: r.id };
+  }
+  return null;
+}
+
+/** Is there another worker this job could run on with `requiredMB` free? Read from the last heartbeats. */
+export async function workerWithRoom(svc: Services, queue: QueueName, requiredMB: number): Promise<{ workerId: string } | null> {
+  const rows = await svc.database.db
+    .select({
+      id: schema.workerInstances.id,
+      lastSeenAt: schema.workerInstances.lastSeenAt,
+      queues: schema.workerInstances.queues,
+      diskFreeMB: schema.workerInstances.diskFreeMB,
+      diskLeasedMB: schema.workerInstances.diskLeasedMB,
+    })
+    .from(schema.workerInstances)
+    .where(gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)));
+  return pickWorkerWithRoom(rows, new Date(), workerIdOf(svc.config), queue, requiredMB);
+}
+
+/**
+ * Pure: why heavy jobs are waiting across the fleet, from the last heartbeats. Work waits only when every live
+ * process that takes jobs is short (one with room picks the job up), so this is null unless all of them are; the
+ * reason is the first one's. Null too when no process takes jobs: that is a missing worker, not a paused one.
+ */
+export function fleetPausedReason(
+  rows: Array<{ lastSeenAt: Date; queues: string[] | null; paused: PausedReason | null }>,
+  now: Date,
+  staleMs = WORKER_STALE_MS,
+): PausedReason | null {
+  const takers = rows.filter((r) => now.getTime() - r.lastSeenAt.getTime() <= staleMs && (r.queues?.length ?? 0) > 0);
+  if (!takers.length || takers.some((r) => !r.paused)) return null;
+  return takers[0]?.paused ?? null;
+}
+
+/** How long `fleetPaused` reuses its answer: `system.status` is public and polled, so it must not be one query per call. */
+const FLEET_PAUSED_TTL_MS = 5_000;
+let fleetPausedCache: { at: number; value: PausedReason | null } | null = null;
+
+/**
+ * The jobs-paused reason the app shows (`system.status`). Read from the heartbeats rather than this process's own
+ * machine, because an HTTP-only process (RUN_WORKERS=false) runs no jobs and its CPU or disk says nothing about them.
+ */
+export async function fleetPaused(svc: Services): Promise<PausedReason | null> {
+  const now = Date.now();
+  if (fleetPausedCache && now - fleetPausedCache.at < FLEET_PAUSED_TTL_MS) return fleetPausedCache.value;
+  const rows = await svc.database.db
+    .select({ lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, paused: schema.workerInstances.paused })
+    .from(schema.workerInstances)
+    .where(gt(schema.workerInstances.lastSeenAt, new Date(now - WORKER_STALE_MS)));
+  const value = fleetPausedReason(rows, new Date(now));
+  fleetPausedCache = { at: now, value };
+  return value;
+}
+
 export async function beat(svc: Services): Promise<void> {
   const id = workerIdOf(svc.config);
   const hostname = os.hostname();
@@ -134,66 +247,79 @@ export async function beat(svc: Services): Promise<void> {
   const startedAt = new Date(now.getTime() - process.uptime() * 1000);
   const gpuJson: WorkerGpu | null = gpu ? { vendor: gpu.vendor, devices: gpu.devices, note: gpu.note } : null;
   const renders: WorkerRenders = { running: r.running, limit: r.limit, max: svc.resources.maxRenders(), mode: r.mode };
-  const queues = svc.config.RUN_WORKERS ? Object.values(QUEUES) : [];
+  // what this process takes right now: everything, or without the disk queues while the gate holds them (queue/disk-gate.ts)
+  const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
+  // disk promised to jobs in flight on this volume, by every process on it: what a hand-off subtracts from "free"
+  const lease = svc.resources.leases();
+  const diskLeasedMB = lease.volume
+    ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb
+    : lease.ownMB;
+  const row = {
+    role: processRole(svc.config),
+    hostname,
+    startedAt,
+    lastSeenAt: now,
+    version: svc.config.REELSAW_VERSION,
+    commit: svc.config.REELSAW_COMMIT,
+    pid: process.pid,
+    cpus: snap.cpus,
+    memTotalMB: snap.memTotalMB,
+    diskFreeMB: snap.diskFreeMB,
+    diskTotalMB: snap.diskTotalMB,
+    volume: lease.volume,
+    diskLeasedMB,
+    gpu: gpuJson,
+    renders,
+    queues,
+    processing: inflightJobs(),
+    paused: pausedReason(snap),
+    updatedAt: now,
+  };
   await svc.database.db
     .insert(schema.workerInstances)
-    .values({
-      id,
-      role: processRole(svc.config),
-      hostname,
-      startedAt,
-      lastSeenAt: now,
-      version: svc.config.REELSAW_VERSION,
-      commit: svc.config.REELSAW_COMMIT,
-      pid: process.pid,
-      cpus: snap.cpus,
-      memTotalMB: snap.memTotalMB,
-      diskFreeMB: snap.diskFreeMB,
-      diskTotalMB: snap.diskTotalMB,
-      gpu: gpuJson,
-      renders,
-      queues,
-      processing: inflightJobs(),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: schema.workerInstances.id,
-      set: {
-        role: processRole(svc.config),
-        hostname,
-        startedAt,
-        lastSeenAt: now,
-        version: svc.config.REELSAW_VERSION,
-        commit: svc.config.REELSAW_COMMIT,
-        pid: process.pid,
-        cpus: snap.cpus,
-        memTotalMB: snap.memTotalMB,
-        diskFreeMB: snap.diskFreeMB,
-        diskTotalMB: snap.diskTotalMB,
-        gpu: gpuJson,
-        renders,
-        queues,
-        processing: inflightJobs(),
-        updatedAt: now,
-      },
-    });
+    .values({ id, ...row })
+    .onConflictDoUpdate({ target: schema.workerInstances.id, set: row });
   const cutoff = new Date(now.getTime() - WORKER_PRUNE_MS);
   await svc.database.db.delete(schema.workerInstances).where(and(lt(schema.workerInstances.lastSeenAt, cutoff), ne(schema.workerInstances.id, id)));
 }
 
 export async function forget(svc: Services): Promise<void> {
-  await svc.database.db.delete(schema.workerInstances).where(eq(schema.workerInstances.id, workerIdOf(svc.config)));
+  const id = workerIdOf(svc.config);
+  await releaseWorkerLeases(svc, id); // its jobs have stopped (main.ts calls this after the queue stop): nothing of theirs is still writing
+  await svc.database.db.delete(schema.workerInstances).where(eq(schema.workerInstances.id, id));
 }
 
-/** Repeat the beat every 15 s. The stop function deletes this process's row. Callers await `beat` once at boot so the first HTTP request already sees this process. */
-export function startHeartbeat(svc: Services): () => void {
+/**
+ * Repeat the beat every 15 s. The stop function deletes this process's row and its disk leases: call it only
+ * once the queue has stopped (running jobs finished or the grace ran out), so a job still writing during the
+ * shutdown grace keeps its claim and other processes on the volume do not take its bytes. Callers await `beat`
+ * once at boot so the first HTTP request already sees this process.
+ */
+/**
+ * The Sentry cron monitor a process checks into: `heartbeat-<WORKER_ID>` when the id is pinned (one monitor per
+ * worker service, so one dead worker alerts), else `heartbeat-<role>` (api, worker, app).
+ */
+export function heartbeatMonitor(c: Pick<Config, "WORKER_ID" | "RUN_HTTP" | "RUN_WORKERS">): string {
+  return `heartbeat-${c.WORKER_ID?.trim() || processRole(c)}`;
+}
+
+export function startHeartbeat(svc: Services): () => Promise<void> {
   const log = svc.log.child({ module: "ops" });
+  const monitor = heartbeatMonitor(svc.config);
+  let lastCheckIn = 0;
   const tick = () =>
-    beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
+    beat(svc)
+      .then(() => {
+        // the monitor is per minute; the database beat stays every 15 s
+        if (Date.now() - lastCheckIn < 60_000) return;
+        lastCheckIn = Date.now();
+        svc.telemetry.checkIn(monitor, "ok", { type: "interval", minutes: 1 });
+      })
+      .catch((err) => log.warn({ err }, "worker heartbeat failed"));
   const t = setInterval(tick, WORKER_HEARTBEAT_MS);
   t.unref();
-  return () => {
+  return async () => {
     clearInterval(t);
-    void forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
+    await forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
   };
 }

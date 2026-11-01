@@ -10,7 +10,10 @@ describe("splitDeleted", () => {
     const { keep, overflow } = splitDeleted(list);
     assert.equal(keep.length, DELETED_FLAGS_LIVE_CAP);
     assert.equal(keep[0]!.id, "f30");
-    assert.deepEqual(overflow.map((f) => f.id), Array.from({ length: 30 }, (_, i) => `f${i}`));
+    assert.deepEqual(
+      overflow.map((f) => f.id),
+      Array.from({ length: 30 }, (_, i) => `f${i}`),
+    );
   });
   it("under the cap nothing moves", () => {
     assert.deepEqual(splitDeleted([{ id: "a" }]).overflow, []);
@@ -26,7 +29,8 @@ describe("changedColumns", () => {
 });
 
 describe("capDiagnostics", () => {
-  const base = (over: Partial<ClipDiagnostics> = {}): ClipDiagnostics => ({ renderedAt: "x", layout: {}, cuts: { applied: [], skipped: [] }, outDurationSec: 1, renderMs: 1, ...over }) as unknown as ClipDiagnostics;
+  const base = (over: Partial<ClipDiagnostics> = {}): ClipDiagnostics =>
+    ({ renderedAt: "x", layout: {}, cuts: { applied: [], skipped: [] }, outDurationSec: 1, renderMs: 1, ...over }) as unknown as ClipDiagnostics;
   it("keeps the last 20 skipped cuts and bumper notes and trims long reasons", () => {
     const d = capDiagnostics(
       base({

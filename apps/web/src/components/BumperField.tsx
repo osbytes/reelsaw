@@ -8,9 +8,11 @@ import { formatTag, licenseText } from "../lib/library";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
-import { Modal, Skeleton, SkeletonRegion } from "./ui";
+import { ConfirmDialog, Modal, Skeleton, SkeletonRegion } from "./ui";
+import { MultiCombobox } from "./MultiCombobox";
 import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -20,24 +22,32 @@ import type { ClipBumpers } from "@reelsaw/shared";
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
+const ACCEPT =
+  ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
 const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name);
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
 /** One `library.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
-export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["assets"][number];
+export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["items"][number];
 
-/** The user's library (live assets and recently removed ones). */
+/** The user's library (live assets and recently deleted ones). */
 export function useBumperLibrary() {
   const trpc = useTRPC();
-  return useQuery(trpc.library.list.queryOptions());
+  // the newest 500 uploads (the server pages; `total` says how many there are in all)
+  return useQuery(
+    trpc.library.list.queryOptions({ limit: 500 }, { select: (d) => ({ assets: d.items, deleted: d.deleted, total: d.total, nextCursor: d.nextCursor }) }),
+  );
 }
 
-export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);
+export const lengthText = (a: Pick<LibraryAsset, "durationSec">) =>
+  a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
 export const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 /** "video · 4 s · 1080×1920", "audio · 2:31" (images are drawn separately: their length is a control). */
-export const metaText = (a: LibraryAsset) => (a.kind === "audio" ? `audio · ${lengthText(a)}` : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`);
+export const metaText = (a: LibraryAsset) =>
+  a.kind === "audio"
+    ? `audio · ${lengthText(a)}`
+    : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
 
 export interface UploadJob {
   key: string;
@@ -49,7 +59,7 @@ export interface UploadJob {
   note?: string;
 }
 
-/** Upload (several at once, two at a time), default and remove/restore actions for the library. */
+/** Upload (several at once, two at a time), default and delete/restore actions for the library. */
 export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) => void } = {}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -63,7 +73,9 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const notifyDeleted = useDeletedToast();
   const create = useMutation(trpc.library.add.mutationOptions());
   const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
-  const removeM = useMutation(trpc.library.remove.mutationOptions());
+  const removeM = useMutation(trpc.library.delete.mutationOptions());
+  // the window the library page (or the delete confirm) already fetched; no fetch of its own
+  const restoreWindow = useRestoreWindow("asset", false);
   const restoreM = useMutation(trpc.library.restore.mutationOptions());
   const updateM = useMutation(trpc.library.update.mutationOptions());
   const busy = setDefaultM.isPending || removeM.isPending || restoreM.isPending || updateM.isPending;
@@ -87,7 +99,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
         if (r.duplicate) {
           // nothing new was stored: say so, and point at the card that already has it
           patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
-          toast(r.restored ? `Already in your library, restored: ${r.name}` : `Already in your library: ${r.name}`, { id: `bumper-dup-${r.id}` });
+          toast(r.restored ? `Already in your library, restored “${r.name}”` : `Already in your library: “${r.name}”`, { id: `bumper-dup-${r.id}` });
           dupRef.current?.(r.id);
         } else {
           patch(key, { state: "done" });
@@ -103,7 +115,8 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       const { ok, failed } = finished.current;
       finished.current = { ok: 0, failed: 0 };
       if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
-      else if (ok === 0) toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
+      else if (ok === 0)
+        toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
       else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
     }
   };
@@ -116,7 +129,13 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       const image = isImageFile(file);
       const max = image ? MAX_IMAGE_BYTES : isAudioFile(file) ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
       if (file.size > max) {
-        fresh.push({ key, name: file.name, pct: 0, state: "failed", error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.` });
+        fresh.push({
+          key,
+          name: file.name,
+          pct: 0,
+          state: "failed",
+          error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.`,
+        });
         continue;
       }
       fresh.push({ key, name: file.name, pct: 0, state: "queued" });
@@ -126,24 +145,28 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     // each worker takes its first file synchronously, so this starts at most two and never an idle one
     while (running.current < 2 && queue.current.length > 0) void work();
   };
-  const dismiss = (key?: string) => setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
+  const dismiss = (key?: string) =>
+    setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
 
   const setDefault = (slot: "intro" | "outro", a: LibraryAsset, current: string | undefined) => {
-    setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
+    setDefaultM.mutate(
+      { slot, assetId: current === a.id ? null : a.id },
+      { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail },
+    );
   };
   const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
     restoreM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(`Restored ${a.name}`), true),
+      () => (refresh(), toast(`Restored “${a.name}”`), true),
       (e) => (fail(e), false),
     );
   /** Soft delete with Undo / Delete forever / See deletions (the server keeps the file, so projects using it keep rendering). */
-  const remove = (a: LibraryAsset) =>
+  const deleteAsset = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
       () => (
         refresh(),
         notifyDeleted({
           items: [{ kind: "asset", id: a.id, title: a.name }],
-          restorable: "for 30 days",
+          restorable: restoreWindow.restorable,
           storedBytes: a.sizeBytes,
           canPurge: !a.usedBy && !a.usedByClips && !a.usedByTemplates,
         }),
@@ -162,7 +185,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     const next = name.trim();
     if (!next || next === a.name) return Promise.resolve(false);
     return updateM.mutateAsync({ id: a.id, name: next }).then(
-      () => (refresh(), toast(`Renamed to ${next}`), true),
+      () => (refresh(), toast(`Renamed to “${next}”`), true),
       (e) => (fail(e), false),
     );
   };
@@ -172,7 +195,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       () => (refresh(), true),
       (e) => (fail(e), false),
     );
-  return { jobs, uploading, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
+  return { jobs, uploading, busy, uploadMany, dismiss, setDefault, deleteAsset, restore, setSeconds, rename, setTags };
 }
 
 /** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
@@ -184,7 +207,17 @@ export const playOnly = (el: HTMLAudioElement) => {
 };
 
 /** A pencil that opens a small popover with the name field; Enter or Save renames. */
-function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pick<LibraryAsset, "name">; busy: boolean; onRename: (name: string) => void; className?: string }) {
+function RenamePopover({
+  asset: a,
+  busy,
+  onRename,
+  className = "",
+}: {
+  asset: Pick<LibraryAsset, "name">;
+  busy: boolean;
+  onRename: (name: string) => void;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(a.name);
   const save = () => {
@@ -195,15 +228,35 @@ function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pi
   return (
     <Popover.Root open={open} onOpenChange={(o) => (o && setV(a.name), setOpen(o))}>
       <Popover.Trigger asChild>
-        <button type="button" className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`} aria-label={`Rename ${a.name}`} title="Rename">
+        <button
+          type="button"
+          className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`}
+          aria-label={`Rename ${a.name}`}
+          title="Rename"
+        >
           <Pencil className="h-3 w-3" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
+        >
           <label className="flex flex-col gap-1 text-ink2">
             Name
-            <input className="input h-8 px-2 py-0 text-xs" type="text" maxLength={120} value={v} disabled={busy} autoFocus aria-label="New name" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+            <input
+              className="input h-8 px-2 py-0 text-xs"
+              type="text"
+              maxLength={120}
+              value={v}
+              disabled={busy}
+              autoFocus
+              aria-label="New name"
+              onChange={(e) => setV(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
@@ -248,9 +301,25 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
           {jobs.map((j) => (
             <li key={j.key} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
+                {j.state === "done" ? (
+                  <span className="font-mono text-ok">●</span>
+                ) : j.state === "failed" ? (
+                  <span className="font-mono text-err">▲</span>
+                ) : (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />
+                )}
                 <span className="min-w-0 flex-1 truncate">{j.name}</span>
-                <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
+                <span className="shrink-0 font-mono text-ink3">
+                  {j.state === "queued"
+                    ? "waiting"
+                    : j.state === "uploading"
+                      ? `${Math.round(j.pct * 100)}%`
+                      : j.state === "saving"
+                        ? "adding"
+                        : j.state === "done"
+                          ? (j.note ?? "added")
+                          : "failed"}
+                </span>
                 {(j.state === "done" || j.state === "failed") && (
                   <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
                     <X className="h-3.5 w-3.5" />
@@ -279,7 +348,17 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
 }
 
 /** Seconds field for an image; empty means the library item's own length. */
-function SecField({ value, onChange, placeholder, label }: { value: number | undefined; onChange: (v: number | undefined) => void; placeholder: number; label: string }) {
+function SecField({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  placeholder: number;
+  label: string;
+}) {
   return (
     <label className="flex shrink-0 items-center gap-1 text-xs text-ink2">
       <input
@@ -326,9 +405,9 @@ export function SlotRow({
   fixed: FixedOption[];
   assets: LibraryAsset[];
   known: LibraryAsset[];
-  defaultId?: string | null;
+  defaultId?: string | null | undefined;
   /** the asset a "follow the project / default" choice ends up using */
-  inheritedId?: string | null;
+  inheritedId?: string | null | undefined;
   /** seconds may be set even when the choice is "default" (the project modal) */
   secOnInherit?: boolean;
 }) {
@@ -338,15 +417,39 @@ export function SlotRow({
     return (
       <>
         <span className="text-xs text-ink2 max-sm:col-span-full max-sm:-mb-1">{label}</span>
-        <BumperCombobox className="min-w-0" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
-        <div className="flex w-[5rem] justify-end">{image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}</div>
+        <BumperCombobox
+          className="min-w-0"
+          slot={slot}
+          label={`${label} choice`}
+          value={choice}
+          onChange={(c) => onChange(c, undefined)}
+          fixed={fixed}
+          assets={assets}
+          known={known}
+          defaultId={defaultId}
+          loading={loading}
+        />
+        <div className="flex w-[5rem] justify-end">
+          {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
+        </div>
       </>
     );
   return (
     <>
       <span className="text-xs text-ink2">{label}</span>
       <div className="flex min-w-0 items-center gap-2">
-        <BumperCombobox className="min-w-0 flex-1" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
+        <BumperCombobox
+          className="min-w-0 flex-1"
+          slot={slot}
+          label={`${label} choice`}
+          value={choice}
+          onChange={(c) => onChange(c, undefined)}
+          fixed={fixed}
+          assets={assets}
+          known={known}
+          defaultId={defaultId}
+          loading={loading}
+        />
         {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
       </div>
     </>
@@ -369,41 +472,56 @@ export function LicenseBadge({ provenance: p, className = "", wrap = false }: { 
   );
 }
 
-/** Tags as removable chips with an add field (Enter or comma); each change saves right away. */
+/** Tags: pick from the ones already in your library or create one (Enter); each change saves right away. */
 function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name" | "tags">; busy: boolean; onTags: (tags: string[]) => void }) {
-  const [v, setV] = useState("");
-  const add = () => {
-    const next = v.split(",").map((t) => t.trim().toLowerCase().slice(0, 40)).filter((t) => t && !a.tags.includes(t));
-    setV("");
-    if (next.length) onTags([...a.tags, ...next].slice(0, 30));
-  };
+  const library = useBumperLibrary();
+  const known = [...new Set([...(library.data?.assets ?? []).flatMap((x) => x.tags), ...a.tags])].sort((x, y) => x.localeCompare(y));
   return (
-    <div className="flex min-h-[3.25rem] flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1" aria-label="Tags">
-        {a.tags.map((t) => (
-          <span key={t} className="inline-flex items-center gap-0.5 rounded-full bg-sunk py-0.5 pl-2 pr-1 text-[11px] text-ink2">
-            {t}
-            <button type="button" className="grid h-4 w-4 place-items-center rounded-full hover:bg-line" disabled={busy} aria-label={`Remove tag ${t}`} onClick={() => onTags(a.tags.filter((x) => x !== t))}>
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        ))}
-        {a.tags.length === 0 && <span className="text-[11px] text-ink3">No tags yet</span>}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <input className="input h-7 min-w-0 flex-1 px-2 py-0 text-xs" type="text" maxLength={40} value={v} disabled={busy} placeholder="Add a tag…" aria-label={`Add a tag to ${a.name}`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => (e.key === "Enter" || e.key === ",") && (e.preventDefault(), add())} />
-        <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={busy || !v.trim()} onClick={add} aria-label="Add tag">
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+    <MultiCombobox
+      label={`Tags on ${a.name}`}
+      placeholder="Add tags…"
+      searchPlaceholder="Find or create a tag…"
+      empty="No tags yet. Type one to create it."
+      footerHint="Tags make an item easy to find"
+      options={known.map((t) => ({ value: t, label: t }))}
+      value={a.tags}
+      disabled={busy}
+      onChange={(tags) => onTags(tags.slice(0, 30))}
+      creatable={{ noun: "tag", normalize: (q) => q.trim().toLowerCase().slice(0, 40) || null }}
+    />
   );
 }
 
-/** Intro / outro / remove, in the same order on the card and in the viewer. */
-function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
+/** Intro / outro / delete, in the same order on the card and in the viewer. */
+function AssetActions({
+  asset: a,
+  introId,
+  outroId,
+  busy,
+  onUse,
+  onDelete,
+  withLabels = false,
+}: {
+  asset: LibraryAsset;
+  introId?: string | undefined;
+  outroId?: string | undefined;
+  busy: boolean;
+  onUse: (slot: "intro" | "outro") => void;
+  onDelete: () => void;
+  withLabels?: boolean;
+}) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
-    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy || a.kind === "audio"} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
+    <button
+      type="button"
+      className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`}
+      disabled={busy || a.kind === "audio"}
+      aria-pressed={on}
+      aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`}
+      title={
+        a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`
+      }
+      onClick={() => onUse(slot)}
+    >
       {on ? "● " : ""}
       {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
     </button>
@@ -412,9 +530,16 @@ function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withL
     <div className="grid grid-cols-3 gap-1">
       {slotBtn("intro", introId === a.id)}
       {slotBtn("outro", outroId === a.id)}
-      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+      <button
+        type="button"
+        className="btn-ghost justify-center px-1 py-1 text-xs"
+        disabled={busy}
+        aria-label={`Delete ${a.name}`}
+        title="Delete"
+        onClick={onDelete}
+      >
         <Trash2 className="h-3.5 w-3.5" />
-        {withLabels && "Remove"}
+        {withLabels && "Delete"}
       </button>
     </div>
   );
@@ -432,16 +557,39 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
   return (
     <Popover.Root open={open} onOpenChange={(o) => (o && setV(String(a.durationSec)), setOpen(o))}>
       <Popover.Trigger asChild>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink" aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`} title="Change how long it is shown">
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink"
+          aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`}
+          title="Change how long it is shown"
+        >
           {lengthText(a)}
           <Pencil className="h-3 w-3" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
+        >
           <label className="flex items-center gap-1.5 text-ink2">
             Shown for
-            <input className="input h-7 w-16 px-1.5 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={v} disabled={busy} autoFocus aria-label={`Seconds ${a.name} is shown`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />s
+            <input
+              className="input h-7 w-16 px-1.5 py-0 text-xs"
+              type="number"
+              min={1}
+              max={10}
+              step={0.5}
+              value={v}
+              disabled={busy}
+              autoFocus
+              aria-label={`Seconds ${a.name} is shown`}
+              onChange={(e) => setV(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
+            s
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
@@ -461,19 +609,35 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
 export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
-  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "", a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  const used = [
+    a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "",
+    a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "",
+    a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
       {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
       {a.usedBy || a.usedByClips || a.usedByTemplates ? (
         <Popover.Root>
           <Popover.Trigger asChild>
-            <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
+            <button
+              type="button"
+              className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline"
+              title="Where it’s used"
+              aria-label={`Where ${a.name} is used`}
+            >
               {defaults ? `· used by ${used}${fix}` : `Used by ${used}${fix}`}
             </button>
           </Popover.Trigger>
           <Popover.Portal>
-            <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+            <Popover.Content
+              align="start"
+              sideOffset={6}
+              collisionPadding={12}
+              className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+            >
               <b className="text-[13px]">Where “{a.name}” is used</b>
               <UsageList id={a.id} className="mt-2 max-h-[min(280px,50dvh)]" />
             </Popover.Content>
@@ -487,12 +651,35 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({
+  asset: a,
+  introId,
+  outroId,
+  busy,
+  onClose,
+  onUse,
+  onDelete,
+  onRename,
+  onTags,
+}: {
+  onTags: (tags: string[]) => void;
+  asset: LibraryAsset | null;
+  introId?: string | undefined;
+  outroId?: string | undefined;
+  busy: boolean;
+  onClose: () => void;
+  onUse: (slot: "intro" | "outro") => void;
+  onDelete: () => void;
+  onRename: (name: string) => void;
+}) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/70" />
-        <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4">
+        <Dialog.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4"
+        >
           {a && (
             <>
               <div className="flex items-center gap-2">
@@ -505,12 +692,29 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               {a.kind === "audio" ? (
                 <div className="flex flex-col items-center gap-4 rounded-[12px] bg-sunk px-4 py-8">
                   <AudioLines className="h-12 w-12 text-ink3" aria-hidden />
-                  <audio key={a.id} src={`/media/assets/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
+                  <audio
+                    key={a.id}
+                    src={`/media/assets/${a.id}`}
+                    controls
+                    autoPlay
+                    preload="metadata"
+                    className="w-full"
+                    aria-label={`Play ${a.name}`}
+                    onPlay={(e) => playOnly(e.currentTarget)}
+                  />
                 </div>
               ) : (
                 <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
                   {a.kind === "video" ? (
-                    <video key={a.id} src={`/media/assets/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                    <video
+                      key={a.id}
+                      src={`/media/assets/${a.id}`}
+                      poster={a.thumbnailUrl}
+                      controls
+                      autoPlay
+                      playsInline
+                      className="max-h-full max-w-full object-contain"
+                    />
                   ) : (
                     <img key={a.id} src={`/media/assets/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
                   )}
@@ -518,7 +722,9 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               )}
               <p className="truncate font-mono text-xs text-ink3">
                 {formatTag(a.mime) ? `${formatTag(a.mime)} · ` : ""}
-                {a.kind === "audio" ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}` : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
+                {a.kind === "audio"
+                  ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}`
+                  : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
               <TagEditor asset={a} busy={busy} onTags={onTags} />
@@ -533,7 +739,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                   <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
                 </div>
               )}
-              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
+              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onDelete={onDelete} withLabels />
               <p className="text-center text-xs text-ink3">
                 New project with it as the{" "}
                 <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
@@ -578,7 +784,9 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
             <Link to={`/templates/${t.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
               {t.name}
             </Link>
-            <span className="shrink-0 text-ink3">{t.layers > 1 ? `layer ×${t.layers}` : "layer"} · template</span>
+            <span className="shrink-0 text-ink3">
+              {[...t.slots, ...(t.layers ? [t.layers > 1 ? `layer ×${t.layers}` : "layer"] : [])].join(" + ")} · template
+            </span>
           </div>
         ))}
         {projects.map((p) => (
@@ -592,10 +800,13 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
             {p.clips.map((c) => (
               <div key={c.id} className="flex items-baseline gap-2 pl-3">
                 <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
-                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled moment"}
+                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled clip"}
                 </Link>
                 <span className="shrink-0 text-ink3">
-                  {c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s)).join(" + ")} · {c.via === "clip" ? "on the clip" : "from project"}
+                  {c.slots
+                    .map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s))
+                    .join(" + ")}{" "}
+                  · {c.via === "clip" ? "on the clip" : "from project"}
                 </span>
               </div>
             ))}
@@ -606,37 +817,39 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
   );
 }
 
-/** Confirm before removing an asset; lists what still uses it. */
-export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsset | null; onClose: () => void; onConfirm: (a: LibraryAsset) => void }) {
+/** Confirm before deleting a library item (library page and command palette); lists what still uses it. */
+export function DeleteAssetDialog({
+  asset,
+  onClose,
+  onConfirm,
+}: {
+  asset: Pick<LibraryAsset, "id" | "name" | "usedBy" | "usedByTemplates"> | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { hint } = useRestoreWindow("asset", !!asset);
+  const used = asset ? asset.usedBy > 0 || asset.usedByTemplates > 0 : false;
   return (
-    <Modal open={!!asset} onOpenChange={(o) => !o && onClose()} title="Remove from your library?" width={460}>
-      {asset && (
-        <>
-          <p className="text-sm leading-relaxed text-ink2">
-            {asset.usedBy
-              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} You can restore it for 30 days.`
-              : asset.usedByTemplates
-                ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. You can restore it for 30 days.`
-                : `“${asset.name}” will be removed. You can restore it for 30 days.`}
-          </p>
-          {(asset.usedBy > 0 || asset.usedByTemplates > 0) && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
-          <div className="mt-1 flex justify-end gap-2">
-            <button className="btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="btn bg-err font-semibold text-white hover:brightness-110"
-              onClick={() => {
-                onConfirm(asset);
-                onClose();
-              }}
-            >
-              Remove
-            </button>
-          </div>
-        </>
-      )}
-    </Modal>
+    <ConfirmDialog
+      open={!!asset}
+      onOpenChange={(o) => !o && onClose()}
+      title="Delete from your library?"
+      width={460}
+      body={
+        !asset
+          ? ""
+          : asset.usedBy
+            ? `${asset.usedBy === 1 ? "The project using it keeps" : `The ${asset.usedBy} projects using it keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} ${hint()}`
+            : asset.usedByTemplates
+              ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. ${hint()}`
+              : `“${asset.name}” is hidden from pickers and defaults. ${hint()}`
+      }
+      confirm="Delete"
+      danger
+      onConfirm={onConfirm}
+    >
+      {asset && used && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
+    </ConfirmDialog>
   );
 }
 
@@ -650,7 +863,12 @@ export interface SlotChoices {
   outroSec?: number;
 }
 const toChoice = (v: string | null | undefined): SlotChoice => (v === undefined ? "inherit" : v === null ? "none" : v);
-export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({ intro: toChoice(b?.intro), outro: toChoice(b?.outro), ...(b?.introSec ? { introSec: b.introSec } : {}), ...(b?.outroSec ? { outroSec: b.outroSec } : {}) });
+export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({
+  intro: toChoice(b?.intro),
+  outro: toChoice(b?.outro),
+  ...(b?.introSec ? { introSec: b.introSec } : {}),
+  ...(b?.outroSec ? { outroSec: b.outroSec } : {}),
+});
 const isAssetChoice = (c: SlotChoice) => c !== "inherit" && c !== "none" && c !== "keep" && c !== "default";
 /** The value stored on the clip: slots that inherit are left out, seconds only travel with a picked asset. */
 export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
@@ -662,21 +880,53 @@ export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
 /** The asset a slot ends up using on a clip: its own choice, else the project's. */
 export const effectiveAsset = (own: string | null | undefined, project: string | null | undefined) => (own === undefined ? project || null : own);
 /** Seconds a slot lasts on a clip: its own, else the project's, else the asset's own length. */
-export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string | null | undefined, projectSec: number | undefined, assetSec: number | undefined) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
+export const effectiveSeconds = (
+  clipSec: number | undefined,
+  ownChoice: string | null | undefined,
+  projectSec: number | undefined,
+  assetSec: number | undefined,
+) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
 
-/** Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset. */
-export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean }) {
+/**
+ * Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset.
+ * `template`: a layer template's slots instead (Clip's own / None / each asset; there is no project to follow).
+ */
+export function BumperSelects({
+  value,
+  onChange,
+  projectIntroId,
+  projectOutroId,
+  className = "",
+  keep = false,
+  reserveSec = false,
+  template = false,
+}: {
+  value: SlotChoices;
+  onChange: (v: SlotChoices) => void;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+  className?: string;
+  keep?: boolean;
+  reserveSec?: boolean;
+  template?: boolean;
+}) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   // music is for the audio lane, never a slot
   const assets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
-  const fixed = (projectId: string | null | undefined): FixedOption[] => [
-    ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
-    { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
-    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
-  ];
+  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
+  const fixed = (projectId: string | null | undefined): FixedOption[] =>
+    template
+      ? [
+          { value: "keep", label: "Clip’s own", hint: "Clips keep the one they have", icon: <Equal className="h-4 w-4" /> },
+          { value: "none", label: "None", hint: "Takes it off the clips", icon: <Ban className="h-4 w-4" /> },
+        ]
+      : [
+          ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
+          { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
+          { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+        ];
   const row = (slot: "intro" | "outro", label: string, projectId: string | null | undefined, defaultId: string | undefined) => (
     <SlotRow
       slot={slot}
@@ -693,7 +943,9 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
     />
   );
   return (
-    <div className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}>
+    <div
+      className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}
+    >
       {row("intro", "Intro", projectIntroId, defaults?.introAssetId)}
       {row("outro", "Outro", projectOutroId, defaults?.outroAssetId)}
     </div>
@@ -701,7 +953,25 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
 }
 
 /** "Intro / outro…" from a clip card's ⋯ menu: this clip's own choice without opening the editor. */
-export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId }: { open: boolean; onOpenChange: (o: boolean) => void; clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null }) {
+export function ClipBumpersDialog({
+  open,
+  onOpenChange,
+  clipId,
+  projectId,
+  bumpers,
+  rendered,
+  projectIntroId,
+  projectOutroId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  clipId: string;
+  projectId: string;
+  bumpers: ClipBumpers | null | undefined;
+  rendered: boolean;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
@@ -735,7 +1005,12 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
         <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
           Save
         </button>
-        <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
+        <button
+          className="btn-ink px-2.5 py-1 text-xs"
+          disabled={!dirty || update.isPending || !rendered}
+          title={rendered ? undefined : "This clip isn't rendered yet"}
+          onClick={() => save(true)}
+        >
           Save & re-render
         </button>
       </div>
@@ -744,7 +1019,27 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
 }
 
 /** Applies an intro and/or outro to every selected clip (the selection bar's ⋯ menu). Slots left on "Leave as it is" are untouched. Pass `open` to drive it from that menu; otherwise it renders its own button. */
-export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className, open: openProp, onOpenChange }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function BulkBumpersPopover({
+  projectId,
+  clipIds,
+  rerenderable,
+  projectIntroId,
+  projectOutroId,
+  onDone,
+  className,
+  open: openProp,
+  onOpenChange,
+}: {
+  projectId: string;
+  clipIds: string[];
+  rerenderable: number;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+  onDone: () => void;
+  className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [inner, setInner] = useState(false);
@@ -791,7 +1086,13 @@ export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIn
         <Popover.Anchor className="pointer-events-none absolute right-8 bottom-0 h-px w-px" />
       )}
       <Popover.Portal>
-        <Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+        <Popover.Content
+          side="top"
+          align="end"
+          sideOffset={8}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+        >
           <b className="text-[13px]">
             Intro and outro for {clipIds.length} clip{clipIds.length === 1 ? "" : "s"}
           </b>
@@ -800,7 +1101,12 @@ export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIn
             <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
               Apply
             </button>
-            <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} title={rerenderable ? undefined : "None of the selected clips is rendered yet"} onClick={() => apply(true)}>
+            <button
+              className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs"
+              disabled={nothing || many.isPending || !rerenderable}
+              title={rerenderable ? undefined : "None of the selected clips is rendered yet"}
+              onClick={() => apply(true)}
+            >
               {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
             </button>
           </div>
@@ -832,8 +1138,8 @@ export function ProjectBumpersModal({
   clipCount: number;
   introId: string | null | undefined;
   outroId: string | null | undefined;
-  introSec?: number;
-  outroSec?: number;
+  introSec?: number | undefined;
+  outroSec?: number | undefined;
 }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -842,7 +1148,8 @@ export function ProjectBumpersModal({
   const save = useMutation(trpc.projects.setBumpers.mutationOptions());
   const assets = library.data?.assets ?? [];
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const known1 = (id: string | null | undefined, slotDefault: string | undefined): Choice => (id === null ? "none" : id ? (id === slotDefault ? "default" : id) : slotDefault ? "none" : "default");
+  const known1 = (id: string | null | undefined, slotDefault: string | undefined): Choice =>
+    id === null ? "none" : id ? (id === slotDefault ? "default" : id) : slotDefault ? "none" : "default";
   const initial = { intro: known1(introId, defaults?.introAssetId), outro: known1(outroId, defaults?.outroAssetId) };
   const [pick, setPick] = useState<{ intro?: Choice; outro?: Choice; introSec?: number | null; outroSec?: number | null }>({});
   const intro = pick.intro ?? initial.intro;
@@ -850,12 +1157,12 @@ export function ProjectBumpersModal({
   const iSec = pick.introSec === undefined ? introSec : (pick.introSec ?? undefined);
   const oSec = pick.outroSec === undefined ? outroSec : (pick.outroSec ?? undefined);
   const dirty = intro !== initial.intro || outro !== initial.outro || iSec !== introSec || oSec !== outroSec;
-  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
+  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
   const fixed = (slotDefault: string | undefined): FixedOption[] => [
     { value: "default", label: `Default (${name(slotDefault)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
   ];
-  // a project may still use an asset that was removed since; keep it selectable as itself
+  // a project may still use an asset that was deleted since; keep it selectable as itself
   const row = (slot: "intro" | "outro", label: string, choice: Choice, sec: number | undefined, slotDefault: string | undefined) => (
     <SlotRow
       slot={slot}
@@ -874,7 +1181,14 @@ export function ProjectBumpersModal({
   );
   const apply = (rerender: boolean) =>
     save.mutate(
-      { id: projectId, intro, outro, ...(iSec && intro !== "none" ? { introSec: clampSec(iSec) } : {}), ...(oSec && outro !== "none" ? { outroSec: clampSec(oSec) } : {}), rerender },
+      {
+        id: projectId,
+        intro,
+        outro,
+        ...(iSec && intro !== "none" ? { introSec: clampSec(iSec) } : {}),
+        ...(oSec && outro !== "none" ? { outroSec: clampSec(oSec) } : {}),
+        rerender,
+      },
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
@@ -892,7 +1206,9 @@ export function ProjectBumpersModal({
         {row("intro", "Intro", intro, iSec, defaults?.introAssetId)}
         {row("outro", "Outro", outro, oSec, defaults?.outroAssetId)}
       </div>
-      <p className="min-h-8 text-xs text-ink3">{dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}</p>
+      <p className="min-h-8 text-xs text-ink3">
+        {dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}
+      </p>
       <div className="flex flex-wrap justify-end gap-2">
         <button className="btn-ghost" onClick={() => onOpenChange(false)}>
           Cancel

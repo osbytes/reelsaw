@@ -24,9 +24,9 @@ export interface BumperCoverage {
   outro: SlotCoverage | null;
 }
 
-type ProjectIn = { settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null };
+type ProjectIn = { settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null };
 type ClipIn = {
-  bumpers?: { intro?: string | null; outro?: string | null } | null;
+  bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined } | null;
   /** layers (or the older overlays + audio) also hold library assets (see `assetRefs`) */
   layers?: unknown;
   overlays?: unknown;
@@ -53,7 +53,14 @@ export function bumperCoverage(project: ProjectIn, clips: ClipIn[]): BumperCover
     if (!sorted.length) return null;
     const [assetId, withCount] = sorted[0]!;
     const used = sorted.reduce((n, [, c]) => n + c, 0);
-    return { assetId, withCount, total: clips.length, assets: sorted.map(([id, count]) => ({ assetId: id, count })), others: sorted.slice(1).map(([id, count]) => ({ assetId: id, count })), noneCount: clips.length - used };
+    return {
+      assetId,
+      withCount,
+      total: clips.length,
+      assets: sorted.map(([id, count]) => ({ assetId: id, count })),
+      others: sorted.slice(1).map(([id, count]) => ({ assetId: id, count })),
+      noneCount: clips.length - used,
+    };
   };
   return { intro: slot(counts.intro), outro: slot(counts.outro) };
 }
@@ -65,7 +72,7 @@ export function bumperCoverage(project: ProjectIn, clips: ClipIn[]): BumperCover
  * once); a project with no clips counts when its settings name the asset. Pure: no database.
  */
 export function countBumperUsage(
-  projects: { settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null; clips: ClipIn[] }[],
+  projects: { settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null; clips: ClipIn[] }[],
 ): Map<string, { projects: number; clips: number }> {
   const out = new Map<string, { projects: number; clips: number }>();
   const bump = (id: string, key: "projects" | "clips") => {
@@ -94,7 +101,11 @@ export function countBumperUsage(
 }
 
 /** One plain sentence, e.g. "outro copia-qr on 3/9 clips (6 none, 1 other)". Takes a SlotSummary (service.ts) or a coverage. */
-export function describeCoverage(slot: "intro" | "outro", name: string, c: { withCount: number; total: number; noneCount: number; otherCount: number }): string {
+export function describeCoverage(
+  slot: "intro" | "outro",
+  name: string,
+  c: { withCount: number; total: number; noneCount: number; otherCount: number },
+): string {
   const rest = [c.noneCount ? `${c.noneCount} none` : "", c.otherCount ? `${c.otherCount} other` : ""].filter(Boolean);
   return `${slot} ${name} on ${c.withCount}/${c.total} clips${rest.length ? ` (${rest.join(", ")})` : ""}`;
 }

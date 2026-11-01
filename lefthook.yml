@@ -8,6 +8,12 @@ pre-commit:
   commands:
     secrets:
       run: node scripts/hook.mjs optional gitleaks git --pre-commit --staged --redact --no-banner .
+    # lint errors and unformatted code in the staged files only (biome.json); `pnpm format` formats,
+    # `pnpm lint:fix` applies the safe lint fixes. Checks, never rewrites: a partly staged file stays as staged.
+    lint:
+      glob: "*.{ts,tsx,js,mjs,cjs}"
+      # --staged, not {staged_files}: a long file list overflows the Windows command line
+      run: pnpm exec biome check --staged --diagnostic-level=error --no-errors-on-unmatched
 
 commit-msg:
   commands:

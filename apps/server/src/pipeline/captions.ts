@@ -1,4 +1,17 @@
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style, type RenderedCaptions } from "@reelsaw/shared";
+import {
+  CAPTION_FONT_FRAC,
+  HOOK_FONT_FRAC,
+  lineSecondsFor,
+  captionMaxChars,
+  lineDisplayEnd,
+  monotonicWords,
+  emphasisKey,
+  captionYAt,
+  type Word,
+  type Style,
+  type RenderedCaptions,
+  type SeamRun,
+} from "@reelsaw/shared";
 
 export interface CaptionOptions {
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
@@ -16,6 +29,8 @@ export interface CaptionOptions {
   maxLineSeconds?: number;
   /** text overlays (clip overlays of kind "text"), in the body's own seconds; drawn above the captions */
   texts?: TextOverlayEvent[];
+  /** split / stack stretches in the body's own seconds: caption lines there sit on the seam (`captionYAt`) */
+  seams?: SeamRun[];
 }
 
 /** One text overlay as the ASS file draws it: centre position and size as fractions of the frame. */
@@ -56,7 +71,8 @@ export const WATERMARK_LOGO = {
   gap: 0.004,
 } as const;
 /** Centre y of the text line under the logo (logo height = w × 9/16 ÷ aspect of the frame height). */
-export const watermarkTextY = () => WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
+export const watermarkTextY = () =>
+  WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
 
 /**
  * The caption lines a render burns in, grouped exactly as `buildAss` groups them, shifted by the
@@ -64,11 +80,18 @@ export const watermarkTextY = () => WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 
  */
 export function renderedCaptions(words: Word[], style: Style, introSec: number, maxLineSeconds?: number): RenderedCaptions {
   const r3 = (n: number) => Number((n + introSec).toFixed(3));
-  const lines = style.captions === "none" ? [] : groupLines(monotonicWords(words), style.wordsPerLine, maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
+  const lines =
+    style.captions === "none"
+      ? []
+      : groupLines(monotonicWords(words), style.wordsPerLine, maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
   return {
     introSec: Number(introSec.toFixed(3)),
     captions: style.captions,
-    lines: lines.map((line, i) => ({ start: r3(line[0]!.start), end: r3(lineDisplayEnd(lines, i)), words: line.map((w) => ({ text: w.text, start: r3(w.start), end: r3(w.end) })) })),
+    lines: lines.map((line, i) => ({
+      start: r3(line[0]!.start),
+      end: r3(lineDisplayEnd(lines, i)),
+      words: line.map((w) => ({ text: w.text, start: r3(w.start), end: r3(w.end) })),
+    })),
   };
 }
 
@@ -115,7 +138,8 @@ export function buildAss(input: Word[], opts: CaptionOptions): string {
   const outline = Math.max(2, Math.round(4 * scale));
   const margin = Math.round(width * 0.06);
   const pos = (x: number, y: number) => `{\\an5\\pos(${Math.round(x * width)},${Math.round(y * height)})}`;
-  const capPos = pos(style.captionX, style.captionY);
+  // each line is placed once, at its midpoint, so a line never moves while it is on screen
+  const capPosAt = (start: number, end: number) => pos(style.captionX, captionYAt(style, opts.seams ?? [], (start + end) / 2));
   const hookPos = pos(style.hookX, style.hookY);
   const hi = assColor(style.highlightColor);
   const tx = (t: string) => esc(style.uppercase ? t.toUpperCase() : t);
@@ -154,7 +178,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
     const fs = Math.max(8, Math.round(t.size * height));
     const fn = t.font && t.font !== font ? `\\fn${esc(t.font).replace(/[\\,]/g, "")}` : "";
-    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
+    events.push(
+      `Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`,
+    );
   }
 
   // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed
@@ -179,6 +205,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines.forEach((line, li) => {
       const start = line[0]!.start;
       const end = lineDisplayEnd(lines, li);
+      const capPos = capPosAt(start, end);
       if (style.captions === "plain" || style.captions === "box") {
         events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Caption,,0,0,0,,${capPos}${line.map(plainWord).join(" ")}`);
         return;

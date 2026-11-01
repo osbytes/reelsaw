@@ -23,7 +23,18 @@ import path from "node:path";
 import { loadConfig, type Config } from "../config.js";
 import { createLogger } from "../log.js";
 import { createAi } from "../ai/registry.js";
-import { compare, describeInterval, exec, findEvalRoot, fmt, makeCache, type Baseline, type CaseResult, type EvalContext, type SummaryMetric } from "./framework.js";
+import {
+  compare,
+  describeInterval,
+  exec,
+  findEvalRoot,
+  fmt,
+  makeCache,
+  type Baseline,
+  type CaseResult,
+  type EvalContext,
+  type SummaryMetric,
+} from "./framework.js";
 import { createMeter, meteredModel, type MeterSummary } from "./meter.js";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { suites } from "./suites/index.js";
@@ -31,7 +42,7 @@ import { suites } from "./suites/index.js";
 const BOOL_FLAGS = new Set(["offline", "update", "verbose", "list", "no-cache"]);
 const argv = process.argv.slice(2);
 const valuesOf = (name: string) => argv.flatMap((a, i) => (a === `--${name}` && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? [argv[i + 1]!] : []));
-const valueOf = (name: string) => valuesOf(name)[0];
+const flagValue = (name: string) => valuesOf(name)[0];
 const has = (name: string) => argv.includes(`--${name}`);
 const positional = argv.filter((a, i) => !a.startsWith("--") && !(i > 0 && argv[i - 1]!.startsWith("--") && !BOOL_FLAGS.has(argv[i - 1]!.slice(2))));
 
@@ -52,7 +63,8 @@ if (!inContainer) {
   // compose service names only resolve inside the network; the stack publishes them on localhost
   for (const k of Object.keys(process.env)) {
     const v = process.env[k];
-    if (v && /:\/\/(speaches|ollama|host\.docker\.internal|db|minio)(:|\/)/.test(v)) process.env[k] = v.replace(/:\/\/(speaches|ollama|host\.docker\.internal|db|minio)(?=[:/])/, "://localhost");
+    if (v && /:\/\/(speaches|ollama|host\.docker\.internal|db|minio)(:|\/)/.test(v))
+      process.env[k] = v.replace(/:\/\/(speaches|ollama|host\.docker\.internal|db|minio)(?=[:/])/, "://localhost");
   }
 }
 process.env.DATABASE_URL ||= "postgres://eval@localhost/eval"; // never connected to
@@ -80,7 +92,7 @@ async function main() {
   }
   const offline = has("offline");
   const update = has("update");
-  const acceptReason = valueOf("accept-regressions")?.trim() || undefined;
+  const acceptReason = flagValue("accept-regressions")?.trim() || undefined;
   if (has("accept-regressions") && !acceptReason) throw new Error('--accept-regressions needs a reason: --accept-regressions "why these regressions are fine"');
   if (acceptReason && !update) throw new Error("--accept-regressions only makes sense with --update");
   const noCache = has("no-cache");
@@ -88,7 +100,7 @@ async function main() {
   const unknown = positional.filter((p) => !suites.some((s) => s.name === p));
   if (unknown.length) throw new Error(`unknown suite(s): ${unknown.join(", ")}; known: ${suites.map((s) => s.name).join(", ")}`);
 
-  const profiles = parseProfiles({ matrix: valueOf("matrix"), profiles: valueOf("profiles"), set: valuesOf("set") });
+  const profiles = parseProfiles({ matrix: flagValue("matrix"), profiles: flagValue("profiles"), set: valuesOf("set") });
   const matrix = profiles.length > 0;
   if (matrix && update) throw new Error("--update records the default .env configuration; it cannot be combined with --matrix / --set");
   if (!matrix) profiles.push({ name: "default", env: {} });
@@ -101,7 +113,14 @@ async function main() {
   const report: SuiteReport[] = [];
   let failed = false;
   for (const profile of profiles) {
-    if (matrix) process.stdout.write(`\n━━ profile ${profile.name}: ${Object.entries(profile.env).map(([k, v]) => `${k}=${v}`).join(" ") || "(no overrides)"}\n`);
+    if (matrix)
+      process.stdout.write(
+        `\n━━ profile ${profile.name}: ${
+          Object.entries(profile.env)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ") || "(no overrides)"
+        }\n`,
+      );
     let config: Config | undefined;
     const getConfig = () => (config ??= loadConfig({ ...process.env, ...profile.env }));
     const meter = createMeter();
@@ -112,7 +131,7 @@ async function main() {
       cacheDir,
       offline,
       verbose: has("verbose"),
-      opt: (name) => valueOf(name),
+      opt: (name) => flagValue(name),
       profile: profile.name,
       config: getConfig,
       ai: { ...ai, languageModel: async (id) => meteredModel(meter, await ai.languageModel(id)) },
@@ -127,7 +146,17 @@ async function main() {
       const empty = { llm: meter.summary("llm"), stt: meter.summary("stt") };
       if (offline && (s.needs.includes("models") || s.needs.includes("network"))) {
         console.log(`  skipped (--offline; needs ${s.needs.join(", ")})`);
-        report.push({ profile: profile.name, suite: s.name, results: [], metrics: {}, regressions: [], improvements: [], ms: 0, skipped: "offline", meter: empty });
+        report.push({
+          profile: profile.name,
+          suite: s.name,
+          results: [],
+          metrics: {},
+          regressions: [],
+          improvements: [],
+          ms: 0,
+          skipped: "offline",
+          meter: empty,
+        });
         continue;
       }
       meter.mark();
@@ -139,7 +168,9 @@ async function main() {
         const msg = (err as Error).message;
         // a missing tool (ffmpeg, ffprobe, yt-dlp not installed where the evals run) measured nothing: skip, don't fail
         const missingTool = /spawn (\S+) ENOENT/.exec(msg)?.[1];
-        results = missingTool ? [{ id: "(suite)", pass: false, skipped: `needs ${missingTool} on PATH (${msg})` }] : [{ id: "(suite)", pass: false, notes: `suite crashed: ${msg}` }];
+        results = missingTool
+          ? [{ id: "(suite)", pass: false, skipped: `needs ${missingTool} on PATH (${msg})` }]
+          : [{ id: "(suite)", pass: false, notes: `suite crashed: ${msg}` }];
       }
       const ms = Date.now() - t0;
       // a suite whose every case was skipped measured nothing: no metrics, so nothing to "regress"
@@ -148,7 +179,7 @@ async function main() {
       const meterSummary = { llm: meter.summary("llm"), stt: meter.summary("stt") };
       // baselines describe the default configuration only
       const basePath = path.join(root, "baselines", `${s.name}${offline && s.offlineBaseline ? ".offline" : ""}.json`);
-      const baseline = !matrix && existsSync(basePath) ? (JSON.parse(await fs.readFile(basePath, "utf8")) as Baseline) : null;
+      const baseline = !matrix && !s.noBaseline && existsSync(basePath) ? (JSON.parse(await fs.readFile(basePath, "utf8")) as Baseline) : null;
       const cmp = compare(baseline, results, metrics);
       printTable(results);
       for (const [k, m] of Object.entries(metrics)) {
@@ -159,12 +190,16 @@ async function main() {
       if (calls) console.log(`  ${"calls".padEnd(28)} ${calls}`);
       for (const r of cmp.regressions) console.log(`  ✗ REGRESSION ${r}`);
       for (const r of cmp.improvements) console.log(`  ✓ improved ${r}`);
-      if (!baseline && !matrix) console.log(`  (no baseline yet; run with --update to record one)`);
+      if (!baseline && !matrix && !s.noBaseline) console.log(`  (no baseline yet; run with --update to record one)`);
       console.log(`  ${(ms / 1000).toFixed(1)}s`);
       const accepting = update && cmp.regressions.length > 0 && acceptReason !== undefined;
       if (cmp.regressions.length && !accepting) failed = true;
       if (update && cmp.regressions.length && !accepting) {
-        console.log(`  ✗ baseline NOT updated: ${cmp.regressions.length} regression(s) above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`);
+        console.log(
+          `  ✗ baseline NOT updated: ${cmp.regressions.length} regression(s) above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`,
+        );
+      } else if (update && s.noBaseline) {
+        console.log("  baseline NOT updated: this suite replays data from outside the repo and has no baseline");
       } else if (update && has("split")) {
         console.log("  baseline NOT updated: --split runs score a subset; rerun without --split to update");
       } else if (update && !ran.length) {
@@ -206,7 +241,7 @@ async function main() {
   const json = JSON.stringify({ at: new Date().toISOString(), offline, noCache, profiles, report }, null, 2);
   await fs.writeFile(path.join(repDir, `${stamp}.json`), json);
   await fs.writeFile(path.join(repDir, `${stamp}.md`), markdown(report, profiles, matrix));
-  const jsonOut = valueOf("json");
+  const jsonOut = flagValue("json");
   if (jsonOut) await fs.writeFile(path.resolve(jsonOut), json);
   console.log(`\nreport: ${path.relative(process.cwd(), path.join(repDir, `${stamp}.md`))}`);
   if (failed) {
@@ -250,9 +285,25 @@ function comparisonColumns(rows: SuiteReport[]): Array<{ head: string; cell: (r:
     ...metricKeys.map((k) => ({ head: k, cell: (r: SuiteReport) => (r.metrics[k] ? fmt(r.metrics[k]!.value) : "") })),
     { head: "wall", cell: (r) => secs(r.ms) },
   ];
-  if (anyLlm) cols.push({ head: "llm calls", cell: (r) => (r.meter.llm.calls ? `${r.meter.llm.calls}${r.meter.llm.errors ? ` (${r.meter.llm.errors} failed)` : ""}` : "cached") }, { head: "llm p50", cell: (r) => (r.meter.llm.calls ? secs(r.meter.llm.p50Ms) : "") }, { head: "llm p95", cell: (r) => (r.meter.llm.calls ? secs(r.meter.llm.p95Ms) : "") }, { head: "tokens in/out", cell: (r) => (r.meter.llm.calls ? `${tokens(r.meter.llm.inputTokens)}/${tokens(r.meter.llm.outputTokens)}` : "") });
-  if (anyStt) cols.push({ head: "stt calls", cell: (r) => (r.meter.stt.calls ? `${r.meter.stt.calls}${r.meter.stt.errors ? ` (${r.meter.stt.errors} failed)` : ""}` : "cached") }, { head: "stt p50", cell: (r) => (r.meter.stt.calls ? secs(r.meter.stt.p50Ms) : "") }, { head: "x realtime", cell: (r) => (r.meter.stt.sttRealtimeFactor !== undefined ? String(r.meter.stt.sttRealtimeFactor) : "") });
-  if (anyCost) cols.push({ head: "cost", cell: (r) => usd(r.meter.llm.costUsd === undefined && r.meter.stt.costUsd === undefined ? undefined : (r.meter.llm.costUsd ?? 0) + (r.meter.stt.costUsd ?? 0)) });
+  if (anyLlm)
+    cols.push(
+      { head: "llm calls", cell: (r) => (r.meter.llm.calls ? `${r.meter.llm.calls}${r.meter.llm.errors ? ` (${r.meter.llm.errors} failed)` : ""}` : "cached") },
+      { head: "llm p50", cell: (r) => (r.meter.llm.calls ? secs(r.meter.llm.p50Ms) : "") },
+      { head: "llm p95", cell: (r) => (r.meter.llm.calls ? secs(r.meter.llm.p95Ms) : "") },
+      { head: "tokens in/out", cell: (r) => (r.meter.llm.calls ? `${tokens(r.meter.llm.inputTokens)}/${tokens(r.meter.llm.outputTokens)}` : "") },
+    );
+  if (anyStt)
+    cols.push(
+      { head: "stt calls", cell: (r) => (r.meter.stt.calls ? `${r.meter.stt.calls}${r.meter.stt.errors ? ` (${r.meter.stt.errors} failed)` : ""}` : "cached") },
+      { head: "stt p50", cell: (r) => (r.meter.stt.calls ? secs(r.meter.stt.p50Ms) : "") },
+      { head: "x realtime", cell: (r) => (r.meter.stt.sttRealtimeFactor !== undefined ? String(r.meter.stt.sttRealtimeFactor) : "") },
+    );
+  if (anyCost)
+    cols.push({
+      head: "cost",
+      cell: (r) =>
+        usd(r.meter.llm.costUsd === undefined && r.meter.stt.costUsd === undefined ? undefined : (r.meter.llm.costUsd ?? 0) + (r.meter.stt.costUsd ?? 0)),
+    });
   return cols;
 }
 
@@ -267,7 +318,12 @@ function printComparison(rows: SuiteReport[]) {
 function printTable(results: CaseResult[]) {
   const metricKeys = [...new Set(results.flatMap((r) => Object.keys(r.metrics ?? {})))].slice(0, 6);
   const head = ["case", "result", ...metricKeys, "notes"];
-  const rows = results.map((r) => [r.id, r.skipped ? "skip" : r.pass ? "pass" : "FAIL", ...metricKeys.map((k) => fmt(r.metrics?.[k] ?? "")), (r.skipped ?? r.notes ?? "").replace(/\s+/g, " ")]);
+  const rows = results.map((r) => [
+    r.id,
+    r.skipped ? "skip" : r.pass ? "pass" : "FAIL",
+    ...metricKeys.map((k) => fmt(r.metrics?.[k] ?? "")),
+    (r.skipped ?? r.notes ?? "").replace(/\s+/g, " "),
+  ]);
   const w = head.map((h, i) => Math.min(i === head.length - 1 ? 90 : 34, Math.max(h.length, ...rows.map((r) => r[i]!.length))));
   console.log("  " + head.map((h, i) => h.padEnd(w[i]!)).join("  "));
   for (const r of rows) console.log("  " + r.map((x, i) => x.slice(0, w[i]).padEnd(w[i]!)).join("  "));
@@ -277,7 +333,14 @@ function markdown(report: SuiteReport[], profiles: Profile[], matrix: boolean) {
   const out = [`# Eval report ${new Date().toISOString()}`, ""];
   if (matrix) {
     out.push("## Profiles", "", "| profile | overrides |", "|---|---|");
-    for (const p of profiles) out.push(`| ${p.name} | ${Object.entries(p.env).map(([k, v]) => `\`${k}=${v}\``).join(" ") || "(none)"} |`);
+    for (const p of profiles)
+      out.push(
+        `| ${p.name} | ${
+          Object.entries(p.env)
+            .map(([k, v]) => `\`${k}=${v}\``)
+            .join(" ") || "(none)"
+        } |`,
+      );
     out.push("", "## Comparison", "");
     for (const suite of [...new Set(report.map((r) => r.suite))]) {
       const rows = report.filter((r) => r.suite === suite && !r.skipped);
@@ -293,12 +356,23 @@ function markdown(report: SuiteReport[], profiles: Profile[], matrix: boolean) {
     out.push(`## ${matrix ? `${r.profile} · ` : ""}${r.suite}${r.skipped ? ` (skipped: ${r.skipped})` : ""}`, "");
     if (r.regressions.length) out.push(...r.regressions.map((x) => `- ✗ ${x}`), "");
     if (r.improvements.length) out.push(...r.improvements.map((x) => `- ✓ ${x}`), "");
-    if (Object.keys(r.metrics).length) out.push("| metric | value | 95% interval |", "|---|---|---|", ...Object.entries(r.metrics).map(([k, m]) => `| ${k} | ${fmt(m.value)} | ${describeInterval(m).replace("95% CI ", "")} |`), "");
+    if (Object.keys(r.metrics).length)
+      out.push(
+        "| metric | value | 95% interval |",
+        "|---|---|---|",
+        ...Object.entries(r.metrics).map(([k, m]) => `| ${k} | ${fmt(m.value)} | ${describeInterval(m).replace("95% CI ", "")} |`),
+        "",
+      );
     const calls = describeMeter(r.meter);
     if (calls) out.push(`Calls: ${calls}`, "");
     if (r.results.length) {
       out.push("| case | result | metrics | notes |", "|---|---|---|---|");
-      for (const c of r.results) out.push(`| ${c.id} | ${c.skipped ? "skip" : c.pass ? "pass" : "**FAIL**"} | ${Object.entries(c.metrics ?? {}).map(([k, v]) => `${k}=${fmt(v)}`).join(", ")} | ${(c.skipped ?? c.notes ?? "").replace(/\|/g, "/")} |`);
+      for (const c of r.results)
+        out.push(
+          `| ${c.id} | ${c.skipped ? "skip" : c.pass ? "pass" : "**FAIL**"} | ${Object.entries(c.metrics ?? {})
+            .map(([k, v]) => `${k}=${fmt(v)}`)
+            .join(", ")} | ${(c.skipped ?? c.notes ?? "").replace(/\|/g, "/")} |`,
+        );
       out.push("");
     }
   }

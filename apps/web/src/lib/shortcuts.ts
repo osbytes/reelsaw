@@ -11,7 +11,8 @@ export interface ShortcutGroup {
 }
 
 /** Typing in a text field never triggers a shortcut (checkboxes and sliders still allow them). */
-export const isTypingTarget = (el: EventTarget | null) => !!(el as HTMLElement | null)?.closest?.("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]");
+export const isTypingTarget = (el: EventTarget | null) =>
+  !!(el as HTMLElement | null)?.closest?.("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]");
 
 // One registry of what each mounted view offers, so the `?` sheet lists exactly what works on this
 // screen. Handlers stay with their views; this holds the documentation.
@@ -61,6 +62,9 @@ export function useSheetKey(toggle: () => void) {
  * `isTypingTarget`). The handler is read through a ref, so no dependency list is needed and the
  * binding never fires a stale closure. Pass `preventDefault: false` to decide per event.
  */
+/** Space on a confirm's button, Backspace in a crop dialog: those keys belong to the dialog, not the page behind it. */
+const inDialog = (t: EventTarget | null) => t instanceof Element && !!t.closest('[role="dialog"], [role="alertdialog"]');
+
 export function useShortcut(
   keys: string,
   handler: (e: KeyboardEvent) => void,
@@ -68,6 +72,8 @@ export function useShortcut(
     enabled?: boolean;
     /** also fire while typing in inputs / textareas / contenteditable */
     inFields?: boolean;
+    /** also fire while focus is inside a dialog (by default a page's keys stay quiet behind an open dialog) */
+    inDialogs?: boolean;
     preventDefault?: boolean;
     /** match `event.key` (for "?", "!" and other shifted characters) instead of the physical key */
     useKey?: boolean;
@@ -87,11 +93,14 @@ export function useShortcut(
       enableOnFormTags: true,
       enableOnContentEditable: true,
       // a shifted character is matched on `event.key` with modifiers ignored, so ⌘? / Alt+! are refused here
-      ignoreEventWhen: (e) => (!inFields && isTypingTarget(e.target)) || (!!opts.useKey && !opts.ignoreModifiers && (e.metaKey || e.ctrlKey || e.altKey)),
+      ignoreEventWhen: (e) =>
+        (!inFields && isTypingTarget(e.target)) ||
+        (!opts.inDialogs && inDialog(e.target)) ||
+        (!!opts.useKey && !opts.ignoreModifiers && (e.metaKey || e.ctrlKey || e.altKey)),
       preventDefault: opts.preventDefault ?? true,
       useKey: opts.useKey ?? false,
       ignoreModifiers: opts.ignoreModifiers ?? opts.useKey ?? false,
     },
-    [keys, opts.enabled, inFields, opts.preventDefault, opts.useKey, opts.ignoreModifiers],
+    [keys, opts.enabled, inFields, opts.inDialogs, opts.preventDefault, opts.useKey, opts.ignoreModifiers],
   );
 }

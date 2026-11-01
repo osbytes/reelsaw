@@ -14,7 +14,22 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { sentenceEndAfter } from "../../pipeline/thought.js";
-import { chunkTranscript, excludeRanges, MAP_CHUNK_CHARS, MAP_CHUNK_SECONDS, mapChunk, needsSecondLook, repairTimestamps, pairwiseRank, pairwiseCalls, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "../../pipeline/select.js";
+import {
+  chunkTranscript,
+  excludeRanges,
+  MAP_CHUNK_CHARS,
+  MAP_CHUNK_SECONDS,
+  mapChunk,
+  needsSecondLook,
+  repairTimestamps,
+  pairwiseRank,
+  pairwiseCalls,
+  scoreCandidates,
+  type LlmOpts,
+  type ScoreInput,
+  type ScoreResult,
+  type SelectContext,
+} from "../../pipeline/select.js";
 import { clipCap, scoreGate, snapCandidate, type ScoreGateOpts } from "../../pipeline/analyze.js";
 import { isUnavailable, type CaseResult, type Suite, type SummaryMetric, type EvalContext } from "../framework.js";
 import { evalAi } from "../asr.js";
@@ -45,7 +60,16 @@ async function fixtures(ctx: EvalContext) {
   return out;
 }
 
-const cand = (startSec: number, endSec: number): ClipCandidate => ({ title: "t", hook: "h", startSec, endSec, score: 50, reasoning: "", caption: "", hashtags: [] });
+const cand = (startSec: number, endSec: number): ClipCandidate => ({
+  title: "t",
+  hook: "h",
+  startSec,
+  endSec,
+  score: 50,
+  reasoning: "",
+  caption: "",
+  hashtags: [],
+});
 
 /**
  * The auto-mode score gate on synthetic rubric totals from judges with different calibration
@@ -78,18 +102,35 @@ function gateCases(): CaseResult[] {
       // the point of the change: a fixed cutoff empties a stingy judge's project (and keeps everything from a generous one)
       if (rule === "absolute" && name === "stingy" && kept >= 3) fails.push(`absolute kept ${kept}; expected it to collapse to the leader`);
       if (rule === "absolute" && name === "generous" && kept !== totals.length) fails.push(`absolute kept ${kept}; expected every clip`);
-      out.push({ id: `gate/${name}/${rule}`, pass: !fails.length, metrics: { n: g.n, kept, threshold: g.threshold, median: g.median ?? -1, mad: g.mad ?? -1 }, notes: fails.join("; ") });
+      out.push({
+        id: `gate/${name}/${rule}`,
+        pass: !fails.length,
+        metrics: { n: g.n, kept, threshold: g.threshold, median: g.median ?? -1, mad: g.mad ?? -1 },
+        notes: fails.join("; "),
+      });
     }
   }
   // the relative rule keeps the same clips when a judge shifts and stretches its scale
   const base = dists.generous!;
   const a = scoreGate(base, { ...rel, floor: 0 }).keep.join();
-  const b = scoreGate(base.map((t) => 0.5 * t - 10), { ...rel, floor: 0 }).keep.join();
-  out.push({ id: "gate/affine-invariant", pass: a === b, metrics: { n: base.length }, notes: a === b ? "" : "different clips kept after rescaling the totals" });
+  const b = scoreGate(
+    base.map((t) => 0.5 * t - 10),
+    { ...rel, floor: 0 },
+  ).keep.join();
+  out.push({
+    id: "gate/affine-invariant",
+    pass: a === b,
+    metrics: { n: base.length },
+    notes: a === b ? "" : "different clips kept after rescaling the totals",
+  });
   // degenerate pools: one clip, all equal
   const one = scoreGate([12], rel);
   const flat = scoreGate([50, 50, 50, 50], rel);
-  out.push({ id: "gate/degenerate", pass: one.keep[0] === true && flat.keep.every(Boolean), metrics: { single: Number(one.keep[0]), flatKept: flat.keep.filter(Boolean).length } });
+  out.push({
+    id: "gate/degenerate",
+    pass: one.keep[0] === true && flat.keep.every(Boolean),
+    metrics: { single: Number(one.keep[0]), flatKept: flat.keep.filter(Boolean).length },
+  });
   return out;
 }
 
@@ -111,7 +152,12 @@ async function pairwiseCases(): Promise<CaseResult[]> {
     const top3 = order.slice(0, 3).join(",");
     const want = passes >= 3 ? "9,8,7" : "9";
     const pass = top3.startsWith(want) && calls <= pairwiseCalls(items.length, passes);
-    out.push({ id: `pairwise/passes-${passes}`, pass, metrics: { calls, maxCalls: pairwiseCalls(items.length, passes), topPlaced: order.slice(0, 3).filter((id, i) => id === 9 - i).length }, notes: `top 3: ${top3}` });
+    out.push({
+      id: `pairwise/passes-${passes}`,
+      pass,
+      metrics: { calls, maxCalls: pairwiseCalls(items.length, passes), topPlaced: order.slice(0, 3).filter((id, i) => id === 9 - i).length },
+      notes: `top 3: ${top3}`,
+    });
   }
   return out;
 }
@@ -189,7 +235,10 @@ export function creatorPickMetrics(p: Pick<CreatorPicks, "picks" | "negative">, 
   });
   const matching = ranked.map((c, i) => ({ c, i })).filter(({ c }) => spans.some(({ span }) => matches(c, span)));
   const scored = ranked.filter((c) => c.scored);
-  const g = scoreGate(scored.map((c) => c.total), gate);
+  const g = scoreGate(
+    scored.map((c) => c.total),
+    gate,
+  );
   const kept = new Set(scored.filter((_, i) => g.keep[i]));
   const matchingScored = matching.filter(({ c }) => c.scored);
   const recalled = perSpan.filter((s) => s.recalled).length;
@@ -217,7 +266,9 @@ function creatorResult(id: string, p: CreatorPicks, ranked: RankedCandidate[], g
   if (!m.recalled) fails.push(`none of the creator's ${m.spans} span(s) in our top ${m.n}`);
   if (m.matchingKept < m.matching) fails.push(`the gate drops ${m.matching - m.matchingKept} of ${m.matching} candidate(s) matching a creator span`);
   const fmtT = (x: number) => x.toFixed(0);
-  const spanNotes = m.perSpan.map((s) => `${fmtT(s.span[0])}-${fmtT(s.span[1])}: ${s.recalled ? "found" : "missed"} (best IoU ${s.bestIou}${s.bestRank ? ` at rank ${s.bestRank}` : ""})`);
+  const spanNotes = m.perSpan.map(
+    (s) => `${fmtT(s.span[0])}-${fmtT(s.span[1])}: ${s.recalled ? "found" : "missed"} (best IoU ${s.bestIou}${s.bestRank ? ` at rank ${s.bestRank}` : ""})`,
+  );
   const { perSpan: _p, ...metrics } = m;
   return { id, pass: !fails.length, metrics: { ...metrics, split: p.split, ...extra }, notes: [...fails, ...spanNotes].join("; ") };
 }
@@ -226,7 +277,13 @@ async function creatorFixtures(ctx: EvalContext) {
   const root = ctx.fixtures("selection");
   const only = ctx.opt("split");
   if (only && only !== "dev" && only !== "heldout") throw new Error(`--split must be dev or heldout, got ${only}`);
-  const out: Array<{ name: string; dir: string; p: CreatorPicks; t: TranscriptFixture & { windows: Array<[number, number]> }; recorded?: CandidatesFile }> = [];
+  const out: Array<{
+    name: string;
+    dir: string;
+    p: CreatorPicks;
+    t: TranscriptFixture & { windows: Array<[number, number]> };
+    recorded?: CandidatesFile | undefined;
+  }> = [];
   for (const name of (await fs.readdir(root)).sort()) {
     const dir = path.join(root, name);
     if (!existsSync(path.join(dir, "picks.json"))) continue;
@@ -289,7 +346,9 @@ async function runPicker(ctx: EvalContext, t: TranscriptFixture & { windows: Arr
     const found = await cached(["map", cfg.AI_MODEL, ch.lines, sc], async () => mapChunk((await models()).o, ch, sc));
     if (needsSecondLook(ch, found, sc.minSec)) {
       const exclude = excludeRanges(found);
-      found.push(...(await cached(["map-more", cfg.AI_MODEL, ch.lines, sc, exclude], async () => mapChunk((await models()).o, ch, sc, exclude).catch(() => []))));
+      found.push(
+        ...(await cached(["map-more", cfg.AI_MODEL, ch.lines, sc, exclude], async () => mapChunk((await models()).o, ch, sc, exclude).catch(() => []))),
+      );
     }
     perChunk.push(found);
   }
@@ -315,16 +374,29 @@ async function runPicker(ctx: EvalContext, t: TranscriptFixture & { windows: Arr
       .join(" ")
       .slice(0, 2500);
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c) }));
-  const scoredList = await cached(["score", judgeId, inputs, sc, samples], async () => [...(await scoreCandidates((await models()).judge, inputs, sc, samples, 1)).entries()]);
+  const scoredList = await cached(["score", judgeId, inputs, sc, samples], async () => [
+    ...(await scoreCandidates((await models()).judge, inputs, sc, samples, 1)).entries(),
+  ]);
   const scored = new Map<number, ScoreResult>(scoredList);
   const byTotal = (a: { total: number }, b: { total: number }) => b.total - a.total;
   const rated = pooled.map((c, id) => ({ c, id, total: scored.get(id)?.total ?? Math.round(c.score), scored: scored.has(id) }));
   let ranked = [...rated.filter((x) => x.scored).sort(byTotal), ...rated.filter((x) => !x.scored).sort(byTotal)];
   if (pairwise && ranked.length > 2) {
     // like analyze(): only the gate's keepers are compared head to head
-    const gate = scoreGate(ranked.filter((x) => x.scored).map((x) => x.total), { rule: cfg.ANALYZE_SCORE_RULE, floor: cfg.ANALYZE_MIN_SCORE_FLOOR, k: cfg.ANALYZE_SCORE_MAD_K });
+    const gate = scoreGate(
+      ranked.filter((x) => x.scored).map((x) => x.total),
+      { rule: cfg.ANALYZE_SCORE_RULE, floor: cfg.ANALYZE_MIN_SCORE_FLOOR, k: cfg.ANALYZE_SCORE_MAD_K },
+    );
     const top = ranked.filter((x, i) => x.scored && gate.keep[i]).slice(0, 10);
-    const order = await cached(["pairwise", judgeId, top.map((x) => inputs[x.id]), sc, cfg.ANALYZE_PAIRWISE_PASSES], async () => pairwiseRank((await models()).judge, top.map((x) => inputs[x.id]!), sc, undefined, cfg.ANALYZE_PAIRWISE_PASSES));
+    const order = await cached(["pairwise", judgeId, top.map((x) => inputs[x.id]), sc, cfg.ANALYZE_PAIRWISE_PASSES], async () =>
+      pairwiseRank(
+        (await models()).judge,
+        top.map((x) => inputs[x.id]!),
+        sc,
+        undefined,
+        cfg.ANALYZE_PAIRWISE_PASSES,
+      ),
+    );
     const byId = new Map(top.map((x) => [x.id, x]));
     ranked = [...order.map((id) => byId.get(id)!), ...ranked.filter((x) => !byId.has(x.id))];
   }
@@ -379,7 +451,11 @@ function creatorSummary(results: CaseResult[], live: boolean, prefix: string): R
   const rs = results.filter((r) => r.id.startsWith("creator-picks/") && r.id.endsWith("/live") === live);
   if (!rs.length) return {};
   const sum = (k: string) => rs.reduce((a, r) => a + Number(r.metrics?.[k] ?? 0), 0);
-  const ratio = (k: number, n: number, better: "higher" | "lower" = "higher"): SummaryMetric => ({ value: Number((n ? k / n : 0).toFixed(2)), better, ratio: { k, n } });
+  const ratio = (k: number, n: number, better: "higher" | "lower" = "higher"): SummaryMetric => ({
+    value: Number((n ? k / n : 0).toFixed(2)),
+    better,
+    ratio: { k, n },
+  });
   return {
     [`${prefix}RecallAtN`]: ratio(sum("recalled"), sum("spans")),
     [`${prefix}PicksFound`]: ratio(sum("picksFound"), sum("picks")),
@@ -445,7 +521,8 @@ export const selectionSuite: Suite = {
         tried++;
         const len = c.endSec - c.startSec;
         if (len < settings.minClipSeconds - 0.01 || len > settings.maxClipSeconds + 0.7) snapFails.push(`${s0.toFixed(0)}s → length ${len.toFixed(1)}`);
-        const onStart = c.startSec === 0 || [...starts].some((x) => Math.abs(x - 0.25 - c.startSec) < 0.02 || Math.abs(Math.max(0, x - 0.25) - c.startSec) < 0.02);
+        const onStart =
+          c.startSec === 0 || [...starts].some((x) => Math.abs(x - 0.25 - c.startSec) < 0.02 || Math.abs(Math.max(0, x - 0.25) - c.startSec) < 0.02);
         const onEnd = Math.abs(c.endSec - t.durationSec) < 0.02 || [...ends].some((x) => Math.abs(x + 0.35 - c.endSec) < 0.02);
         if (!onStart || !onEnd) snapFails.push(`${s0.toFixed(1)}s → ${c.startSec}-${c.endSec} not on sentence boundaries`);
       }
@@ -454,17 +531,30 @@ export const selectionSuite: Suite = {
       // a clip ends on a complete thought: what the model proposed goes through the real snapper with words
       for (const k of t.cases ?? []) {
         const words = t.words ?? [];
-        const c = snapCandidate(cand(k.propose[0], k.propose[1]), segs, t.sceneCuts ?? [], { ...settings, minClipSeconds: 20, maxClipSeconds: 60 }, t.durationSec, { words });
+        const c = snapCandidate(
+          cand(k.propose[0], k.propose[1]),
+          segs,
+          t.sceneCuts ?? [],
+          { ...settings, minClipSeconds: 20, maxClipSeconds: 60 },
+          t.durationSec,
+          { words },
+        );
         const bad: string[] = [];
         if (!c) bad.push("candidate dropped");
         else {
           const lastIdx = words.map((w, i) => ((w.start + w.end) / 2 < c.endSec - 0.35 ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
           const signal = sentenceEndAfter(words, lastIdx);
           if (!signal) bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
-          if (Math.abs(c.endSec - k.expectEnd) > k.tolerance) bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
+          if (Math.abs(c.endSec - k.expectEnd) > k.tolerance)
+            bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
           if (c.startSec > k.windowStart + 0.5) bad.push(`starts at ${c.startSec}, after ${k.windowStart}`);
         }
-        out.push({ id: `${name}/${k.id}`, pass: !bad.length, metrics: { start: c?.startSec ?? -1, end: c?.endSec ?? -1, expectEnd: k.expectEnd, offBy: c ? Number((c.endSec - k.expectEnd).toFixed(2)) : -1 }, notes: bad.join("; ") });
+        out.push({
+          id: `${name}/${k.id}`,
+          pass: !bad.length,
+          metrics: { start: c?.startSec ?? -1, end: c?.endSec ?? -1, expectEnd: k.expectEnd, offBy: c ? Number((c.endSec - k.expectEnd).toFixed(2)) : -1 },
+          notes: bad.join("; "),
+        });
       }
     }
     out.push(...(await creatorPickCases(ctx)));
@@ -498,7 +588,12 @@ export const selectionModelSuite: Suite = {
       const chunks = chunkTranscript(t.segments);
       const pick = Number(ctx.opt("selection-chunks") ?? 1);
       for (const [i, ch] of chunks.slice(0, pick).entries()) {
-        const sc: SelectContext = { title: t.title, durationSec: t.durationSec, minSec: defaultProjectSettings.minClipSeconds, maxSec: defaultProjectSettings.maxClipSeconds };
+        const sc: SelectContext = {
+          title: t.title,
+          durationSec: t.durationSec,
+          minSec: defaultProjectSettings.minClipSeconds,
+          maxSec: defaultProjectSettings.maxClipSeconds,
+        };
         const t0 = Date.now();
         try {
           const found = await ctx.cached(["map", cfg.AI_MODEL, ch.lines, sc], () => mapChunk(o, ch, sc));
@@ -507,13 +602,26 @@ export const selectionModelSuite: Suite = {
           // model-free quality proxies, comparable across models: how many proposals already respect the
           // length range, how many overlap another proposal (duplicates), and whether hooks are real
           const inRange = found.filter((c) => c.endSec - c.startSec >= sc.minSec && c.endSec - c.startSec <= sc.maxSec).length;
-          const overlapping = found.filter((c, k) => found.some((d, j) => j !== k && Math.min(c.endSec, d.endSec) - Math.max(c.startSec, d.startSec) > 0.5 * Math.min(c.endSec - c.startSec, d.endSec - d.startSec))).length;
+          const overlapping = found.filter((c, k) =>
+            found.some(
+              (d, j) =>
+                j !== k && Math.min(c.endSec, d.endSec) - Math.max(c.startSec, d.startSec) > 0.5 * Math.min(c.endSec - c.startSec, d.endSec - d.startSec),
+            ),
+          ).length;
           const weakHooks = found.filter((c) => c.hook.trim().length < 12 || c.hook.trim().toLowerCase() === c.title.trim().toLowerCase()).length;
           const pass = found.length > 0 && !outside.length && snapped.length >= Math.ceil(found.length / 2);
           out.push({
             id: `${name}/chunk-${i}`,
             pass,
-            metrics: { candidates: found.length, outside: outside.length, snappable: snapped.length, inRange, overlapping, weakHooks, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+            metrics: {
+              candidates: found.length,
+              outside: outside.length,
+              snappable: snapped.length,
+              inRange,
+              overlapping,
+              weakHooks,
+              sec: Number(((Date.now() - t0) / 1000).toFixed(1)),
+            },
             notes: outside.map((c) => `${c.startSec}-${c.endSec}`).join(", "),
           });
         } catch (err) {

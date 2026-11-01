@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { trace } from "@opentelemetry/api";
 import type { Logger } from "./log.js";
 
 export type AppEnv = { Variables: { requestId: string; log: Logger; userId?: string } };
@@ -48,15 +49,34 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
     c.set("log", httpLog.child({ requestId }));
     c.header(REQUEST_ID_HEADER, requestId);
     await next();
-    const path = c.req.path;
+    const path = redactPath(c.req.path);
+    // the HTTP server span is named for the route ("GET /media/clips/:projectId/:file", "POST /api/trpc/projects.create"),
+    // not just "GET", and typed for Sentry's request views; tRPC paths name procedures, never ids
+    const route = path.startsWith("/api/trpc/") ? path : c.req.routePath;
+    const span = trace.getActiveSpan();
+    span?.updateName(`${c.req.method} ${route}`);
+    span?.setAttributes({ "http.route": route, "sentry.op": "http.server" });
     const status = c.res.status;
     const ms = Math.round(performance.now() - t0);
     const level = accessLevel(c.req.method, path, status, ms);
     // durations belong to the http span/metrics; the line carries one only when it is an anomaly
-    const entry = { requestId, method: c.req.method, path, route: c.req.routePath, status, userId: c.get("userId"), ...(level === "warn" && status < 400 ? { ms } : {}) };
+    const entry = {
+      requestId,
+      method: c.req.method,
+      path,
+      route: c.req.routePath,
+      status,
+      userId: c.get("userId"),
+      ...(level === "warn" && status < 400 ? { ms } : {}),
+    };
     if (c.error) httpLog.error({ ...entry, err: c.error }, "request failed");
     else httpLog[level](entry, status >= 500 ? "request failed" : level === "warn" && status < 400 ? "slow request" : "request");
   };
+}
+
+/** Reset, verification and share links carry their token in the path; the access log keeps the route, not the secret. */
+export function redactPath(p: string): string {
+  return p.replace(/(\/(?:reset-password|verify-email|m)\/)[^/]+/g, "$1…");
 }
 
 /** tRPC error code -> level: our bugs at error, forbidden/limits at warn, ordinary client mistakes at debug. */
@@ -82,8 +102,19 @@ export function trpcLogLevel(code: string): Level {
   }
 }
 
-export function logTrpcError(log: Logger, e: { path?: string; type?: string; code: string; requestId?: string; userId?: string; err: Error }) {
+export function logTrpcError(
+  log: Logger,
+  e: { path?: string | undefined; type?: string; code: string; requestId?: string | undefined; userId?: string | undefined; err: Error },
+) {
   const level = trpcLogLevel(e.code);
-  const fields = { procedure: e.path, type: e.type, code: e.code, requestId: e.requestId, userId: e.userId, ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }) };
+  const fields = {
+    procedure: e.path,
+    type: e.type,
+    code: e.code,
+    requestId: e.requestId,
+    userId: e.userId,
+    // our bug: the cause tRPC wrapped is what the stack (and the error report, log.ts) should show
+    ...(level === "error" ? { err: e.err.cause instanceof Error ? e.err.cause : e.err } : { reason: e.err.message.slice(0, 300) }),
+  };
   log[level](fields, "trpc error");
 }

@@ -1,6 +1,8 @@
 // Production bundle for the distributed image: first-party code (this app and @reelsaw/shared)
-// inlined and minified into dist-bundle/{main,cli}.js with no source maps; npm dependencies stay
-// external and are installed as a normal production node_modules.
+// inlined and minified into dist-bundle/{main,cli}.js; npm dependencies stay external and are
+// installed as a normal production node_modules. Source maps are written next to the chunks with no
+// sourceMappingURL: a release build uploads them to Sentry (Dockerfile) and the image ships none.
+// Class and function names are kept, so an error reads `QuotaExceededError`, not `e`.
 import { build } from "esbuild";
 import { readFileSync, rmSync } from "node:fs";
 
@@ -20,7 +22,8 @@ await build({
   platform: "node",
   target: "node24",
   minify: true,
-  sourcemap: false,
+  keepNames: true,
+  sourcemap: "external",
   legalComments: "none",
   external,
   chunkNames: "chunks/[hash]",

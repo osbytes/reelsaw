@@ -202,6 +202,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | `cuts` | models | disfluency jump cuts on real audio: removed cleanly, refused safely, or broken |
 | `transcription` | models, media | WER + entity recall through the configured STT, bias and correction: synthetic `say` audio, and real speech graded against human captions |
 | `disfluency` | nothing (runs offline) | disfluency detection precision/recall on reviewed real-transcript cases (rules + model) |
+| `decisions` | nothing (runs offline) | today's disfluency detector against users' recorded accept / reject / manual-cut decisions (EVAL_DECISIONS=export.jsonl) |
 | `selection-model` | models | one real map call per sampled chunk: candidates inside the chunk, parseable, snappable |
 <!-- /generated -->
 
@@ -360,7 +361,8 @@ Sister Circle `uYFjIHelrH0` (talk show: lower thirds, round corner bug, a sweats
 screen as scene text), MrUniverse Oxford `jd5bCpWWBXA` (street interview, captions centred low at
 y 0.89-0.95, not bottom-right as first reported), Valsorda `YNzgRNsB9UA` (live-coding: title strip is
 the overlay, the code is content, presentation expected), Bradford City `F_FQy5Syc3A` (bug plus ad
-boards), R Podcast `GzCeABCU3Gk` (title band over a still), VOA `AK0A6L6-agU` (news package). Frame
+boards), R Podcast `GzCeABCU3Gk` (title band over a still), VOA `AK0A6L6-agU` (news package), Roblox
+gameplay `5S1OctmhFK8` (by URL and time only: game UI that must not be masked, no burned-in text). Frame
 labels may carry `video` (their source) and the `lower-third` kind; only frames without `video` feed
 the original Apollo metrics and the mask-residual check, while `overlayRecall` (required burned-in
 labels found) and `rawPrecision` (share of detected boxes on burned-in text; scene text lowers it by
@@ -374,9 +376,10 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
 `.github/workflows/ci.yml` (job `check`) runs, on every PR and on main:
 
 1. `pnpm --filter @reelsaw/server test:unit`: every file in `apps/server/test` that does **not** import
-   `./helpers.js` (`scripts/unit-tests.mjs` filters by that import; today 21 of 31 files). Files that
-   import it need the app at `REELSAW_URL` and Postgres on 127.0.0.1:5432, and drive `docker compose
-   exec`. A new test that needs no stack should simply not import helpers.
+   `./helpers.js`, `./lifecycle-harness.js`, `pg` or `createServices` (`scripts/unit-tests.mjs`
+   filters by those imports; today 81 of 109 files). Files that import them need the app at
+   `REELSAW_URL` and Postgres on 127.0.0.1:5432, and drive `docker compose exec`; they run in the
+   stack workflow below. A new test that needs no stack should simply not import them.
 2. `pnpm --filter @reelsaw/server models:download` (cached by `actions/cache`, keyed on
    `scripts/download-models.sh`), then `pnpm --filter @reelsaw/server eval:offline`: all suites
    with `--offline`. Suites that need an LLM/STT (`cuts`, `selection-model`, `transcription`) are
@@ -393,22 +396,39 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
 
 ### Stack tests in CI
 
-Not enabled; a commented `stack` job sits at the bottom of `ci.yml`. The 10 stack test files
-(accounts, hosted, import, mcp, project-settings, render-completion-deadlock, report,
-sampling-concurrency, settings, search) are only run by hand against a local deploy. What blocks
-turning it on, none of which could be verified without running Docker:
+`.github/workflows/stack.yml` runs the test files that `test:unit` leaves out (accounts, hosted,
+import, mcp, project-settings, render-completion-deadlock, report, sampling-concurrency, settings,
+search and the rest) against the real compose stack. It is its own workflow so a PR or push that
+only touches `docs/`, `website/` or Markdown skips it, and it is not a required check. A new push
+to a PR cancels the run still going for the previous one. It:
 
-- **Never run in CI.** `docker compose up --build` of the root `docker-compose.yml` needs a throwaway
-  `.env` (`BETTER_AUTH_SECRET`, `APP_URL`, `PORT=3100`) and a ~10 minute image build; it has not been
-  confirmed that the app starts and passes `/api/health` with no AI provider configured (the local
-  setup refuses to start without an Ollama endpoint by design, so check the startup gate first).
-- **Helpers assume the author's host.** `test/helpers.ts` reads the Postgres password from `.env`, uses
-  `docker compose exec -T app reelsaw …` and `docker compose cp` from the repo root, and BASE defaults
-  to `localhost:3100`. In CI the compose project name, published ports and `.env` must match.
-- **Tests that call models** (anything that creates a project from a real URL) cannot run without
-  provider keys; they would need to be split out or given the mock in `scripts/mock-ai.mjs`.
+1. starts `scripts/mock-ai.mjs` on the runner (it answers `GET /v1/models`, chat completions and
+   transcription with word timestamps), because the app refuses to boot without a reachable language
+   and transcription model;
+2. writes a throwaway `.env` (random `BETTER_AUTH_SECRET`, `PORT=3100`, `OPENAI_BASE_URL` pointing at
+   the mock through `host.docker.internal`, `AI_MODEL=openai:mock`, `TRANSCRIPTION_MODEL=openai:whisper-1`);
+3. builds `reelsaw:latest` with buildx from cached layers (the `stack` Actions cache scope, written
+   only by pushes to main so PRs read it without filling the quota, and the release's
+   `ghcr.io/osbytes/reelsaw:buildcache`), then
+   `docker compose up -d --no-build --wait app` with `COMPOSE_FILE=docker-compose.yml:.github/compose.ci.yml`
+   (the override only adds the `host.docker.internal` mapping; the variable is set for the whole job so
+   the helpers' `docker compose exec` / `cp` use the same files and project name), then curls
+   `/api/health`;
+4. runs `pnpm --filter @reelsaw/server test:stack` (only the stack files, two at a time like
+   `pnpm test`; `check` already ran the rest) with `REELSAW_URL=http://localhost:3100`. `helpers.ts`
+   reads the Postgres password from `.env` (absent, so the default `reelsaw`) and connects to the
+   published `127.0.0.1:5432`;
+5. on failure uploads `docker compose logs app` and the mock's log as the `stack-app-logs` artifact.
 
-When it works locally in a clean checkout with only that throwaway `.env`, uncomment the job.
+What it covers: sign-up and auth, settings, imports, reports, MCP, search, the render and sampling
+concurrency paths, with the deterministic mock as the model. What it does not: model quality (the mock
+returns fixed clips; that is the evals' job), anything needing a real URL download (`yt-dlp` against a
+live site), S3 storage and the GPU path.
+
+Where the time goes (a PR run, about 5 minutes): the cached image build is about 2.5 minutes (pulling
+the `node_modules` layer, `pnpm -r build`, loading the image into Docker) and the stack tests about
+1.5. Tests that need real provider keys or a second compose profile should be split out rather than
+skipped silently.
 
 ## Fixtures
 
@@ -491,6 +511,35 @@ as the older cases do. Keep `cut` and `keep` roughly balanced and assign `split`
 each. Commit only the window words, never the whole track. Sources so far: Dwarkesh Patel × Si
 Sheppard `LwQQ7nBCGSs` (host and guest) and Missing Semester lecture 1 `MSgoeuMqUmU` (lecturers and a
 student).
+
+## Cases from user decisions
+
+Every accept, reject, manual cut and delete is a label a user gave for free, and the decision log
+(`user_decisions`, [specs/decision-log.md](specs/decision-log.md)) keeps it with its ±30-word window
+after the project is deleted. Two ways to use it:
+
+```bash
+docker compose exec -T app reelsaw decisions export you@example.com > me.decisions.jsonl   # or MCP export_decisions
+cd apps/server
+npx tsx src/eval/tools/harvest-decisions.ts ../../me.decisions.jsonl --out ../../eval/fixtures/disfluency/candidates.json
+EVAL_DECISIONS=../../me.decisions.jsonl npx tsx src/eval/run.ts decisions            # live replay, no baseline
+```
+
+- **Harvest** writes candidate disfluency cases in the `cases.json` shape: accepted detector cuts and
+  manual cuts are `cut`, rejected or deleted detector cuts are `keep`; undoing your own cut, inferred
+  decisions and name fixes are skipped. Split is by project (a hash of the project id), so windows of
+  one video never land on both sides; windows already in `cases.json` or decided twice are dropped
+  (the latest decision wins). `candidates.json` and `*.decisions.jsonl` are gitignored: read each
+  candidate as for caption diffs above, and move only the ones you were given to share into
+  `cases.json` (the `d<id>-…` case id points back at the decision).
+- **Replay** (`decisions` suite) runs today's detector over every explicit cut decision in an export and
+  reports precision / recall against what users chose, overall and per split. It never compares with
+  or writes a baseline (user data is not in git); without `EVAL_DECISIONS` / `--decisions` it is
+  skipped. The cases are drawn from the detector's own proposals (plus manual cuts), so recall here
+  is over what users noticed, the same caveat as cases 01-50.
+- Each case's `source` carries the link at the moment, `videoId` and the source's `sha256` from
+  ingest. A re-download is usually not byte-identical; the case does not need the media (it stores
+  its words).
 
 ## Real-speech transcription cases
 

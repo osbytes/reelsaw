@@ -15,7 +15,11 @@ function words(spec: string): Word[] {
   });
 }
 const limits = { minSec: 2, maxSec: 30 };
-const text = (ws: Word[], a: number, b: number) => ws.filter((w) => (w.start + w.end) / 2 > a && (w.start + w.end) / 2 < b).map((w) => w.text).join(" ");
+const text = (ws: Word[], a: number, b: number) =>
+  ws
+    .filter((w) => (w.start + w.end) / 2 > a && (w.start + w.end) / 2 < b)
+    .map((w) => w.text)
+    .join(" ");
 
 describe("sentenceEndAfter", () => {
   it("punctuation always ends a sentence, even before a lower-case word", () => {

@@ -58,6 +58,13 @@ describe("brand assets stay in sync with the website", () => {
     assert.ok(ico.readUInt16LE(4) >= 1, "at least one image");
   });
 
+  it("keeps the app out of search results while letting crawlers read that", () => {
+    assert.match(read("apps/web/index.html"), /<meta name="robots" content="noindex"/);
+    const robots = read("apps/web/public/robots.txt");
+    assert.match(robots, /^User-agent: \*$/m);
+    assert.doesNotMatch(robots, /^Disallow: \/\s*$/m, "a blanket Disallow hides the noindex tag");
+  });
+
   it("keeps the copied design tokens the same", () => {
     const app = read("apps/web/src/index.css");
     const site = read("website/app/globals.css");

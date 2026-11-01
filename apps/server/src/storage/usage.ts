@@ -7,7 +7,9 @@ import path from "node:path";
 import { isNotNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
-import { planScratchSweep } from "./sweep.js";
+import { LEASE_STALE_MS, volumeLeases } from "../disk-leases.js";
+import { workerIdOf } from "../ops/workers.js";
+import { CACHE_KINDS, cacheIdleMs, planScratchSweep } from "./sweep.js";
 
 /** The YouTube video id in a watch / short / embed / youtu.be URL, else null. */
 export function youtubeId(url: string | null | undefined): string | null {
@@ -75,6 +77,16 @@ export interface StorageReport {
   uniqueBytes: number;
   scratchOrphanBytes: number;
   scratchOrphanFiles: number;
+  /** scratch copies of stored files (S3 only): the sweep evicts them after SCRATCH_CACHE_HOURS idle, a job short of disk sooner */
+  cacheBytes: number;
+  cacheFiles: number;
+  /** null: nothing is evictable (local store, or SCRATCH_CACHE_HOURS=0) */
+  cacheIdleHours: number | null;
+  /** the filesystem DATA_DIR is on (disk-leases.ts); null before the leaser is set up */
+  volume: string | null;
+  /** free space already claimed by jobs in flight on that volume, by every process on it: counted as used before the bytes land */
+  leasedMB: number;
+  leasedJobs: number;
   duplicateSourceBytes: number;
   duplicateSourceGroups: number;
   expiredButPresentBytes: number;
@@ -85,7 +97,14 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const db = svc.database.db;
   const storeRoot = svc.config.STORAGE_DRIVER === "s3" ? null : (svc.config.STORAGE_LOCAL_DIR ?? svc.paths.storage);
   const unique = await uniqueBytes([svc.paths.projects, svc.paths.uploads, ...(storeRoot ? [storeRoot] : [])]);
-  const orphans = await planScratchSweep(svc, Date.now() + 365 * 86_400_000); // ignore the grace period: report all of it
+  const planned = await planScratchSweep(svc, Date.now() + 365 * 86_400_000); // ignore the grace period and the idle time: report all of it
+  const orphans = planned.filter((r) => !CACHE_KINDS.has(r.kind));
+  const cache = planned.filter((r) => CACHE_KINDS.has(r.kind));
+  const idleMs = cacheIdleMs(svc);
+  const lease = svc.resources.leases();
+  const leased = lease.volume
+    ? await volumeLeases(db, { volume: lease.volume, selfId: workerIdOf(svc.config), staleMs: LEASE_STALE_MS })
+    : { mb: lease.ownMB, jobs: lease.own };
 
   const live = await db
     .select({ url: schema.projects.sourceUrl, bytes: schema.projects.sourceBytes })
@@ -94,7 +113,10 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const dup = duplicateSourceBytes(live.map((p) => ({ identity: videoIdentity(p.url), bytes: p.bytes ?? 0 })));
 
   // retention marked these expired, yet a source file is still on disk (scratch copy or store object)
-  const expired = await db.select({ id: schema.projects.id, key: schema.projects.sourceKey }).from(schema.projects).where(isNotNull(schema.projects.sourceExpiredAt));
+  const expired = await db
+    .select({ id: schema.projects.id, key: schema.projects.sourceKey })
+    .from(schema.projects)
+    .where(isNotNull(schema.projects.sourceExpiredAt));
   let expiredBytes = 0;
   let expiredProjects = 0;
   for (const p of expired) {
@@ -115,6 +137,12 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
     uniqueBytes: unique,
     scratchOrphanBytes: orphans.reduce((s, r) => s + r.bytes, 0),
     scratchOrphanFiles: orphans.length,
+    cacheBytes: cache.reduce((s, r) => s + r.bytes, 0),
+    cacheFiles: cache.length,
+    cacheIdleHours: idleMs === null ? null : idleMs / 3_600_000,
+    volume: lease.volume,
+    leasedMB: leased.mb,
+    leasedJobs: leased.jobs,
     duplicateSourceBytes: dup.bytes,
     duplicateSourceGroups: dup.groups,
     expiredButPresentBytes: expiredBytes,

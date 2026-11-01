@@ -33,7 +33,19 @@ export interface Run {
 }
 
 /** Event types runsOf reads; load only these. */
-export const RUN_EVENT_TYPES = ["project.created", "run.started", "stage.started", "stage.completed", "project.done", "project.failed", "clip.created", "clip.rendering", "clip.retrying", "clip.done", "clip.failed"] as const;
+export const RUN_EVENT_TYPES = [
+  "project.created",
+  "run.started",
+  "stage.started",
+  "stage.completed",
+  "project.done",
+  "project.failed",
+  "clip.created",
+  "clip.rendering",
+  "clip.retrying",
+  "clip.done",
+  "clip.failed",
+] as const;
 
 /** Events that, in a log from before `run.started`, show work beginning on an idle project. */
 const LEGACY_STARTERS = new Set(["stage.started", "clip.rendering", "clip.retrying", "clip.created"]);
@@ -64,7 +76,16 @@ export function runsOf(log: LogEvent[]): Run[] {
   let cur: Open | null = null;
 
   const open = (seq: number, reason: RunReason | null, t: number, implicit: boolean): Open => {
-    const run: Run = { seq, reason, startedAt: new Date(t).toISOString(), finishedAt: null, outcome: "running", runSec: null, stages: {}, clips: { done: 0, failed: 0 } };
+    const run: Run = {
+      seq,
+      reason,
+      startedAt: new Date(t).toISOString(),
+      finishedAt: null,
+      outcome: "running",
+      runSec: null,
+      stages: {},
+      clips: { done: 0, failed: 0 },
+    };
     runs.push(run);
     return { run, startMs: t, implicit, empty: true, stageStart: {}, clipsDone: 0, clipsFailed: 0 };
   };
@@ -130,7 +151,12 @@ export async function loadRunLogs(db: Db, projectIds: string[]): Promise<Map<str
   const out = new Map<string, LogEvent[]>(projectIds.map((id) => [id, []]));
   if (!projectIds.length) return out;
   const rows = await db
-    .select({ projectId: schema.projectEvents.projectId, type: schema.projectEvents.type, payload: schema.projectEvents.payload, createdAt: schema.projectEvents.createdAt })
+    .select({
+      projectId: schema.projectEvents.projectId,
+      type: schema.projectEvents.type,
+      payload: schema.projectEvents.payload,
+      createdAt: schema.projectEvents.createdAt,
+    })
     .from(schema.projectEvents)
     .where(and(inArray(schema.projectEvents.projectId, projectIds), inArray(schema.projectEvents.type, [...RUN_EVENT_TYPES])))
     .orderBy(asc(schema.projectEvents.id));
@@ -150,12 +176,21 @@ export function firstStageSeconds(runs: Run[]): Partial<Record<PipelineStage, nu
   return out;
 }
 
-const REASON: Record<string, string> = { created: "new project", retry: "retry", rerender: "re-render", refine: "refine", reanalyze: "re-analyze", clip_added: "clip added" };
+const REASON: Record<string, string> = {
+  created: "new project",
+  retry: "retry",
+  rerender: "re-render",
+  refine: "refine",
+  reanalyze: "re-analyze",
+  clip_added: "clip added",
+};
 
 /** One line per run, for `reelsaw status`. */
 export function describeRun(r: Run): string {
   const mm = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-  const stages = PIPELINE_STAGES.filter((s) => r.stages[s] !== undefined).map((s) => `${s} ${mm(r.stages[s]!)}`).join(" ");
+  const stages = PIPELINE_STAGES.filter((s) => r.stages[s] !== undefined)
+    .map((s) => `${s} ${mm(r.stages[s]!)}`)
+    .join(" ");
   const total = r.runSec !== null ? mm(r.runSec) : "running";
   const clips = r.outcome === "running" ? "" : ` clips ${r.clips.done}${r.clips.failed ? ` (+${r.clips.failed} failed)` : ""}`;
   return `#${r.seq} ${(r.reason ? (REASON[r.reason] ?? r.reason) : "unknown reason").padEnd(11)} ${r.startedAt.slice(0, 19).replace("T", " ")}  ${r.outcome.padEnd(7)} ${total.padStart(7)}${clips}${stages ? `  [${stages}]` : ""}${r.error ? `  ${r.error.slice(0, 80)}` : ""}`;

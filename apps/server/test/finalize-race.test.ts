@@ -66,7 +66,10 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
     assert.equal((await state(projectId)).status, "done");
     assert.equal(await h.eventCount(projectId, "project.done"), 1);
     // the milestone ledger (notify/completion.ts) gets one row, pointing at that project.done
-    const ledger = await h.pool.query(`select f.first_event_id::text as e, (select id::text from project_events where project_id = $1 and type = 'project.done') as done from finished_projects f where f.project_id = $1`, [projectId]);
+    const ledger = await h.pool.query(
+      `select f.first_event_id::text as e, (select id::text from project_events where project_id = $1 and type = 'project.done') as done from finished_projects f where f.project_id = $1`,
+      [projectId],
+    );
     assert.equal(ledger.rows.length, 1);
     assert.equal(ledger.rows[0].e, ledger.rows[0].done);
   });
@@ -96,6 +99,12 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
     const clips = [await h.makeClip(projectId, 0, "rendering")];
     await finishTogether(projectId, clips);
     await Promise.all([h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId)), h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId))]);
+    assert.equal(await h.eventCount(projectId, "project.done"), 1);
+  });
+  it("a rendering project whose last clip was deleted finishes as done with no clips", async () => {
+    const projectId = await h.makeProject(userId, "rendering");
+    await h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId));
+    assert.equal((await state(projectId)).status, "done");
     assert.equal(await h.eventCount(projectId, "project.done"), 1);
   });
 });

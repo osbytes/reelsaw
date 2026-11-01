@@ -39,6 +39,8 @@ export const envSchema = z.object({
   UPDATE_CHECK_URL: z.string().url().default("https://api.github.com/repos/osbytes/reelsaw/releases/latest"),
   UPDATE_CHECK_HOURS: z.coerce.number().min(1).max(168).default(6),
   DATABASE_URL: z.string().min(1),
+  /** Connections in this process's main Postgres pool (pg-boss, requests, jobs). Model-call slots (ai/gate.ts) use their own small pool. */
+  DB_POOL_MAX: z.coerce.number().int().min(4).default(10),
   BETTER_AUTH_SECRET: z.string().min(16),
   DATA_DIR: z.string().default(path.resolve(process.cwd(), "data")),
   WEB_DIST: z.string().optional(),
@@ -77,6 +79,10 @@ export const envSchema = z.object({
   REQUIRE_EMAIL_VERIFICATION: boolFalse,
   /** Behind a reverse proxy (Caddy, Cloudflare; the Docker deployment), the client address comes from its headers. false = ignore them (exposed directly). */
   TRUST_PROXY: boolTrue,
+  /** With TRUST_PROXY and X-Forwarded-For: how many proxies in front of the app append to it. The client is the entry that many from the right. */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(1).max(10).default(1),
+  /** Which header names the client address behind the proxy. */
+  TRUSTED_PROXY_HEADER: z.enum(["x-forwarded-for", "cf-connecting-ip", "x-real-ip"]).default("x-forwarded-for"),
   /** Sign-up guards (abuse.ts); 0 / false = off. Runtime settings. */
   MAX_SIGNUPS_PER_IP_PER_DAY: z.coerce.number().int().min(0).default(0),
   BLOCK_DISPOSABLE_EMAILS: boolFalse,
@@ -91,6 +97,23 @@ export const envSchema = z.object({
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
   MAX_SOURCE_FILE_MB: z.coerce.number().int().min(1).default(8192), // yt-dlp --max-filesize for URL sources
   ALLOW_PRIVATE_SOURCE_URLS: boolFalse, // true: URL sources may point at LAN/loopback addresses (e.g. a NAS)
+  // integrations (docs/specs/media-links.md, webhooks.md). Runtime settings except the two process knobs.
+  /** Share links last this many days unless the owner picks less (1-3650). */
+  MEDIA_LINK_TTL_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+  /** The owner may pick "Never expires" for a share link (hosted sets false). */
+  MEDIA_LINK_ALLOW_NEVER: boolTrue,
+  /** Revoked and expired share links are deleted this many days after they stopped working (0 = keep). */
+  MEDIA_LINK_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
+  /** S3 only: answer a share link with a 302 to a presigned URL instead of streaming the object (check your consumers follow redirects). */
+  MEDIA_LINKS_REDIRECT: boolFalse,
+  /** Webhook endpoints an account may have; 0 = unlimited. */
+  MAX_WEBHOOKS_PER_USER: z.coerce.number().int().min(0).default(10),
+  /** true: webhook URLs may point at LAN/loopback hosts (a self-hosted n8n on the same network); also allows http. */
+  ALLOW_PRIVATE_WEBHOOK_URLS: boolFalse,
+  /** Delivery log rows are deleted after this many days (0 = keep). */
+  WEBHOOK_DELIVERY_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
+  /** Webhook deliveries in flight per process. */
+  WEBHOOK_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
 
   AI_MODEL: z.string().default("openai:gpt-4o-mini"),
   TRANSCRIPTION_MODEL: z.string().default("openai:whisper-1"),
@@ -101,6 +124,10 @@ export const envSchema = z.object({
   TRANSCRIBE_CONCURRENCY: z.coerce.number().int().min(0).max(8).default(0),
   /** Parallel LLM calls while finding/scoring moments. 0 = auto (1 for a self-hosted model, 4 for cloud). */
   ANALYZE_CONCURRENCY: z.coerce.number().int().min(0).max(16).default(0),
+  // one model call (all its HTTP attempts) may take this long; 0 = auto: 120 s hosted, 600 s self-hosted
+  LLM_CALL_TIMEOUT_SECONDS: z.coerce.number().int().min(0).max(86_400).default(0),
+  // a checkpointed stage that finishes no unit of work for this long is stopped (it resumes on retry); 0 = auto: 1.5 x the call timeout
+  STAGE_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().min(0).max(1440).default(0),
   /** Model calls in flight per provider across every process ("ollama=2,openai=16"; 0 = unlimited). Unset: 2 for self-hosted (the compatible server, openai with a base URL), unlimited for cloud. See ai/gate.ts. */
   PROVIDER_CONCURRENCY: z.string().default(""),
   /** Rubric samples per candidate (median is kept). 0 = auto (1 self-hosted, 3 cloud). */
@@ -117,12 +144,12 @@ export const envSchema = z.object({
   ANALYZE_JUDGE_MODEL: z.string().optional(),
   /** Feed entities from the video metadata (channel, title, description, tags) to the transcriber as vocabulary hints. */
   TRANSCRIPT_BIAS: boolTrue,
-  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). Off by default; projects opt in via refineEntities when this ceiling is on. */
+  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). On by default; projects opt in via refineEntities when this ceiling is on. */
   TRANSCRIPT_CORRECTION: boolTrue,
-  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). Off by default. */
+  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). Off by default (DISFLUENCY_REMOVAL below). */
   DISFLUENCY_REMOVAL: boolFalse,
   DISFLUENCY_LLM: boolFalse,
-  /** Scene-cut detection and on-screen text scan during refine. Off by default. */
+  /** Scene-cut detection and on-screen text scan during refine. On by default; set false to skip both. */
   REFINE_SCENES: boolTrue,
   /** Corrections at or above this LLM confidence are applied automatically; the rest wait for the user. */
   TRANSCRIPT_AUTO_FIX_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.85),
@@ -151,8 +178,8 @@ export const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: boolFalse,
   S3_PREFIX: z.string().optional(),
-  S3_PUBLIC_URL: z.string().optional(),
-  S3_PRESIGN_EXPIRES: z.coerce.number().int().default(3600),
+  S3_PUBLIC_URL: z.string().url("S3_PUBLIC_URL must be a full URL such as https://cdn.example.com").optional(),
+  S3_PRESIGN_EXPIRES: z.coerce.number().int().min(1).max(604800, "S3_PRESIGN_EXPIRES cannot exceed 604800 seconds (7 days, the SigV4 maximum)").default(3600),
   CLEANUP_WORKDIR: boolTrue,
   /** Events a project page replays when it connects (progress ticks never replay); older ones load on request */
   EVENT_REPLAY_LIMIT: z.coerce.number().int().min(20).max(2000).default(300),
@@ -161,6 +188,7 @@ export const envSchema = z.object({
   // error reporting and product analytics (telemetry.ts); off unless set, the browser gets the public keys via system.status
   SENTRY_DSN: z.string().url().optional(),
   SENTRY_ENVIRONMENT: z.string().max(60).optional(),
+  SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   POSTHOG_KEY: z.string().max(200).optional(),
   POSTHOG_HOST: z.string().url().default("https://us.i.posthog.com"),
   // quotas (0 = unlimited); admins can override per user in Users → Limits
@@ -168,7 +196,7 @@ export const envSchema = z.object({
   MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),
   MAX_NEW_PROJECTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
   MAX_LIVE_JOBS_PER_USER: z.coerce.number().int().min(0).default(0), // queued + running jobs a user's own requests may add to (hosted: e.g. 12)
-  MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders and hand-made clips a user may ask for per hour
+  MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders, hand-made clips and re-runs of analysis or refinement a user may ask for per hour
   MAX_STORAGE_MB: z.coerce.number().int().min(0).default(0), // sources + uploads + renders + intros/outros per user; checked at upload and project creation
   /** Minutes of source video per account per period: the billing period when the account has one, else the UTC calendar month. 0 = unlimited. */
   MAX_SOURCE_MINUTES_PER_MONTH: z.coerce.number().int().min(0).default(0),
@@ -181,10 +209,21 @@ export const envSchema = z.object({
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   DELETED_RETENTION_DAYS: z.coerce.number().int().min(0).default(7), // deleted projects / replaced clips stay restorable this long, then rows and files go (0 = keep forever)
+  /**
+   * With an S3 store, the local copies of sources and rendered clips under DATA_DIR/projects are a cache of the
+   * bucket: the hourly sweep evicts the ones of finished projects idle this long, and a job short of disk evicts
+   * least-recently-used ones first before it gives up (storage/sweep.ts). 0 = never evict. The local store
+   * hardlinks scratch and store, so there is nothing to evict there.
+   */
+  SCRATCH_CACHE_HOURS: z.coerce.number().int().min(0).default(24),
   // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
   ADMIN_EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
+  // the decision log (user_decisions) is training and eval data: kept by default
+  DECISION_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  // checkpoints of finished projects (job_steps) are dropped this many days after the project last changed (0 = keep)
+  STEP_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
   // bot protection on sign-up / sign-in (Better Auth captcha plugin)
   CAPTCHA_PROVIDER: z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).optional(),
   CAPTCHA_SITE_KEY: z.string().optional(),
@@ -301,14 +340,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) throw new ConfigError("Invalid environment:\n" + z.prettifyError(parsed.error));
   const { ALLOW_SIGNUP, ...rest } = parsed.data;
-  const c: Config = { ...rest, SIGNUP_MODE: rest.SIGNUP_MODE ?? (ALLOW_SIGNUP !== undefined && !["1", "true", "yes", "on"].includes(ALLOW_SIGNUP.toLowerCase()) ? "closed" : "open") };
+  const c: Config = {
+    ...rest,
+    SIGNUP_MODE: rest.SIGNUP_MODE ?? (ALLOW_SIGNUP !== undefined && !["1", "true", "yes", "on"].includes(ALLOW_SIGNUP.toLowerCase()) ? "closed" : "open"),
+  };
   if (c.EMAIL_DRIVER !== "none" && !c.EMAIL_FROM) throw new ConfigError(`EMAIL_DRIVER=${c.EMAIL_DRIVER} requires EMAIL_FROM`);
   if (c.EMAIL_DRIVER === "smtp" && !c.SMTP_URL) throw new ConfigError("EMAIL_DRIVER=smtp requires SMTP_URL");
   if (c.EMAIL_DRIVER === "resend" && !c.RESEND_API_KEY) throw new ConfigError("EMAIL_DRIVER=resend requires RESEND_API_KEY");
   if (c.REQUIRE_EMAIL_VERIFICATION && c.EMAIL_DRIVER === "none") throw new ConfigError("REQUIRE_EMAIL_VERIFICATION needs an EMAIL_DRIVER");
-  if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY)) throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
+  if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY))
+    throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
   if (c.STORAGE_DRIVER === "s3" && !c.S3_BUCKET) throw new ConfigError("STORAGE_DRIVER=s3 requires S3_BUCKET");
-  if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET)) throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
+  if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET))
+    throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
   // the operator CLI (src/cli.ts) runs with both off on purpose
   if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
   if (c.NODE_ENV === "production" && c.BETTER_AUTH_SECRET.length < 32) throw new ConfigError("BETTER_AUTH_SECRET must be at least 32 characters in production");

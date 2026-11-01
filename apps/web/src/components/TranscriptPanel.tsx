@@ -55,7 +55,8 @@ const isCutFlag = (f: TranscriptFlag) => f.kind === "disfluency";
 const isLoopFlag = (f: TranscriptFlag) => f.kind === "loop";
 const flagGlyph = (f: TranscriptFlag) => (isCutFlag(f) ? "✂" : isLoopFlag(f) ? "↻" : "Aa");
 const flagGlyphClass = (f: TranscriptFlag) => (isCutFlag(f) ? "bg-sunk" : isLoopFlag(f) ? "bg-warn-soft" : "bg-acc-soft text-acc-text");
-const flagKindLabel = (f: TranscriptFlag) => (isCutFlag(f) ? cutKind(f) : isLoopFlag(f) ? "looping speech" : f.subkind === "manual" ? "your correction" : "name fix");
+const flagKindLabel = (f: TranscriptFlag) =>
+  isCutFlag(f) ? cutKind(f) : isLoopFlag(f) ? "looping speech" : f.subkind === "manual" ? "your correction" : "name fix";
 const flagAriaKind = (f: TranscriptFlag) => (isCutFlag(f) ? "Filler cut" : isLoopFlag(f) ? "Collapsed looping speech" : "Name fix");
 const appliedReplacement = (f: TranscriptFlag) => {
   if (f.status !== "auto" && f.status !== "accepted") return undefined;
@@ -64,7 +65,7 @@ const appliedReplacement = (f: TranscriptFlag) => {
   return undefined;
 };
 /** Never join hundreds of loop copies into the transcript line — one chip, short label. */
-const loopChipText = (f: TranscriptFlag) => appliedReplacement(f) ?? ((f.status === "auto" || f.status === "accepted") ? f.suggested : f.heard);
+const loopChipText = (f: TranscriptFlag) => appliedReplacement(f) ?? (f.status === "auto" || f.status === "accepted" ? f.suggested : f.heard);
 interface CutPlan {
   flagId: string;
   cut: { start: number; end: number };
@@ -72,12 +73,12 @@ interface CutPlan {
   refused?: string;
 }
 interface PlanState {
-  plan?: CutPlan;
-  loading?: "plan" | "exact";
-  error?: string;
+  plan?: CutPlan | undefined;
+  loading?: "plan" | "exact" | undefined;
+  error?: string | undefined;
 }
 
-type Decision = { status: "accepted" | "rejected"; replacement?: string };
+type Decision = { status: "accepted" | "rejected"; replacement?: string | undefined };
 const EPS = 0.02;
 
 /**
@@ -85,7 +86,22 @@ const EPS = 0.02;
  * scrolls away, then shows a "resume" pill. Lines are rendered word by word so each name fix is an
  * inline highlight with a hover/click popover (accept, reject, or type a replacement).
  */
-export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, playback, deletedFlags = [], onFocusClip, onPlayClip, activeClipId, className = "" }: Props) {
+export function TranscriptPanel({
+  projectId,
+  language,
+  segments,
+  words,
+  flags,
+  currentTime,
+  clips,
+  onSeek,
+  playback,
+  deletedFlags = [],
+  onFocusClip,
+  onPlayClip,
+  activeClipId,
+  className = "",
+}: Props) {
   // fix whose surrounding audio is on repeat (owned by the shared playback), how much context, and
   // which version (A/B for cuts)
   const looping = playback?.loop?.key ?? null;
@@ -155,7 +171,10 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       setPinnedFlag(null);
       setOpenFlag(null);
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
-      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""} · restore it from Deleted`);
+      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`, {
+        description: "You can also restore it from the transcript’s Deleted filter",
+        action: { label: "Undo", onClick: () => void restoreOne(f.id) },
+      });
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -381,7 +400,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   const dirty = Object.keys(decisions).length > 0;
 
   async function submit() {
-    await review.mutateAsync({ projectId, decisions: Object.entries(decisions).map(([id, d]) => ({ id, status: d.status, replacement: d.replacement })), rerender: true });
+    await review.mutateAsync({
+      projectId,
+      decisions: Object.entries(decisions).map(([id, d]) => ({ id, status: d.status, replacement: d.replacement })),
+      rerender: true,
+    });
     setDecisions({});
     setPinnedFlag(null);
     setOpenFlag(null);
@@ -392,7 +415,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   const [filter, setFilter] = useState<Filter>("all");
   const isReviewed = (f: TranscriptFlag) => !!decisions[f.id] || f.status === "accepted" || f.status === "rejected";
   const visibleFlag = (f: TranscriptFlag) =>
-    filter === "deleted" ? false : filter === "all" || (filter === "review" ? f.status === "pending" && !decisions[f.id] : filter === "reviewed" ? isReviewed(f) : f.kind === filter);
+    filter === "deleted"
+      ? false
+      : filter === "all" || (filter === "review" ? f.status === "pending" && !decisions[f.id] : filter === "reviewed" ? isReviewed(f) : f.kind === filter);
   const [listOpen, setListOpenRaw] = useState(() => {
     try {
       // phones start with the transcript itself; the pane would cover it
@@ -415,7 +440,8 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     const next = orderedFlags.findIndex((f, i) => i > flagCursor && isP(f));
     jumpToFlag(next >= 0 ? next : orderedFlags.findIndex(isP));
   };
-  const decide = (id: string, d: Decision | null) => setDecisions((x) => (d ? { ...x, [id]: d } : Object.fromEntries(Object.entries(x).filter(([key]) => key !== id))));
+  const decide = (id: string, d: Decision | null) =>
+    setDecisions((x) => (d ? { ...x, [id]: d } : Object.fromEntries(Object.entries(x).filter(([key]) => key !== id))));
   useShortcuts("Transcript fixes", [
     ["Jump to the next fix to review", "N"],
     ["Accept the pinned fix", "A"],
@@ -455,7 +481,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   const selectRange = (a: number, b: number, tries = 0) => {
     const v = viewportRef.current;
     const content = contentRef.current;
-    const spans = content ? [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => Number(el.dataset.s) >= a - 0.02 && Number(el.dataset.e) <= b + 0.02) : [];
+    const spans = content
+      ? [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => Number(el.dataset.s) >= a - 0.02 && Number(el.dataset.e) <= b + 0.02)
+      : [];
     if (!v || !spans.length) {
       if (tries < 20) requestAnimationFrame(() => selectRange(a, b, tries + 1));
       return;
@@ -543,7 +571,37 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   // playhead tick); callbacks go through `latest`, so a memoised line never calls a stale closure.
   const flagIndex = useMemo(() => new Map(orderedFlags.map((f, i) => [f.id, i] as const)), [orderedFlags]);
   const latest = useRef<LineCtx>(null as unknown as LineCtx);
-  latest.current = { visibleFlag, activeRef, onSeek, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, flagRefs, setOpenFlag, setPinnedFlag, setFlagCursor, decide, deleteOne, deleting: delFlag.isPending, copyLink, hasPlayback: !!playback, looping, loopPaused, ctxSec, toggleLoop, setCtxSec, startLoop, variant, setVariant, plans, fetchPlan };
+  latest.current = {
+    visibleFlag,
+    activeRef,
+    onSeek,
+    decisions,
+    openFlag,
+    pinnedFlag,
+    orderedFlags,
+    flagIndex,
+    flagCursor,
+    clips,
+    flagRefs,
+    setOpenFlag,
+    setPinnedFlag,
+    setFlagCursor,
+    decide,
+    deleteOne,
+    deleting: delFlag.isPending,
+    copyLink,
+    hasPlayback: !!playback,
+    looping,
+    loopPaused,
+    ctxSec,
+    toggleLoop,
+    setCtxSec,
+    startLoop,
+    variant,
+    setVariant,
+    plans,
+    fetchPlan,
+  };
   const lineCtx = useMemo<LineCtx>(
     () => ({
       ...latest.current,
@@ -557,166 +615,222 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       fetchPlan: (...a) => latest.current.fetchPlan(...a),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filter, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, delFlag.isPending, !!playback, looping, loopPaused, ctxSec, variant, plans],
+    [
+      filter,
+      decisions,
+      openFlag,
+      pinnedFlag,
+      orderedFlags,
+      flagIndex,
+      flagCursor,
+      clips,
+      delFlag.isPending,
+      !!playback,
+      looping,
+      loopPaused,
+      ctxSec,
+      variant,
+      plans,
+    ],
   );
 
   return (
     <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
       {/* one scrollable row on phones, wraps on wider screens */}
       <ScrollArea className="shrink-0 border-y border-line bg-panel">
-      <div className="flex w-max items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:w-auto sm:flex-wrap sm:px-5">
-        <h2 className="shrink-0 text-[15px] font-bold">Transcript</h2>
-        {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
-        {orderedFlags.length > 0 && (
-          <div className="flex shrink-0 items-center gap-1.5 sm:flex-wrap">
-            <span className={`chip ${pendingFlags.length ? "bg-warn-soft" : "bg-ok-soft"} text-ink`}>
-              <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
-            </span>
-            <button data-flag-nav className="btn-ghost px-2.5 py-1 text-xs" disabled={!pendingFlags.length} onClick={nextPending} title="Next fix to review (N). Then A accept, R reject, ↑ ↓ move">
-              Next fix <span className="kbd">N</span>
+        <div className="flex w-max items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:w-auto sm:flex-wrap sm:px-5">
+          <h2 className="shrink-0 text-[15px] font-bold">Transcript</h2>
+          {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
+          {orderedFlags.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1.5 sm:flex-wrap">
+              <span className={`chip ${pendingFlags.length ? "bg-warn-soft" : "bg-ok-soft"} text-ink`}>
+                <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
+              </span>
+              <button
+                data-flag-nav
+                className="btn-ghost px-2.5 py-1 text-xs"
+                disabled={!pendingFlags.length}
+                onClick={nextPending}
+                title="Next fix to review (N). Then A accept, R reject, ↑ ↓ move"
+              >
+                Next fix <span className="kbd">N</span>
+              </button>
+            </div>
+          )}
+          <div className="flex-1" />
+          {orderedFlags.length > 0 && (
+            // filters sit beside the list they filter (they also narrow the highlights in the text)
+            <div role="radiogroup" aria-label="Which fixes to show" className="flex shrink-0 gap-1">
+              {filterBtn("all", `All ${orderedFlags.length}`)}
+              {filterBtn("review", `To review ${pendingFlags.length}`)}
+              {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
+              {filterBtn("entity", "Names")}
+              {filterBtn("disfluency", "Cuts")}
+              {filterBtn("loop", "Loops")}
+              {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
+            </div>
+          )}
+          {orderedFlags.length > 0 && (
+            <button
+              className={`btn shrink-0 px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+              onClick={() => setListOpen(!listOpen)}
+              aria-pressed={listOpen}
+              title="List every fix, reviewed or not"
+            >
+              <ListChecks className="h-3.5 w-3.5" /> Fixes list
             </button>
+          )}
+          <div className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 xl:flex">
+            <span>
+              <b className="font-mono text-[10px] text-acc-text">Aa</b> name fix
+            </span>
+            <span>
+              <b className="font-mono text-[10px]">✂</b> cut
+            </span>
+            <span>
+              <b className="font-mono text-[10px] text-warn">↻</b> looping speech
+            </span>
+            <span>
+              <b className="font-mono text-[10px] text-warn">?</b> review
+            </span>
           </div>
-        )}
-        <div className="flex-1" />
-        {orderedFlags.length > 0 && (
-          // filters sit beside the list they filter (they also narrow the highlights in the text)
-          <div role="radiogroup" aria-label="Which fixes to show" className="flex shrink-0 gap-1">
-            {filterBtn("all", `All ${orderedFlags.length}`)}
-            {filterBtn("review", `To review ${pendingFlags.length}`)}
-            {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
-            {filterBtn("entity", "Names")}
-            {filterBtn("disfluency", "Cuts")}
-            {filterBtn("loop", "Loops")}
-            {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
-          </div>
-        )}
-        {orderedFlags.length > 0 && (
-          <button
-            className={`btn shrink-0 px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
-            onClick={() => setListOpen(!listOpen)}
-            aria-pressed={listOpen}
-            title="List every fix, reviewed or not"
-          >
-            <ListChecks className="h-3.5 w-3.5" /> Fixes list
-          </button>
-        )}
-        <div className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 xl:flex">
-          <span><b className="font-mono text-[10px] text-acc-text">Aa</b> name fix</span>
-          <span><b className="font-mono text-[10px]">✂</b> cut</span>
-          <span><b className="font-mono text-[10px] text-warn">↻</b> looping speech</span>
-          <span><b className="font-mono text-[10px] text-warn">?</b> review</span>
         </div>
-      </div>
       </ScrollArea>
       <div className="relative flex min-h-0 flex-1">
-      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={viewportRef}>
-        <div ref={contentRef} className="mx-auto max-w-[760px] px-5 pb-28 pt-4" onMouseUp={() => setTimeout(readSelection, 0)} onTouchEnd={() => setTimeout(readSelection, 50)} onKeyUp={readSelection}>
-          {segments.length === 0 && <p className="py-10 text-center text-ink3">The transcript appears here after transcription.</p>}
-          {clipGroups.map((g) => (
-            // a clip's lines share one bracket down the margin, labelled once; the label sticks while scrolling through it
-            <div key={g.items[0]} className="grid grid-cols-[24px_minmax(0,1fr)] gap-1">
-              <div className="relative">
-                {g.clip && (
-                  <>
-                    <div className={`absolute bottom-2 left-[11px] top-3 w-0.5 rounded-full ${activeClipId && g.clip.id === activeClipId ? "bg-acc" : "bg-acc/40"}`} />
-                    <div className="sticky top-2 z-[5] pt-2">
-                      <ClipMarker clip={g.clip} projectId={projectId} active={!!activeClipId && g.clip.id === activeClipId} onFocus={onFocusClip} onPlay={onPlayClip} />
-                    </div>
-                  </>
-                )}
+        <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={viewportRef}>
+          <div
+            ref={contentRef}
+            className="mx-auto max-w-[760px] px-5 pb-28 pt-4"
+            onMouseUp={() => setTimeout(readSelection, 0)}
+            onTouchEnd={() => setTimeout(readSelection, 50)}
+            onKeyUp={readSelection}
+          >
+            {segments.length === 0 && <p className="py-10 text-center text-ink3">The transcript appears here after transcription.</p>}
+            {clipGroups.map((g) => (
+              // a clip's lines share one bracket down the margin, labelled once; the label sticks while scrolling through it
+              <div key={g.items[0]} className="grid grid-cols-[24px_minmax(0,1fr)] gap-1">
+                <div className="relative">
+                  {g.clip && (
+                    <>
+                      <div
+                        className={`absolute bottom-2 left-[11px] top-3 w-0.5 rounded-full ${activeClipId && g.clip.id === activeClipId ? "bg-acc" : "bg-acc/40"}`}
+                      />
+                      <div className="sticky top-2 z-[5] pt-2">
+                        <ClipMarker
+                          clip={g.clip}
+                          projectId={projectId}
+                          active={!!activeClipId && g.clip.id === activeClipId}
+                          onFocus={onFocusClip}
+                          onPlay={onPlayClip}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  {g.items.map((i) => {
+                    const { s, ws } = lines[i]!;
+                    const isActive = currentTime >= s.start && currentTime < s.end;
+                    return <Line key={i} s={s} ws={ws} inClip={clipOfLine[i]} isActive={isActive} time={isActive ? currentTime : -1} ctx={lineCtx} />;
+                  })}
+                </div>
               </div>
-              <div className="min-w-0">
-                {g.items.map((i) => {
-                  const { s, ws } = lines[i]!;
-                  const isActive = currentTime >= s.start && currentTime < s.end;
-                  return <Line key={i} s={s} ws={ws} inClip={clipOfLine[i]} isActive={isActive} time={isActive ? currentTime : -1} ctx={lineCtx} />;
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
-      {listOpen && orderedFlags.length > 0 && (
-        <aside className="absolute inset-y-0 right-0 z-20 flex w-full flex-col sm:w-[340px] border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-            <b className="text-[13px]">Fixes</b>
-            <span className="text-xs text-ink3">{filter === "deleted" ? deletedFlags.length : orderedFlags.filter(visibleFlag).length} shown</span>
-            <button className="ml-auto text-ink2 hover:text-ink" onClick={() => setListOpen(false)} aria-label="Close fixes list">
-              <X className="h-4 w-4" />
-            </button>
+            ))}
           </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <ol className="flex flex-col gap-0.5 p-1.5">
-              {filter === "deleted" &&
-                [...deletedFlags].reverse().map((f) => (
-                  <li key={f.id} className="grid grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5">
-                    <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold opacity-60 ${flagGlyphClass(f)}`}>{flagGlyph(f)}</span>
-                    <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
-                      <span className="block truncate text-[13px] text-ink2">{isCutFlag(f) ? `“${f.heard}”` : isLoopFlag(f) ? `Collapsed ${f.heard}` : `${f.heard} → ${f.replacement ?? f.suggested}`}</span>
-                      <span className="block text-[11px] text-ink3">
-                        <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+        </ScrollArea>
+        {listOpen && orderedFlags.length > 0 && (
+          <aside className="absolute inset-y-0 right-0 z-20 flex w-full flex-col sm:w-[340px] border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
+            <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+              <b className="text-[13px]">Fixes</b>
+              <span className="text-xs text-ink3">{filter === "deleted" ? deletedFlags.length : orderedFlags.filter(visibleFlag).length} shown</span>
+              <button className="ml-auto text-ink2 hover:text-ink" onClick={() => setListOpen(false)} aria-label="Close fixes list">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <ol className="flex flex-col gap-0.5 p-1.5">
+                {filter === "deleted" &&
+                  [...deletedFlags].reverse().map((f) => (
+                    <li key={f.id} className="grid grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5">
+                      <span
+                        className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold opacity-60 ${flagGlyphClass(f)}`}
+                      >
+                        {flagGlyph(f)}
                       </span>
-                    </button>
-                    <button className="btn-ghost px-2.5 py-1 text-xs" disabled={restore.isPending} onClick={() => void restoreOne(f.id)}>
-                      Restore
-                    </button>
-                  </li>
-                ))}
-              {orderedFlags.map((f, i) => {
-                if (!visibleFlag(f)) return null;
-                const d = decisions[f.id] as Decision | undefined;
-                const st = f.status;
-                const isCut = isCutFlag(f);
-                const isLoop = isLoopFlag(f);
-                const rep = d?.replacement ?? f.replacement ?? f.suggested;
-                const rendered = isCut && (st === "auto" || st === "accepted") ? cutState(f, clips) : null;
-                const [label, tone] = d
-                  ? [`Staged: ${d.status === "accepted" ? "accept" : "reject"}`, "bg-acc-soft"]
-                  : st === "pending"
-                    ? ["Needs review", "bg-warn-soft"]
-                    : st === "auto"
-                      ? ["Auto-applied", "bg-ok-soft"]
-                      : st === "accepted"
-                        ? ["Accepted", "bg-ok-soft"]
-                        : ["Rejected", "bg-sunk"];
-                return (
-                  <li key={f.id}>
-                    <button
-                      data-flag-nav
-                      onClick={() => jumpToFlag(i)}
-                      className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
-                    >
-                      <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(f)}`}>{flagGlyph(f)}</span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13px]">
-                          {isCut ? (
-                            <>“<s>{f.heard}</s>”</>
-                          ) : isLoop ? (
-                            <>Collapsed {f.heard}</>
-                          ) : (
-                            <>
-                              <s className="text-ink3">{f.heard}</s> → {rep}
-                            </>
-                          )}
+                      <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
+                        <span className="block truncate text-[13px] text-ink2">
+                          {isCutFlag(f) ? `“${f.heard}”` : isLoopFlag(f) ? `Collapsed ${f.heard}` : `${f.heard} → ${f.replacement ?? f.suggested}`}
                         </span>
                         <span className="block text-[11px] text-ink3">
-                          <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · {Math.round(f.confidence * 100)}%
-                          {rendered && (
-                            <span className={rendered.state === "applied" ? "" : "font-semibold text-warn"} title={cutStateTitle(rendered)}>
-                              {" "}· {rendered.state === "applied" ? "cut in render" : rendered.state === "unverified" ? "▲ cut unverified" : "▲ kept in audio"}
-                            </span>
-                          )}
+                          <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · deleted{" "}
+                          {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                         </span>
-                      </span>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-ink ${tone}`}>{label}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </ScrollArea>
-        </aside>
-      )}
+                      </button>
+                      <button className="btn-ghost px-2.5 py-1 text-xs" disabled={restore.isPending} onClick={() => void restoreOne(f.id)}>
+                        Restore
+                      </button>
+                    </li>
+                  ))}
+                {orderedFlags.map((f, i) => {
+                  if (!visibleFlag(f)) return null;
+                  const d = decisions[f.id] as Decision | undefined;
+                  const st = f.status;
+                  const isCut = isCutFlag(f);
+                  const isLoop = isLoopFlag(f);
+                  const rep = d?.replacement ?? f.replacement ?? f.suggested;
+                  const rendered = isCut && (st === "auto" || st === "accepted") ? cutState(f, clips) : null;
+                  const [label, tone] = d
+                    ? [`Staged: ${d.status === "accepted" ? "accept" : "reject"}`, "bg-acc-soft"]
+                    : st === "pending"
+                      ? ["Needs review", "bg-warn-soft"]
+                      : st === "auto"
+                        ? ["Auto-applied", "bg-ok-soft"]
+                        : st === "accepted"
+                          ? ["Accepted", "bg-ok-soft"]
+                          : ["Rejected", "bg-sunk"];
+                  return (
+                    <li key={f.id}>
+                      <button
+                        data-flag-nav
+                        onClick={() => jumpToFlag(i)}
+                        className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
+                      >
+                        <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(f)}`}>
+                          {flagGlyph(f)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[13px]">
+                            {isCut ? (
+                              <>
+                                “<s>{f.heard}</s>”
+                              </>
+                            ) : isLoop ? (
+                              <>Collapsed {f.heard}</>
+                            ) : (
+                              <>
+                                <s className="text-ink3">{f.heard}</s> → {rep}
+                              </>
+                            )}
+                          </span>
+                          <span className="block text-[11px] text-ink3">
+                            <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · {Math.round(f.confidence * 100)}%
+                            {rendered && (
+                              <span className={rendered.state === "applied" ? "" : "font-semibold text-warn"} title={cutStateTitle(rendered)}>
+                                {" "}
+                                · {rendered.state === "applied" ? "cut in render" : rendered.state === "unverified" ? "▲ cut unverified" : "▲ kept in audio"}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-ink ${tone}`}>{label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </ScrollArea>
+          </aside>
+        )}
       </div>
       {pick && (
         <div
@@ -739,7 +853,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                   if (e.key === "Escape") setFixText(null);
                 }}
               />
-              <button className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40" disabled={addCorrection.isPending || !fixText.trim()} onClick={() => void correctSelection()}>
+              <button
+                className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40"
+                disabled={addCorrection.isPending || !fixText.trim()}
+                onClick={() => void correctSelection()}
+              >
                 {addCorrection.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null} Save
               </button>
               <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => setFixText(null)} aria-label="Cancel correction">
@@ -747,52 +865,83 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               </button>
             </div>
           ) : (
-          <div className="flex items-center gap-1 whitespace-nowrap">
-            <span className="px-2 font-mono">{(pick.end - pick.start).toFixed(1)}s</span>
-            <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => onSeek(pick.start)} aria-label="Play selection" title="Play from the start of the selection">
-              <Play className="h-3.5 w-3.5" />
-            </button>
-            <button className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40" disabled={createClip.isPending || pick.end - pick.start < 3} onClick={() => makeClip("exact")} title={pick.end - pick.start < 3 ? "Select at least 3s" : "Clip exactly this range; the AI writes the title, hook and caption"}>
-              {createClip.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null} Make clip
-            </button>
-            <button className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40" disabled={createClip.isPending || pick.end - pick.start < 8} onClick={() => makeClip("ai")} title={pick.end - pick.start < 8 ? "Select at least 8s for an AI pick" : "Let the AI find the best standalone clip inside this selection"}>
-              <Sparkles className="inline h-3.5 w-3.5" /> AI pick
-            </button>
-            <span className="mx-0.5 h-4 w-px bg-white/20" />
-            <button className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10" onClick={() => setFixText(selectedText(pick))} title="Fix mistranscribed words: captions use your text">
-              ✎ Correct
-            </button>
-            <button
-              className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40"
-              disabled={addCut.isPending}
-              onClick={cutSelection}
-              title="Remove these words from the video and captions of every clip that contains them"
-            >
-              {addCut.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "✂"} Cut
-            </button>
-            <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => copyLink({ sel: `${pick.start.toFixed(2)}-${pick.end.toFixed(2)}` })} aria-label="Copy link to this selection" title="Copy link to this selection">
-              <Link2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
-              onClick={() => {
-                window.getSelection()?.removeAllRanges();
-                setPick(null);
-              }}
-              aria-label="Cancel"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+            <div className="flex items-center gap-1 whitespace-nowrap">
+              <span className="px-2 font-mono">{(pick.end - pick.start).toFixed(1)}s</span>
+              <button
+                className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
+                onClick={() => onSeek(pick.start)}
+                aria-label="Play selection"
+                title="Play from the start of the selection"
+              >
+                <Play className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40"
+                disabled={createClip.isPending || pick.end - pick.start < 3}
+                onClick={() => makeClip("exact")}
+                title={pick.end - pick.start < 3 ? "Select at least 3s" : "Clip exactly this range; the AI writes the title, hook and caption"}
+              >
+                {createClip.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null} Make clip
+              </button>
+              <button
+                className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40"
+                disabled={createClip.isPending || pick.end - pick.start < 8}
+                onClick={() => makeClip("ai")}
+                title={pick.end - pick.start < 8 ? "Select at least 8s for an AI pick" : "Let the AI find the best standalone clip inside this selection"}
+              >
+                <Sparkles className="inline h-3.5 w-3.5" /> AI pick
+              </button>
+              <span className="mx-0.5 h-4 w-px bg-white/20" />
+              <button
+                className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10"
+                onClick={() => setFixText(selectedText(pick))}
+                title="Fix mistranscribed words: captions use your text"
+              >
+                ✎ Correct
+              </button>
+              <button
+                className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40"
+                disabled={addCut.isPending}
+                onClick={cutSelection}
+                title="Remove these words from the video and captions of every clip that contains them"
+              >
+                {addCut.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "✂"} Cut
+              </button>
+              <button
+                className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
+                onClick={() => copyLink({ sel: `${pick.start.toFixed(2)}-${pick.end.toFixed(2)}` })}
+                aria-label="Copy link to this selection"
+                title="Copy link to this selection"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
+                onClick={() => {
+                  window.getSelection()?.removeAllRanges();
+                  setPick(null);
+                }}
+                aria-label="Cancel"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
-          {pick.end - pick.start < 8 && <p className="px-2 pb-1 pt-0.5 text-[11px] opacity-70">{pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}</p>}
+          {pick.end - pick.start < 8 && (
+            <p className="px-2 pb-1 pt-0.5 text-[11px] opacity-70">
+              {pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}
+            </p>
+          )}
           {createClip.error && <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>}
           {addCorrection.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCorrection.error.message}</p>}
           {addCut.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCut.error.message}</p>}
         </div>
       )}
       {!following && segments.length > 0 && (
-        <button className="absolute left-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop" onClick={resume}>
+        <button
+          className="absolute left-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop"
+          onClick={resume}
+        >
           <ArrowDown className="mr-1 inline h-3 w-3" /> Resume following · {formatTime(currentTime)}
         </button>
       )}
@@ -800,7 +949,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         <div className="absolute inset-x-4 bottom-4 z-20 mx-auto flex max-w-[640px] flex-wrap items-center gap-3 rounded-[14px] border border-line bg-panel px-4 py-3 shadow-pop">
           <div className="min-w-0 flex-1 text-[13px]">
             <b>{nDecided} staged</b>{" "}
-            <span className="text-ink2">· {affected.length ? `re-renders clip${affected.length === 1 ? "" : "s"} ${affected.join(", ")}` : "no clips affected"}</span>
+            <span className="text-ink2">
+              · {affected.length ? `re-renders clip${affected.length === 1 ? "" : "s"} ${affected.join(", ")}` : "no clips affected"}
+            </span>
           </div>
           <button className="btn-ghost" onClick={() => setDecisions({})}>
             Discard
@@ -850,8 +1001,52 @@ interface LineCtx {
  * One transcript line. Memoised: while playing, only the line holding the playhead gets a new `time`
  * (every other line gets -1), so the other hundreds of lines and their words do not re-render.
  */
-const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: TranscriptSegment; ws: Array<{ w: Word; flag?: TranscriptFlag }>; inClip: TranscriptClip | undefined; isActive: boolean; time: number; ctx: LineCtx }) {
-  const { visibleFlag, activeRef, onSeek, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, flagRefs, setOpenFlag, setPinnedFlag, setFlagCursor, decide, deleteOne, deleting, copyLink, hasPlayback, looping, loopPaused, ctxSec, toggleLoop, setCtxSec, startLoop, variant, setVariant, plans, fetchPlan } = ctx;
+const Line = memo(function Line({
+  s,
+  ws,
+  inClip,
+  isActive,
+  time,
+  ctx,
+}: {
+  s: TranscriptSegment;
+  ws: Array<{ w: Word; flag?: TranscriptFlag }>;
+  inClip: TranscriptClip | undefined;
+  isActive: boolean;
+  time: number;
+  ctx: LineCtx;
+}) {
+  const {
+    visibleFlag,
+    activeRef,
+    onSeek,
+    decisions,
+    openFlag,
+    pinnedFlag,
+    orderedFlags,
+    flagIndex,
+    flagCursor,
+    clips,
+    flagRefs,
+    setOpenFlag,
+    setPinnedFlag,
+    setFlagCursor,
+    decide,
+    deleteOne,
+    deleting,
+    copyLink,
+    hasPlayback,
+    looping,
+    loopPaused,
+    ctxSec,
+    toggleLoop,
+    setCtxSec,
+    startLoop,
+    variant,
+    setVariant,
+    plans,
+    fetchPlan,
+  } = ctx;
   const marks = ws.filter((x) => x.flag && visibleFlag(x.flag));
   return (
     <div
@@ -902,7 +1097,10 @@ const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: Tra
                 pinned={pinnedFlag === flag.id}
                 highlighted={orderedFlags[flagCursor]?.id === flag.id}
                 rendered={flag.kind === "disfluency" ? cutState(flag, clips) : null}
-                where={`${formatTime(flag.start)}${isLoopFlag(flag) && flag.end - flag.start >= 1 ? `–${formatTime(flag.end)}` : ""}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
+                where={`${formatTime(flag.start)}${isLoopFlag(flag) && flag.end - flag.start >= 1 ? `–${formatTime(flag.end)}` : ""}${clips
+                  .filter((c) => flag.start < c.endSec && flag.end > c.startSec)
+                  .map((c) => ` · in clip ${c.index + 1}`)
+                  .join("")}`}
                 position={`${(flagIndex.get(flag.id) ?? -1) + 1} of ${orderedFlags.length}`}
                 anchorRef={(el) => {
                   flagRefs.current[flag.id] = el;
@@ -981,10 +1179,19 @@ function FlagWord({
   onDelete?: () => void;
   deleting?: boolean;
   onCopyLink?: () => void;
-  loop?: { on: boolean; paused: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
+  loop?:
+    | {
+        on: boolean;
+        paused: boolean;
+        sec: number;
+        toggle: () => void;
+        setSec: (n: number) => void;
+        ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState | undefined; loadPlan: () => void; findExact: () => void } | undefined;
+      }
+    | undefined;
   word: Word;
   flag: TranscriptFlag;
-  decision?: Decision;
+  decision?: Decision | undefined;
   /** what the last render did with this cut (disfluencies only) */
   rendered?: CutState | null;
   open: boolean;
@@ -1036,7 +1243,12 @@ function FlagWord({
   let cls = "";
   if (pending) cls = "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn";
   else if (isDeletion) cls = applied ? "line-through text-ink3" : "border-b-2 border-dotted border-line2";
-  else if (isLoop) cls = pending ? "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn" : applied ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-warn` : "border-b-2 border-dotted border-line2";
+  else if (isLoop)
+    cls = pending
+      ? "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn"
+      : applied
+        ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-warn`
+        : "border-b-2 border-dotted border-line2";
   else cls = applied ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-acc` : "border-b-2 border-dotted border-line2";
   const display = isLoop ? loopChipText(flag) : isDeletion || !applied ? word.text : shown;
 
@@ -1085,163 +1297,192 @@ function FlagWord({
         >
           {/* never taller than the room Radix measured on screen; the body scrolls instead */}
           <ScrollArea style={{ maxHeight: "var(--radix-popover-content-available-height)" }}>
-          <div className="flex flex-col gap-3 p-3.5">
-          <div className="flex items-center gap-2">
-            <span className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(flag)}`}>{flagGlyph(flag)}</span>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : isLoop ? "Looping speech collapsed" : flag.subkind === "manual" ? "Your correction" : "Name / term fix"}</div>
-              <div className="text-xs text-ink3">{where}</div>
-            </div>
-            <span className={`chip ${stateTone}`}>{stateLabel}</span>
-            {rendered && rendered.state !== "applied" && (
-              <span className="chip bg-warn-soft" title={cutStateTitle(rendered)}>
-                {cutStateLabel(rendered)}
-              </span>
-            )}
-            {onCopyLink && (
-              <button className="text-ink3 hover:text-ink" onClick={onCopyLink} aria-label="Copy link to this fix" title="Copy link to this fix">
-                <Link2 className="h-4 w-4" />
-              </button>
-            )}
-            {pinned && (
-              <button className="text-ink2 hover:text-ink" onClick={() => onPin(false)} aria-label="Close">
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          {isDeletion ? (
-            <div>
-              <span className="text-ink3">Cuts </span>
-              <s>“{flag.heard}”</s>
-              {rendered && <p className={`mt-1 whitespace-pre-line text-xs ${rendered.state === "applied" ? "text-ink3" : "text-warn"}`}>{rendered.state === "applied" ? "Cut in the last render." : cutStateTitle(rendered)}</p>}
-            </div>
-          ) : isLoop ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-[13px] leading-snug text-ink2">
-                The transcriber repeated <span className="font-medium text-ink">{flag.heard}</span>. We kept a short run in captions. Rejecting puts the repeated words back. Re-transcribe to recover what was actually said, or type caption text for this stretch.
-              </p>
-              <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
-                Caption this stretch
-              </label>
-              <input
-                id={`rep-${flag.id}`}
-                className="input py-1.5"
-                placeholder="Leave blank to keep captions empty"
-                value={text === flag.suggested ? "" : text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") accept();
-                }}
-              />
-            </div>
-          ) : (
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
-              <span className="text-xs text-ink3">Heard</span>
-              <s>{flag.heard}</s>
-              <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
-                Use
-              </label>
-              <input
-                id={`rep-${flag.id}`}
-                className="input py-1.5"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") accept();
-                }}
-              />
-            </div>
-          )}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-ink3">Confidence</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-sunk">
-              <div className={`h-full rounded-full ${pct >= 80 ? "bg-ok" : pct >= 60 ? "bg-acc" : "bg-warn"}`} style={{ width: `${pct}%` }} />
-            </div>
-            <span className="font-mono">{pct}%</span>
-          </div>
-          {loop && (
-            <div className="flex items-center gap-2">
-              <button
-                className={`btn min-w-[9.5rem] justify-center px-2.5 py-1.5 text-xs ${loop.on ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
-                onClick={loop.toggle}
-                aria-pressed={loop.on}
-                title={loop.on ? "Stop playing in context (P) · Space pauses" : "Play the audio around this fix on repeat (P)"}
-              >
-                {loop.on ? "■ Stop" : "↻ Play in context"} <span className="kbd">P</span>
-              </button>
-              <div role="radiogroup" aria-label="Seconds of context" className="seg">
-                {[2, 4, 8].map((n) => (
-                  <button
-                    key={n}
-                    role="radio"
-                    aria-checked={loop.sec === n}
-                    onClick={() => loop.setSec(n)}
-                    className={`rounded-[7px] px-2 py-0.5 font-mono text-[11px] ${loop.sec === n ? "bg-panel text-ink shadow-[0_1px_2px_rgba(0,0,0,.12)]" : "text-ink2"}`}
-                  >
-                    ±{n}s
-                  </button>
-                ))}
-              </div>
-              {loop.on && !loop.ab && <span className="whitespace-nowrap text-[11px] text-ink3">{loop.paused ? "paused" : "original audio"}</span>}
-            </div>
-          )}
-          {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} paused={loop.paused} />}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {flag.subkind === "manual" && !isDeletion && (
-              <button className="btn-primary px-2.5 py-1.5 text-xs" disabled={!text.trim() || text.trim() === shown} onClick={accept} title="Stage the new text; apply from the bar">
-                <Check className="h-3.5 w-3.5" /> Save text
-              </button>
-            )}
-            {flag.subkind !== "manual" && (
-              <>
-                <button className="btn-primary px-2.5 py-1.5 text-xs" onClick={accept}>
-                  <Check className="h-3.5 w-3.5" /> Accept <span className="kbd">A</span>
-                </button>
-                <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={() => onDecide({ status: "rejected" })}>
-                  <X className="h-3.5 w-3.5" /> Reject <span className="kbd">R</span>
-                </button>
-              </>
-            )}
-            {onDelete &&
-              (confirmDel ? (
-                <span className="flex items-center gap-1">
-                  <button className="btn bg-err px-2.5 py-1.5 text-xs font-semibold text-white hover:brightness-110" disabled={deleting} onClick={onDelete}>
-                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} {flag.subkind === "manual" ? "Delete cut" : "Delete fix"}
-                  </button>
-                  <button className="btn-quiet px-2 py-1.5 text-xs" onClick={() => setConfirmDel(false)}>
-                    Keep
-                  </button>
-                </span>
-              ) : (
-                <button
-                  className="btn-quiet px-2.5 py-1.5 text-xs text-ink2"
-                  onClick={() => setConfirmDel(true)}
-                  title={flag.subkind === "manual" ? "Delete your cut; any automatic fixes it replaced come back as they were" : isLoop ? "Delete this fix; the repeated words come back" : "Delete this fix; the words stay as heard"}
+            <div className="flex flex-col gap-3 p-3.5">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(flag)}`}
                 >
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </button>
-              ))}
-            {decision && (
-              <button className="btn-quiet px-2.5 py-1.5 text-xs" onClick={() => onDecide(null)}>
-                ↶ Undo
-              </button>
-            )}
-            <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
-          </div>
-          {/* always present, one line: swapping its text never resizes the popover */}
-          <p className="flex items-center gap-1 truncate text-[11px] text-ink3">
-            {decision ? (
-              <span className="text-ink2">Staged · apply from the bar under the transcript</span>
-            ) : (
-              <>
-                <span className="kbd">A</span> accept · <span className="kbd">R</span> reject · <span className="kbd">↑</span>
-                <span className="kbd">↓</span> next · <span className="kbd">P</span> play
-              </>
-            )}
-          </p>
-          </div>
+                  {flagGlyph(flag)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold">
+                    {isDeletion
+                      ? `Cut · ${cutKind(flag)}`
+                      : isLoop
+                        ? "Looping speech collapsed"
+                        : flag.subkind === "manual"
+                          ? "Your correction"
+                          : "Name / term fix"}
+                  </div>
+                  <div className="text-xs text-ink3">{where}</div>
+                </div>
+                <span className={`chip ${stateTone}`}>{stateLabel}</span>
+                {rendered && rendered.state !== "applied" && (
+                  <span className="chip bg-warn-soft" title={cutStateTitle(rendered)}>
+                    {cutStateLabel(rendered)}
+                  </span>
+                )}
+                {onCopyLink && (
+                  <button className="text-ink3 hover:text-ink" onClick={onCopyLink} aria-label="Copy link to this fix" title="Copy link to this fix">
+                    <Link2 className="h-4 w-4" />
+                  </button>
+                )}
+                {pinned && (
+                  <button className="text-ink2 hover:text-ink" onClick={() => onPin(false)} aria-label="Close">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              {isDeletion ? (
+                <div>
+                  <span className="text-ink3">Cuts </span>
+                  <s>“{flag.heard}”</s>
+                  {rendered && (
+                    <p className={`mt-1 whitespace-pre-line text-xs ${rendered.state === "applied" ? "text-ink3" : "text-warn"}`}>
+                      {rendered.state === "applied" ? "Cut in the last render." : cutStateTitle(rendered)}
+                    </p>
+                  )}
+                </div>
+              ) : isLoop ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[13px] leading-snug text-ink2">
+                    The transcriber repeated <span className="font-medium text-ink">{flag.heard}</span>. We kept a short run in captions. Rejecting puts the
+                    repeated words back. Re-transcribe to recover what was actually said, or type caption text for this stretch.
+                  </p>
+                  <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
+                    Caption this stretch
+                  </label>
+                  <input
+                    id={`rep-${flag.id}`}
+                    className="input py-1.5"
+                    placeholder="Leave blank to keep captions empty"
+                    value={text === flag.suggested ? "" : text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") accept();
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+                  <span className="text-xs text-ink3">Heard</span>
+                  <s>{flag.heard}</s>
+                  <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
+                    Use
+                  </label>
+                  <input
+                    id={`rep-${flag.id}`}
+                    className="input py-1.5"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") accept();
+                    }}
+                  />
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-ink3">Confidence</span>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-sunk">
+                  <div className={`h-full rounded-full ${pct >= 80 ? "bg-ok" : pct >= 60 ? "bg-acc" : "bg-warn"}`} style={{ width: `${pct}%` }} />
+                </div>
+                <span className="font-mono">{pct}%</span>
+              </div>
+              {loop && (
+                <div className="flex items-center gap-2">
+                  <button
+                    className={`btn min-w-[9.5rem] justify-center px-2.5 py-1.5 text-xs ${loop.on ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+                    onClick={loop.toggle}
+                    aria-pressed={loop.on}
+                    title={loop.on ? "Stop playing in context (P) · Space pauses" : "Play the audio around this fix on repeat (P)"}
+                  >
+                    {loop.on ? "■ Stop" : "↻ Play in context"} <span className="kbd">P</span>
+                  </button>
+                  <div role="radiogroup" aria-label="Seconds of context" className="seg">
+                    {[2, 4, 8].map((n) => (
+                      <button
+                        key={n}
+                        role="radio"
+                        aria-checked={loop.sec === n}
+                        onClick={() => loop.setSec(n)}
+                        className={`rounded-[7px] px-2 py-0.5 font-mono text-[11px] ${loop.sec === n ? "bg-panel text-ink shadow-[0_1px_2px_rgba(0,0,0,.12)]" : "text-ink2"}`}
+                      >
+                        ±{n}s
+                      </button>
+                    ))}
+                  </div>
+                  {loop.on && !loop.ab && <span className="whitespace-nowrap text-[11px] text-ink3">{loop.paused ? "paused" : "original audio"}</span>}
+                </div>
+              )}
+              {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} paused={loop.paused} />}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {flag.subkind === "manual" && !isDeletion && (
+                  <button
+                    className="btn-primary px-2.5 py-1.5 text-xs"
+                    disabled={!text.trim() || text.trim() === shown}
+                    onClick={accept}
+                    title="Stage the new text; apply from the bar"
+                  >
+                    <Check className="h-3.5 w-3.5" /> Save text
+                  </button>
+                )}
+                {flag.subkind !== "manual" && (
+                  <>
+                    <button className="btn-primary px-2.5 py-1.5 text-xs" onClick={accept}>
+                      <Check className="h-3.5 w-3.5" /> Accept <span className="kbd">A</span>
+                    </button>
+                    <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={() => onDecide({ status: "rejected" })}>
+                      <X className="h-3.5 w-3.5" /> Reject <span className="kbd">R</span>
+                    </button>
+                  </>
+                )}
+                {onDelete &&
+                  (confirmDel ? (
+                    <span className="flex items-center gap-1">
+                      <button className="btn-danger-solid px-2.5 py-1.5 text-xs" disabled={deleting} onClick={onDelete}>
+                        {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}{" "}
+                        {flag.subkind === "manual" ? "Delete cut" : "Delete fix"}
+                      </button>
+                      <button className="btn-quiet px-2 py-1.5 text-xs" onClick={() => setConfirmDel(false)}>
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      className="btn-quiet px-2.5 py-1.5 text-xs text-ink2"
+                      onClick={() => setConfirmDel(true)}
+                      title={
+                        flag.subkind === "manual"
+                          ? "Delete your cut; any automatic fixes it replaced come back as they were"
+                          : isLoop
+                            ? "Delete this fix; the repeated words come back"
+                            : "Delete this fix; the words stay as heard"
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </button>
+                  ))}
+                {decision && (
+                  <button className="btn-quiet px-2.5 py-1.5 text-xs" onClick={() => onDecide(null)}>
+                    ↶ Undo
+                  </button>
+                )}
+                <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
+              </div>
+              {/* always present, one line: swapping its text never resizes the popover */}
+              <p className="flex items-center gap-1 truncate text-[11px] text-ink3">
+                {decision ? (
+                  <span className="text-ink2">Staged · apply from the bar under the transcript</span>
+                ) : (
+                  <>
+                    <span className="kbd">A</span> accept · <span className="kbd">R</span> reject · <span className="kbd">↑</span>
+                    <span className="kbd">↓</span> next · <span className="kbd">P</span> play
+                  </>
+                )}
+              </p>
+            </div>
           </ScrollArea>
         </Popover.Content>
       </Popover.Portal>
@@ -1256,7 +1497,15 @@ const SOURCE_LABEL: Record<CutPlan["source"], string> = {
 };
 
 /** Original vs with-the-cut toggle for a disfluency, plus where the cut boundaries came from. */
-function CutAB({ ab, playing, paused }: { ab: NonNullable<NonNullable<React.ComponentProps<typeof FlagWord>["loop"]>["ab"]>; playing: boolean; paused: boolean }) {
+function CutAB({
+  ab,
+  playing,
+  paused,
+}: {
+  ab: NonNullable<NonNullable<React.ComponentProps<typeof FlagWord>["loop"]>["ab"]>;
+  playing: boolean;
+  paused: boolean;
+}) {
   const { plan, loading, error } = ab.plan ?? {};
   useEffect(() => {
     ab.loadPlan();
@@ -1283,7 +1532,11 @@ function CutAB({ ab, playing, paused }: { ab: NonNullable<NonNullable<React.Comp
             </button>
           ))}
         </div>
-        {playing && <span className="whitespace-nowrap text-[11px] text-ink3">{paused ? "paused" : ab.variant === "cut" ? "playing with the cut" : "playing as recorded"}</span>}
+        {playing && (
+          <span className="whitespace-nowrap text-[11px] text-ink3">
+            {paused ? "paused" : ab.variant === "cut" ? "playing with the cut" : "playing as recorded"}
+          </span>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink2">
         {loading === "plan" && <span>Checking for an exact cut…</span>}
@@ -1343,7 +1596,19 @@ function Refusal({ reason }: { reason: string }) {
 }
 
 /** The one label of a clip's bracket: hover for a summary card, click to focus the clip. */
-function ClipMarker({ clip, projectId, active, onFocus, onPlay }: { clip: TranscriptClip; projectId: string; active: boolean; onFocus?: (id: string) => void; onPlay?: (id: string) => void }) {
+function ClipMarker({
+  clip,
+  projectId,
+  active,
+  onFocus,
+  onPlay,
+}: {
+  clip: TranscriptClip;
+  projectId: string;
+  active: boolean;
+  onFocus?: ((id: string) => void) | undefined;
+  onPlay?: ((id: string) => void) | undefined;
+}) {
   const [open, setOpen] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   const show = () => {
@@ -1399,7 +1664,9 @@ function ClipMarker({ clip, projectId, active, onFocus, onPlay }: { clip: Transc
             <div className="flex items-start gap-1.5">
               <span className="pt-px font-mono text-[11px] text-ink3">#{clip.index + 1}</span>
               <b className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug">{clip.title || "Untitled clip"}</b>
-              {clip.score ? <span className="shrink-0 rounded-[6px] bg-acc-soft px-1.5 font-mono text-[11px] font-semibold text-acc-text">{Math.round(clip.score)}</span> : null}
+              {clip.score ? (
+                <span className="shrink-0 rounded-[6px] bg-acc-soft px-1.5 font-mono text-[11px] font-semibold text-acc-text">{Math.round(clip.score)}</span>
+              ) : null}
             </div>
             <span className="font-mono text-[11px] text-ink2">
               {formatTime(clip.startSec)}–{formatTime(clip.endSec)} · {Math.round(clip.endSec - clip.startSec)}s

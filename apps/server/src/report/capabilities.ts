@@ -19,10 +19,7 @@ export type ReportCapabilities = {
   feedback: boolean;
 };
 
-export function reportCapabilities(
-  svc: Pick<Services, "ee" | "telemetry">,
-  user: { role: UserRole },
-): ReportCapabilities {
+export function reportCapabilities(svc: Pick<Services, "ee" | "telemetry">, user: { role: UserRole }): ReportCapabilities {
   const hosted = !!svc.ee;
   const admin = user.role === "admin";
   const feedback = svc.telemetry.enabled.sentry || svc.telemetry.enabled.posthog;

@@ -7,7 +7,7 @@ import { trpcServer } from "@hono/trpc-server";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { and, eq, isNull } from "drizzle-orm";
@@ -17,24 +17,27 @@ import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
-import { checkStorageQuota, QuotaError } from "./quota.js";
-import { keys } from "./storage/index.js";
+import { assertStorageRoom, checkStorageQuota, QuotaError, trackQuotaRefusal } from "./quota.js";
+import { contentTypeFor, keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
-import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
-import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API_KEY_PREFIX } from "./auth.js";
+import { createExportZip, exportPlan, parseClipIds } from "./export.js";
+import { LINK_NOT_FOUND, recordUse, resolveToken } from "./media-links/service.js";
+import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, withClientIp, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
+import { clientIp, WindowCounter } from "./abuse.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
-import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
+import { EMAIL_TOPICS, isEmailTopic, reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
+import { runHealthChecks } from "./health.js";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
@@ -45,12 +48,30 @@ import { escapeHtml, layout } from "./email.js";
 /** What the browser may report: trimmed so a loop of errors cannot fill the log. */
 const clientLogSchema = z.object({
   kind: z.enum(["render", "error", "unhandledrejection", "network"]).default("error"),
-  message: z.string().max(1000).transform((s) => s.slice(0, 500)),
-  stack: z.string().optional().transform((s) => s?.slice(0, 2048)),
+  message: z
+    .string()
+    .max(1000)
+    .transform((s) => s.slice(0, 500)),
+  stack: z
+    .string()
+    .optional()
+    .transform((s) => s?.slice(0, 2048)),
   route: z.string().max(300).optional(),
 });
 
 class UploadTooLarge extends Error {}
+
+/**
+ * Headers set after the handler ran. A Response.redirect() (or one passed through from fetch) has
+ * immutable headers: such a response goes out without these rather than failing.
+ */
+function afterHeaders(c: Context<AppEnv>, headers: Record<string, string>) {
+  try {
+    for (const [k, v] of Object.entries(headers)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+  } catch {
+    // immutable headers
+  }
+}
 
 export function createApp(svc: Services) {
   const { config, auth, storage, paths } = svc;
@@ -58,7 +79,20 @@ export function createApp(svc: Services) {
   const app = new Hono<AppEnv>();
   // request id + access log (request-log.ts); every handler logs through c.get("log")
   app.use(requestLogger(svc.log));
-  // an exception in a handler: the access line above logs it with `err`; the client gets the request id to quote
+  // The built SPA's id (hash of its index.html). Every API response carries it, and the page carries
+  // the one it was served from, so a tab left open across a deploy notices and reloads on its next
+  // route change instead of asking for chunks that are gone (apps/web/src/lib/stale-chunk.ts).
+  const webIndex =
+    config.WEB_DIST && fs.existsSync(path.join(config.WEB_DIST, "index.html")) ? fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8") : null;
+  const webBuild = webIndex ? createHash("sha256").update(webIndex).digest("hex").slice(0, 12) : null;
+  if (webBuild) {
+    app.use("/api/*", async (c, next) => {
+      await next();
+      afterHeaders(c, { "X-Reelsaw-Build": webBuild });
+    });
+  }
+  // an exception in a handler: the access line above logs it at error with `err` (so it is reported, log.ts); the
+  // client gets the request id to quote
   app.onError((err, c) => (err instanceof HTTPException ? err.getResponse() : c.json({ error: "internal error", requestId: c.get("requestId") }, 500)));
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
@@ -69,12 +103,31 @@ export function createApp(svc: Services) {
     }
     return who;
   };
+  // No page of this app is meant to be framed (the OAuth consent screen least of all), no response
+  // is meant to be sniffed into another type, and links out don't need the full URL.
+  app.use(async (c, next) => {
+    await next();
+    afterHeaders(c, { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "X-Frame-Options": "DENY" });
+  });
   app.use(
     "/api/*",
     cors({
-      origin: [config.APP_URL, "http://localhost:5173"],
+      // the Vite dev server only outside production: any local process on :5173 could otherwise call in with the user's cookie
+      origin: config.NODE_ENV === "production" ? [config.APP_URL] : [config.APP_URL, "http://localhost:5173"],
       credentials: true,
-      allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version", "traceparent", "tracestate", "baggage", "last-event-id"],
+      allowHeaders: [
+        "Content-Type",
+        "Authorization",
+        "x-api-key",
+        "x-filename",
+        "trpc-accept",
+        "mcp-session-id",
+        "mcp-protocol-version",
+        "traceparent",
+        "tracestate",
+        "baggage",
+        "last-event-id",
+      ],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     }),
   );
@@ -83,14 +136,17 @@ export function createApp(svc: Services) {
   // Public OTLP config for the browser. The production HTML embeds the same object so the SDK
   // starts before the first API call; Vite dev has no embed and fetches this instead.
   app.get("/api/otel", (c) => c.json(svc.otel.public));
-  // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
+  // readiness for anyone: 200 when the database, event listener, job queue and (with workers) this process's heartbeat all
+  // answer within 2 s each, else 503 with the same `checks` map saying which did not (health.ts). Machine numbers for
+  // admins (or HEALTH_DETAILS=true on a private network).
   app.get("/api/health", async (c) => {
     const open = svc.settings.get().HEALTH_DETAILS;
     const who = open ? null : await activeRequester(auth, db, c.req.raw.headers);
     const details = open || who?.user.role === "admin";
-    return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
+    const { ok, checks } = await runHealthChecks(svc);
+    return c.json({ ok, checks, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) }, ok ? 200 : 503);
   });
-  // The ready email's unsubscribe link (notify/preferences.ts). POST is RFC 8058 one-click (the mail
+  // The unsubscribe link in optional mail, one topic per link (notify/preferences.ts). POST is RFC 8058 one-click (the mail
   // provider posts `List-Unsubscribe=One-Click`) and the confirm button below; GET only shows that
   // button, because link scanners open every link in a mail and must not unsubscribe anyone.
   app.on(["GET", "POST"], UNSUBSCRIBE_PATH, async (c) => {
@@ -99,26 +155,36 @@ export function createApp(svc: Services) {
     const token = c.req.query("t") ?? "";
     const p = (html: string) => `<p style="margin:0 0 12px">${html}</p>`;
     const page = (status: 200 | 400, title: string, bodyHtml: string) => c.html(layout({ preheader: title, title, bodyHtml }), status);
-    if (topic !== "ready" || !userId || !verifyUnsubscribeToken(config.BETTER_AUTH_SECRET, userId, topic, token)) {
+    if (!isEmailTopic(topic) || !userId || !verifyUnsubscribeToken(config.BETTER_AUTH_SECRET, userId, topic, token)) {
       return page(400, "This link does not work", p("Turn emails on or off under Settings → Account in Reelsaw instead."));
     }
     const settings = escapeHtml(`${config.APP_URL.replace(/\/$/, "")}/settings#email`);
+    const stopped = escapeHtml(EMAIL_TOPICS[topic].stopped);
     if (c.req.method === "GET") {
       const action = escapeHtml(`${UNSUBSCRIBE_PATH}?${new URL(c.req.url).searchParams}`);
       return page(
         200,
-        "Stop the ready email?",
-        p("You will no longer get an email when your projects finish. Mail you need, such as password resets, still comes.") +
+        "Stop these emails?",
+        p(`You will no longer get ${stopped}. Mail you need, such as password resets, still comes.`) +
           `<form method="post" action="${action}" style="margin:20px 0"><button type="submit" style="font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer">Stop these emails</button></form>` +
           p(`Or change it under <a href="${settings}">Settings → Account</a>.`),
       );
     }
     const exists = await db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { id: true } });
-    if (exists) await setEmailPreferences(svc, userId, { readyEmail: false });
+    if (exists) await setEmailPreferences(svc, userId, { [topic]: false }, "unsubscribe_link");
     c.get("log").info({ userId, topic }, "email unsubscribed");
-    return page(200, "You're unsubscribed", p(`You will no longer get an email when your projects finish. Turn it back on under <a href="${settings}">Settings → Account</a>.`));
+    return page(200, "You're unsubscribed", p(`You will no longer get ${stopped}. Turn it back on under <a href="${settings}">Settings → Account</a>.`));
   });
+  // OAuth dynamic client registration is open to anyone (claude.ai registers itself); cap it per address so the client table cannot be flooded
+  const registrations = new WindowCounter(20);
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+    if (config.MCP_OAUTH && c.req.method === "POST" && c.req.path === "/api/auth/oauth2/register") {
+      const ip = clientIp(c.req.raw.headers, config);
+      if (ip && !registrations.hit(ip)) {
+        c.get("log").warn({ ip }, "oauth client registration refused: too many from this address today");
+        return c.json({ error: "too_many_requests", error_description: "Too many apps were registered from this network today. Try again tomorrow." }, 429);
+      }
+    }
     if (c.req.method === "GET" && c.req.path === "/api/auth/verify-email") {
       const gate = await gateEmailVerification(db, c.req.query("token") ?? "");
       if (!gate.ok) {
@@ -129,39 +195,85 @@ export function createApp(svc: Services) {
         return c.redirect(`${to.pathname}${to.search}`);
       }
     }
-    const res = await auth.handler(c.req.raw);
+    const res = await auth.handler(withClientIp(c.req.raw, config));
     logAuth(c, res.status);
     return res;
   });
   /** sign-in, sign-up and API key actions: who did what, and why a sign-in failed (never the password) */
-  const AUTH_ACTIONS: Record<string, string> = { "/sign-in/email": "sign-in", "/sign-up/email": "sign-up", "/sign-out": "sign-out", "/request-password-reset": "password reset requested", "/reset-password": "password reset", "/send-verification-email": "verification email requested", "/api-key/create": "api key created", "/api-key/delete": "api key revoked", "/api-key/update": "api key updated" };
+  const AUTH_ACTIONS: Record<string, string> = {
+    "/sign-in/email": "sign-in",
+    "/sign-up/email": "sign-up",
+    "/sign-out": "sign-out",
+    "/request-password-reset": "password reset requested",
+    "/reset-password": "password reset",
+    "/send-verification-email": "verification email requested",
+    "/api-key/create": "api key created",
+    "/api-key/delete": "api key revoked",
+    "/api-key/update": "api key updated",
+  };
   const logAuth = (c: Context<AppEnv>, status: number) => {
     const action = AUTH_ACTIONS[c.req.path.replace(/^\/api\/auth/, "")];
     if (!action || c.req.method !== "POST") return;
     const log = c.get("log");
     if (status < 400) {
       if (action === "sign-in" || action === "sign-up" || action === "password reset") return; // logged with the user id in auth.ts
-      void auth.api.getSession({ headers: c.req.raw.headers }).then((s) => log.info({ action, status, userId: s?.user.id }, "auth"), () => log.info({ action, status }, "auth"));
-    } else log[status >= 500 ? "error" : "warn"]({ action, status, reason: status === 401 ? "bad credentials or unknown account" : status === 403 ? "not allowed (unverified email, waiting for approval, captcha or suspended)" : status === 422 ? "sign-up refused" : status === 429 ? "rate limited" : "rejected" }, "auth failed");
+      void auth.api.getSession({ headers: c.req.raw.headers }).then(
+        (s) => log.info({ action, status, userId: s?.user.id }, "auth"),
+        () => log.info({ action, status }, "auth"),
+      );
+    } else
+      log[status >= 500 ? "error" : "warn"](
+        {
+          action,
+          status,
+          reason:
+            status === 401
+              ? "bad credentials or unknown account"
+              : status === 403
+                ? "not allowed (unverified email, waiting for approval, captcha or suspended)"
+                : status === 422
+                  ? "sign-up refused"
+                  : status === 429
+                    ? "rate limited"
+                    : "rejected",
+        },
+        "auth failed",
+      );
   };
   // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
   // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
-  if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(c.req.raw));
+  if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(withClientIp(c.req.raw, config)));
   // Stripe webhooks (ee): raw body (bounded: events are a few hundred KB at most, and the signature is checked only after
   // the body is read), 2xx only once the event and its sync job committed
   if (svc.ee) app.post("/api/billing/webhook", bodyLimit({ maxSize: 1024 * 1024 }), (c) => svc.ee!.webhook(c));
-  app.use("/api/trpc/*", trpcServer({ router: appRouter, endpoint: "/api/trpc", createContext: contextFactory(svc),
+  app.use(
+    "/api/trpc/*",
+    trpcServer({
+      router: appRouter,
+      endpoint: "/api/trpc",
+      createContext: contextFactory(svc),
       onError: ({ error, path, type, ctx }) => {
         const c = ctx as Ctx | undefined;
-        logTrpcError(c?.log ?? svc.log.child({ module: "http" }), { path, type, code: error.code, requestId: c?.requestId, userId: c?.who?.user.id, err: error });
-        if (error.code === "INTERNAL_SERVER_ERROR") svc.telemetry.captureException(error.cause ?? error, { procedure: path, type, requestId: c?.requestId, userId: c?.who?.user.id });
+        logTrpcError(c?.log ?? svc.log.child({ module: "http" }), {
+          path,
+          type,
+          code: error.code,
+          requestId: c?.requestId,
+          userId: c?.who?.user.id,
+          err: error,
+        });
+        if (error instanceof QuotaError && c?.who)
+          trackQuotaRefusal(svc.telemetry, c.who.user.id, error, c.surface ?? (c.who.via === "session" ? "web" : "api"));
       },
-    }));
+    }),
+  );
 
   // MCP (agents): API key in the Authorization header; see README "MCP" and src/mcp.ts
   const mcpUnauthorized = (c: Context) =>
     c.json({ error: "unauthorized", hint: "Send an API key from Settings as `Authorization: Bearer rs_…`" }, 401, {
-      "WWW-Authenticate": config.MCP_OAUTH ? `Bearer realm="reelsaw", resource_metadata="${new URL("/.well-known/oauth-protected-resource/api/mcp", config.APP_URL)}"` : 'Bearer realm="reelsaw"',
+      "WWW-Authenticate": config.MCP_OAUTH
+        ? `Bearer realm="reelsaw", resource_metadata="${new URL("/.well-known/oauth-protected-resource/api/mcp", config.APP_URL)}"`
+        : 'Bearer realm="reelsaw"',
     });
   app.all("/api/mcp", async (c) => {
     const token = bearerToken(c.req.raw.headers);
@@ -170,29 +282,31 @@ export function createApp(svc: Services) {
       const guarded = requireMcpAuth(
         auth,
         async (_req, claims) => {
-        const user = claims.sub ? await db.query.user.findFirst({ where: eq(schema.user.id, claims.sub) }) : undefined;
-        if (!user) return c.json({ error: "unauthorized" }, 401);
-        const why = cannotUseApp(user, "oauth");
-        if (why) return c.json({ error: "forbidden", message: why }, 403);
-          return handleMcp(c, svc, user);
+          const user = claims.sub ? await db.query.user.findFirst({ where: eq(schema.user.id, claims.sub) }) : undefined;
+          if (!user) return c.json({ error: "unauthorized" }, 401);
+          const why = cannotUseApp(user, "oauth");
+          if (why) return c.json({ error: "forbidden", message: why }, 403);
+          return handleMcp(c, svc, user, { via: "oauth", canAdminister: false });
         },
         // the JWKS is served by this very process: fetch it over loopback, not through APP_URL (which may not resolve from inside a container)
         { resource: mcpResource(config), jwksUrl: `http://127.0.0.1:${config.PORT}/api/auth/jwks` },
       );
       return guarded(c.req.raw);
     }
-    const who = await requester(auth, db, c.req.raw.headers);
+    const who = await requester(auth, db, c.req.raw.headers, svc.log.child({ module: "auth" }));
     if (!who) return mcpUnauthorized(c);
     const why = cannotUseApp(who.user, who.via);
     if (why) return c.json({ error: "forbidden", message: why }, 403);
-    return handleMcp(c, svc, who.user);
+    return handleMcp(c, svc, who.user, who);
   });
 
   // Raw upload: body is the file, original name in x-filename. Streams to disk, then into storage.
   app.post("/api/upload", async (c) => {
     const session = await actor(c);
     if (!session) return c.json({ error: "unauthorized" }, 401);
-    const filename = decodeURIComponent(c.req.header("x-filename") ?? "upload.mp4").replace(/[\\/]/g, "_").slice(0, 200);
+    const filename = decodeURIComponent(c.req.header("x-filename") ?? "upload.mp4")
+      .replace(/[\\/]/g, "_")
+      .slice(0, 200);
     const length = Number(c.req.header("content-length") ?? 0);
     const maxUploadMb = svc.settings.get().MAX_UPLOAD_MB;
     if (length > maxUploadMb * 1024 * 1024) {
@@ -200,11 +314,20 @@ export function createApp(svc: Services) {
       return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
     }
     try {
-      await checkStorageQuota(db, svc.settings.get(), session.user.id, length, svc.entitlements);
+      // a chunked body carries no length: reserve the largest upload allowed (the actual size is re-checked under the lock below)
+      await checkStorageQuota(db, svc.settings.get(), session.user.id, length > 0 ? length : maxUploadMb * 1024 * 1024, svc.entitlements);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       const quota = err instanceof QuotaError ? err.quota : undefined;
+      if (err instanceof QuotaError) trackQuotaRefusal(svc.telemetry, session.user.id, err, session.via === "session" ? "web" : "api");
       return c.json({ error: (err as Error).message, ...(quota ? { quota } : {}) }, 429);
+    }
+    // refuse before writing a byte rather than fill the disk the pipeline needs (a read, not a lease: the file is gone after the copy to the store)
+    const freeMB = (await svc.resources.snapshot()).diskFreeMB;
+    const needMB = svc.config.MIN_FREE_DISK_MB + Math.ceil((length > 0 ? length : maxUploadMb * 1024 * 1024) / 1048576);
+    if (freeMB >= 0 && freeMB < needMB) {
+      c.get("log").warn({ bytes: length, freeMB, needMB }, "upload rejected: not enough disk");
+      return c.json({ error: "This server is low on disk space right now. Try again later, or ask the administrator to free some space." }, 507);
     }
     if (!c.req.raw.body) return c.json({ error: "empty body" }, 400);
     const id = randomUUID();
@@ -226,9 +349,13 @@ export function createApp(svc: Services) {
       const storageKey = keys.upload(id, ext);
       await storage.putFile(storageKey, dest);
       try {
-        await db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        // the real size, under the account's quota lock, in the transaction that inserts the row: parallel uploads cannot all pass
+        await svc.tx(async (u) => {
+          await assertStorageRoom(svc, u, session.user.id, st.size);
+          await u.db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        });
       } catch (err) {
-        // put first (the row must never point at a missing object), so a failed insert leaves an orphan: remove it
+        // put first (the row must never point at a missing object), so a failed insert or a refusal leaves an orphan: remove it
         await storage.delete(storageKey).catch((e) => c.get("log").warn({ err: e, storageKey }, "could not remove the orphaned upload object"));
         throw err;
       }
@@ -238,6 +365,11 @@ export function createApp(svc: Services) {
       if (err instanceof UploadTooLarge) {
         c.get("log").warn({ bytes: received, maxMb: maxUploadMb }, "upload rejected: too large");
         return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
+      }
+      if (err instanceof QuotaError) {
+        c.get("log").warn({ uploadId: id, bytes: received, reason: err.message }, "upload rejected: storage limit");
+        trackQuotaRefusal(svc.telemetry, session.user.id, err, session.via === "session" ? "web" : "api");
+        return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);
@@ -270,7 +402,13 @@ export function createApp(svc: Services) {
     const name = c.req.param("file");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name)) return c.text("not found", 404);
     const file = path.join(DEFAULT_BUNDLED_DIR, "files", name);
-    if (!(await fsp.stat(file).then((s) => s.isFile(), () => false))) return c.text("not found", 404);
+    if (
+      !(await fsp.stat(file).then(
+        (s) => s.isFile(),
+        () => false,
+      ))
+    )
+      return c.text("not found", 404);
     const res = await sendFile(c.req.raw, file);
     res.headers.set("Cache-Control", "public, max-age=86400");
     // static pack files only; the extension decides the type (the shared map has no svg until the library widens it)
@@ -286,11 +424,31 @@ export function createApp(svc: Services) {
     if (!session) return c.text("unauthorized", 401);
     const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
-    const loc = await storage.resolve(asset.sourceKey);
-    if ("url" in loc) return c.redirect(loc.url, 302);
-    const res = await sendFile(c.req.raw, loc.file);
     // an uploaded SVG is a document: never let one run script or load anything in the app's origin
-    if (asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg")) res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    const svgCsp = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    const isSvg = asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg");
+    const loc = await storage.resolve(asset.sourceKey);
+    if ("url" in loc) {
+      // a redirect to the bucket would skip the sandbox header, so an SVG is read through this server (they are small)
+      if (!isSvg) return c.redirect(loc.url, 302);
+      const tmp = path.join(paths.tmp, `svg-${asset.id}-${randomUUID()}.svg`);
+      try {
+        await storage.ensureLocal(asset.sourceKey, tmp);
+        const body = await fsp.readFile(tmp);
+        return new Response(body, {
+          headers: {
+            "Content-Type": "image/svg+xml",
+            "Content-Security-Policy": svgCsp,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=300",
+          },
+        });
+      } finally {
+        await fsp.rm(tmp, { force: true });
+      }
+    }
+    const res = await sendFile(c.req.raw, loc.file);
+    if (isSvg) res.headers.set("Content-Security-Policy", svgCsp);
     return res;
   });
 
@@ -322,15 +480,97 @@ export function createApp(svc: Services) {
     const clipId = file.replace(/\.(mp4|jpg)$/, "");
     const clip = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId)) });
     // a replaced clip's files still play (to decide whether to restore it); a deleted project's do not
-    const project = clip && (await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) }));
+    const project =
+      clip &&
+      (await db.query.projects.findFirst({
+        where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)),
+      }));
     if (!clip || !project) return c.text("not found", 404);
     const key = file.endsWith(".jpg") ? clip.thumbnailKey : clip.outputKey;
     if (!key) return c.text("not ready", 404);
     const download = c.req.query("download") !== undefined;
-    const name = `${String(clip.index + 1).padStart(2, "0")}-${clip.title.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60)}.mp4`;
+    const name = `${String(clip.index + 1).padStart(2, "0")}-${clip.title
+      .replace(/[^\w\- ]+/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .slice(0, 60)}.mp4`;
     const loc = await storage.resolve(key, { downloadName: download ? name : undefined });
+    // a download (not playback or a thumbnail) is the end of the funnel: the clip left Reelsaw
+    if (download && !file.endsWith(".jpg"))
+      svc.telemetry.capture("clip.downloaded", session.user.id, { projectId, clipId, surface: session.via === "session" ? "web" : "api" });
     if ("url" in loc) return c.redirect(loc.url, 302);
     return sendFile(c.req.raw, loc.file, download ? name : undefined, { revalidate: true });
+  });
+
+  // Share links (media-links/service.ts): no session, no cookie; the file itself with a 200, never a redirect unless the
+  // operator turned MEDIA_LINKS_REDIRECT on (consumers such as Instagram and Buffer document only "a public URL").
+  app.get("/m/:token/:file", async (c) => {
+    const { token, file } = c.req.param();
+    const mlog = c.get("log").child({ module: "media-links" });
+    const shared = { "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" };
+    const hit = await resolveToken(svc, token, path.extname(file).slice(1));
+    if (!hit.ok) {
+      mlog.debug({ status: hit.status }, "media link refused");
+      return c.text(hit.message, hit.status, { ...shared, "Cache-Control": "no-store" });
+    }
+    const { link } = hit;
+    c.set("userId", hit.ownerId);
+    const range = c.req.header("range");
+    // one line per fetch, not per Range part of the same fetch
+    if (!range || /^bytes=0-/.test(range))
+      mlog.info({ linkId: link.id, userId: hit.ownerId, projectId: link.projectId, clipId: link.clipId, kind: link.kind }, "media link served");
+    recordUse(db, link.id).catch((err) => mlog.warn({ err, linkId: link.id }, "media link use not recorded"));
+    const owner = { id: hit.ownerId, admin: false };
+    const headers = { ...shared, "Cache-Control": "private, max-age=300" };
+    const attachment = (name: string) => `attachment; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+    try {
+      if (link.kind === "export") {
+        const plan = await exportPlan(svc, owner, link.projectId, link.clipIds ?? []);
+        const { stream } = await createExportZip(
+          { storage, paths, log: mlog },
+          { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },
+        );
+        return c.body(Readable.toWeb(stream) as ReadableStream, 200, {
+          ...headers,
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachment(hit.fileName),
+        });
+      }
+      if (link.kind === "srt" || link.kind === "vtt") {
+        const f = await clipCaptionsFile(svc, owner, link.clipId!, { format: link.kind });
+        return c.body(f.text, 200, {
+          ...headers,
+          "Content-Type": link.kind === "vtt" ? "text/vtt; charset=utf-8" : "application/x-subrip; charset=utf-8",
+          "Content-Disposition": attachment(hit.fileName),
+        });
+      }
+      const key = hit.key!;
+      if (storage.driver === "s3" && config.MEDIA_LINKS_REDIRECT) {
+        const loc = await storage.resolve(key);
+        if ("url" in loc) return c.redirect(loc.url, 302);
+      }
+      const obj = await storage.openRead(key, range);
+      const inline = `inline; filename="${hit.fileName.replace(/"/g, "")}"`;
+      if ("file" in obj) {
+        const res = await sendFile(c.req.raw, obj.file, undefined, { inlineName: hit.fileName, cacheControl: headers["Cache-Control"] });
+        for (const [k, v] of Object.entries(shared)) res.headers.set(k, v);
+        return res;
+      }
+      return c.body(Readable.toWeb(obj.body) as ReadableStream, obj.status, {
+        ...headers,
+        ...obj.headers,
+        "Content-Type": contentTypeFor(key),
+        "Content-Disposition": inline,
+      });
+    } catch (err) {
+      // the target changed between the lookup and the read (deleted, nothing rendered any more): the owner's sentence
+      if (err instanceof TRPCError && (err.code === "NOT_FOUND" || err.code === "CONFLICT"))
+        return c.text(err.code === "CONFLICT" ? err.message : LINK_NOT_FOUND, err.code === "CONFLICT" ? 409 : 404, {
+          ...shared,
+          "Cache-Control": "no-store",
+        });
+      throw err;
+    }
   });
 
   // Bulk export: zip of all rendered clips + YouTube/TikTok metadata
@@ -338,18 +578,23 @@ export function createApp(svc: Services) {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
     const projectId = c.req.param("projectId");
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
-    if (!project) return c.text("not found", 404);
-    const [clips, transcript] = await Promise.all([
-      db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) }),
-      db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { language: true } }),
-    ]);
-    const ids = parseClipIds(c.req.query("clips"));
-    if (!ids) return c.text("bad clips list", 400);
-    const picked = pickExportClips(clips, ids);
-    if (picked.unknown.length) return c.text("some of those clips are not in this project", 404);
-    if (!picked.clips.some((cl) => cl.status === "done" && cl.outputKey)) return c.text("no rendered clips yet", 409);
-    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset });
+    let plan;
+    try {
+      plan = await exportPlan(svc, { id: session.user.id, admin: false }, projectId, parseClipIds(c.req.query("clips")));
+    } catch (err) {
+      if (!(err instanceof TRPCError)) throw err;
+      return c.text(err.message, err.code === "BAD_REQUEST" ? 400 : err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" ? 409 : 500);
+    }
+    svc.telemetry.capture("project.exported", session.user.id, {
+      projectId,
+      clips: plan.clips.length,
+      subset: plan.subset,
+      surface: session.via === "session" ? "web" : "api",
+    });
+    const { stream, filename } = await createExportZip(
+      { storage, paths, log: c.get("log") },
+      { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },
+    );
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     c.header("Cache-Control", "no-store");
@@ -357,7 +602,11 @@ export function createApp(svc: Services) {
   });
 
   // SRT / VTT downloads: a clip's burned-in captions and a project's transcript. Owner only; `?words=1` adds word times to VTT.
-  const sendCaptionFile = async (c: Context<AppEnv>, make: (who: { id: string; admin: false }, format: CaptionFormat, words: boolean) => Promise<CaptionFile>, ext: string) => {
+  const sendCaptionFile = async (
+    c: Context<AppEnv>,
+    make: (who: { id: string; admin: false }, format: CaptionFormat, words: boolean) => Promise<CaptionFile>,
+    ext: string,
+  ) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
     const format = ext === "vtt" ? "vtt" : "srt";
@@ -439,7 +688,18 @@ export function createApp(svc: Services) {
     if (clientLogHits.size > 1000) for (const [k, v] of clientLogHits) if (!v.some((t) => now - t < 60_000)) clientLogHits.delete(k);
     const parsed = clientLogSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "invalid" }, 400);
-    c.get("log").child({ module: "web" }).warn({ route: parsed.data.route, kind: parsed.data.kind, clientMessage: parsed.data.message, stack: parsed.data.stack, userAgent: c.req.header("user-agent")?.slice(0, 200) }, "client error");
+    c.get("log")
+      .child({ module: "web" })
+      .warn(
+        {
+          route: parsed.data.route,
+          kind: parsed.data.kind,
+          clientMessage: parsed.data.message,
+          stack: parsed.data.stack,
+          userAgent: c.req.header("user-agent")?.slice(0, 200),
+        },
+        "client error",
+      );
     return c.body(null, 204);
   });
 
@@ -461,7 +721,11 @@ export function createApp(svc: Services) {
     };
     const cs = num("cutStart");
     const ce = num("cutEnd");
-    const audio = await cutPreviewAudio(svc, session.user.id, projectId, flagId, { pad: num("pad") ?? 2, cut: cs !== undefined && ce !== undefined && ce > cs ? { start: cs, end: ce } : undefined, signal: c.req.raw.signal });
+    const audio = await cutPreviewAudio(svc, session.user.id, projectId, flagId, {
+      pad: num("pad") ?? 2,
+      cut: cs !== undefined && ce !== undefined && ce > cs ? { start: cs, end: ce } : undefined,
+      signal: c.req.raw.signal,
+    });
     if (!audio) return c.text("not found", 404);
     c.header("Content-Type", "audio/mpeg");
     c.header("Cache-Control", "private, max-age=3600");
@@ -471,7 +735,9 @@ export function createApp(svc: Services) {
   app.get("/media/source/:projectId", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
+    const project = await db.query.projects.findFirst({
+      where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)),
+    });
     if (!project?.sourceKey) return c.text("not found", 404);
     const loc = await storage.resolve(project.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
@@ -482,10 +748,24 @@ export function createApp(svc: Services) {
   // Client routes have no file extension (`/signup`). A missing `/favicon.ico` (or .png, .txt, …)
   // must 404, not return this HTML: crawlers request /favicon.ico by convention, and serving the
   // shell there is why app.reelsaw.com showed a generic globe in Google Search.
-  if (config.WEB_DIST && fs.existsSync(config.WEB_DIST)) {
-    const index = injectOtelBoot(fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8"), svc.otel.public);
+  // Hashed files under /assets/ never change, so they cache for a year; the HTML must revalidate
+  // every load or a tab boots an old chunk map after a deploy.
+  if (config.WEB_DIST && webIndex && webBuild) {
+    const index = injectOtelBoot(webIndex, svc.otel.public).replace("</head>", `<meta name="reelsaw-build" content="${webBuild}" /></head>`);
+    app.use("/assets/*", async (c, next) => {
+      await next();
+      if (c.res.ok) c.header("Cache-Control", "public, max-age=31536000, immutable");
+    });
+    const shell = (c: Context<AppEnv>) => {
+      c.header("Cache-Control", "no-cache");
+      c.header("Content-Security-Policy", "frame-ancestors 'none'");
+      return c.html(index);
+    };
+    // before serveStatic, which would send the raw dist/index.html (no build id, no OTEL config) for these
+    app.get("/", shell);
+    app.get("/index.html", shell);
     app.use("/*", serveStatic({ root: path.relative(process.cwd(), config.WEB_DIST) || "." }));
-    app.get("*", (c) => (isSpaIndexPath(c.req.path) ? c.html(index) : c.notFound()));
+    app.get("*", (c) => (isSpaIndexPath(c.req.path) ? shell(c) : c.notFound()));
   }
 
   return app;

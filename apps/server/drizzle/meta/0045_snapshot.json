@@ -1,6 +1,6 @@
 {
-  "id": "4359063b-df84-46f0-b0b1-eb4d30fbcf80",
-  "prevId": "1fea74a7-f40a-411d-836c-257b8fc17400",
+  "id": "fd61b274-34cd-4118-acf0-cdc5e6b7f3df",
+  "prevId": "4348136c-f32f-4bd8-b245-591947bcf027",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1396,117 +1396,93 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.completion_notices": {
-      "name": "completion_notices",
+    "public.disk_leases": {
+      "name": "disk_leases",
       "schema": "",
       "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "bigint",
+        "id": {
+          "name": "id",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "volume": {
+          "name": "volume",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "completion_notices_user_id_idx": {
-          "name": "completion_notices_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "completion_notices_event_id_project_events_id_fk": {
-          "name": "completion_notices_event_id_project_events_id_fk",
-          "tableFrom": "completion_notices",
-          "tableTo": "project_events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "notNull": true
         },
-        "completion_notices_user_id_user_id_fk": {
-          "name": "completion_notices_user_id_user_id_fk",
-          "tableFrom": "completion_notices",
-          "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.finished_projects": {
-      "name": "finished_projects",
-      "schema": "",
-      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "project_id": {
           "name": "project_id",
           "type": "text",
-          "primaryKey": true,
-          "notNull": true
+          "primaryKey": false,
+          "notNull": false
         },
-        "user_id": {
-          "name": "user_id",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "first_event_id": {
-          "name": "first_event_id",
-          "type": "bigint",
+        "mb": {
+          "name": "mb",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "first_done_at": {
-          "name": "first_done_at",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
         }
       },
       "indexes": {
-        "finished_projects_user_id_idx": {
-          "name": "finished_projects_user_id_idx",
+        "disk_leases_volume_idx": {
+          "name": "disk_leases_volume_idx",
           "columns": [
             {
-              "expression": "user_id",
+              "expression": "volume",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "disk_leases_worker_idx": {
+          "name": "disk_leases_worker_idx",
+          "columns": [
+            {
+              "expression": "worker_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1518,21 +1494,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "finished_projects_user_id_user_id_fk": {
-          "name": "finished_projects_user_id_user_id_fk",
-          "tableFrom": "finished_projects",
-          "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1977,6 +1939,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "stage_seq": {
+          "name": "stage_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "stage_started_at": {
           "name": "stage_started_at",
@@ -2949,12 +2918,6 @@
           "notNull": true,
           "default": false
         },
-        "last_active_at": {
-          "name": "last_active_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -3124,13 +3087,6 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": false
-        },
-        "ready_email": {
-          "name": "ready_email",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "updated_at": {
           "name": "updated_at",
@@ -3302,6 +3258,19 @@
         },
         "disk_total_mb": {
           "name": "disk_total_mb",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "volume": {
+          "name": "volume",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disk_leased_mb": {
+          "name": "disk_leased_mb",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

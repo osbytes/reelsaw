@@ -1,6 +1,6 @@
 {
   "name": "@reelsaw/server",
-  "version": "0.23.3",
+  "version": "0.30.3",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -19,6 +19,7 @@
     "bundle": "node scripts/bundle.mjs",
     "test": "node --import tsx --test --test-concurrency=2 test/*.test.ts",
     "test:unit": "node scripts/unit-tests.mjs",
+    "test:stack": "node scripts/unit-tests.mjs --stack",
     "eval:offline": "tsx src/eval/run.ts --offline",
     "creator-spans": "tsx src/eval/tools/creator-spans.ts",
     "models:download": "sh ../../scripts/download-models.sh models",
@@ -81,7 +82,9 @@
     "pino-roll": "^4.0.0",
     "posthog-node": "^5.57.0",
     "semver": "^7.8.5",
+    "standardwebhooks": "^1.1.1",
     "stripe": "23.0.0",
+    "undici": "7.30.1",
     "yauzl": "3.4.0",
     "zod": "^4.6.7"
   },

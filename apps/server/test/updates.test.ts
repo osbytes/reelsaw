@@ -6,8 +6,17 @@ import { createLogger } from "../src/log.js";
 import { createUpdateChecker, releaseVersion, upgradeHowTo, MIN_CHECK_GAP_MS } from "../src/updates.js";
 
 const log = createLogger({ LOG_LEVEL: "silent", LOG_FORMAT: "json" } as never, {}, new Writable({ write: (_c, _e, cb) => cb() }));
-const cfg = (current: string, enabled = true) => ({ REELSAW_VERSION: current, UPDATE_CHECK: enabled, UPDATE_CHECK_URL: "https://example.test/latest", UPDATE_CHECK_HOURS: 6 });
-const release = (tag: string) => ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: `https://github.com/osbytes/reelsaw/releases/tag/${tag}`, published_at: "2026-10-17T10:00:00Z" }) });
+const cfg = (current: string, enabled = true) => ({
+  REELSAW_VERSION: current,
+  UPDATE_CHECK: enabled,
+  UPDATE_CHECK_URL: "https://example.test/latest",
+  UPDATE_CHECK_HOURS: 6,
+});
+const release = (tag: string) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ tag_name: tag, html_url: `https://github.com/osbytes/reelsaw/releases/tag/${tag}`, published_at: "2026-10-17T10:00:00Z" }),
+});
 
 describe("releaseVersion", () => {
   it("accepts a release tag with or without v, not a source build", () => {
@@ -65,7 +74,9 @@ describe("update checker", () => {
   });
 
   it("rejects an answer without a version tag", async () => {
-    const s = await createUpdateChecker(cfg("0.5.0"), log, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ tag_name: "nightly" }) }) }).check();
+    const s = await createUpdateChecker(cfg("0.5.0"), log, {
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ tag_name: "nightly" }) }),
+    }).check();
     assert.equal(s.latest, null);
     assert.match(s.error!, /unexpected release tag/);
   });

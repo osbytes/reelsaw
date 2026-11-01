@@ -12,7 +12,14 @@ import { decodeCursor, pageOf } from "./pagination.js";
 
 export const ACTIVE_STATUSES = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const satisfies readonly ProjectStatus[];
 
-type Facts = { clipCount: number; clipsDone: number; clipsFailed: number; clipThumbIds: string[]; firstThumbId: string | null; overrides: Array<{ intro?: string | null; outro?: string | null }> };
+type Facts = {
+  clipCount: number;
+  clipsDone: number;
+  clipsFailed: number;
+  clipThumbIds: string[];
+  firstThumbId: string | null;
+  overrides: Array<{ intro?: string | null; outro?: string | null }>;
+};
 
 /** Clip counts, first thumbnails and per-clip bumper overrides for a set of projects: one query, grouped by project. */
 async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Facts>> {
@@ -24,7 +31,9 @@ async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Fact
       clipCount: sql<number>`count(*)::int`,
       clipsDone: sql<number>`(count(*) filter (where ${C.status} = 'done'))::int`,
       clipsFailed: sql<number>`(count(*) filter (where ${C.status} = 'failed'))::int`,
-      clipThumbIds: sql<string[]>`coalesce((array_agg(${C.id} order by ${C.index}) filter (where ${C.status} = 'done' and ${C.thumbnailKey} is not null))[1:3], '{}')`,
+      clipThumbIds: sql<
+        string[]
+      >`coalesce((array_agg(${C.id} order by ${C.index}) filter (where ${C.status} = 'done' and ${C.thumbnailKey} is not null))[1:3], '{}')`,
       firstThumbId: sql<string | null>`(array_agg(${C.id} order by ${C.index}) filter (where ${C.thumbnailKey} is not null))[1]`,
       overrides: sql<Facts["overrides"]>`coalesce(jsonb_agg(${C.bumpers} order by ${C.index}) filter (where ${C.bumpers} is not null), '[]'::jsonb)`,
     })
@@ -35,7 +44,7 @@ async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Fact
 }
 
 /** `deleted: true` lists only deleted (still restorable) projects; otherwise deleted ones are left out. */
-export type ListInput = { cursor?: string; limit: number; status?: ProjectStatus; deleted?: boolean };
+export type ListInput = { cursor?: string | undefined; limit: number; status?: ProjectStatus | undefined; deleted?: boolean | undefined };
 
 export async function listProjectsPage(db: Db, userId: string, input: ListInput) {
   const P = schema.projects;
@@ -47,7 +56,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
     if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
     conds.push(sql`(${P.updatedAt}, ${P.id}) < (${String(c[0])}::timestamptz, ${String(c[1])})`);
   }
-  const [fetched, [{ total }]] = await Promise.all([
+  const [fetched, [{ total } = { total: 0 }]] = await Promise.all([
     db
       .select({ row: P, ts: sql<string>`${P.updatedAt}::text` })
       .from(P)
@@ -58,15 +67,23 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
   ]);
   const { items, nextCursor } = pageOf(fetched, input.limit, (r) => [r.ts, r.row.id]);
   const rows = items.map((r) => r.row);
-  const facts = await clipFacts(db, rows.map((r) => r.id));
-  const stored = await storedBytesByProject(db, rows.map((r) => r.id));
+  const facts = await clipFacts(
+    db,
+    rows.map((r) => r.id),
+  );
+  const stored = await storedBytesByProject(
+    db,
+    rows.map((r) => r.id),
+  );
   const bumperSummaries = await projectBumperSummaries(
     db,
     userId,
     rows.map((p) => {
       const f = facts.get(p.id);
       // coverage needs per-clip overrides only; the clips without one inherit the project's setting
-      const clips = f ? [...f.overrides.map((bumpers) => ({ bumpers })), ...Array.from({ length: f.clipCount - f.overrides.length }, () => ({ bumpers: null }))] : [];
+      const clips = f
+        ? [...f.overrides.map((bumpers) => ({ bumpers })), ...Array.from({ length: f.clipCount - f.overrides.length }, () => ({ bumpers: null }))]
+        : [];
       return { id: p.id, settings: p.settings, clips };
     }),
   );
@@ -109,7 +126,10 @@ async function storedBytesByProject(db: Db, ids: string[]): Promise<Map<string, 
 export async function projectStats(db: Db, userId: string) {
   const [[a], [b]] = await Promise.all([
     db
-      .select({ total: sql<number>`count(*)::int`, running: sql<number>`(count(*) filter (where ${inArray(schema.projects.status, [...ACTIVE_STATUSES])}))::int` })
+      .select({
+        total: sql<number>`count(*)::int`,
+        running: sql<number>`(count(*) filter (where ${inArray(schema.projects.status, [...ACTIVE_STATUSES])}))::int`,
+      })
       .from(schema.projects)
       .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt))),
     db

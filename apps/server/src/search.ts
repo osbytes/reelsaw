@@ -48,10 +48,22 @@ export function wordScore(w: string, cols: Array<[Col, number]>): SQL {
 }
 export const sumScores = (parts: SQL[]): SQL => sql`(${sql.join(parts, sql` + `)})`;
 /** Users page: every word must be in the name or email (literally, or close to a word in it); score weights the name 2 over the email 1. */
-export const userMatch = (ws: string[]): SQL | undefined => (ws.length ? and(...ws.map((w) => or(near(schema.user.name, w), near(schema.user.email, w))!)) : undefined);
-export const userScore = (ws: string[]): SQL | undefined => (ws.length ? sumScores(ws.map((w) => wordScore(w, [[schema.user.name, 2], [schema.user.email, 1]]))) : undefined);
+export const userMatch = (ws: string[]): SQL | undefined =>
+  ws.length ? and(...ws.map((w) => or(near(schema.user.name, w), near(schema.user.email, w))!)) : undefined;
+export const userScore = (ws: string[]): SQL | undefined =>
+  ws.length
+    ? sumScores(
+        ws.map((w) =>
+          wordScore(w, [
+            [schema.user.name, 2],
+            [schema.user.email, 1],
+          ]),
+        ),
+      )
+    : undefined;
 /** `<%` compares against this setting; call first inside a transaction (local to it) */
-export const setSearchThreshold = (tx: Pick<Db, "execute">) => tx.execute(sql`select set_config('pg_trgm.word_similarity_threshold', ${String(SEARCH_SIM)}, true)`);
+export const setSearchThreshold = (tx: Pick<Db, "execute">) =>
+  tx.execute(sql`select set_config('pg_trgm.word_similarity_threshold', ${String(SEARCH_SIM)}, true)`);
 
 type ProjectRow = Pick<schema.Project, "id" | "title" | "status" | "durationSec" | "sourceUrl" | "updatedAt" | "sourceMeta">;
 const PROJECT_COLUMNS = { id: true, title: true, status: true, durationSec: true, sourceMeta: true, sourceUrl: true, updatedAt: true } as const;
@@ -60,7 +72,10 @@ const PROJECT_COLUMNS = { id: true, title: true, status: true, durationSec: true
 async function clipFacts(db: Db, ids: string[]) {
   const facts = new Map<string, { clipCount: number; clipsDone: number; failedClipIds: string[] }>();
   if (!ids.length) return facts;
-  const rows = await db.select({ projectId: schema.clips.projectId, id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(and(inArray(schema.clips.projectId, ids), isNull(schema.clips.deletedAt)));
+  const rows = await db
+    .select({ projectId: schema.clips.projectId, id: schema.clips.id, status: schema.clips.status })
+    .from(schema.clips)
+    .where(and(inArray(schema.clips.projectId, ids), isNull(schema.clips.deletedAt)));
   for (const c of rows) {
     const f = facts.get(c.projectId) ?? { clipCount: 0, clipsDone: 0, failedClipIds: [] };
     f.clipCount++;
@@ -72,7 +87,10 @@ async function clipFacts(db: Db, ids: string[]) {
 }
 
 async function projectRows(db: Db, rows: Array<ProjectRow & { score?: number }>) {
-  const facts = await clipFacts(db, rows.map((p) => p.id));
+  const facts = await clipFacts(
+    db,
+    rows.map((p) => p.id),
+  );
   return rows.map((p) => ({
     id: p.id,
     title: p.title,
@@ -90,7 +108,12 @@ export type SearchProject = Awaited<ReturnType<typeof projectRows>>[number];
 
 /** The user's most recently changed projects (the palette's list before anything is typed). */
 export async function recentProjects(db: Db, userId: string, limit = 20) {
-  const rows = await db.query.projects.findMany({ where: and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)), columns: PROJECT_COLUMNS, orderBy: desc(schema.projects.updatedAt), limit });
+  const rows = await db.query.projects.findMany({
+    where: and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)),
+    columns: PROJECT_COLUMNS,
+    orderBy: desc(schema.projects.updatedAt),
+    limit,
+  });
   return projectRows(db, rows);
 }
 
@@ -102,7 +125,7 @@ export interface SearchInput {
    * Link needles (a YouTube id, or host + path): projects whose source link contains one of them, so the
    * client can tell whether a pasted link already has a project. The client decides which candidates really match.
    */
-  links?: string[];
+  links?: string[] | undefined;
 }
 
 export async function searchLibrary(db: Db, userId: string, input: SearchInput) {
@@ -110,19 +133,41 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
   // deleted projects (and clips a re-analyze replaced) are not found until restored
   const mine = and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt));
   if (input.links?.length) {
-    const rows = await db.query.projects.findMany({ where: and(mine, or(...input.links.map((n) => contains(schema.projects.sourceUrl, n)))), columns: PROJECT_COLUMNS, orderBy: desc(schema.projects.updatedAt), limit: 50 });
+    const rows = await db.query.projects.findMany({
+      where: and(mine, or(...input.links.map((n) => contains(schema.projects.sourceUrl, n)))),
+      columns: PROJECT_COLUMNS,
+      orderBy: desc(schema.projects.updatedAt),
+      limit: 50,
+    });
     return { projects: await projectRows(db, rows), clips: [], truncated: false };
   }
   const ws = words(input.q);
   if (!ws.length) return { projects: await recentProjects(db, userId, SEARCH_PROJECTS), clips: [], truncated: false };
 
   const projScore = sumScores(ws.map((w) => wordScore(w, [[schema.projects.title, WEIGHT_PROJECT_TITLE]])));
-  const clipScore = sumScores(ws.map((w) => wordScore(w, [[schema.clips.title, WEIGHT_CLIP_TITLE], [schema.clips.hook, WEIGHT_CLIP_HOOK], [schema.clips.caption, WEIGHT_CLIP_CAPTION]])));
+  const clipScore = sumScores(
+    ws.map((w) =>
+      wordScore(w, [
+        [schema.clips.title, WEIGHT_CLIP_TITLE],
+        [schema.clips.hook, WEIGHT_CLIP_HOOK],
+        [schema.clips.caption, WEIGHT_CLIP_CAPTION],
+      ]),
+    ),
+  );
   const clipMatch: SQL[] = ws.map((w) => or(near(schema.clips.title, w), near(schema.clips.hook, w), near(schema.clips.caption, w))!);
   const { projectsFound, clipsFound } = await db.transaction(async (tx) => {
     await setSearchThreshold(tx);
     const projectsFound = await tx
-      .select({ id: schema.projects.id, title: schema.projects.title, status: schema.projects.status, durationSec: schema.projects.durationSec, sourceMeta: schema.projects.sourceMeta, sourceUrl: schema.projects.sourceUrl, updatedAt: schema.projects.updatedAt, score: sql<number>`${projScore}`.mapWith(Number) })
+      .select({
+        id: schema.projects.id,
+        title: schema.projects.title,
+        status: schema.projects.status,
+        durationSec: schema.projects.durationSec,
+        sourceMeta: schema.projects.sourceMeta,
+        sourceUrl: schema.projects.sourceUrl,
+        updatedAt: schema.projects.updatedAt,
+        score: sql<number>`${projScore}`.mapWith(Number),
+      })
       .from(schema.projects)
       .where(and(mine, ...ws.map((w) => near(schema.projects.title, w))))
       .orderBy(desc(projScore), desc(schema.projects.updatedAt))
@@ -174,11 +219,29 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
 
 /** Failed work across the account, for the palette's "Retry all failed" commands (ids capped; the counts are exact). */
 export async function failedCounts(db: Db, userId: string) {
-  const failedClip = and(eq(schema.projects.userId, userId), eq(schema.clips.status, "failed"), isNull(schema.projects.deletedAt), isNull(schema.clips.deletedAt));
+  const failedClip = and(
+    eq(schema.projects.userId, userId),
+    eq(schema.clips.status, "failed"),
+    isNull(schema.projects.deletedAt),
+    isNull(schema.clips.deletedAt),
+  );
   const [[clipTotals], clipIds, projectIds] = await Promise.all([
-    db.select({ clips: count(), projects: sql<number>`count(distinct ${schema.clips.projectId})` }).from(schema.clips).innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id)).where(failedClip),
-    db.select({ id: schema.clips.id }).from(schema.clips).innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id)).where(failedClip).limit(500),
-    db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.userId, userId), eq(schema.projects.status, "failed"), isNull(schema.projects.deletedAt))).limit(200),
+    db
+      .select({ clips: count(), projects: sql<number>`count(distinct ${schema.clips.projectId})` })
+      .from(schema.clips)
+      .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
+      .where(failedClip),
+    db
+      .select({ id: schema.clips.id })
+      .from(schema.clips)
+      .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
+      .where(failedClip)
+      .limit(500),
+    db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.userId, userId), eq(schema.projects.status, "failed"), isNull(schema.projects.deletedAt)))
+      .limit(200),
   ]);
   return {
     failedClips: Number(clipTotals?.clips ?? 0),

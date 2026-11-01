@@ -51,7 +51,13 @@ const pop = (T: number, s: number, d = 0.5) => easeOutBack(k01(T, s, d));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const win = (T: number, a: number, b: number, d = 0.45) => Math.min(enter(T, a, d), 1 - enter(T, b - d, d));
 type Geo = { x: number; y: number; w: number; h: number; r?: number };
-const mix = (g: Geo, h: Geo, t: number): Geo => ({ x: lerp(g.x, h.x, t), y: lerp(g.y, h.y, t), w: lerp(g.w, h.w, t), h: lerp(g.h, h.h, t), r: lerp(g.r ?? 0, h.r ?? 0, t) });
+const mix = (g: Geo, h: Geo, t: number): Geo => ({
+  x: lerp(g.x, h.x, t),
+  y: lerp(g.y, h.y, t),
+  w: lerp(g.w, h.w, t),
+  h: lerp(g.h, h.h, t),
+  r: lerp(g.r ?? 0, h.r ?? 0, t),
+});
 const fmt = (s: number) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
 const abs = (left: number, top: number, extra?: CSSProperties): CSSProperties => ({ position: "absolute", left, top, ...extra });
 
@@ -112,7 +118,9 @@ function Rail({ T }: P) {
           <div key={"c" + i}>
             <div style={abs(x0, y - 1.5, { width: x1 - x0, height: 3, background: C.line, opacity: show })} />
             <div style={abs(x0, y - 1.5, { width: (x1 - x0) * p, height: 3, background: C.acc, opacity: show })} />
-            {p > 0 && p < 1 && <div style={abs(x0 + (x1 - x0) * p - 7, y - 7, { width: 14, height: 14, borderRadius: 7, background: C.acc, boxShadow: `0 0 18px ${C.acc}` })} />}
+            {p > 0 && p < 1 && (
+              <div style={abs(x0 + (x1 - x0) * p - 7, y - 7, { width: 14, height: 14, borderRadius: 7, background: C.acc, boxShadow: `0 0 18px ${C.acc}` })} />
+            )}
           </div>
         );
       })}
@@ -203,7 +211,9 @@ function Source({ T }: P) {
   const lab = enter(T, Tr + 0.6) * (1 - up);
   return (
     <div style={{ opacity: out }}>
-      <div style={abs(BX, y - lerp(96, 52, up), { width: BW, display: "flex", alignItems: "baseline", fontSize: 22, color: C.ink2, opacity: Math.max(lab, up) })}>
+      <div
+        style={abs(BX, y - lerp(96, 52, up), { width: BW, display: "flex", alignItems: "baseline", fontSize: 22, color: C.ink2, opacity: Math.max(lab, up) })}
+      >
         <span style={{ fontFamily: MONO, color: C.ink3, flex: 1 }}>{up > 0.5 ? "transcript" : "audio → 12 chunks · 4 in parallel"}</span>
         <span style={{ fontFamily: MONO }}>{up > 0.5 ? "9,812 words · 2 speakers" : words + " words"}</span>
       </div>
@@ -212,9 +222,31 @@ function Source({ T }: P) {
           const x = i * (cw + gap);
           const p = k01(T, chunkStart(i, Tr), 1.3);
           return (
-            <div key={i} style={abs(x, 0, { width: cw, height: h, borderRadius: lerp(10, 6, up), overflow: "hidden", background: STRIPES, borderLeft: i && gap < 1 ? `2px solid ${C.bg}` : "none", boxSizing: "border-box" })}>
+            <div
+              key={i}
+              style={abs(x, 0, {
+                width: cw,
+                height: h,
+                borderRadius: lerp(10, 6, up),
+                overflow: "hidden",
+                background: STRIPES,
+                borderLeft: i && gap < 1 ? `2px solid ${C.bg}` : "none",
+                boxSizing: "border-box",
+              })}
+            >
               <div style={abs(0, 0, { width: cw * p, height: h, background: C.accSoft, opacity: wave })} />
-              <div style={abs(0, 0, { width: cw, height: h, display: "flex", alignItems: "center", justifyContent: "space-around", padding: "0 4px", boxSizing: "border-box", opacity: wave })}>
+              <div
+                style={abs(0, 0, {
+                  width: cw,
+                  height: h,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-around",
+                  padding: "0 4px",
+                  boxSizing: "border-box",
+                  opacity: wave,
+                })}
+              >
                 {WAVE.slice(i * 12, i * 12 + 12).map((v, j) => (
                   <div key={j} style={{ width: 3, height: Math.max(2, v * h * 0.7), borderRadius: 2, background: j / 12 < p ? C.acc : C.ink3 }} />
                 ))}
@@ -229,7 +261,9 @@ function Source({ T }: P) {
         const ck = pop(T, chunkStart(i, Tr) + 1.3, 0.4) * (1 - up);
         return (
           <div key={"l" + i}>
-            <div style={abs(x, y + h + 12, { width: cw, textAlign: "center", fontFamily: MONO, fontSize: 16, color: p >= 1 ? C.ink2 : C.ink3, opacity: lab })}>{fmt(i * 291)}</div>
+            <div style={abs(x, y + h + 12, { width: cw, textAlign: "center", fontFamily: MONO, fontSize: 16, color: p >= 1 ? C.ink2 : C.ink3, opacity: lab })}>
+              {fmt(i * 291)}
+            </div>
             <div
               style={abs(x + cw / 2 - 42, y - 44 + (1 - ck) * 8, {
                 width: 84,
@@ -262,7 +296,21 @@ function Ingest({ T }: P) {
   const chipOut = 1 - enter(T, Tr + 0.1, 0.4);
   return (
     <>
-      <div style={abs(560, 300 + (1 - pill) * 14, { width: 800, opacity: pill, display: "flex", alignItems: "center", gap: 16, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 999, padding: "14px 26px", boxSizing: "border-box", fontSize: 24 })}>
+      <div
+        style={abs(560, 300 + (1 - pill) * 14, {
+          width: 800,
+          opacity: pill,
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          background: C.panel,
+          border: `1px solid ${C.line}`,
+          borderRadius: 999,
+          padding: "14px 26px",
+          boxSizing: "border-box",
+          fontSize: 24,
+        })}
+      >
         <span style={{ fontFamily: MONO, color: C.acc }}>yt-dlp</span>
         <span style={{ fontFamily: MONO, color: C.ink3, flex: 1, whiteSpace: "nowrap", overflow: "hidden" }}>youtube.com/watch?v=Qx7f…</span>
         <b style={{ whiteSpace: "nowrap" }}>Founders Pod #42</b>
@@ -272,13 +320,36 @@ function Ingest({ T }: P) {
         {chips.map((c, i) => {
           const a = pop(T, I + 2.0 + i * 0.18, 0.45);
           return (
-            <span key={c} style={{ fontFamily: MONO, fontSize: 22, border: `1px solid ${C.line}`, borderRadius: 10, padding: "6px 14px", opacity: Math.min(1, a), transform: `scale(${0.85 + 0.15 * a})` }}>
+            <span
+              key={c}
+              style={{
+                fontFamily: MONO,
+                fontSize: 22,
+                border: `1px solid ${C.line}`,
+                borderRadius: 10,
+                padding: "6px 14px",
+                opacity: Math.min(1, a),
+                transform: `scale(${0.85 + 0.15 * a})`,
+              }}
+            >
               {c}
             </span>
           );
         })}
         <div style={{ flex: 1 }} />
-        <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 22, color: C.ink, opacity: enter(T, I + 3.0), background: C.okSoft, borderRadius: 999, padding: "7px 16px" }}>
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 22,
+            color: C.ink,
+            opacity: enter(T, I + 3.0),
+            background: C.okSoft,
+            borderRadius: 999,
+            padding: "7px 16px",
+          }}
+        >
           <span style={{ width: 10, height: 10, borderRadius: 5, background: C.ok }} />
           source stored once
         </span>
@@ -301,11 +372,20 @@ const LANES = [
 function Word({ w, cut = 0, add, cutMark = 0 }: { w: string; cut?: number; add?: { w: string; a: number } | null; cutMark?: number }) {
   return (
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8 }}>
-      {cutMark > 0 && <span style={{ position: "absolute", left: "50%", top: -26, transform: "translateX(-50%)", fontSize: 18, color: C.err, opacity: cutMark }}>✂</span>}
-      <span style={{ color: cut > 0.5 ? C.ink3 : C.ink, textDecoration: cut > 0.5 ? "line-through" : "none", textDecorationColor: C.err, textDecorationThickness: 3 }}>{w}</span>
-      {add && (
-        <span style={{ color: C.acc, fontWeight: 700, opacity: add.a, transform: `scale(${0.7 + 0.3 * add.a})`, display: "inline-block" }}>{add.w}</span>
+      {cutMark > 0 && (
+        <span style={{ position: "absolute", left: "50%", top: -26, transform: "translateX(-50%)", fontSize: 18, color: C.err, opacity: cutMark }}>✂</span>
       )}
+      <span
+        style={{
+          color: cut > 0.5 ? C.ink3 : C.ink,
+          textDecoration: cut > 0.5 ? "line-through" : "none",
+          textDecorationColor: C.err,
+          textDecorationThickness: 3,
+        }}
+      >
+        {w}
+      </span>
+      {add && <span style={{ color: C.acc, fontWeight: 700, opacity: add.a, transform: `scale(${0.7 + 0.3 * add.a})`, display: "inline-block" }}>{add.w}</span>}
     </span>
   );
 }
@@ -327,13 +407,46 @@ function Refine({ T }: P) {
     <div style={{ opacity: vis }}>
       <svg width={W} height={H} style={abs(0, 0)} aria-hidden>
         {mids.map((m, i) => (
-          <path key={"f" + i} d={`M 320 330 V ${m} H ${LX}`} fill="none" stroke={C.acc} strokeWidth="3" pathLength="1" strokeDasharray="1" strokeDashoffset={1 - draw(T, R + 0.6 + i * 0.1, 0.6)} />
+          <path
+            key={"f" + i}
+            d={`M 320 330 V ${m} H ${LX}`}
+            fill="none"
+            stroke={C.acc}
+            strokeWidth="3"
+            pathLength="1"
+            strokeDasharray="1"
+            strokeDashoffset={1 - draw(T, R + 0.6 + i * 0.1, 0.6)}
+          />
         ))}
         {mids.map((m, i) => (
-          <path key={"g" + i} d={`M ${LX + LW} ${m} H 1730 V ${mids[1]}`} fill="none" stroke={prog[i]! >= 1 ? C.ok : C.line} strokeWidth="3" pathLength="1" strokeDasharray="1" strokeDashoffset={1 - draw(T, R + LANES[i]!.fin, 0.4)} />
+          <path
+            key={"g" + i}
+            d={`M ${LX + LW} ${m} H 1730 V ${mids[1]}`}
+            fill="none"
+            stroke={prog[i]! >= 1 ? C.ok : C.line}
+            strokeWidth="3"
+            pathLength="1"
+            strokeDasharray="1"
+            strokeDashoffset={1 - draw(T, R + LANES[i]!.fin, 0.4)}
+          />
         ))}
       </svg>
-      <div style={abs(1746, mids[1]! - 34, { width: 150, opacity: Math.min(1, lastDone), transform: `scale(${0.8 + 0.2 * lastDone})`, background: C.accSoft, border: `2px solid ${C.acc}`, borderRadius: 12, padding: "8px 10px", boxSizing: "border-box", fontFamily: MONO, fontSize: 16, lineHeight: 1.35, color: C.ink })}>
+      <div
+        style={abs(1746, mids[1]! - 34, {
+          width: 150,
+          opacity: Math.min(1, lastDone),
+          transform: `scale(${0.8 + 0.2 * lastDone})`,
+          background: C.accSoft,
+          border: `2px solid ${C.acc}`,
+          borderRadius: 12,
+          padding: "8px 10px",
+          boxSizing: "border-box",
+          fontFamily: MONO,
+          fontSize: 16,
+          lineHeight: 1.35,
+          color: C.ink,
+        })}
+      >
         enqueue
         <br />
         <span style={{ color: C.acc }}>analyze</span>
@@ -343,14 +456,31 @@ function Refine({ T }: P) {
         const done = p >= 1;
         const a = enter(T, R + 0.7 + i * 0.12);
         return (
-          <div key={l.q} style={abs(LX, LY[i]! + (1 - a) * 18, { width: LW, height: LH, opacity: a, background: C.panel, border: `2px solid ${done ? C.ok : p > 0 ? C.acc : C.line}`, borderRadius: 18, boxSizing: "border-box", overflow: "hidden" })}>
+          <div
+            key={l.q}
+            style={abs(LX, LY[i]! + (1 - a) * 18, {
+              width: LW,
+              height: LH,
+              opacity: a,
+              background: C.panel,
+              border: `2px solid ${done ? C.ok : p > 0 ? C.acc : C.line}`,
+              borderRadius: 18,
+              boxSizing: "border-box",
+              overflow: "hidden",
+            })}
+          >
             <div style={abs(26, 20, { width: 300, display: "flex", flexDirection: "column", gap: 6 })}>
               <span style={{ fontFamily: MONO, fontSize: 20, color: C.acc }}>{l.q}</span>
               <span style={{ fontSize: 22, color: C.ink2 }}>{l.d}</span>
-              <span style={{ fontFamily: MONO, fontSize: 17, color: done ? C.ok : C.ink3 }}>{done ? (i === 1 ? "✓ done · finished last" : "✓ done") : p > 0 ? "running · " + Math.round(p * 100) + "%" : "waiting"}</span>
+              <span style={{ fontFamily: MONO, fontSize: 17, color: done ? C.ok : C.ink3 }}>
+                {done ? (i === 1 ? "✓ done · finished last" : "✓ done") : p > 0 ? "running · " + Math.round(p * 100) + "%" : "waiting"}
+              </span>
             </div>
             <div style={abs(360, 0, { width: LW - 390, height: LH, display: "flex", alignItems: "center", gap: 14, fontSize: 28 })}>
-              {i === 0 && ENTITY_WORDS.map((w, j) => <Word key={j} w={w} cut={j === 4 ? k01(p, 0.35, 0.2) : 0} add={j === 4 ? { w: "Copia", a: Math.min(1, pop(p, 0.6, 0.25)) } : null} />)}
+              {i === 0 &&
+                ENTITY_WORDS.map((w, j) => (
+                  <Word key={j} w={w} cut={j === 4 ? k01(p, 0.35, 0.2) : 0} add={j === 4 ? { w: "Copia", a: Math.min(1, pop(p, 0.6, 0.25)) } : null} />
+                ))}
               {i === 1 &&
                 FILLER_WORDS.map((w, j) => {
                   const at = FILLER_AT[j];
@@ -361,8 +491,34 @@ function Refine({ T }: P) {
                   const cutAt = SCENE_CUT_AT[j];
                   const face = j % 5 !== 2 ? pop(p, j / 16, 0.12) : 0;
                   return (
-                    <div key={j} style={{ position: "relative", width: 50, height: 74, borderRadius: 6, background: STRIPES, flex: "none", borderLeft: cutAt && p > cutAt ? `4px solid ${C.acc}` : "none", boxSizing: "border-box" }}>
-                      {face > 0 && <span style={{ position: "absolute", left: 13, top: 22, width: 22, height: 22, borderRadius: 11, border: `2.5px solid ${C.ok}`, opacity: Math.min(1, face), boxSizing: "border-box" }} />}
+                    <div
+                      key={j}
+                      style={{
+                        position: "relative",
+                        width: 50,
+                        height: 74,
+                        borderRadius: 6,
+                        background: STRIPES,
+                        flex: "none",
+                        borderLeft: cutAt && p > cutAt ? `4px solid ${C.acc}` : "none",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      {face > 0 && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            left: 13,
+                            top: 22,
+                            width: 22,
+                            height: 22,
+                            borderRadius: 11,
+                            border: `2.5px solid ${C.ok}`,
+                            opacity: Math.min(1, face),
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -453,14 +609,33 @@ function Cands({ T }: P) {
   const capWord = Math.floor((T * 2.2) % 3);
   return (
     <>
-      <div style={abs(BX, 370, { fontFamily: MONO, fontSize: 20, color: C.ink3, opacity: win(T, A + 1.0, A + 3.6) })}>map: transcript windows → 12 candidates</div>
-      <div style={abs(1340, 470, { width: 320, opacity: judge, background: C.panel, border: `2px solid ${C.acc}`, borderRadius: 16, padding: 20, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 10 })}>
+      <div style={abs(BX, 370, { fontFamily: MONO, fontSize: 20, color: C.ink3, opacity: win(T, A + 1.0, A + 3.6) })}>
+        map: transcript windows → 12 candidates
+      </div>
+      <div
+        style={abs(1340, 470, {
+          width: 320,
+          opacity: judge,
+          background: C.panel,
+          border: `2px solid ${C.acc}`,
+          borderRadius: 16,
+          padding: 20,
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        })}
+      >
         <span style={{ fontFamily: MONO, fontSize: 18, color: C.acc }}>judge model</span>
         <span style={{ fontSize: 24, fontWeight: 700 }}>Pairwise ranking</span>
-        <span style={{ fontFamily: MONO, fontSize: 20, color: C.ink2 }}>{cmp < 1 ? `#${pr[0] + 1} vs #${pr[1] + 1} → #${(CANDS[pr[0]]![1] > CANDS[pr[1]]![1] ? pr[0] : pr[1]) + 1}` : "ranking settled"}</span>
+        <span style={{ fontFamily: MONO, fontSize: 20, color: C.ink2 }}>
+          {cmp < 1 ? `#${pr[0] + 1} vs #${pr[1] + 1} → #${(CANDS[pr[0]]![1] > CANDS[pr[1]]![1] ? pr[0] : pr[1]) + 1}` : "ranking settled"}
+        </span>
         <span style={{ fontFamily: MONO, fontSize: 17, color: C.ink3 }}>{Math.max(nCmp, cmp >= 1 ? 18 : 0)} comparisons</span>
       </div>
-      <div style={abs(640, 360 + 5 * 48 + 8, { width: 640, textAlign: "center", fontSize: 22, color: C.ink3, opacity: win(T, A + 6.3, Rn + 0.4, 0.4) })}>7 weaker moments dropped</div>
+      <div style={abs(640, 360 + 5 * 48 + 8, { width: 640, textAlign: "center", fontSize: 22, color: C.ink3, opacity: win(T, A + 6.3, Rn + 0.4, 0.4) })}>
+        7 weaker moments dropped
+      </div>
       {CANDS.map((c, i) => {
         const r = RANK[i]!;
         const top = r < 5;
@@ -468,7 +643,13 @@ function Cands({ T }: P) {
         const row = Math.floor(i / 6);
         const g0: Geo = { x: BX + (c[2] / 58.2) * BW - 24, y: 300, w: 48, h: 30 };
         const g1: Geo = { x: 300 + col * 224, y: 430 + row * 124, w: 200, h: 100 };
-        const g2: Geo = { x: 860 + (col - 2.5) * 70 + ((i * 37) % 23) - 11, y: 500 + (row - 0.5) * 60 + ((i * 53) % 19) - 9, w: 200, h: 100, r: ((i * 29) % 9) - 4 };
+        const g2: Geo = {
+          x: 860 + (col - 2.5) * 70 + ((i * 37) % 23) - 11,
+          y: 500 + (row - 0.5) * 60 + ((i * 53) % 19) - 9,
+          w: 200,
+          h: 100,
+          r: ((i * 29) % 9) - 4,
+        };
         const g3: Geo = { x: 640, y: 360 + i * 48, w: 640, h: 40 };
         const g4: Geo = { x: 640, y: 360 + r * 48, w: 640, h: 40 };
         const g5: Geo = top ? { x: F0 + r * (FW + FG), y: 380, w: FW, h: FH } : { x: 640, y: 360 + r * 48 + 60, w: 640, h: 40 };
@@ -491,7 +672,17 @@ function Cands({ T }: P) {
         const stuck = r === 4 && (rs.st === "crash" || rs.st === "resume");
         return (
           <div key={i} style={abs(g.x, g.y, { width: g.w, height: g.h, opacity: op, transform: `rotate(${g.r}deg)`, zIndex: top ? 2 : 1 })}>
-            <div style={abs(0, 0, { width: g.w, height: g.h, borderRadius: lerp(lerp(6, 14, p1), 14, p5), background: C.panel, border: `2px solid ${hl ? C.acc : p1 < 0.5 ? C.acc : C.line}`, boxSizing: "border-box", overflow: "hidden" })}>
+            <div
+              style={abs(0, 0, {
+                width: g.w,
+                height: g.h,
+                borderRadius: lerp(lerp(6, 14, p1), 14, p5),
+                background: C.panel,
+                border: `2px solid ${hl ? C.acc : p1 < 0.5 ? C.acc : C.line}`,
+                boxSizing: "border-box",
+                overflow: "hidden",
+              })}
+            >
               <div style={abs(14, 12, { width: 172, opacity: p1 * (1 - p3), display: "flex", flexDirection: "column", gap: 10 })}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 16 }}>
                   <span style={{ color: C.ink3 }}>cand {String(i + 1).padStart(2, "0")}</span>
@@ -500,7 +691,18 @@ function Cands({ T }: P) {
                 <div style={{ height: 8, borderRadius: 4, background: C.line, width: "92%" }} />
                 <div style={{ height: 8, borderRadius: 4, background: C.line, width: "64%" }} />
               </div>
-              <div style={abs(0, 0, { width: 640, height: 40, display: "flex", alignItems: "center", gap: 14, padding: "0 16px", boxSizing: "border-box", opacity: p3 * (1 - p5) })}>
+              <div
+                style={abs(0, 0, {
+                  width: 640,
+                  height: 40,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "0 16px",
+                  boxSizing: "border-box",
+                  opacity: p3 * (1 - p5),
+                })}
+              >
                 <span style={{ fontFamily: MONO, fontSize: 18, width: 36, color: top ? C.acc : C.ink3, opacity: p4 }}>#{r + 1}</span>
                 <span style={{ fontSize: 21, flex: 1, whiteSpace: "nowrap" }}>{c[0]}</span>
                 <div style={{ width: 120, height: 6, borderRadius: 3, background: C.line }}>
@@ -510,11 +712,46 @@ function Cands({ T }: P) {
               </div>
               <div style={abs(0, 0, { width: FW, height: FH, opacity: p5, background: STRIPES })}>
                 <div style={abs(14, 46, { width: FW - 28, textAlign: "center", opacity: hookOn })}>
-                  <span style={{ background: "#fff", color: "#111", fontWeight: 800, fontSize: 17, lineHeight: 1.3, borderRadius: 8, padding: "4px 8px", boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }}>{c[0]}</span>
+                  <span
+                    style={{
+                      background: "#fff",
+                      color: "#111",
+                      fontWeight: 800,
+                      fontSize: 17,
+                      lineHeight: 1.3,
+                      borderRadius: 8,
+                      padding: "4px 8px",
+                      boxDecorationBreak: "clone",
+                      WebkitBoxDecorationBreak: "clone",
+                    }}
+                  >
+                    {c[0]}
+                  </span>
                 </div>
-                <div style={abs(10, FH * 0.64, { width: FW - 20, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px 6px", opacity: k01(rs.p, 0.2, 0.1) })}>
+                <div
+                  style={abs(10, FH * 0.64, {
+                    width: FW - 20,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    gap: "4px 6px",
+                    opacity: k01(rs.p, 0.2, 0.1),
+                  })}
+                >
                   {hook.map((w, j) => (
-                    <span key={j} style={{ fontSize: 22, fontWeight: 800, color: "#fff", textTransform: "uppercase", textShadow: "0 2px 6px rgba(0,0,0,.7)", background: j === capWord % hook.length ? C.acc : "transparent", borderRadius: 5, padding: "0 4px" }}>
+                    <span
+                      key={j}
+                      style={{
+                        fontSize: 22,
+                        fontWeight: 800,
+                        color: "#fff",
+                        textTransform: "uppercase",
+                        textShadow: "0 2px 6px rgba(0,0,0,.7)",
+                        background: j === capWord % hook.length ? C.acc : "transparent",
+                        borderRadius: 5,
+                        padding: "0 4px",
+                      }}
+                    >
                       {w}
                     </span>
                   ))}
@@ -533,11 +770,24 @@ function Cands({ T }: P) {
                     <div key={t} style={abs(FW * t - 1, -3, { width: 2, height: 14, background: stuck && t === 0.4 ? C.warn : C.bg })} />
                   ))}
                 </div>
-                <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 17, color: rs.st === "done" ? C.ok : rs.st === "crash" ? C.err : rs.st === "resume" ? C.warn : C.ink2 }}>
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontFamily: MONO,
+                    fontSize: 17,
+                    color: rs.st === "done" ? C.ok : rs.st === "crash" ? C.err : rs.st === "resume" ? C.warn : C.ink2,
+                  }}
+                >
                   <span>{rs.st === "queued" ? "queued" : rs.st === "crash" ? "interrupted" : rs.st === "done" ? "✓ ready" : STEP(rs.p)}</span>
                   <span>{rs.st === "done" || rs.st === "queued" ? "" : Math.round(rs.p * 100) + "%"}</span>
                 </div>
-                {stuck && <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 15, color: C.warn }}>{rs.st === "crash" ? "last save: captions" : "↺ from captions"}</div>}
+                {stuck && (
+                  <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 15, color: C.warn }}>
+                    {rs.st === "crash" ? "last save: captions" : "↺ from captions"}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -553,7 +803,22 @@ function ResumeBanner({ T }: P) {
   const a = win(T, Rs + 0.8, CUES.Outro + 0.2, 0.4);
   const back = T >= Rs + 2.0;
   return (
-    <div style={abs(460, 286 + (1 - a) * 10, { width: 1000, opacity: a, display: "flex", alignItems: "center", justifyContent: "center", gap: 14, fontSize: 26, background: back ? C.okSoft : C.errSoft, border: `2px solid ${back ? C.ok : C.err}`, borderRadius: 999, padding: "14px 26px", boxSizing: "border-box" })}>
+    <div
+      style={abs(460, 286 + (1 - a) * 10, {
+        width: 1000,
+        opacity: a,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        fontSize: 26,
+        background: back ? C.okSoft : C.errSoft,
+        border: `2px solid ${back ? C.ok : C.err}`,
+        borderRadius: 999,
+        padding: "14px 26px",
+        boxSizing: "border-box",
+      })}
+    >
       <span style={{ fontFamily: MONO, fontWeight: 600, color: back ? C.ok : C.err }}>{back ? "↺" : "▲"}</span>
       <span>
         {back ? (
@@ -594,7 +859,11 @@ function Caption({ T }: P) {
   }
   if (!cur) return null;
   const a = win(T, cur.at, cur.until, 0.35);
-  return <div style={abs(160, 978, { width: 1600, textAlign: "center", fontSize: 30, lineHeight: 1.35, color: C.ink, opacity: a, textWrap: "balance" })}>{cur.text}</div>;
+  return (
+    <div style={abs(160, 978, { width: 1600, textAlign: "center", fontSize: 30, lineHeight: 1.35, color: C.ink, opacity: a, textWrap: "balance" })}>
+      {cur.text}
+    </div>
+  );
 }
 
 /** The whole frame at authored time T, in 1920×1080 pixels. */
@@ -716,14 +985,31 @@ export function PipelineFilm({ capture = false, className }: { capture?: boolean
   };
 
   return (
-    <div ref={root} className={className} style={{ display: "flex", flexDirection: "column", background: C.bg, color: C.ink, ...(fullscreen ? { width: "100%", height: "100%" } : null) }}>
+    <div
+      ref={root}
+      className={className}
+      style={{ display: "flex", flexDirection: "column", background: C.bg, color: C.ink, ...(fullscreen ? { width: "100%", height: "100%" } : null) }}
+    >
       {/* The picture: click to pause and resume (the buttons below do the same for keyboards). */}
       <div
         ref={box}
         onClick={toggle}
         style={{ position: "relative", overflow: "hidden", cursor: "pointer", ...(fullscreen ? { flex: 1, minHeight: 0 } : { aspectRatio: `${W} / ${H}` }) }}
       >
-        <div role="img" aria-label={FILM_LABEL} style={{ position: "absolute", left: fit.x, top: fit.y, width: W, height: H, transform: `scale(${fit.scale})`, transformOrigin: "0 0", visibility: fit.scale ? "visible" : "hidden" }}>
+        <div
+          role="img"
+          aria-label={FILM_LABEL}
+          style={{
+            position: "absolute",
+            left: fit.x,
+            top: fit.y,
+            width: W,
+            height: H,
+            transform: `scale(${fit.scale})`,
+            transformOrigin: "0 0",
+            visibility: fit.scale ? "visible" : "hidden",
+          }}
+        >
           <PipelineFrame T={t} />
         </div>
         {!playing && (
@@ -794,14 +1080,26 @@ function Scrub({ t, onSeek }: { t: number; onSeek: (t: number) => void }) {
       }}
       onKeyDown={(e) => {
         const step = e.shiftKey ? 5 : 1;
-        const next = e.key === "ArrowRight" || e.key === "ArrowUp" ? t + step : e.key === "ArrowLeft" || e.key === "ArrowDown" ? t - step : e.key === "Home" ? 0 : e.key === "End" ? TOTAL : null;
+        const next =
+          e.key === "ArrowRight" || e.key === "ArrowUp"
+            ? t + step
+            : e.key === "ArrowLeft" || e.key === "ArrowDown"
+              ? t - step
+              : e.key === "Home"
+                ? 0
+                : e.key === "End"
+                  ? TOTAL
+                  : null;
         if (next === null) return;
         e.preventDefault();
         onSeek(clamp(next, 0, TOTAL));
       }}
       className="group relative h-7 min-w-0 flex-1 cursor-pointer touch-none rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
     >
-      <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-[height] group-hover:h-[5px]" style={{ background: "rgba(255,255,255,.14)" }}>
+      <div
+        className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-[height] group-hover:h-[5px]"
+        style={{ background: "rgba(255,255,255,.14)" }}
+      >
         <div className="h-full rounded-full" style={{ width: `${(t / TOTAL) * 100}%`, background: C.acc }} />
       </div>
     </div>

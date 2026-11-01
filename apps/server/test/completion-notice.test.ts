@@ -10,14 +10,29 @@ import {
   selectUnseen,
   type DoneNotice,
 } from "../src/notify/completion.js";
-import { EVENT_HANDLER_DEFAULTS, defineEventHandlers, eventHandlerJobs, eventHandlerQueues, eventHandlerSetting, parseEventHandlerJob, policyOf, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
+import {
+  EVENT_HANDLER_DEFAULTS,
+  defineEventHandlers,
+  eventHandlerJobs,
+  eventHandlerQueues,
+  eventHandlerSetting,
+  parseEventHandlerJob,
+  policyOf,
+  type EventHandlerDeps,
+  type ReadDb,
+} from "../src/event-handlers.js";
 import { projectEventHandlers } from "../src/project-event-handlers.js";
 import { PROJECT_EVENT_TYPES } from "@reelsaw/shared";
 import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
 
-const log = { debug() {}, child() { return log; } } as unknown as Logger;
+const log = {
+  debug() {},
+  child() {
+    return log;
+  },
+} as unknown as Logger;
 
 function done(p: Partial<DoneNotice> & Pick<DoneNotice, "eventId" | "projectId" | "at">): DoneNotice {
   return { title: p.title ?? p.projectId, clips: p.clips ?? 2, failed: p.failed ?? 0, rerender: p.rerender ?? false, ...p };
@@ -34,7 +49,10 @@ describe("ready email selection", () => {
       done({ eventId: 3, projectId: "c", at: now - 8 * 24 * hour }),
     ];
     const unseen = selectUnseen(events, now - hour, now);
-    assert.deepEqual(unseen.map((e) => e.projectId), ["b"]);
+    assert.deepEqual(
+      unseen.map((e) => e.projectId),
+      ["b"],
+    );
   });
 
   it("includes everything in the window when the account has never been stamped", () => {
@@ -170,8 +188,12 @@ describe("event handlers", () => {
   const handle = async () => {};
 
   it("lists every handler in one map, and a name twice on one event does not compile", () => {
-    assert.deepEqual(eventHandlerQueues(projectEventHandlers).map((q) => q.name), ["event.project.done.readyEmail"]);
+    assert.deepEqual(
+      eventHandlerQueues(projectEventHandlers).map((q) => q.name),
+      ["event.project.done.readyEmail"],
+    );
     // @ts-expect-error duplicate key in the one map
+    // biome-ignore lint/suspicious/noDuplicateObjectKeys: the duplicate is what this test proves does not compile
     defineEventHandlers({ "project.done": { x: { handle }, x: { handle } } });
   });
 
@@ -183,7 +205,11 @@ describe("event handlers", () => {
     const typePrefixes = PROJECT_EVENT_TYPES.map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
     const settings = Object.keys(envSchema.shape).filter((k) => typePrefixes.some((p) => k.startsWith(p)));
     assert.ok(settings.length > 0);
-    for (const k of settings) assert.ok(prefixes.some((p) => k.startsWith(p)), `${k} names no registered handler`);
+    for (const k of settings)
+      assert.ok(
+        prefixes.some((p) => k.startsWith(p)),
+        `${k} names no registered handler`,
+      );
   });
 
   it("fills a handler's queue options from the defaults, overridden at the definition", () => {
@@ -197,7 +223,10 @@ describe("event handlers", () => {
     assert.equal(policyOf({ oneAtATime: true }), "singleton");
     assert.equal(policyOf({ coalesce: true, oneAtATime: true }), "stately");
     const qs = eventHandlerQueues(defineEventHandlers({ "project.done": { readyEmail } }));
-    assert.deepEqual(qs.map((q) => [q.name, q.policy]), [["event.project.done.readyEmail", "stately"]]);
+    assert.deepEqual(
+      qs.map((q) => [q.name, q.policy]),
+      [["event.project.done.readyEmail", "stately"]],
+    );
   });
 
   it("queues one job per handler in emit then map order, keyed by event id unless the handler keys it", async () => {
@@ -209,12 +238,15 @@ describe("event handlers", () => {
       },
     });
     const jobs = await eventHandlerJobs(handlers, [event, { ...event, id: 2 }], db, deps(true));
-    assert.deepEqual(jobs.map((j) => [j.queue, j.data.key, j.startAfter ?? 0]), [
-      ["event.project.done.x", "1", 0],
-      ["event.project.done.y", "clips-2", 30],
-      ["event.project.done.x", "2", 0],
-      ["event.project.done.y", "clips-2", 30],
-    ]);
+    assert.deepEqual(
+      jobs.map((j) => [j.queue, j.data.key, j.startAfter ?? 0]),
+      [
+        ["event.project.done.x", "1", 0],
+        ["event.project.done.y", "clips-2", 30],
+        ["event.project.done.x", "2", 0],
+        ["event.project.done.y", "clips-2", 30],
+      ],
+    );
   });
 
   it("parses a job's event against the schema", () => {

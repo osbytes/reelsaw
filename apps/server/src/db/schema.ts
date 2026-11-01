@@ -1,58 +1,81 @@
 import { sql } from "drizzle-orm";
-import {
-  pgTable,
-  text,
-  timestamp,
-  boolean,
-  integer,
-  real,
-  jsonb,
-  bigserial,
-  bigint,
-  numeric,
-  index,
-  uniqueIndex,
-  primaryKey,
-} from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, TemplateLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
+import type {
+  EmailPrefSource,
+  EmailTopic,
+  ProjectSettings,
+  UserProjectDefaults,
+  ProjectStatus,
+  RunReason,
+  ClipStatus,
+  Word,
+  TranscriptSegment,
+  ProjectEventType,
+  ReframeMode,
+  TranscriptFlag,
+  RefineStatus,
+  LayoutSection,
+  DetectedSegment,
+  StyleOverride,
+  ClipScores,
+  ClipOrigin,
+  ClipDiagnostics,
+  ClipBumpers,
+  ClipOverlay,
+  ClipAudio,
+  ClipLayer,
+  TemplateLayer,
+  AssetProvenance,
+  RenderedCaptions,
+  SourceOverlay,
+  TextProfile,
+  DecisionKind,
+  SourceRef,
+} from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 // ---------- Better Auth core tables ----------
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
-  /** admin: sees system settings and manages users. The first account is admin. */
-  role: text("role").$type<UserRole>().default("user").notNull(),
-  /** null = waiting for an admin (SIGNUP_MODE=approval). */
-  approvedAt: timestamp("approved_at", { withTimezone: true }),
-  banned: boolean("banned").default(false).notNull(),
-  banReason: text("ban_reason"),
-  /** one key per real mailbox (abuse.ts `emailKey`); unique, so `a.b+x@gmail.com` cannot register twice */
-  emailKey: text("email_key"),
-  /** the address the sign-up came from (behind the proxy's headers); null when unknown */
-  signupIp: text("signup_ip"),
-  /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
-  flags: jsonb("flags").$type<string[]>().notNull().default([]),
-  /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
-  mustChangePassword: boolean("must_change_password").default(false).notNull(),
-  /** last authenticated request, coalesced (presence.ts). Null until the first one after this column existed. */
-  lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
-},
-(t) => [
-  // admin Users search: ILIKE '%q%' and word similarity on name and email
-  index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
-  index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
-  uniqueIndex("user_email_key_idx").on(t.emailKey),
-  index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
-]);
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    /** admin: sees system settings and manages users. The first account is admin. */
+    role: text("role").$type<UserRole>().default("user").notNull(),
+    /** null = waiting for an admin (SIGNUP_MODE=approval). */
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    banned: boolean("banned").default(false).notNull(),
+    banReason: text("ban_reason"),
+    /** one key per real mailbox (abuse.ts `emailKey`); unique, so `a.b+x@gmail.com` cannot register twice */
+    emailKey: text("email_key"),
+    /** the address the sign-up came from (behind the proxy's headers); null when unknown */
+    signupIp: text("signup_ip"),
+    /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
+    flags: jsonb("flags").$type<string[]>().notNull().default([]),
+    /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
+    mustChangePassword: boolean("must_change_password").default(false).notNull(),
+    /** last authenticated request, coalesced (presence.ts). Null until the first one after this column existed. */
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    // admin Users search: ILIKE '%q%' and word similarity on name and email
+    index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
+    index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
+    uniqueIndex("user_email_key_idx").on(t.emailKey),
+    index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
+  ],
+);
 
 /** Per-account request counter for the mutation rate limit (abuse.ts `checkRequestRate`): one row per user and minute, pruned hourly. */
 export const userRate = pgTable(
@@ -72,7 +95,10 @@ export const session = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     token: text("token").notNull().unique(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     userId: text("user_id")
@@ -99,7 +125,10 @@ export const account = pgTable(
     scope: text("scope"),
     password: text("password"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index("account_user_id_idx").on(t.userId)],
 );
@@ -112,7 +141,10 @@ export const verification = pgTable(
     value: text("value").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
@@ -173,6 +205,7 @@ export const ADMIN_EVENT_TYPES = [
   "billing.payment_failed",
   "billing.canceled",
   "billing.complimentary",
+  "billing.unknown_price",
 ] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
@@ -296,8 +329,8 @@ export const userSettings = pgTable("user_settings", {
   limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
   /** admin's per-user watermark decision: true / false; null = follow the plan and the instance setting (quota.ts `watermarkFor`) */
   watermark: boolean("watermark"),
-  /** the ready email (notify/completion.ts); off from Settings, `set_email_preferences`, `reelsaw email-prefs` or the email's unsubscribe link */
-  readyEmail: boolean("ready_email").default(true).notNull(),
+  /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
+  learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;
@@ -352,7 +385,9 @@ export const assets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("assets_user_idx").on(t.userId), index("assets_hash_idx").on(t.userId, t.contentHash),
+  (t) => [
+    index("assets_user_idx").on(t.userId),
+    index("assets_hash_idx").on(t.userId, t.contentHash),
     // the hourly purge looks for removed assets across all users
     index("assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
     // one instance-shared row per catalog / provider item (and Iconify colour), however many accounts import it
@@ -401,6 +436,8 @@ export const layerTemplates = pgTable(
     name: text("name").notNull(),
     /** the layers with their timing (TemplateLayer[], max MAX_CLIP_LAYERS) */
     layers: jsonb("layers").$type<TemplateLayer[]>().notNull().default([]),
+    /** intro / outro applied with the layers (clip-bumper shape; a missing slot leaves the clip's own); null = none */
+    bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -431,10 +468,19 @@ export const projects = pgTable(
     sourceExpiredAt: timestamp("source_expired_at", { withTimezone: true }),
     stage: text("stage"),
     stageProgress: real("stage_progress"),
+    /** checkpointed stages: units done, total, seconds left (remaining x rolling median unit time) and that median in ms; null when the stage is not made of steps */
+    stageDetail: jsonb("stage_detail").$type<{ done: number; total: number; etaSec: number | null; unitMs: number | null }>(),
     /** explicit runs (see pipeline/lifecycle.ts startRun): how many have started, when and why the current/last one did */
     runSeq: integer("run_seq").notNull().default(0),
     runStartedAt: timestamp("run_started_at", { withTimezone: true }),
     runReason: text("run_reason").$type<RunReason>(),
+    /**
+     * Version of the project's stage work (ingest → analyze), like clips.render_gen: bumped when a retry, re-analyze,
+     * refine or delete supersedes it. Stage jobs carry it and commit only while it is current (see pipeline/common.ts).
+     */
+    stageSeq: integer("stage_seq").notNull().default(0),
+    /** times the reconciler re-enqueued this project's lost job since the last user start or retry; past the limit it fails the project (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     /** when the stage now running began; stage.completed / stage.failed durations come from it */
     stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
@@ -443,6 +489,10 @@ export const projects = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     /** soft delete: hidden everywhere, restorable until the purge (DELETED_RETENTION_DAYS) removes the row and its files */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
+    forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
+    /** the creator's own key/value pairs (create_project `metadata`), never interpreted; echoed in every webhook for the project */
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
   },
   (t) => [
     // the hourly purge looks for deleted projects across all users
@@ -476,6 +526,37 @@ export const transcriptChunks = pgTable(
   (t) => [uniqueIndex("transcript_chunks_project_index_idx").on(t.projectId, t.index)],
 );
 
+/**
+ * Durable checkpoints of a pipeline stage (pipeline/steps.ts, `ctx.step`): one row per unit of work (a map window,
+ * a scoring batch). The key hashes the unit's content, model, prompt version and parameters, so a retry, or a
+ * re-run with the same inputs, reuses the row and a changed input misses. Cascades with the project; the hourly
+ * sweep drops the rows of finished projects after STEP_RETENTION_DAYS.
+ */
+export const jobSteps = pgTable(
+  "job_steps",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** set for clip-scoped steps (prepare); null for project stages */
+    clipId: text("clip_id"),
+    stage: text("stage").notNull(),
+    name: text("name").notNull(),
+    key: text("key").notNull(),
+    status: text("status").$type<"done" | "failed">().notNull(),
+    /** bounded JSON only; validated with the caller's schema on read */
+    output: jsonb("output"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    /** the projects.stage_seq that wrote it: diagnostics, not part of the key */
+    stageSeq: integer("stage_seq").notNull(),
+    ms: integer("ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.stage, t.name, t.key] }), index("job_steps_project_stage_idx").on(t.projectId, t.stage)],
+);
+
 export const transcripts = pgTable("transcripts", {
   projectId: text("project_id")
     .primaryKey()
@@ -506,6 +587,8 @@ export const clips = pgTable(
     id: text("id").primaryKey(),
     /** bumped on every render request; a render only commits if its generation is still current */
     renderGen: integer("render_gen").notNull().default(0),
+    /** times the reconciler re-enqueued this clip's lost job since the last render or prepare request; past the limit it fails the clip (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -583,9 +666,7 @@ export const projectEvents = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index("project_events_project_id_idx").on(t.projectId, t.id),
-  ],
+  (t) => [index("project_events_project_id_idx").on(t.projectId, t.id)],
 );
 
 export type Project = typeof projects.$inferSelect;
@@ -632,6 +713,25 @@ export const finishedProjects = pgTable(
 );
 
 /**
+ * An account's choice for one topic of optional mail (notify/preferences.ts). No row = the topic's
+ * default (`EMAIL_TOPICS` in @reelsaw/shared), so a new topic needs no backfill. `source` says where the
+ * choice was made, which is also the consent record an opt-in topic needs (docs/specs/email.md).
+ */
+export const emailTopicPrefs = pgTable(
+  "email_topic_prefs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    topic: text("topic").$type<EmailTopic>().notNull(),
+    enabled: boolean("enabled").notNull(),
+    source: text("source").$type<EmailPrefSource>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.topic] })],
+);
+
+/**
  * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate
  * moment with its scores and the filter that dropped it. Written in the stage's unit of work.
  * `models` records what actually ran (config at report time may differ).
@@ -653,6 +753,41 @@ export const stageArtifacts = pgTable(
   (t) => [index("stage_artifacts_project_id_idx").on(t.projectId, t.id)],
 );
 
+/**
+ * Append-only log of what users decided about the pipeline's output (docs/specs/decision-log.md): accepted, rejected,
+ * deleted and manual fixes, clip edits, deletes and re-picks, each with the before/after values and enough context
+ * to judge it without the project. `project_id` / `clip_id` are deliberately not foreign keys: decisions outlive
+ * the project ("Delete forever" keeps them unless the user asks to forget). Written in the action's unit of work
+ * (`recordDecisions`); pruned after DECISION_RETENTION_DAYS (events-retention.ts).
+ */
+export const userDecisions = pgTable(
+  "user_decisions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    clipId: text("clip_id"),
+    kind: text("kind").$type<DecisionKind>().notNull(),
+    /** a person chose it (false: inferred, e.g. a clip a re-analyze replaced) */
+    explicit: boolean("explicit").notNull(),
+    before: jsonb("before").$type<Record<string, unknown> | null>(),
+    after: jsonb("after").$type<Record<string, unknown> | null>(),
+    context: jsonb("context").$type<Record<string, unknown>>().notNull(),
+    models: jsonb("models").$type<Record<string, string>>().notNull().default({}),
+    source: jsonb("source").$type<SourceRef>().notNull(),
+    appVersion: text("app_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("user_decisions_user_idx").on(t.userId, t.id),
+    index("user_decisions_user_kind_idx").on(t.userId, t.kind, t.id),
+    index("user_decisions_project_idx").on(t.projectId, t.id),
+  ],
+);
+export type UserDecision = typeof userDecisions.$inferSelect;
+
 export * from "./oauth-schema.js";
 
 // ---------- Enterprise edition (apps/server/src/ee, loaded with REELSAW_EE=true) ----------
@@ -669,7 +804,17 @@ export const billingCustomers = pgTable("billing_customers", {
 });
 
 /** Stripe's subscription statuses plus `complimentary` (an admin granted the plan without Stripe). */
-export const BILLING_STATUSES = ["trialing", "active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused", "complimentary"] as const;
+export const BILLING_STATUSES = [
+  "trialing",
+  "active",
+  "past_due",
+  "unpaid",
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+  "complimentary",
+] as const;
 export type BillingStatus = (typeof BILLING_STATUSES)[number];
 export type BillingInterval = "month" | "year";
 
@@ -730,7 +875,10 @@ export const billingEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     error: text("error"),
   },
-  (t) => [index("billing_events_subscription_idx").on(t.subscriptionId, t.created), index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`)],
+  (t) => [
+    index("billing_events_subscription_idx").on(t.subscriptionId, t.created),
+    index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`),
+  ],
 );
 export type BillingEventRow = typeof billingEvents.$inferSelect;
 
@@ -762,12 +910,163 @@ export const workerInstances = pgTable(
     /** -1 when this filesystem cannot report free space (same as ResourceSnapshot) */
     diskFreeMB: integer("disk_free_mb").notNull().default(-1),
     diskTotalMB: integer("disk_total_mb").notNull().default(0),
+    /** the filesystem DATA_DIR is on (the `.volume-id` marker, disk-leases.ts); processes sharing it share disk leases */
+    volume: text("volume"),
+    /** MB leased to jobs in flight on that volume (every process on it), as of this beat */
+    diskLeasedMB: integer("disk_leased_mb").notNull().default(0),
     gpu: jsonb("gpu").$type<WorkerGpu | null>(),
     renders: jsonb("renders").$type<WorkerRenders>().notNull(),
     queues: text("queues").array().notNull().default(sql`'{}'::text[]`),
     processing: jsonb("processing").$type<WorkerJob[]>().notNull().default(sql`'[]'::jsonb`),
+    /** what this process was short of at its last beat (resources.ts `pausedReason`): heavy jobs wait on it; null = room */
+    paused: text("paused").$type<"memory" | "CPU" | "disk">(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("worker_instances_last_seen_idx").on(t.lastSeenAt)],
 );
 export type WorkerInstanceRow = typeof workerInstances.$inferSelect;
+
+/**
+ * Disk a job in flight has claimed on a volume (the filesystem DATA_DIR is on, identified by the
+ * `.volume-id` marker every process sharing it reads). resources.ts takes one, atomically against the
+ * volume's live total, before a stage writes its scratch, and the stage gives it back when it ends; a
+ * lease counts while its worker heartbeats and until it expires (the longest a stage job may run), so
+ * a crash leaks nothing for long. disk-leases.ts.
+ */
+export const diskLeases = pgTable(
+  "disk_leases",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    volume: text("volume").notNull(),
+    workerId: text("worker_id").notNull(),
+    jobId: text("job_id"),
+    projectId: text("project_id"),
+    /** the stage that took it: ingest, transcribe, render */
+    kind: text("kind").notNull(),
+    mb: integer("mb").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("disk_leases_volume_idx").on(t.volume, t.expiresAt), index("disk_leases_worker_idx").on(t.workerId)],
+);
+export type DiskLeaseRow = typeof diskLeases.$inferSelect;
+
+// ---------- Integrations: share links and webhooks (docs/specs/media-links.md, docs/specs/webhooks.md) ----------
+
+export const MEDIA_LINK_KINDS = ["clip", "thumb", "srt", "vtt", "export"] as const;
+export type MediaLinkKind = (typeof MEDIA_LINK_KINDS)[number];
+export const MEDIA_LINK_SOURCES = ["ui", "mcp", "cli", "webhook"] as const;
+export type MediaLinkSource = (typeof MEDIA_LINK_SOURCES)[number];
+
+/**
+ * A share link: anyone with its URL (`/m/<token>/<name>.<ext>`) can fetch the clip's current render, thumbnail, captions
+ * or the project's export zip, until it expires or is revoked. Looked up by the token's hash; the token is also kept
+ * sealed so the owner can copy the link again. media-links/service.ts.
+ */
+export const mediaLinks = pgTable(
+  "media_links",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** null for kind export */
+    clipId: text("clip_id").references(() => clips.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<MediaLinkKind>().notNull(),
+    /** export only: the subset, as for ?clips=; null = every rendered clip */
+    clipIds: text("clip_ids").array(),
+    /** sha256 of the token, hex */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** the token, sealed with the "media-links" secret box */
+    tokenSealed: text("token_sealed").notNull(),
+    source: text("source").$type<MediaLinkSource>().notNull(),
+    label: text("label"),
+    /** null = never expires (only where MEDIA_LINK_ALLOW_NEVER) */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    useCount: integer("use_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // the owner's list, newest first (listLinks pages by created_at, id)
+    index("media_links_user_idx").on(t.userId, t.createdAt, t.id),
+    index("media_links_project_idx").on(t.projectId),
+    // reuse lookup (getOrCreateLink) and per-clip revoke
+    index("media_links_clip_kind_idx").on(t.clipId, t.kind).where(sql`${t.revokedAt} is null`),
+  ],
+);
+export type MediaLinkRow = typeof mediaLinks.$inferSelect;
+
+/** Events a webhook endpoint may subscribe to; `webhook.test` is sent by Send test only. */
+export const WEBHOOK_EVENT_TYPES = ["project.created", "project.done", "project.failed", "clip.done", "clip.failed"] as const;
+export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
+
+/** Where an account's events are POSTed, signed with the Standard Webhooks scheme. webhooks/service.ts. */
+export const webhookEndpoints = pgTable(
+  "webhook_endpoints",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    description: text("description"),
+    events: text("events").array().$type<WebhookEventType[]>().notNull(),
+    /** whsec_… sealed with the "webhooks" secret box */
+    secretSealed: text("secret_sealed").notNull(),
+    /** a rotation keeps the previous secret signing until prev_secret_until */
+    prevSecretSealed: text("prev_secret_sealed"),
+    prevSecretUntil: timestamp("prev_secret_until", { withTimezone: true }),
+    enabled: boolean("enabled").notNull().default(true),
+    /** why it was turned off, as the UI says it; null when the owner turned it off or it is on */
+    disabledReason: text("disabled_reason"),
+    /** first failed delivery of the current streak; null when healthy */
+    failingSince: timestamp("failing_since", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("webhook_endpoints_user_idx").on(t.userId, t.id)],
+);
+export type WebhookEndpointRow = typeof webhookEndpoints.$inferSelect;
+
+export const WEBHOOK_DELIVERY_STATUSES = ["pending", "sending", "delivered", "failed", "cancelled"] as const;
+export type WebhookDeliveryStatus = (typeof WEBHOOK_DELIVERY_STATUSES)[number];
+
+/**
+ * One event for one endpoint (the outbox): inserted in the unit of work that emitted the event (uow.ts), sent by the
+ * `webhooks.deliver` job, retried on a schedule. `body` is built at the first attempt and resent byte for byte.
+ */
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    endpointId: text("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    /** project_events.id; no FK: events are pruned and projects purged. null for webhook.test */
+    eventId: bigint("event_id", { mode: "number" }),
+    projectId: text("project_id"),
+    type: text("type").notNull(),
+    status: text("status").$type<WebhookDeliveryStatus>().notNull().default("pending"),
+    attempt: integer("attempt").notNull().default(0),
+    body: text("body"),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    lastResponse: text("last_response"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.id),
+    index("webhook_deliveries_user_idx").on(t.userId, t.id),
+    // the sweep for deliveries whose job was lost (deliver.ts requeueStuckDeliveries)
+    index("webhook_deliveries_due_idx").on(t.nextAttemptAt).where(sql`${t.status} in ('pending', 'sending')`),
+  ],
+);
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;

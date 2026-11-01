@@ -41,7 +41,7 @@ export interface ProviderRegistry {
   list(): ProviderInfo[];
   has(id: string): boolean;
   search(id: string, q: string, opts?: Partial<SearchOptions>): Promise<CatalogSearchResult>;
-  resolve(id: string, externalId: string, opts?: { color?: string }): Promise<Resolved>;
+  resolve(id: string, externalId: string, opts?: { color?: string | undefined }): Promise<Resolved>;
 }
 
 export function createProviderRegistry(deps: { settings: () => RuntimeSettings; http: ProviderHttp; catalog: Catalog; now?: () => number }): ProviderRegistry {
@@ -60,7 +60,10 @@ export function createProviderRegistry(deps: { settings: () => RuntimeSettings; 
   const active = () => all.filter((p) => p.listed(deps.settings())).map((p) => p.provider);
   const get = (id: string) => {
     const p = active().find((x) => x.id === id);
-    if (!p) throw new ProviderError(`Unknown or disabled provider "${id}". Providers with a key are hidden until an admin sets it under Settings → System → Library.`);
+    if (!p)
+      throw new ProviderError(
+        `Unknown or disabled provider "${id}". Providers with a key are hidden until an admin sets it under Settings → System → Library.`,
+      );
     return p;
   };
 
@@ -84,7 +87,15 @@ export function createProviderRegistry(deps: { settings: () => RuntimeSettings; 
   };
 
   return {
-    list: () => active().map((p) => ({ id: p.id, label: p.label, kinds: p.kinds, attributionLine: p.attributionLine, experimental: !!p.experimental, available: !deps.http.unavailableUntil(p.id) })),
+    list: () =>
+      active().map((p) => ({
+        id: p.id,
+        label: p.label,
+        kinds: p.kinds,
+        attributionLine: p.attributionLine,
+        experimental: !!p.experimental,
+        available: !deps.http.unavailableUntil(p.id),
+      })),
     has: (id) => active().some((p) => p.id === id),
     async search(id, q, opts = {}) {
       const p = get(id);

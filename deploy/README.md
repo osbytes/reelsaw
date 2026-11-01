@@ -151,6 +151,16 @@ prints the same from the shell, and agents can ask with the `check_for_update` M
 asks GitHub's releases API every 6 hours (`UPDATE_CHECK_HOURS`) sending nothing but the request;
 `UPDATE_CHECK=false` turns it off.
 
+Back up first (see below): migrations only go forward, so pinning an older image after an upgrade
+is not a rollback unless that version's migrations match your database
+([irreversible migrations](../docs/RELEASING.md#irreversible-migrations)).
+
+**Waiting for renders on upgrade.** On `docker compose up -d` the app stops accepting requests, then
+waits up to `SHUTDOWN_GRACE_SECONDS` (default 300) for running jobs. Docker kills the container at
+`stop_grace_period`, which is `STOP_GRACE_PERIOD` in `.env` (default `330s`). If you raise
+`SHUTDOWN_GRACE_SECONDS`, set `STOP_GRACE_PERIOD` to at least that plus 30 seconds (for 900, use
+`930s`); the app logs a warning at boot when the two cannot both hold.
+
 ## Back up
 
 Everything lives in two volumes: `reelsaw_pgdata` (database) and `reelsaw_data` (videos, clips).
@@ -174,3 +184,17 @@ docker compose logs app                      # boot and job logs
 docker compose exec app reelsaw status <id>  # one project's pipeline state (id from the URL)
 docker compose exec app reelsaw machine      # cpus, memory, disk, GPU, ffmpeg encoder in use
 ```
+
+**`password authentication failed for user "reelsaw"` at boot.** The `reelsaw_pgdata` volume keeps the
+password it was created with, and a new `.env` (a deleted install folder, a second checkout, an
+install made by another tool under the same project name) carries a different one. The installer
+handles this on every run: it keeps the volume and sets the database password from `.env` before the
+app starts, so re-running `install.sh` / `install.ps1` is the fix. By hand, from the install folder:
+
+```bash
+docker compose up -d db
+docker compose exec -T db psql -U reelsaw -d reelsaw -c "alter user reelsaw password '$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)'"
+docker compose up -d
+```
+
+To start over instead (drops every project): `docker compose down && docker volume rm reelsaw_pgdata reelsaw_data`.

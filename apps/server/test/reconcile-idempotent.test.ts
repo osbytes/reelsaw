@@ -50,7 +50,10 @@ describe("reconcile", { skip: notReady ?? false }, () => {
     const r = await reconcile(h.svc);
     assert.equal(r.requeued, 0);
     const jobs = await h.jobsFor([busy]);
-    assert.deepEqual(jobs.map((j) => j.state), ["active"]);
+    assert.deepEqual(
+      jobs.map((j) => j.state),
+      ["active"],
+    );
   });
 
   it("a rendering project re-queues a clip without a render job once, at the clip's current generation", async () => {
@@ -63,7 +66,11 @@ describe("reconcile", { skip: notReady ?? false }, () => {
     const jobs = await h.pool.query(`select data from pgboss.job where singleton_key = $1`, [clipId]);
     assert.equal(jobs.rowCount, 1);
     assert.equal(jobs.rows[0].data.gen, 4);
-    assert.equal((await h.pool.query(`select render_gen from clips where id = $1`, [clipId])).rows[0].render_gen, 4, "reconciling does not bump the generation");
+    assert.equal(
+      (await h.pool.query(`select render_gen from clips where id = $1`, [clipId])).rows[0].render_gen,
+      4,
+      "reconciling does not bump the generation",
+    );
   });
 
   it("projects that are done, failed or only scheduled are left alone", async () => {

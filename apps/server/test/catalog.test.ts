@@ -20,8 +20,17 @@ const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex")
 const PACK = path.resolve(import.meta.dirname, "../assets/catalog");
 
 const item = (id: string, name: string, over: Record<string, unknown> = {}) => ({
-  id, kind: "audio", mime: "audio/mpeg", name, tags: [name.toLowerCase()], bytes: 3, sha256: sha("abc"), url: `files/${id}.mp3`,
-  license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" }, source: { url: "https://example.com/" }, ...over,
+  id,
+  kind: "audio",
+  mime: "audio/mpeg",
+  name,
+  tags: [name.toLowerCase()],
+  bytes: 3,
+  sha256: sha("abc"),
+  url: `files/${id}.mp3`,
+  license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" },
+  source: { url: "https://example.com/" },
+  ...over,
 });
 const manifest = (version: number, items: unknown[]): Manifest => manifestSchema.parse({ version, generatedAt: "2026-10-01T00:00:00Z", items });
 
@@ -61,7 +70,9 @@ describe("catalog manifest", () => {
       const h = init.headers as Record<string, string>;
       seen.push(h["if-none-match"]);
       assert.equal(h["user-agent"], "reelsaw/1.2.3");
-      return h["if-none-match"] === '"v5"' ? new Response(null, { status: 304 }) : new Response(JSON.stringify(online), { status: 200, headers: { etag: '"v5"' } });
+      return h["if-none-match"] === '"v5"'
+        ? new Response(null, { status: 304 })
+        : new Response(JSON.stringify(online), { status: 200, headers: { etag: '"v5"' } });
     }) as unknown as typeof fetch;
     const c = store(await bundle(manifest(1, [item("sfx-pop", "Pop")])), f);
     const first = await c.refresh();
@@ -79,7 +90,14 @@ describe("catalog manifest", () => {
 
   it("keeps the bundled pack when the online manifest is older, invalid, or unreachable", async () => {
     const b = await bundle(manifest(3, [item("sfx-pop", "Pop")]));
-    for (const res of [() => new Response(JSON.stringify(manifest(2, [])), { status: 200 }), () => new Response("not json", { status: 200 }), () => new Response(JSON.stringify({ version: 9, items: [{ id: 1 }] }), { status: 200 }), () => { throw new Error("offline"); }]) {
+    for (const res of [
+      () => new Response(JSON.stringify(manifest(2, [])), { status: 200 }),
+      () => new Response("not json", { status: 200 }),
+      () => new Response(JSON.stringify({ version: 9, items: [{ id: 1 }] }), { status: 200 }),
+      () => {
+        throw new Error("offline");
+      },
+    ]) {
       const c = store(b, (async () => res()) as unknown as typeof fetch);
       const r = await c.refresh({ force: true });
       assert.equal(r.status.version, 3);
@@ -89,18 +107,31 @@ describe("catalog manifest", () => {
 
   it("refuses a non-https CATALOG_URL without fetching", async () => {
     let called = false;
-    const c = createCatalog({ config: { DATA_DIR: dir, REELSAW_VERSION: "x" }, url: () => "http://insecure.test/index.json", log, fetch: (async () => ((called = true), new Response("{}"))) as unknown as typeof fetch, bundledDir: await bundle(manifest(1, [])) });
+    const c = createCatalog({
+      config: { DATA_DIR: dir, REELSAW_VERSION: "x" },
+      url: () => "http://insecure.test/index.json",
+      log,
+      fetch: (async () => ((called = true), new Response("{}"))) as unknown as typeof fetch,
+      bundledDir: await bundle(manifest(1, [])),
+    });
     const r = await c.refresh();
     assert.equal(called, false);
     assert.match(r.status.lastError!, /https/);
   });
 
   it("searches name and tags with Fuse, filters by kind and pages", async () => {
-    const items = [item("sfx-whoosh", "Whoosh in", { tags: ["swoosh", "transition"] }), item("sfx-ding", "Ding", { tags: ["bell"] }), item("icon-star", "Star", { kind: "image", mime: "image/svg+xml", url: "files/icon-star.svg", tags: ["favorite"] })];
+    const items = [
+      item("sfx-whoosh", "Whoosh in", { tags: ["swoosh", "transition"] }),
+      item("sfx-ding", "Ding", { tags: ["bell"] }),
+      item("icon-star", "Star", { kind: "image", mime: "image/svg+xml", url: "files/icon-star.svg", tags: ["favorite"] }),
+    ];
     const c = store(await bundle(manifest(1, items)));
     assert.equal((await c.search("swoosh", { limit: 5 })).items[0]!.externalId, "sfx-whoosh", "found by tag");
     assert.equal((await c.search("wosh", { limit: 5 })).items[0]!.externalId, "sfx-whoosh", "fuzzy");
-    assert.deepEqual((await c.search("", { kind: "image", limit: 5 })).items.map((i) => i.externalId), ["icon-star"]);
+    assert.deepEqual(
+      (await c.search("", { kind: "image", limit: 5 })).items.map((i) => i.externalId),
+      ["icon-star"],
+    );
     const p1 = await c.search("", { limit: 2 });
     assert.equal(p1.items.length, 2);
     assert.equal(p1.nextCursor, "2");
@@ -130,7 +161,8 @@ describe("the committed starter pack", () => {
   });
   it("finds the sounds it is named for", async () => {
     const c = createCatalog({ config: { DATA_DIR: dir, REELSAW_VERSION: "x" }, url: () => URL_, log, bundledDir: PACK });
-    for (const q of ["pop", "ding", "whoosh", "click", "error", "success", "record scratch"]) assert.ok((await c.search(q, { kind: "audio", limit: 3 })).items.length, q);
+    for (const q of ["pop", "ding", "whoosh", "click", "error", "success", "record scratch"])
+      assert.ok((await c.search(q, { kind: "audio", limit: 3 })).items.length, q);
   });
 });
 
@@ -149,6 +181,15 @@ function fakeSvc(opts: { fetch?: typeof fetch; bundledDir: string }) {
       delete: async (k: string) => void objects.delete(k),
     },
     database: { db: { insert: () => ({ values: async (v: Record<string, unknown>) => void uploads.push(v) }) } },
+    // the unit of work: the same fake table, no quota (settings carry no MAX_STORAGE_MB), the lock and settings reads answered empty
+    tx: async (fn: (u: unknown) => Promise<unknown>) =>
+      fn({
+        db: {
+          insert: () => ({ values: async (v: Record<string, unknown>) => void uploads.push(v) }),
+          execute: async () => ({ rows: [] }),
+          query: { userSettings: { findFirst: async () => undefined } },
+        },
+      }),
   } as unknown as Services;
   libraryProviders(svc, { fetch: opts.fetch, bundledDir: opts.bundledDir });
   return { svc, objects, uploads };
@@ -193,7 +234,13 @@ describe("importing from the catalog", () => {
     assert.equal("saveFor" in c, false);
     assert.equal("category" in c, false);
     assert.deepEqual(c.tags, ["bubble", "extra"]);
-    assert.deepEqual(c.provenance, { provider: "reelsaw", externalId: "sfx-pop", url: "https://example.com/", license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" }, variant: "" });
+    assert.deepEqual(c.provenance, {
+      provider: "reelsaw",
+      externalId: "sfx-pop",
+      url: "https://example.com/",
+      license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" },
+      variant: "",
+    });
   });
 
   it("a second account importing the same item reuses the shared row", async () => {
@@ -234,7 +281,10 @@ describe("importing from the catalog", () => {
     const ok = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-new" }, { shared, fetch: f, lookup });
     assert.equal(ok.id, "asset-1");
     assert.equal(created.at(-1)!.system, true);
-    assert.equal([...objects.values()].some((b) => b.toString() === "abc"), true);
+    assert.equal(
+      [...objects.values()].some((b) => b.toString() === "abc"),
+      true,
+    );
     body = "evil";
     objects.clear();
     rows.clear(); // not yet on the instance, so it is fetched again

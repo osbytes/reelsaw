@@ -22,9 +22,16 @@ services:
   app:
     build: .
     image: reelsaw:latest
-    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
-    stop_grace_period: 330s
+    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them. If you raise
+    # SHUTDOWN_GRACE_SECONDS, set STOP_GRACE_PERIOD in .env to at least that + 30s (e.g. 930s for 900)
+    stop_grace_period: ${STOP_GRACE_PERIOD:-330s}
     restart: unless-stopped
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "5"
     depends_on:
       db:
         condition: service_healthy
@@ -38,7 +45,8 @@ services:
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
       WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
-      # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
+      # JSON logs also go here so they survive container re-creation: `reelsaw logs <id>`. Each process writes its own
+      # file (reelsaw.<worker id>.<date>.log, rotated daily, 7 kept) so scaled workers never prune each other's
       LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "true"
       RUN_WORKERS: ${RUN_WORKERS_IN_APP:-true}
@@ -51,10 +59,20 @@ services:
   worker:
     build: .
     image: reelsaw:latest
-    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
-    stop_grace_period: 330s
+    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them. If you raise
+    # SHUTDOWN_GRACE_SECONDS, set STOP_GRACE_PERIOD in .env to at least that + 30s (e.g. 930s for 900)
+    stop_grace_period: ${STOP_GRACE_PERIOD:-330s}
     restart: unless-stopped
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "5"
     profiles: ["workers"]
+    # RUN_HTTP=false: the image's /api/health check would always fail
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
@@ -67,7 +85,8 @@ services:
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
       WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
-      # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
+      # JSON logs also go here so they survive container re-creation: `reelsaw logs <id>`. Each process writes its own
+      # file (reelsaw.<worker id>.<date>.log, rotated daily, 7 kept) so scaled workers never prune each other's
       LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "false"
       RUN_WORKERS: "true"

@@ -18,14 +18,20 @@ describe("ingestScratchMB", () => {
 
 describe("parseDownloadTick", () => {
   it("reads a yt-dlp --newline progress line", () => {
-    assert.deepEqual(parseDownloadTick("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00"), { fraction: 0.123, message: "Downloading 12% of 1.57GiB at 5.00MiB/s" });
-    assert.deepEqual(parseDownloadTick("[download] 100.0% of  114.74KiB at    5.98MiB/s ETA 00:00"), { fraction: 1, message: "Downloading 100% of 114.74KiB at 5.98MiB/s" });
+    assert.deepEqual(parseDownloadTick("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00"), {
+      fraction: 0.123,
+      message: "Downloading 12% of 1.57GiB at 5.00MiB/s",
+    });
+    assert.deepEqual(parseDownloadTick("[download] 100.0% of  114.74KiB at    5.98MiB/s ETA 00:00"), {
+      fraction: 1,
+      message: "Downloading 100% of 114.74KiB at 5.98MiB/s",
+    });
     assert.deepEqual(parseDownloadTick("[download]   0.0% of   10.00MiB at  Unknown B/s ETA Unknown"), { fraction: 0, message: "Downloading 0% of 10.00MiB" });
   });
   it("ignores everything else, including the --print-json line", () => {
     assert.equal(parseDownloadTick('{"id": "x", "title": "[download] 50%"}'), null);
     assert.equal(parseDownloadTick("[download] Destination: source.f137.mp4"), null);
-    assert.equal(parseDownloadTick("[Merger] Merging formats into \"source.mp4\""), null);
+    assert.equal(parseDownloadTick('[Merger] Merging formats into "source.mp4"'), null);
     assert.equal(parseDownloadTick(""), null);
   });
 });
@@ -33,7 +39,8 @@ describe("parseDownloadTick", () => {
 describe("describeDownloadFailure", () => {
   it("explains a proxy / tunnel rejection without env keys (admins get those in the UI)", () => {
     const err = new Error("Download failed");
-    const stderr = "ERROR: [youtube] 9hSfOfgrL1I: Unable to download API page: <urlopen error Tunnel connection failed: 407 NO_USER> (caused by ProxyError('<urlopen error Tunnel connection failed: 407 NO_USER>')); please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=";
+    const stderr =
+      "ERROR: [youtube] 9hSfOfgrL1I: Unable to download API page: <urlopen error Tunnel connection failed: 407 NO_USER> (caused by ProxyError('<urlopen error Tunnel connection failed: 407 NO_USER>')); please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=";
     const msg = describeDownloadFailure(err, stderr);
     assert.match(msg, /proxy blocked/i);
     assert.doesNotMatch(msg, /YTDLP_/);
@@ -47,8 +54,22 @@ describe("describeDownloadFailure", () => {
     assert.doesNotMatch(msg, /YTDLP_/);
   });
   it("keeps a short ERROR line without the github trailer", () => {
-    const msg = describeDownloadFailure(new Error("x"), "ERROR: Something obscure broke; please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=");
+    const msg = describeDownloadFailure(
+      new Error("x"),
+      "ERROR: Something obscure broke; please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=",
+    );
     assert.equal(msg, "Could not download: Something obscure broke");
+  });
+  it("says a page 404 / 410 is a dead link", () => {
+    const stderr = "ERROR: [generic] zapier-logo: Unable to download webpage: HTTP Error 404: Not Found (caused by <HTTPError 404: Not Found>)";
+    assert.match(describeDownloadFailure(new Error("x"), stderr), /link no longer exists/i);
+  });
+  it("does not call a 404 on the media URL, or one in a retry notice, a dead link", () => {
+    assert.doesNotMatch(describeDownloadFailure(new Error("x"), "ERROR: unable to download video data: HTTP Error 404: Not Found"), /no longer exists/i);
+    assert.doesNotMatch(
+      describeDownloadFailure(new Error("x"), "[download] Got error: HTTP Error 404: Not Found. Retrying (1/10)...\nERROR: Connection reset by peer"),
+      /no longer exists/i,
+    );
   });
 });
 

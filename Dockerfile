@@ -6,7 +6,7 @@
 # runs once on the build machine's own architecture ($BUILDPLATFORM).
 
 # ---------- models: downloaded once, natively ----------
-FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS models
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS models
 RUN apk add --no-cache curl
 COPY scripts/download-models.sh /tmp/download-models.sh
 RUN sh /tmp/download-models.sh /models
@@ -26,26 +26,48 @@ ENV DATA_DIR=/data \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=3000
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 gosu \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 \
  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
  && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
  && chmod +x /usr/local/bin/yt-dlp \
- && gosu nobody true \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=models /models /app/server/models
 
 # ---------- build: once, natively ----------
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS build
+# the slim image has no CA bundle: Node carries its own, but native tools (sentry-cli below) use the system's
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm fetch reads only the lockfile, so a version bump in a package.json (every Release PR) keeps
+# the download layer cached; the install after it links from the store without the network
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm fetch
+COPY package.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --offline
 COPY . .
-RUN pnpm -r build \
+# Release builds (release.yml) pass a Sentry token as a build secret: the bundles get debug ids and their source maps
+# go to Sentry, so production stacks read as source. Without the secret (local, CI, self-built) this is skipped;
+# a failed upload (Sentry down, a bad token) warns and the release goes on without maps.
+# Either way no map reaches the image: the web maps are deleted here, the server's with the rest below.
+ARG REELSAW_VERSION=dev
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+RUN --mount=type=secret,id=sentry_auth_token,required=false \
+    pnpm -r build \
  && pnpm --filter @reelsaw/server bundle \
+ && if [ -s /run/secrets/sentry_auth_token ] && [ -n "$SENTRY_ORG" ] && [ -n "$SENTRY_PROJECT" ]; then \
+      export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)" \
+      && npx --yes @sentry/cli@2.39.1 sourcemaps inject apps/server/dist-bundle apps/web/dist \
+      && { npx --yes @sentry/cli@2.39.1 sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "reelsaw@${REELSAW_VERSION}" apps/server/dist-bundle apps/web/dist \
+           || echo "WARNING: source map upload to Sentry failed; this release ships with minified stacks"; }; \
+    fi \
+ && find apps/web/dist -name "*.map" -delete \
  && pnpm --filter @reelsaw/server --prod deploy --legacy /out/server \
  # ship the minified bundle only: no tsc output, sources, maps, or the inlined workspace package
  && rm -rf /out/server/dist /out/server/dist-bundle /out/server/src /out/server/test /out/server/scripts /out/server/tsconfig*.json /out/server/node_modules/@reelsaw \
@@ -54,7 +76,7 @@ RUN pnpm -r build \
 
 # ---------- server for one target architecture: drop the other platforms' native binaries ----------
 # A separate stage (not a RUN in `runtime`): deleting files in a later layer wouldn't shrink the image.
-FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS server
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS server
 ARG TARGETARCH
 COPY --from=build /out/server /out/server
 RUN set -eu; \
@@ -65,7 +87,13 @@ RUN set -eu; \
       find "$b" -mindepth 1 -maxdepth 1 -type d ! -name linux -exec rm -rf {} +; \
       find "$b/linux" -mindepth 1 -maxdepth 1 -type d ! -name "$arch" -exec rm -rf {} +; \
       ls "$b/linux/$arch"/*.node >/dev/null || { echo "no onnxruntime binary for linux/$arch in $b"; exit 1; }; \
-    done
+    done; \
+    # better-auth declares drizzle-kit as an optional peer and pnpm links the server's dev copy into the
+    # production tree; nothing imports it at runtime, and it drags in tsx and esbuild (Go binaries the
+    # image scanner flags). The dangling peer symlink left behind is never resolved.
+    cd /out/server/node_modules/.pnpm; \
+    rm -rf drizzle-kit@* tsx@* esbuild@* @esbuild+* @esbuild-kit+* node_modules/.bin/esbuild node_modules/.bin/tsx node_modules/.bin/drizzle-kit; \
+    ! ls -d *esbuild* 2>/dev/null || { echo "esbuild still in the production tree"; exit 1; }
 
 # ---------- dev: source mounted, live reload (docker-compose.dev.yml) ----------
 FROM system AS dev
@@ -112,15 +140,19 @@ COPY --from=build --chown=node:node /app/apps/server/assets /app/server/assets
 COPY --from=build --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node THIRD_PARTY.md /app/THIRD_PARTY.md
 # operator CLI: docker compose exec app reelsaw status <projectId> (drops to node when invoked as root)
-RUN printf '%s\n' '#!/bin/sh' 'if [ "$(id -u)" = "0" ]; then exec gosu node node /app/server/dist/cli.js "$@"; fi' 'exec node /app/server/dist/cli.js "$@"' > /usr/local/bin/reelsaw \
+# setpriv (util-linux, in the base image) drops privileges; the app never runs npm, npx, corepack or yarn,
+# so the copies bundled with the Node image go (their own dependencies carry scanner findings).
+RUN printf '%s\n' '#!/bin/sh' 'if [ "$(id -u)" = "0" ]; then exec setpriv --reuid=node --regid=node --init-groups node /app/server/dist/cli.js "$@"; fi' 'exec node /app/server/dist/cli.js "$@"' > /usr/local/bin/reelsaw \
  && chmod +x /usr/local/bin/reelsaw \
- && mkdir -p /data && chown node:node /data /app
-# Root entrypoint chowns volume-mounted DATA_DIR (Railway etc.), then gosu node. Process still runs as node.
+ && mkdir -p /data && chown node:node /data /app \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* \
+ && setpriv --reuid=node --regid=node --init-groups true
+# Root entrypoint chowns volume-mounted DATA_DIR (Railway etc.), then drops to node. Process still runs as node.
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 USER root
 VOLUME ["/data"]
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD gosu node node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD setpriv --reuid=node --regid=node --init-groups node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "/app/server/dist/main.js"]

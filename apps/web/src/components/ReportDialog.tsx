@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShortcut } from "../lib/shortcuts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -86,7 +86,8 @@ export function ReportDialog() {
       });
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => null);
-        const msg = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn't build the report (${res.status})`;
+        const msg =
+          body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn’t build the report (${res.status})`;
         throw new Error(msg);
       }
       const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "reelsaw-report.zip";
@@ -95,14 +96,23 @@ export function ReportDialog() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      urls.current.add(url);
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        urls.current.delete(url);
+      }, 10_000);
       if (caps.feedback) {
         const client = clientContext();
         void sendIssueFeedback({
           message: text.trim(),
           name: me.data?.name,
           email: me.data?.email,
-          tags: { source: target?.tags?.source ?? "report-dialog", ...target?.tags, ...(projectId ? { projectId } : {}), ...(client.route ? { route: client.route } : {}) },
+          tags: {
+            source: target?.tags?.source ?? "report-dialog",
+            ...target?.tags,
+            ...(projectId ? { projectId } : {}),
+            ...(client.route ? { route: client.route } : {}),
+          },
           properties: { project_id: projectId ?? null, clip_count: clipIds.length, route: client.route ?? null, via: "zip" },
         }).catch(() => {});
       }
@@ -110,12 +120,22 @@ export function ReportDialog() {
     },
     onSuccess: (r) => {
       closeReport();
-      toast(r.kind === "feedback" ? "Thanks — we got your report" : `Saved ${r.name} to your downloads · send it to the Reelsaw team`);
+      toast(r.kind === "feedback" ? "Thanks — we got your report" : `Saved “${r.name}” to your downloads · send it to the Reelsaw team`);
     },
   });
 
   // "!" opens the report from anywhere (ignored while typing)
   useShortcut(REPORT_SHORTCUT, () => openReportHere(), { useKey: true });
+
+  // object URLs of downloaded reports still waiting for their delayed revoke; unmounting releases them
+  const urls = useRef(new Set<string>());
+  useEffect(() => {
+    const held = urls.current;
+    return () => {
+      for (const u of held) URL.revokeObjectURL(u);
+      held.clear();
+    };
+  }, []);
 
   // reset per opening
   useEffect(() => {
@@ -170,7 +190,11 @@ export function ReportDialog() {
       <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-3 pr-3">
           <Dialog.Description className="-mt-1 text-sm text-ink2">
-            {projectId ? <>About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>. </> : null}
+            {projectId ? (
+              <>
+                About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>.{" "}
+              </>
+            ) : null}
             {feedbackOnly
               ? "Sends your description to the Reelsaw team. API keys and passwords are never included."
               : "Saves a zip you can send to the Reelsaw team. API keys and passwords are never included."}
@@ -205,10 +229,16 @@ export function ReportDialog() {
                 label="Clips the problem shows up in"
                 placeholder="None in particular"
                 searchPlaceholder="Search clips by number or title…"
-                empty="No clip matches"
+                empty="No clips match"
+                footerHint="Pick any that show the problem"
                 value={clipIds}
                 onChange={setClipIds}
-                options={clips.map((c) => ({ value: c.id, prefix: String(c.index + 1), label: c.title, hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined }))}
+                options={clips.map((c) => ({
+                  value: c.id,
+                  prefix: String(c.index + 1),
+                  label: c.title,
+                  hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined,
+                }))}
               />
             </div>
           )}
@@ -220,27 +250,58 @@ export function ReportDialog() {
                 {projectId
                   ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history"
                   : inc.instance
-                    ? "This instance's unfinished work, job queue, usage and recent failures"
+                    ? "This instance’s unfinished work, job queue, usage and recent failures"
                     : "Your projects' status and recent failures"}
-                , the app's settings (secrets shown only as set/unset), and your description.
+                , the app’s settings (secrets shown only as set/unset), and your description.
               </span>
               {caps.instance &&
                 row(
                   "instance",
                   "Instance-wide diagnostics",
-                  "Unfinished work, failed jobs, usage and error logs across every account — for queue, disk or machine problems, not only your projects. Other accounts' project titles and ids are included.",
+                  "Unfinished work, failed jobs, usage and error logs across every account — for queue, disk or machine problems, not only your projects. Other accounts’ project titles and ids are included.",
                 )}
               {caps.system &&
                 row(
                   "system",
                   "System info and recent errors",
-                  inc.instance ? "Included with instance-wide diagnostics" : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren't tied to another account",
+                  inc.instance
+                    ? "Included with instance-wide diagnostics"
+                    : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren’t tied to another account",
                   inc.instance,
                 )}
-              {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn't keep a log file" : "Pipeline log lines, including model calls when they're recorded", !!preview && !preview.logs)}
-              {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
-              {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}
-              {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : <Skeleton className="mt-0.5 inline-block h-3 w-40" />)}
+              {projectId &&
+                row(
+                  "logs",
+                  "Logs for this project",
+                  preview && !preview.logs ? "This instance doesn’t keep a log file" : "Pipeline log lines, including model calls when they’re recorded",
+                  !!preview && !preview.logs,
+                )}
+              {projectId &&
+                row(
+                  "previews",
+                  "Thumbnails and the selected clips' videos",
+                  clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips",
+                )}
+              {projectId &&
+                row(
+                  "allClips",
+                  "All rendered clips",
+                  preview ? (
+                    `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}`
+                  ) : (
+                    <Skeleton className="mt-0.5 inline-block h-3 w-28" />
+                  ),
+                )}
+              {projectId &&
+                row(
+                  "source",
+                  "Source video",
+                  preview ? (
+                    `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}`
+                  ) : (
+                    <Skeleton className="mt-0.5 inline-block h-3 w-40" />
+                  ),
+                )}
             </fieldset>
           )}
         </div>
@@ -248,7 +309,7 @@ export function ReportDialog() {
 
       {/* one reserved line for notes and errors, so the buttons never move */}
       <p className={`min-h-[18px] shrink-0 text-xs ${error ? "text-err" : "text-ink3"}`} role={error ? "alert" : undefined}>
-        {error ?? (uploadWithoutSource ? "Without the source video, problems that depend on the video itself can't be reproduced." : "")}
+        {error ?? (uploadWithoutSource ? "Without the source video, problems that depend on the video itself can’t be reproduced." : "")}
       </p>
 
       <div className="flex shrink-0 items-center justify-end gap-2">

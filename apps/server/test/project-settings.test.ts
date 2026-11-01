@@ -16,7 +16,18 @@ describe("project intro/outro resolution", () => {
   const db = drizzle(p, { schema });
   let me: Awaited<ReturnType<typeof signUp>>;
   let other: Awaited<ReturnType<typeof signUp>>;
-  const asset = (userId: string, kind: "video" | "image" = "image") => ({ id: randomUUID(), userId, kind, name: "x", durationSec: 3, width: 1080, height: 1920, hasAudio: false, sourceKey: "k", sizeBytes: 1 });
+  const asset = (userId: string, kind: "video" | "image" = "image") => ({
+    id: randomUUID(),
+    userId,
+    kind,
+    name: "x",
+    durationSec: 3,
+    width: 1080,
+    height: 1920,
+    hasAudio: false,
+    sourceKey: "k",
+    sizeBytes: 1,
+  });
   let dflt: string, picked: string, removed: string, foreign: string;
 
   before(async () => {

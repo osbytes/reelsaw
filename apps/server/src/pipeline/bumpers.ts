@@ -27,10 +27,16 @@ export const BUMPER_AUDIO_MAX_BYTES = 30 * 1024 * 1024;
 export const BUMPER_AUDIO_MAX_SEC = 15 * 60;
 export const BUMPER_AUDIO_MIN_SEC = 0.05;
 export const bumperKind = (ext: string): "video" | "image" | "audio" | null =>
-  (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext) ? "audio" : null;
+  (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext)
+    ? "video"
+    : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext)
+      ? "image"
+      : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext)
+        ? "audio"
+        : null;
 /** GIF and WebP can hold an animation; the probe decides whether they are a video or a still. */
 export const ANIMATABLE_EXTS = [".gif", ".webp"] as const;
-type KindProbe = Pick<ProbeInfo, "durationSec"> & { frames?: number };
+type KindProbe = Pick<ProbeInfo, "durationSec" | "frames">;
 /** More than one frame, or a length beyond a still's, makes a GIF / WebP an animation. */
 export const isAnimated = (probe: KindProbe) => (probe.frames ?? 0) > 1 || probe.durationSec > 0.1;
 /**
@@ -44,7 +50,23 @@ export const assetKind = (ext: string, probe: KindProbe): "video" | "image" | "a
 /** Shown whenever a file's type is not one we take. */
 export const ASSET_FORMATS_SENTENCE = "Use an MP4, MOV or WebM video; a PNG, JPG, WebP, GIF or SVG image; or an MP3, M4A, WAV, OGG or FLAC audio file.";
 /** The exact format stored on a library row, by file extension (checked by ffprobe before it is trusted). */
-export const ASSET_MIME: Record<string, string> = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac" };
+export const ASSET_MIME: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".flac": "audio/flac",
+};
 export const assetMime = (ext: string): string | null => ASSET_MIME[ext.toLowerCase()] ?? null;
 export const BUMPER_FPS = 30;
 /** Seconds of the body's audio faded out when an outro follows. */
@@ -58,27 +80,39 @@ export const NORM_VERSION = "v1";
 export const normVariant = (w: number, h: number) => `${NORM_VERSION}.${w}x${h}`;
 
 /** A sentence for the user, or null when the probed file is an acceptable bumper. */
-export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height"> & { hasAudio?: boolean; frames?: number }): string | null {
+export function bumperProblem(
+  slot: "intro" | "outro" | undefined,
+  file: { ext: string; sizeBytes: number },
+  probe: Pick<ProbeInfo, "durationSec" | "width" | "height" | "frames"> & { hasAudio?: boolean | undefined },
+): string | null {
   const label = slot === "intro" ? "Intros" : slot === "outro" ? "Outros" : "Intros and outros";
   const kind = assetKind(file.ext, probe);
   if (!kind) return ASSET_FORMATS_SENTENCE;
   if (kind === "audio") {
     if (slot) return "An audio file can be music under a clip, not an intro or outro. Add it without a slot.";
-    if (file.sizeBytes > BUMPER_AUDIO_MAX_BYTES) return `This audio file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Music can be at most ${BUMPER_AUDIO_MAX_BYTES / 1024 / 1024} MB.`;
+    if (file.sizeBytes > BUMPER_AUDIO_MAX_BYTES)
+      return `This audio file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Music can be at most ${BUMPER_AUDIO_MAX_BYTES / 1024 / 1024} MB.`;
     if (probe.hasAudio === false) return "This file has no audio stream that could be read.";
     // a sound effect can be a few hundredths of a second (a click, a pop); the lane gives it a half-second window
     if (!(probe.durationSec >= BUMPER_AUDIO_MIN_SEC)) return `This audio is too short to use (under ${BUMPER_AUDIO_MIN_SEC} s).`;
-    if (probe.durationSec > BUMPER_AUDIO_MAX_SEC + 0.05) return `This audio is ${Math.round(probe.durationSec / 60)} min long. Music can be at most ${BUMPER_AUDIO_MAX_SEC / 60} min.`;
+    if (probe.durationSec > BUMPER_AUDIO_MAX_SEC + 0.05)
+      return `This audio is ${Math.round(probe.durationSec / 60)} min long. Music can be at most ${BUMPER_AUDIO_MAX_SEC / 60} min.`;
     return null;
   }
   if (kind === "image") {
-    if (file.sizeBytes > BUMPER_IMAGE_MAX_BYTES) return `This image is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Images can be at most ${BUMPER_IMAGE_MAX_BYTES / 1024 / 1024} MB.`;
-    if (!probe.width || !probe.height) return file.ext === ".webp" ? "This WebP could not be read. If it is animated, save it as a GIF or an MP4 instead." : "This file could not be read as an image.";
-    if (probe.width > BUMPER_IMAGE_MAX_PX || probe.height > BUMPER_IMAGE_MAX_PX) return `This image is ${probe.width}x${probe.height}. Images can be at most ${BUMPER_IMAGE_MAX_PX} px on a side.`;
+    if (file.sizeBytes > BUMPER_IMAGE_MAX_BYTES)
+      return `This image is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Images can be at most ${BUMPER_IMAGE_MAX_BYTES / 1024 / 1024} MB.`;
+    if (!probe.width || !probe.height)
+      return file.ext === ".webp"
+        ? "This WebP could not be read. If it is animated, save it as a GIF or an MP4 instead."
+        : "This file could not be read as an image.";
+    if (probe.width > BUMPER_IMAGE_MAX_PX || probe.height > BUMPER_IMAGE_MAX_PX)
+      return `This image is ${probe.width}x${probe.height}. Images can be at most ${BUMPER_IMAGE_MAX_PX} px on a side.`;
     if (Math.min(probe.width, probe.height) < 64) return `This image is only ${probe.width}x${probe.height}. Use one at least 64 px on each side.`;
     return null;
   }
-  if (file.sizeBytes > BUMPER_MAX_BYTES) return `This file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. ${label} can be at most ${BUMPER_MAX_BYTES / 1024 / 1024} MB.`;
+  if (file.sizeBytes > BUMPER_MAX_BYTES)
+    return `This file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. ${label} can be at most ${BUMPER_MAX_BYTES / 1024 / 1024} MB.`;
   if (!probe.width || !probe.height) return "This file has no video that could be read.";
   if (!(probe.durationSec >= 0.3)) return "This video is too short to use (under 0.3 s).";
   if (probe.durationSec > BUMPER_MAX_SEC + 0.05) return `This video is ${Math.round(probe.durationSec)} s long. ${label} can be at most ${BUMPER_MAX_SEC} s.`;
@@ -90,8 +124,10 @@ export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: 
  * otherwise the project's, otherwise none. `fromClip` lists the slots the clip decided itself.
  */
 export function resolveClipBumpers(
-  project: { introAssetId?: string | null; outroAssetId?: string | null; introSec?: number; outroSec?: number },
-  clip: { bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null },
+  project: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined },
+  clip: {
+    bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null;
+  },
 ): { introId: string | null; outroId: string | null; introSec?: number; outroSec?: number; fromClip: Array<"intro" | "outro"> } {
   const own = clip.bumpers ?? {};
   const fromClip: Array<"intro" | "outro"> = [];
@@ -126,7 +162,13 @@ export const bumperFrames = (durationSec: number) => Math.max(1, Math.round(dura
  * background, 30 fps constant, yuv420p, AAC stereo 48 kHz (generated silence when it has none),
  * trimmed or padded to a whole number of frames so audio and video end together.
  */
-export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" | "audio" }, canvas: Canvas, encodeArgs: string[] = videoEncodeArgs("libx264")): string[] {
+export function normaliseArgs(
+  input: string,
+  output: string,
+  asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" | "audio" },
+  canvas: Canvas,
+  encodeArgs: string[] = videoEncodeArgs("libx264"),
+): string[] {
   const image = asset.kind === "image";
   const frames = bumperFrames(asset.durationSec);
   const sec = frames / BUMPER_FPS;
@@ -135,19 +177,42 @@ export function normaliseArgs(input: string, output: string, asset: { durationSe
   return [
     // an image is looped into a video of the requested length
     ...(image ? ["-loop", "1", "-framerate", String(BUMPER_FPS)] : []),
-    "-i", input,
+    "-i",
+    input,
     ...(asset.hasAudio && !image ? [] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
-    "-filter_complex", `${video};${audio}`,
-    "-map", "[v]", "-map", "[a]",
-    "-frames:v", String(frames), "-t", sec.toFixed(4),
-    ...encodeArgs, "-pix_fmt", "yuv420p", "-r", String(BUMPER_FPS),
-    "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
-    "-movflags", "+faststart", "-f", "mp4", output,
+    "-filter_complex",
+    `${video};${audio}`,
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-frames:v",
+    String(frames),
+    "-t",
+    sec.toFixed(4),
+    ...encodeArgs,
+    "-pix_fmt",
+    "yuv420p",
+    "-r",
+    String(BUMPER_FPS),
+    "-c:a",
+    "aac",
+    "-b:a",
+    "160k",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+    output,
   ];
 }
 
 export interface NormaliseDeps {
-  ffmpeg: (args: string[], opts?: { signal?: AbortSignal }) => Promise<unknown>;
+  ffmpeg: (args: string[], opts?: { signal?: AbortSignal | undefined }) => Promise<unknown>;
   /** `-c:v …` of the encoder in use (media.videoEncodeArgs()); a hardware encoder that fails is retried with libx264 */
   encodeArgs?: string[];
   log?: Logger;
@@ -173,7 +238,8 @@ async function nonEmpty(file: string) {
   }
 }
 
-export const isSvgAsset = (a: { mime?: string | null; sourceKey: string }) => a.mime === "image/svg+xml" || (!a.mime && a.sourceKey.toLowerCase().endsWith(".svg"));
+export const isSvgAsset = (a: { mime?: string | null; sourceKey: string }) =>
+  a.mime === "image/svg+xml" || (!a.mime && a.sourceKey.toLowerCase().endsWith(".svg"));
 /** Width an SVG is rasterised at for the compositor, thumbnails and image intros: the output frame's width. */
 export const RASTER_WIDTH = 1080;
 export const RASTER_VERSION = "v1";
@@ -216,7 +282,9 @@ export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFi
   await fs.mkdir(dir, { recursive: true });
   const normKey = keys.assetNorm(asset.sourceKey, variant);
   if (await deps.storage.exists(normKey)) return deps.storage.ensureLocal(normKey, local);
-  const source = isSvgAsset(asset) ? await ensureRaster(deps, asset, canvas.width) : await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
+  const source = isSvgAsset(asset)
+    ? await ensureRaster(deps, asset, canvas.width)
+    : await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
   const tmp = `${local}.${randomUUID()}.tmp.mp4`;
   try {
     const software = videoEncodeArgs("libx264");
@@ -243,8 +311,15 @@ export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFi
  * normalised files; produces [v] and [a]. Audio is sequential, never mixed: the body's last 0.2 s fade
  * out when an outro follows, and its audio is forced to the bumpers' format and the video's length.
  */
-export function bumperConcat(o: { introInput?: number; outroInput?: number; bodyVideo: string; bodyAudio: string; bodySec: number }): string {
-  const fade = o.outroInput !== undefined && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
+export function bumperConcat(o: {
+  introInput?: number | undefined;
+  outroInput?: number | undefined;
+  bodyVideo: string;
+  bodyAudio: string;
+  bodySec: number;
+}): string {
+  const fade =
+    o.outroInput !== undefined && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
   const body = o.bodySec.toFixed(3);
   const slots = [
     ...(o.introInput !== undefined ? [`[${o.introInput}:v][${o.introInput}:a]`] : []),
@@ -265,7 +340,11 @@ export const BUMPER_THUMB = { width: 270, height: 480 } as const;
  * resized to cover. Idempotent: written to a temp name, renamed, then stored; concurrent callers share one run.
  */
 const thumbRuns = new Map<string, Promise<string>>();
-export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string }, asset: { id: string; kind: "video" | "image" | "audio"; durationSec: number; sourceKey: string; mime?: string | null }, localSource?: string): Promise<string> {
+export function ensureBumperThumb(
+  deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string },
+  asset: { id: string; kind: "video" | "image" | "audio"; durationSec: number; sourceKey: string; mime?: string | null },
+  localSource?: string,
+): Promise<string> {
   const running = thumbRuns.get(asset.id);
   if (running) return running;
   const run = (async () => {
@@ -278,9 +357,23 @@ export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; stora
     const final = path.join(dir, "thumb.jpg");
     try {
       // an SVG is rasterised first (resvg), then cropped like any picture; the PNG stays in storage for the renderer
-      const source = isSvgAsset(asset) ? await ensureRaster({ storage: deps.storage, dir }, asset, RASTER_WIDTH) : (localSource ?? (await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)))));
+      const source = isSvgAsset(asset)
+        ? await ensureRaster({ storage: deps.storage, dir }, asset, RASTER_WIDTH)
+        : (localSource ?? (await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)))));
       const seek = asset.kind === "video" ? ["-ss", (asset.durationSec / 3).toFixed(2)] : [];
-      await deps.ffmpeg(["-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}:force_original_aspect_ratio=increase,crop=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}`, "-q:v", "4", tmp]);
+      await deps.ffmpeg([
+        "-y",
+        ...seek,
+        "-i",
+        source,
+        "-frames:v",
+        "1",
+        "-vf",
+        `scale=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}:force_original_aspect_ratio=increase,crop=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}`,
+        "-q:v",
+        "4",
+        tmp,
+      ]);
       if (!(await nonEmpty(tmp))) throw new Error("thumbnail was empty");
       await fs.rename(tmp, final);
       await deps.storage.putFile(key, final, "image/jpeg");

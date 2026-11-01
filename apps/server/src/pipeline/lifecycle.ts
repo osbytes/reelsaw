@@ -2,9 +2,9 @@
  * Transactional state transitions shared by the API, workers and the reconciler. Each runs inside
  * a unit of work (svc.tx) so the row change, its event and its job commit together.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./manual.js";
-import { schema } from "../db/index.js";
+import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
@@ -12,18 +12,49 @@ import { cleanupWorkdir, runFacts } from "./common.js";
 import type { PipelineStage, ProjectStatus, RunReason } from "@reelsaw/shared";
 import { removeScratchClip } from "../storage/sweep.js";
 
+/** False once the project is deleted: no run starts and no job is queued for it (restore it, then Retry). */
+async function projectIsLive(u: UnitOfWork, projectId: string): Promise<boolean> {
+  const [r] = await u.db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  return !!r;
+}
+
 /**
  * Ask for a fresh render of a clip. Bumps clips.render_gen so any render still running for an
  * older version can't commit, cancels queued/running jobs, marks the clip pending, enqueues the
  * new job, and moves a finished project back to "rendering". `patch` applies clip edits in the same
  * transaction (e.g. new bounds). Superseded output files are deleted after commit.
  */
-export async function requestRender(svc: Services, u: UnitOfWork, projectId: string, clipId: string, patch: Partial<typeof schema.clips.$inferInsert> = {}, reason: RunReason = "rerender"): Promise<number | null> {
-  const [prev] = await u.db.select({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt))).for("update");
+export async function requestRender(
+  svc: Services,
+  u: UnitOfWork,
+  projectId: string,
+  clipId: string,
+  patch: Partial<typeof schema.clips.$inferInsert> = {},
+  reason: RunReason = "rerender",
+): Promise<number | null> {
+  const [prev] = await u.db
+    .select({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey })
+    .from(schema.clips)
+    .where(and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)))
+    .for("update");
   if (!prev) return null; // gone, or soft-deleted (restore it first)
+  // deleting a project locks its clips first, so with this clip locked the flag is settled: no work for a deleted project
+  if (!(await projectIsLive(u, projectId))) return null;
   const [row] = await u.db
     .update(schema.clips)
-    .set({ ...patch, status: "pending", error: null, outputKey: null, thumbnailKey: null, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
+    .set({
+      ...patch,
+      status: "pending",
+      error: null,
+      outputKey: null,
+      thumbnailKey: null,
+      reconcileRequeues: 0,
+      renderGen: sql`${schema.clips.renderGen} + 1`,
+      updatedAt: new Date(),
+    })
     .where(eq(schema.clips.id, clipId))
     .returning({ gen: schema.clips.renderGen });
   await u.cancelLiveJobs(QUEUES.render, clipId);
@@ -61,15 +92,25 @@ export interface PrepareOptions {
 export async function requestPrepare(_svc: Services, u: UnitOfWork, projectId: string, clipId: string, o: PrepareOptions = {}): Promise<boolean> {
   const c = schema.clips;
   // locked, so the status read here is the one the update replaces: exactly one caller sees the flip and emits
-  const [clip] = await u.db.select({ origin: c.origin, status: c.status }).from(c).where(and(eq(c.id, clipId), eq(c.projectId, projectId), isNull(c.deletedAt))).for("update");
+  const [clip] = await u.db
+    .select({ origin: c.origin, status: c.status })
+    .from(c)
+    .where(and(eq(c.id, clipId), eq(c.projectId, projectId), isNull(c.deletedAt)))
+    .for("update");
   if (!clip) return false;
+  if (!(await projectIsLive(u, projectId))) return false; // see requestRender
   const restart = o.restart ?? true;
   if (restart) {
     await u.cancelLiveJobs(QUEUES.render, clipId);
     await u.cancelLiveJobs(QUEUES.prepare, clipId);
   }
   const flipped = clip.status !== "preparing";
-  if (flipped || restart) await u.db.update(c).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(c.id, clipId));
+  // a user or operator restart gives the clip a fresh reconciler budget; the reconciler's own re-queue (restart: false) keeps counting
+  if (flipped || restart)
+    await u.db
+      .update(c)
+      .set({ status: "preparing", error: null, ...(restart ? { reconcileRequeues: 0 } : {}), updatedAt: new Date() })
+      .where(eq(c.id, clipId));
   const mode = o.mode ?? prepareModeOf(clip);
   if (restart || !(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode });
   if (o.reason) await startRun(u, projectId, { reason: o.reason, status: "rendering", stage: "render" });
@@ -119,7 +160,7 @@ export interface StartRunOptions {
   /** the stage the run begins in; omitted leaves the project's stage as it is */
   stage?: PipelineStage | null;
   /** other project columns to write in the same statement (e.g. new settings) */
-  set?: Partial<typeof schema.projects.$inferInsert>;
+  set?: { [K in keyof typeof schema.projects.$inferInsert]?: (typeof schema.projects.$inferInsert)[K] | SQL };
   /** when the project is already mid-run, still apply status/stage/set (no new run). For resumes of a stuck run. */
   continueActive?: boolean;
 }
@@ -130,23 +171,45 @@ export interface StartRunOptions {
  * update (`done`/`failed` for a restart, `run_seq = 0` for a project just created), so when several
  * callers ask at once (six clips re-rendered in one request, a retry racing a re-render) exactly one
  * gets a row back and only it bumps `run_seq` and emits `run.started`. Returns the new sequence
- * number, or null when the project was already running (the request joins the current run).
+ * number, or null when the project was already running (the request joins the current run) or is deleted.
  */
 export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOptions): Promise<number | null> {
   const t = schema.projects;
-  const values = { ...o.set, status: o.status, ...(o.stage !== undefined ? { stage: o.stage } : {}), error: null, updatedAt: new Date() };
+  const values = { ...o.set, status: o.status, ...(o.stage !== undefined ? { stage: o.stage } : {}), error: null, reconcileRequeues: 0, updatedAt: new Date() }; // a new run or a retry gets a fresh reconciler budget
   const idle = o.reason === "created" ? sql`${t.runSeq} = 0` : sql`${t.status} in ('done', 'failed')`;
   const [row] = await u.db
     .update(t)
     .set({ ...values, runSeq: sql`${t.runSeq} + 1`, runStartedAt: sql`now()`, runReason: o.reason, stageStartedAt: sql`now()` })
-    .where(and(eq(t.id, projectId), idle))
+    .where(and(eq(t.id, projectId), isNull(t.deletedAt), idle))
     .returning({ seq: t.runSeq });
   if (row) {
     await u.emit(projectId, "run.started", { seq: row.seq, reason: o.reason });
     return row.seq;
   }
-  if (o.continueActive) await u.db.update(t).set(values).where(and(eq(t.id, projectId), sql`${t.status} not in ('done', 'failed')`));
+  if (o.continueActive)
+    await u.db
+      .update(t)
+      .set(values)
+      .where(and(eq(t.id, projectId), isNull(t.deletedAt), sql`${t.status} not in ('done', 'failed')`));
   return null;
+}
+
+/**
+ * Supersede the project's stage work (ingest → analyze): bump projects.stage_seq, so a stage job still running for
+ * the old value commits nothing, fails nothing and queues nothing (cancelling a pg-boss job does not stop it). Jobs the
+ * caller queues afterwards carry the new value. Lock clips (and the transcript) first: this takes the project row.
+ */
+export async function supersedeStages(u: UnitOfWork, projectId: string): Promise<void> {
+  await u.db
+    .update(schema.projects)
+    .set({ stageSeq: sql`${schema.projects.stageSeq} + 1` })
+    .where(eq(schema.projects.id, projectId));
+}
+
+/** The project's current stage version, for a caller that has just superseded the stages and queues work under the new one. */
+export async function stageSeqOf(db: Db, projectId: string): Promise<number | undefined> {
+  const [r] = await db.select({ seq: schema.projects.stageSeq }).from(schema.projects).where(eq(schema.projects.id, projectId));
+  return r?.seq;
 }
 
 /**
@@ -170,19 +233,31 @@ export async function lockProjectClips(u: UnitOfWork, projectId: string): Promis
  * clip, then project.
  */
 export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projectId: string) {
-  const [project] = await u.db.select({ status: schema.projects.status, userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
+  const [project] = await u.db
+    .select({ status: schema.projects.status, userId: schema.projects.userId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .for("no key update");
   // only a rendering project finishes here: while a re-analyze is still picking (the clips it kept go on rendering),
-  // the analyze hand-off moves it to rendering and the last render finalizes
+  // the analyze hand-off moves it to rendering and the last render finalizes. A rendering project with no live
+  // clips (the last one was deleted) is finished too: nothing is left that could finalize it later
   if (!project || project.status !== "rendering") return;
-  const clips = await u.db.select({ status: schema.clips.status }).from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
-  if (!clips.length || !clips.every((c) => c.status === "done" || c.status === "failed")) return;
+  const clips = await u.db
+    .select({ status: schema.clips.status })
+    .from(schema.clips)
+    .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+  if (!clips.every((c) => c.status === "done" || c.status === "failed")) return;
   const doneCount = clips.filter((c) => c.status === "done").length;
-  if (doneCount === 0) {
+  if (doneCount === 0 && clips.length) {
     const facts = await runFacts(u.db, projectId);
-    await u.db.update(schema.projects).set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", ...facts });
+    await u.db
+      .update(schema.projects)
+      .set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() })
+      .where(eq(schema.projects.id, projectId));
+    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", errorKind: "AllClipsFailed", ...facts });
     return;
   }
+  // no live clips left (the last one was deleted while rendering) finishes as done with nothing, rather than stranding the status
   const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
   const eventId = await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });

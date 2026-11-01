@@ -4,8 +4,12 @@ import { NavLink, useLocation } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
 import { ApiKeysSection } from "../components/ApiKeys";
+import { ShareLinksSection } from "../components/ShareLinks";
+import { WebhooksSection } from "../components/Webhooks";
 import { AccountSection } from "../components/AccountSection";
+import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
+import { LearningSection } from "../components/LearningSection";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
 import { WorkersOnlineLine, WorkersSection } from "../components/WorkersSection";
@@ -14,7 +18,15 @@ import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
-import { ACCESS_FIELDS, InstanceSettingsGroup, LIBRARY_FIELDS, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
+import {
+  ACCESS_FIELDS,
+  InstanceSettingsGroup,
+  LIBRARY_FIELDS,
+  LIMIT_FIELDS,
+  OPERATIONS_FIELDS,
+  PIPELINE_FIELDS,
+  RETENTION_FIELDS,
+} from "../components/InstanceSettings";
 import { BILLING_PATH, CHANGELOG_URL, REPO_URL } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
@@ -51,7 +63,8 @@ export function SettingsPage() {
   const hasBilling = !!me.data?.ee?.billing;
   const system = loc.pathname.endsWith("/system") && isAdmin;
   const billing = loc.pathname === BILLING_PATH && hasBilling;
-  const tab = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
+  const tab = ({ isActive }: { isActive: boolean }) =>
+    `rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -75,7 +88,11 @@ export function SettingsPage() {
               </span>
             </div>
             <p className="mt-1 min-h-5 text-sm text-ink2">
-              {system ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env." : billing ? "Your plan, what you have used this period, and the plans on offer." : "Your account, your defaults for new projects, and keys for agents and tools."}
+              {system
+                ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env."
+                : billing
+                  ? "Your plan, what you have used this period, and the plans on offer."
+                  : "Your account, your defaults for new projects, and keys for agents and tools."}
             </p>
           </div>
           {/* the tab row keeps its height for everyone, so the page does not jump when the role loads */}
@@ -114,7 +131,11 @@ export function SettingsPage() {
           <>
             <AccountSection />
             <ProjectDefaultsSection />
+            <LearningSection />
             <ApiKeysSection mcpUrl={`${window.location.origin}/api/mcp`} />
+            <WebhooksSection />
+            <ShareLinksSection />
+            <ConnectedAppsSection />
           </>
         )}
       </main>
@@ -214,7 +235,12 @@ function SystemTab() {
   const env = s
     ? [
         ["Storage", s.storage],
-        ["Render concurrency", s.renderConcurrency.mode === "auto" ? `automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}` : `${s.renderConcurrency.max} (fixed)`],
+        [
+          "Render concurrency",
+          s.renderConcurrency.mode === "auto"
+            ? `automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}`
+            : `${s.renderConcurrency.max} (fixed)`,
+        ],
         ["Email", s.email],
         ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
         ["Compatible base URL", s.compatBaseUrl ?? "not set"],
@@ -231,24 +257,24 @@ function SystemTab() {
     <div className="flex flex-col gap-4 md:grid md:grid-cols-[11rem_minmax(0,1fr)] md:gap-6">
       {/* side nav: a sticky column on wide screens (the grid cell spans the whole content, so it can follow), a scrollable row on phones */}
       <div className="md:sticky md:top-0 md:self-start md:pt-1">
-      <ScrollArea className="-mx-4 px-4 md:mx-0 md:px-0">
-        <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label="System sections">
-          {SYSTEM_SECTIONS.map(([id, label]) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              aria-current={active === id ? "location" : undefined}
-              onClick={(e) => {
-                e.preventDefault();
-                jumpTo(id);
-              }}
-              className={`rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${active === id ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`}
-            >
-              {label}
-            </a>
-          ))}
-        </nav>
-      </ScrollArea>
+        <ScrollArea className="-mx-4 px-4 md:mx-0 md:px-0">
+          <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label="System sections">
+            {SYSTEM_SECTIONS.map(([id, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                aria-current={active === id ? "location" : undefined}
+                onClick={(e) => {
+                  e.preventDefault();
+                  jumpTo(id);
+                }}
+                className={`rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${active === id ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`}
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
+        </ScrollArea>
       </div>
 
       <div className="flex min-w-0 flex-col gap-6">
@@ -292,7 +318,9 @@ function SystemTab() {
                     </div>
                     <div className="relative h-2 rounded-full bg-sunk">
                       <div className={`h-full rounded-full ${g.ok ? "bg-acc" : "bg-warn"}`} style={{ width: `${Math.min(100, g.used)}%` }} />
-                      {g.limit !== undefined && g.limit > 0 && g.limit < 100 && <div title="Pause threshold" className="absolute -top-1 h-4 w-0.5 rounded-full bg-ink" style={{ left: `${g.limit}%` }} />}
+                      {g.limit !== undefined && g.limit > 0 && g.limit < 100 && (
+                        <div title="Pause threshold" className="absolute -top-1 h-4 w-0.5 rounded-full bg-ink" style={{ left: `${g.limit}%` }} />
+                      )}
                     </div>
                     <div className="text-xs text-ink2">
                       {g.ok ? "" : "◷ Jobs paused · "}
@@ -330,17 +358,42 @@ function SystemTab() {
           <ModelsSection />
         </div>
 
-        <InstanceSettingsGroup id="access" title="Access" intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in." fields={ACCESS_FIELDS} />
-        <InstanceSettingsGroup id="limits" title="Limits" intro="Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh." fields={LIMIT_FIELDS} />
+        <InstanceSettingsGroup
+          id="access"
+          title="Access"
+          intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in."
+          fields={ACCESS_FIELDS}
+        />
+        <InstanceSettingsGroup
+          id="limits"
+          title="Limits"
+          intro="Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh."
+          fields={LIMIT_FIELDS}
+        />
         <InstanceSettingsGroup
           id="pipeline"
           title="Pipeline"
           intro="Refine-stage ceilings for every account. Off by default. Turn a gate on so projects (and Project defaults) may opt into that step; leave off to keep every account on the fast path."
           fields={PIPELINE_FIELDS}
         />
-        <InstanceSettingsGroup id="retention" title="Retention" intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep." fields={RETENTION_FIELDS} />
-        <InstanceSettingsGroup id="operations" title="Operations" intro="Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers." fields={OPERATIONS_FIELDS} />
-        <InstanceSettingsGroup id="library" title="Library" intro="Where Browse finds sounds, icons and media. The Reelsaw catalog and Iconify need nothing; paste a free key to switch a provider on. Keys are stored encrypted and never shown again." fields={LIBRARY_FIELDS} />
+        <InstanceSettingsGroup
+          id="retention"
+          title="Retention"
+          intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep."
+          fields={RETENTION_FIELDS}
+        />
+        <InstanceSettingsGroup
+          id="operations"
+          title="Operations"
+          intro="Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers."
+          fields={OPERATIONS_FIELDS}
+        />
+        <InstanceSettingsGroup
+          id="library"
+          title="Library"
+          intro="Where Browse finds sounds, icons and media. The Reelsaw catalog and Iconify need nothing; paste a free key to switch a provider on. Keys are stored encrypted and never shown again."
+          fields={LIBRARY_FIELDS}
+        />
 
         <div id="log-level" className="scroll-mt-4">
           <LogLevelSection />

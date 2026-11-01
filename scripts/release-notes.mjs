@@ -14,7 +14,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MAINTAINERS = (process.env.MAINTAINERS ?? "dillonstreator").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+const MAINTAINERS = (process.env.MAINTAINERS ?? "dillonstreator")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
 const REPO_URL = "https://github.com/osbytes/reelsaw";
 
 const version = process.argv[2]?.replace(/^v/, "");
@@ -33,7 +36,10 @@ export function sectionOf(md, v) {
   if (start < 0) return null;
   let end = lines.findIndex((l, i) => i > start && /^## /.test(l));
   if (end < 0) end = lines.length;
-  return lines.slice(start + 1, end).join("\n").trim();
+  return lines
+    .slice(start + 1, end)
+    .join("\n")
+    .trim();
 }
 
 /** Drop " Thanks [@login](url)! -" for maintainers; keep it for everyone else. */

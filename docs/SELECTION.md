@@ -17,6 +17,26 @@ How a clip's start and end are chosen, and where to add a fixture when one is wr
    `test/thought.test.ts`) moves the edges onto sentence boundaries. The editor's manual edits never
    go through it (user decisions are durable).
 
+## Checkpointed windows
+
+Finding moments is made of *steps* saved in `job_steps` as they finish: one per map window (`map:<i>`), per second look
+(`glean:<i>`), per batch of candidates scored (`score:<i>`), plus `scene-cuts`. A retry, a restart or a timeout resumes with the
+steps already saved; a project page shows "13 of 43 parts, about 1 h left".
+
+**Keys are content-addressed, not seq-addressed.** A re-analyze with unchanged inputs, model, prompt version and params reuses
+the map, glean and score steps; a changed setting misses naturally. The key is the SHA-256 of the unit's content (transcript lines,
+candidate texts), the model id, a `*_PROMPT_VERSION` constant and the settings that change the answer (clip lengths, focus,
+instructions, samples). So:
+
+- change the model, `AI_MODEL` or `ANALYZE_JUDGE_MODEL`, and only the windows or batches that model answers are asked again;
+- change the clip length range, the focus or the instructions and every window is asked again;
+- **edit a prompt in `select.ts` and bump its `MAP_PROMPT_VERSION` / `SCORE_PROMPT_VERSION`** (the pairwise prompts are not steps), or old answers to the old text are reused;
+- a re-analyze that changes nothing gets the same moments back (map answers are not re-sampled). To force fresh picks, change the
+  instructions, or wait out `STEP_RETENTION_DAYS` (default 14, 0 keeps them).
+
+Aborts and timeouts are never skipped: a second look that *fails* (the model answered nonsense) keeps the window's first picks, one
+that *times out* ends the attempt and is resumed. Time limits: docs/TROUBLESHOOTING.md, "Long videos on a slow model".
+
 ## Why segment boundaries are not enough
 
 Stored `transcripts.segments` are `toSentences(words)` (`transcript.ts`): split at terminal

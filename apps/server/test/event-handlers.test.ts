@@ -67,29 +67,38 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     // the payload names its project (filled in by emit), in the row and in the job
     const row = await h.pool.query(`select payload->>'projectId' as id from project_events where project_id = $1`, [p]);
     assert.equal(row.rows[0].id, p);
-    const job = await h.pool.query(`select data->'event'->'payload'->>'projectId' as id from pgboss.job where name = 'event.project.done.testWrites' and singleton_key = $1`, [`${p}|renamed later`]);
+    const job = await h.pool.query(
+      `select data->'event'->'payload'->>'projectId' as id from pgboss.job where name = 'event.project.done.testWrites' and singleton_key = $1`,
+      [`${p}|renamed later`],
+    );
     assert.equal(job.rows[0].id, p);
   });
 
   it("leaves no job when the transition rolls back", async () => {
     const p = await h.makeProject(await h.makeUser(), "rendering");
-    await assert.rejects(tx(async (u) => {
-      await u.emit(p, "project.done", done);
-      throw new Error("transition failed");
-    }));
+    await assert.rejects(
+      tx(async (u) => {
+        await u.emit(p, "project.done", done);
+        throw new Error("transition failed");
+      }),
+    );
     assert.equal(await h.eventCount(p, "project.done"), 0);
     assert.equal((await jobs("testWrites", `${p}|lifecycle test`)).length, 0);
   });
 
   it("leaves no job when COMMIT itself fails, after the handlers' jobs were written", async () => {
     // a deferred constraint fails at COMMIT, after the uow wrote the jobs: a job sent outside the transaction would survive
-    await h.pool.query(`create table if not exists test_outbox_defer (id int primary key, ref int not null, constraint test_outbox_defer_ref foreign key (ref) references test_outbox_defer (id) deferrable initially deferred)`);
+    await h.pool.query(
+      `create table if not exists test_outbox_defer (id int primary key, ref int not null, constraint test_outbox_defer_ref foreign key (ref) references test_outbox_defer (id) deferrable initially deferred)`,
+    );
     try {
       const p = await h.makeProject(await h.makeUser(), "rendering");
-      await assert.rejects(tx(async (u) => {
-        await u.emit(p, "project.done", done);
-        await u.db.execute(sql`insert into test_outbox_defer (id, ref) values (1, 999)`);
-      }));
+      await assert.rejects(
+        tx(async (u) => {
+          await u.emit(p, "project.done", done);
+          await u.db.execute(sql`insert into test_outbox_defer (id, ref) values (1, 999)`);
+        }),
+      );
       assert.equal(await h.eventCount(p, "project.done"), 0);
       assert.equal((await jobs("testWrites", `${p}|lifecycle test`)).length, 0);
     } finally {
@@ -101,9 +110,12 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     const p = await h.makeProject(await h.makeUser(), "rendering");
     failNext = true;
     try {
-      await assert.rejects(tx(async (u) => {
-        await u.emit(p, "project.done", done);
-      }), /handler failed/);
+      await assert.rejects(
+        tx(async (u) => {
+          await u.emit(p, "project.done", done);
+        }),
+        /handler failed/,
+      );
     } finally {
       failNext = false;
     }
@@ -117,13 +129,21 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     const emit = () => tx(async (u) => void (await u.emit(p, "project.done", done)));
     await emit();
     await emit(); // joins the waiting job
-    assert.deepEqual((await jobs("testOnce", key)).map((j) => j.state), ["created"]);
+    assert.deepEqual(
+      (await jobs("testOnce", key)).map((j) => j.state),
+      ["created"],
+    );
     // the waiting job starts: a new event may queue the next one, but only one
     await h.pool.query(`update pgboss.job set state = 'active', started_on = now() where name = 'event.project.done.testOnce' and singleton_key = $1`, [key]);
     await emit();
     await emit();
-    assert.deepEqual((await jobs("testOnce", key)).map((j) => j.state), ["active", "created"]);
+    assert.deepEqual(
+      (await jobs("testOnce", key)).map((j) => j.state),
+      ["active", "created"],
+    );
     // a second running job for the key is refused by the queue itself
-    await assert.rejects(h.pool.query(`update pgboss.job set state = 'active' where name = 'event.project.done.testOnce' and singleton_key = $1 and state = 'created'`, [key]));
+    await assert.rejects(
+      h.pool.query(`update pgboss.job set state = 'active' where name = 'event.project.done.testOnce' and singleton_key = $1 and state = 'created'`, [key]),
+    );
   });
 });

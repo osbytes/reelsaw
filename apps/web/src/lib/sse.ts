@@ -1,9 +1,20 @@
 /**
  * EventSource that uses fetch, so the OpenTelemetry fetch instrumentation can add `traceparent`.
  * The browser EventSource API cannot set headers, which left live tRPC subscriptions on their own trace.
- * Reconnects the way EventSource does (including Last-Event-ID). A 4xx response stops.
+ * Reconnects the way EventSource does (including Last-Event-ID), with exponential backoff and jitter
+ * (1 s up to 30 s, reset when a connection opens). Only 401 and 403 (and 204) stop it; a 404, 429, other
+ * 4xx or any 5xx is retried, since a deploy, a proxy or a rate limit clears on its own.
  */
 type Listener = (event: Event) => void;
+
+const BACKOFF_MIN_MS = 1000;
+const BACKOFF_MAX_MS = 30_000;
+
+let onUnauthorized: () => void = () => {};
+/** Called when the stream is refused with 401: the app refetches the session, which sends it to /login. */
+export function setSseUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
 
 export class FetchEventSource {
   static CONNECTING = 0;
@@ -16,7 +27,8 @@ export class FetchEventSource {
 
   private listeners = new Map<string, Set<Listener>>();
   private abort = new AbortController();
-  private retryMs = 3000;
+  private retryMs = 0; // a server `retry:` field raises the floor of the backoff
+  private attempt = 0;
   private buf = "";
   private eventName = "message";
   private dataLines: string[] = [];
@@ -58,8 +70,14 @@ export class FetchEventSource {
       if (stop || this.readyState === this.CLOSED) return;
       this.readyState = this.CONNECTING;
       this.emit("error", "", this.lastId ?? "");
-      await this.sleep(this.retryMs);
+      await this.sleep(this.nextDelay());
     }
+  }
+
+  private nextDelay(): number {
+    const base = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** Math.min(this.attempt, 10));
+    this.attempt++;
+    return Math.max(this.retryMs, base * (0.5 + Math.random() * 0.5));
   }
 
   /** True when the connection must not be retried (closed, or the server refused it). */
@@ -82,13 +100,15 @@ export class FetchEventSource {
       return this.readyState === this.CLOSED;
     }
     if (this.readyState === this.CLOSED) return true;
-    // 4xx and 204 will not start working on a retry. A 5xx or a dropped connection will.
-    if (res.status === 204 || (res.status >= 400 && res.status < 500)) {
+    // 204 (the server asks us to stop), 401 and 403 will not start working on a retry. Anything else will.
+    if (res.status === 204 || res.status === 401 || res.status === 403) {
       this.readyState = this.CLOSED;
       this.emit("error", "", this.lastId ?? "");
+      if (res.status === 401) onUnauthorized();
       return true;
     }
     if (!res.ok || !res.body) return false;
+    this.attempt = 0;
     this.readyState = this.OPEN;
     this.emit("open", "", this.lastId ?? "");
     const reader = res.body.getReader();
@@ -145,10 +165,14 @@ export class FetchEventSource {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const t = setTimeout(resolve, ms);
-      this.abort.signal.addEventListener("abort", () => {
-        clearTimeout(t);
-        resolve();
-      }, { once: true });
+      this.abort.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 }

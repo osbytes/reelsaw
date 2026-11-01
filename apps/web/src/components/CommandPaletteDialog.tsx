@@ -3,7 +3,31 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFuzzy, Highlight, type Fuzzy, type FuseResultMatch } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
-import { ChevronLeft, Download, Ban, ExternalLink, Film, FolderOpen, Images, Layers, Star, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
+import {
+  ChevronLeft,
+  Download,
+  Ban,
+  ExternalLink,
+  Film,
+  FolderOpen,
+  Images,
+  Layers,
+  Star,
+  LifeBuoy,
+  Link2,
+  MoreHorizontal,
+  Moon,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Settings,
+  Sparkles,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
 import { useSession } from "../lib/auth";
@@ -16,14 +40,16 @@ import { ago } from "../lib/time";
 import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
+import { ForgetDecisionsOption } from "./ForgetDecisionsOption";
 import { CHANGELOG_URL, DELETED_PATH, formatTime } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
+import { DeleteAssetDialog } from "./BumperField";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
 const oneLine = (s: string) => s.trim().split(/\s+/).join(" ");
-
 
 /** What a pasted link looks like inside a stored source link: a YouTube id, else host and path. The server prefilters with it; linkKey decides. */
 function linkNeedle(url: string): string {
@@ -53,20 +79,28 @@ interface Item {
   label: ReactNode;
   hint?: ReactNode;
   icon?: ReactNode;
-  thumb?: string | null;
+  thumb?: string | null | undefined;
   /** a 9:16 thumbnail (library items) rather than a 16:9 one */
   tall?: boolean;
-  danger?: boolean;
+  danger?: boolean | undefined;
   /** → / Tab / the ⋯ button open this item's action list */
   actions?: Target;
   run: () => void;
 }
 
-
 /** kind, length, size and badges of a library item on one line */
-function assetHint(a: { kind: string; mime?: string | null; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
-  const badges = [defaults?.introAssetId === a.id ? "default intro" : "", defaults?.outroAssetId === a.id ? "default outro" : "", a.usedBy ? `used by ${a.usedBy}` : ""].filter(Boolean);
-  return [formatTag(a.mime) ?? a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].filter(Boolean).join(" · ");
+function assetHint(
+  a: { kind: string; mime?: string | null; durationSec: number; width: number; height: number; usedBy: number; id: string },
+  defaults?: { introAssetId?: string; outroAssetId?: string },
+): string {
+  const badges = [
+    defaults?.introAssetId === a.id ? "default intro" : "",
+    defaults?.outroAssetId === a.id ? "default outro" : "",
+    a.usedBy ? `used by ${a.usedBy}` : "",
+  ].filter(Boolean);
+  return [formatTag(a.mime) ?? a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function download(href: string) {
@@ -94,16 +128,17 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
   const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
-  const removeAsset = useMutation(trpc.library.remove.mutationOptions());
+  const removeAsset = useMutation(trpc.library.delete.mutationOptions());
+  const assetWindow = useRestoreWindow("asset", open);
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
 
   // the library, fetched only while the palette is open
-  const libQ = useQuery({ ...trpc.library.list.queryOptions(), enabled: open, staleTime: 30_000 });
-  const library = libQ.data?.assets;
+  const libQ = useQuery({ ...trpc.library.list.queryOptions({ limit: 500 }), enabled: open, staleTime: 30_000 });
+  const library = libQ.data?.items;
   const libFuse = useMemo(() => (library ? createFuzzy(library.map(searchable), SEARCH_KEYS) : null), [library]);
-  const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "deleted") : "none");
 
   // The list before typing is the 20 most recent projects; typing asks the server (debounced), which matches in SQL
   // and returns a handful of rows. Fuse only ranks and highlights those rows.
@@ -130,7 +165,13 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   type ClipRow = NonNullable<typeof searchQ.data>["clips"][number];
   // a pasted link is only answered by results for that link, never by the previous query's
   const staleLink = linkMode && (searchQ.isPlaceholderData || !searchQ.data);
-  const index = searching ? (staleLink ? undefined : searchQ.data) : recentQ.data ? { projects: recentQ.data.projects, clips: [] as ClipRow[], truncated: false } : undefined;
+  const index = searching
+    ? staleLink
+      ? undefined
+      : searchQ.data
+    : recentQ.data
+      ? { projects: recentQ.data.projects, clips: [] as ClipRow[], truncated: false }
+      : undefined;
   const loadingIndex = searching ? !searchQ.data || staleLink : !recentQ.data;
   // everything the palette has shown, so an item's action list still works after the query changes
   const known = useRef({ projects: new Map<string, Proj>(), clips: new Map<string, ClipRow>() });
@@ -141,7 +182,16 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     return {
       // loose: the server already decided what matches, Fuse only orders and highlights what it recognises
       projects: createFuzzy(index.projects, [{ name: "title", weight: 1 }], { threshold: 0.6 }),
-      clips: createFuzzy(index.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }], { threshold: 0.6 }),
+      clips: createFuzzy(
+        index.clips,
+        [
+          { name: "title", weight: 3 },
+          { name: "hook", weight: 1.5 },
+          { name: "projectTitle", weight: 1 },
+          { name: "caption", weight: 0.6 },
+        ],
+        { threshold: 0.6 },
+      ),
     };
   }, [index]);
   // per-project clip facts come with each project row
@@ -157,6 +207,9 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
   const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "clip" | "asset"; id: string; title: string }>(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
+  // projects and clips share one window (DELETED_RETENTION_DAYS)
+  const keepWindow = useRestoreWindow("project", confirm?.kind === "delete" || confirm?.kind === "clip");
   const savedQ = useRef("");
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -174,7 +227,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     go(() => {
       fn().then(
         () => (refresh(projectId), toast(done)),
-        (err: Error) => toast(`${failed}: ${err.message.slice(0, 120)}`),
+        (err: Error) => toast.error(`${failed}: ${err.message.slice(0, 120)}`),
       );
     });
   /** Runs a mutation per id, one after another, and reports how many worked. */
@@ -227,10 +280,19 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   };
   const clipHint = (c: ClipRow, snippet?: ReactNode): ReactNode => (
     <>
-      <StatusText status={c.status} /> · <span className="font-mono">{formatTime(Math.max(0, c.endSec - c.startSec))}</span> · {snippet ?? c.projectTitle} · <span className="font-mono">@{formatTime(c.startSec)}</span>
+      <StatusText status={c.status} /> · <span className="font-mono">{formatTime(Math.max(0, c.endSec - c.startSec))}</span> · {snippet ?? c.projectTitle} ·{" "}
+      <span className="font-mono">@{formatTime(c.startSec)}</span>
     </>
   );
-  const projectItem = (p: Proj, group: string, label: ReactNode = p.title): Item => ({ key: `p-${p.id}`, group, thumb: p.thumbnailUrl, label, hint: projectHint(p), actions: { kind: "project", id: p.id }, run: go(() => nav(`/p/${p.id}`)) });
+  const projectItem = (p: Proj, group: string, label: ReactNode = p.title): Item => ({
+    key: `p-${p.id}`,
+    group,
+    thumb: p.thumbnailUrl,
+    label,
+    hint: projectHint(p),
+    actions: { kind: "project", id: p.id },
+    run: go(() => nav(`/p/${p.id}`)),
+  });
 
   const items: Item[] = useMemo(() => {
     const out: Item[] = [];
@@ -256,8 +318,19 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
               (err: Error) => toast.error(`Couldn’t set the ${slot}: ${err.message.slice(0, 120)}`),
             );
           });
-        const P = (key: string, text: string, icon: ReactNode, run: () => void, hint?: string, thumb?: string): Item => ({ key: `tp-${key}`, group: label, label: text, hint, icon, thumb, tall: !!thumb, run });
-        acts.push(P("default", `Project default (${assetName(defaultId)})`, <Star className="h-4 w-4" />, choose("default", "default"), "What Settings say now"));
+        const P = (key: string, text: string, icon: ReactNode, run: () => void, hint?: string, thumb?: string): Item => ({
+          key: `tp-${key}`,
+          group: label,
+          label: text,
+          hint,
+          icon,
+          thumb,
+          tall: !!thumb,
+          run,
+        });
+        acts.push(
+          P("default", `Project default (${assetName(defaultId)})`, <Star className="h-4 w-4" />, choose("default", "default"), "What Settings say now"),
+        );
         acts.push(P("none", "None", <Ban className="h-4 w-4" />, choose("none", "none"), "No " + slot + " on this project"));
         for (const a of library ?? []) acts.push(P(a.id, a.name, <Images className="h-4 w-4" />, choose(a.id, a.name), assetHint(a, defaults), a.thumbnailUrl));
         return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
@@ -265,7 +338,15 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       if (target.kind === "asset") {
         const a = library?.find((x) => x.id === target.id);
         if (!a) return out;
-        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
+        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({
+          key: `ta-${key}`,
+          group: "Actions",
+          label,
+          icon,
+          hint,
+          danger,
+          run,
+        });
         for (const slot of ["intro", "outro"] as const) {
           const current = defaults?.[slot === "intro" ? "introAssetId" : "outroAssetId"];
           acts.push(
@@ -273,45 +354,186 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
               slot,
               current === a.id ? `Stop using as ${slot} default` : `Use as ${slot} default`,
               <Images className="h-4 w-4" />,
-              act(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`, "Couldn’t save", () => setDefault.mutateAsync({ slot, assetId: current === a.id ? null : a.id }).then(() => qc.invalidateQueries({ queryKey: trpc.me.pathKey() })), undefined),
+              act(
+                current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`,
+                "Couldn’t save",
+                () =>
+                  setDefault.mutateAsync({ slot, assetId: current === a.id ? null : a.id }).then(() => qc.invalidateQueries({ queryKey: trpc.me.pathKey() })),
+                undefined,
+              ),
               "For new projects",
             ),
           );
         }
-        acts.unshift(A("open", "Open in library", <ExternalLink className="h-4 w-4" />, go(() => nav(`/library#asset=${a.id}`))));
-        acts.push(A("remove", "Remove", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "asset", id: a.id, title: a.name })), a.usedBy ? `Used by ${plural(a.usedBy, "project")}; they keep rendering with it` : "You can restore it for 30 days", true));
+        acts.unshift(
+          A(
+            "open",
+            "Open in library",
+            <ExternalLink className="h-4 w-4" />,
+            go(() => nav(`/library#asset=${a.id}`)),
+          ),
+        );
+        acts.push(
+          A(
+            "delete",
+            "Delete…",
+            <Trash2 className="h-4 w-4" />,
+            go(() => setConfirm({ kind: "asset", id: a.id, title: a.name })),
+            a.usedBy ? `Used by ${plural(a.usedBy, "project")}; they keep rendering with it` : "You can restore it from Deleted",
+            true,
+          ),
+        );
         return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "project") {
         const p = known.current.projects.get(target.id);
         if (!p) return out;
         const s = stats.get(p.id);
-        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
-        acts.push(A("open", "Open", <ExternalLink className="h-4 w-4" />, go(() => nav(`/p/${p.id}`))));
-        if (s?.done) acts.push(A("export", "Export zip", <Download className="h-4 w-4" />, go(() => download(`/api/projects/${p.id}/export.zip`)), `${plural(s.done, "rendered clip")} with paste-ready metadata`));
-        if (p.status === "failed" || p.status === "done") acts.push(A("resume", "Resume pipeline", <Play className="h-4 w-4" />, act("Pipeline resumed", "Couldn’t resume", () => retry.mutateAsync({ id: p.id }), p.id), "From the last stage that didn’t finish"));
+        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({
+          key: `ta-${key}`,
+          group: "Actions",
+          label,
+          icon,
+          hint,
+          danger,
+          run,
+        });
+        acts.push(
+          A(
+            "open",
+            "Open",
+            <ExternalLink className="h-4 w-4" />,
+            go(() => nav(`/p/${p.id}`)),
+          ),
+        );
+        if (s?.done)
+          acts.push(
+            A(
+              "export",
+              "Export zip",
+              <Download className="h-4 w-4" />,
+              go(() => download(`/api/projects/${p.id}/export.zip`)),
+              `${plural(s.done, "rendered clip")} with paste-ready metadata`,
+            ),
+          );
+        if (p.status === "failed" || p.status === "done")
+          acts.push(
+            A(
+              "resume",
+              "Resume pipeline",
+              <Play className="h-4 w-4" />,
+              act("Pipeline resumed", "Couldn’t resume", () => retry.mutateAsync({ id: p.id }), p.id),
+              "From the last stage that didn’t finish",
+            ),
+          );
         if (s?.failed.length)
           acts.push(
             A(
               "retry-clips",
               `Retry failed clips (${s.failed.length})`,
               <RotateCcw className="h-4 w-4" />,
-              act(`Retrying ${plural(s.failed.length, "failed clip")}`, "Couldn’t retry", () => Promise.all(s.failed.map((c) => rerender.mutateAsync({ id: c.id }))), p.id),
+              act(
+                `Retrying ${plural(s.failed.length, "failed clip")}`,
+                "Couldn’t retry",
+                () => Promise.all(s.failed.map((c) => rerender.mutateAsync({ id: c.id }))),
+                p.id,
+              ),
             ),
           );
-        acts.push(A("intro", "Set intro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "intro", id: p.id })), "Default, none or a library item"));
-        acts.push(A("outro", "Set outro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "outro", id: p.id })), "Default, none or a library item"));
-        if (p.status === "done" || p.status === "failed") acts.push(A("refine", "Re-run refine", <Sparkles className="h-4 w-4" />, go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })), "Names, disfluencies, scene changes"));
-        acts.push(A("delete", "Delete project", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })), "Removes the source, transcript and every clip", true));
+        acts.push(
+          A(
+            "intro",
+            "Set intro…",
+            <Images className="h-4 w-4" />,
+            () => (setQ(""), setTarget({ kind: "pick", slot: "intro", id: p.id })),
+            "Default, none or a library item",
+          ),
+        );
+        acts.push(
+          A(
+            "outro",
+            "Set outro…",
+            <Images className="h-4 w-4" />,
+            () => (setQ(""), setTarget({ kind: "pick", slot: "outro", id: p.id })),
+            "Default, none or a library item",
+          ),
+        );
+        if (p.status === "done" || p.status === "failed")
+          acts.push(
+            A(
+              "refine",
+              "Re-run refine…",
+              <Sparkles className="h-4 w-4" />,
+              go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })),
+              "Names, disfluencies, scene changes",
+            ),
+          );
+        acts.push(
+          A(
+            "delete",
+            "Delete project…",
+            <Trash2 className="h-4 w-4" />,
+            go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })),
+            "Hides the source, transcript and every clip until you restore it",
+            true,
+          ),
+        );
       } else {
         const c = known.current.clips.get(target.id);
         if (!c) return out;
-        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
-        acts.push(A("open", "Open in project", <ExternalLink className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}#clip=${c.id}`))));
-        acts.push(A("edit", "Edit clip", <Pencil className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}/clips/${c.id}`))));
-        acts.push(A("rerender", "Re-render", <RefreshCw className="h-4 w-4" />, act("Re-rendering the clip", "Couldn’t re-render", () => rerender.mutateAsync({ id: c.id }), c.projectId)));
-        if (c.videoUrl && c.status === "done") acts.push(A("download", "Download clip", <Download className="h-4 w-4" />, go(() => download(`${c.videoUrl}?download`)), "The rendered mp4"));
-        acts.push(A("delete", "Delete clip", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })), "Hidden until you restore it from Deleted", true));
+        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({
+          key: `ta-${key}`,
+          group: "Actions",
+          label,
+          icon,
+          hint,
+          danger,
+          run,
+        });
+        acts.push(
+          A(
+            "open",
+            "Open in project",
+            <ExternalLink className="h-4 w-4" />,
+            go(() => nav(`/p/${c.projectId}#clip=${c.id}`)),
+          ),
+        );
+        acts.push(
+          A(
+            "edit",
+            "Edit clip",
+            <Pencil className="h-4 w-4" />,
+            go(() => nav(`/p/${c.projectId}/clips/${c.id}`)),
+          ),
+        );
+        acts.push(
+          A(
+            "rerender",
+            "Re-render",
+            <RefreshCw className="h-4 w-4" />,
+            act("Re-rendering the clip", "Couldn’t re-render", () => rerender.mutateAsync({ id: c.id }), c.projectId),
+          ),
+        );
+        if (c.videoUrl && c.status === "done")
+          acts.push(
+            A(
+              "download",
+              "Download clip",
+              <Download className="h-4 w-4" />,
+              go(() => download(`${c.videoUrl}?download`)),
+              "The rendered mp4",
+            ),
+          );
+        acts.push(
+          A(
+            "delete",
+            "Delete clip…",
+            <Trash2 className="h-4 w-4" />,
+            go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })),
+            "Hidden until you restore it from Deleted",
+            true,
+          ),
+        );
       }
       return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
     }
@@ -322,7 +544,14 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       if (urls.length === 1) {
         const existing = have.get(linkKey(urls[0]!));
         if (existing) out.push(projectItem(existing, "Already in your projects", `Open ${existing.title}`));
-        out.push({ key: "new-url", group: "Start", icon: <Link2 className="h-4 w-4" />, label: "New project from this link", hint: <span className="truncate font-mono">{urls[0]}</span>, run: go(() => nav(`/new?url=${encodeURIComponent(urls[0]!)}`)) });
+        out.push({
+          key: "new-url",
+          group: "Start",
+          icon: <Link2 className="h-4 w-4" />,
+          label: "New project from this link",
+          hint: <span className="truncate font-mono">{urls[0]}</span>,
+          run: go(() => nav(`/new?url=${encodeURIComponent(urls[0]!)}`)),
+        });
       } else {
         const fresh: string[] = [];
         const dupes = new Map<string, Proj>();
@@ -351,16 +580,65 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
 
     const actions: Item[] = [
       { key: "a-new", group: "Actions", icon: <Plus className="h-4 w-4" />, label: "New project", hint: "paste a link or upload", run: go(() => nav("/new")) },
-      { key: "a-upload", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload videos…", hint: "several start a project each", run: () => fileRef.current?.click() },
+      {
+        key: "a-upload",
+        group: "Actions",
+        icon: <Upload className="h-4 w-4" />,
+        label: "Upload videos…",
+        hint: "several start a project each",
+        run: () => fileRef.current?.click(),
+      },
       { key: "a-projects", group: "Actions", icon: <FolderOpen className="h-4 w-4" />, label: "Go to projects", run: go(() => nav("/")) },
-      { key: "a-library", group: "Actions", icon: <Images className="h-4 w-4" />, label: "Go to library", hint: "intros, outros, images, audio", run: go(() => nav("/library")) },
-      { key: "a-templates", group: "Actions", icon: <Layers className="h-4 w-4" />, label: "Go to templates", hint: "layer templates for any clip length", run: go(() => nav("/templates")) },
-      { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
+      {
+        key: "a-library",
+        group: "Actions",
+        icon: <Images className="h-4 w-4" />,
+        label: "Go to library",
+        hint: "intros, outros, images, audio",
+        run: go(() => nav("/library")),
+      },
+      {
+        key: "a-templates",
+        group: "Actions",
+        icon: <Layers className="h-4 w-4" />,
+        label: "Go to templates",
+        hint: "layer templates for any clip length",
+        run: go(() => nav("/templates")),
+      },
+      {
+        key: "a-upload-bumper",
+        group: "Actions",
+        icon: <Upload className="h-4 w-4" />,
+        label: "Add to library…",
+        hint: "video, image or audio",
+        run: () => bumperFileRef.current?.click(),
+      },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
-      { key: "a-deleted", group: "Actions", icon: <Trash2 className="h-4 w-4" />, label: "Go to deleted", hint: "restore or delete forever", run: go(() => nav(DELETED_PATH)) },
-      { key: "a-releases", group: "Actions", icon: <Sparkles className="h-4 w-4" />, label: "What's new", hint: "reelsaw.com/releases", run: go(() => window.open(CHANGELOG_URL, "_blank", "noopener,noreferrer")) },
+      {
+        key: "a-deleted",
+        group: "Actions",
+        icon: <Trash2 className="h-4 w-4" />,
+        label: "Go to deleted",
+        hint: "restore or delete forever",
+        run: go(() => nav(DELETED_PATH)),
+      },
+      {
+        key: "a-releases",
+        group: "Actions",
+        icon: <Sparkles className="h-4 w-4" />,
+        label: "What's new",
+        hint: "reelsaw.com/releases",
+        run: go(() => window.open(CHANGELOG_URL, "_blank", "noopener,noreferrer")),
+      },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
-      { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
+      {
+        key: "a-report",
+        group: "Actions",
+        icon: <LifeBuoy className="h-4 w-4" />,
+        label: "Report an issue…",
+        hint: "bug, feedback · !",
+        run: go(openReportHere),
+      },
     ];
     // global commands only appear when there is something for them to do
     if (failedClipCount)
@@ -373,7 +651,11 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         run: go(() => {
           void each(counts?.failedClipIds ?? [], (id) => rerender.mutateAsync({ id })).then((r) => {
             refresh();
-            toast(r.failed ? `Retrying ${plural(r.ok, "clip")} · ${r.failed} couldn’t be queued${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}` : `Retrying ${plural(r.ok, "failed clip")}`);
+            toast(
+              r.failed
+                ? `Retrying ${plural(r.ok, "clip")} · ${r.failed} couldn’t be queued${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}`
+                : `Retrying ${plural(r.ok, "failed clip")}`,
+            );
           });
         }),
       });
@@ -387,7 +669,11 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         run: go(() => {
           void each(counts?.failedProjectIds ?? [], (id) => retry.mutateAsync({ id })).then((r) => {
             refresh();
-            toast(r.failed ? `Resumed ${plural(r.ok, "project")} · ${r.failed} couldn’t be resumed${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}` : `Resumed ${plural(r.ok, "failed project")}`);
+            toast(
+              r.failed
+                ? `Resumed ${plural(r.ok, "project")} · ${r.failed} couldn’t be resumed${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}`
+                : `Resumed ${plural(r.ok, "failed project")}`,
+            );
           });
         }),
       });
@@ -414,7 +700,8 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       }
     }
     if (fuse) {
-      for (const r of rankRows(fuse.projects, index!.projects, ql).slice(0, 8)) out.push(projectItem(r.item, "Projects", <Highlight text={r.item.title} matches={r.matches} k="title" />));
+      for (const r of rankRows(fuse.projects, index!.projects, ql).slice(0, 8))
+        out.push(projectItem(r.item, "Projects", <Highlight text={r.item.title} matches={r.matches} k="title" />));
       for (const r of rankRows(fuse.clips, index!.clips, ql)) {
         const c = r.item;
         const via = r.matches?.find((m) => m.key !== "title");
@@ -425,7 +712,12 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           icon: <Film className="h-4 w-4" />,
           label: <Highlight text={c.title || "Untitled clip"} matches={r.matches} k="title" />,
           // show where the match was when it wasn't the title: the hook or caption snippet
-          hint: clipHint(c, via && (via.key === "hook" || via.key === "caption") && typeof via.value === "string" ? <Highlight text={via.value} matches={[via]} k={via.key} /> : undefined),
+          hint: clipHint(
+            c,
+            via && (via.key === "hook" || via.key === "caption") && typeof via.value === "string" ? (
+              <Highlight text={via.value} matches={[via]} k={via.key} />
+            ) : undefined,
+          ),
           actions: { kind: "clip", id: c.id },
           run: go(() => nav(`/p/${c.projectId}#clip=${c.id}`)),
         });
@@ -491,7 +783,13 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
             <Dialog.Title className="sr-only">Search and commands</Dialog.Title>
             <div className="flex items-center gap-2.5 border-b border-line px-4">
               {target ? (
-                <button type="button" onClick={back} className="flex h-7 max-w-[45%] shrink-0 items-center gap-1 rounded-[8px] bg-sunk pl-1.5 pr-2.5 text-xs font-semibold text-ink2 hover:text-ink" aria-label="Back to results" title="Back (←)">
+                <button
+                  type="button"
+                  onClick={back}
+                  className="flex h-7 max-w-[45%] shrink-0 items-center gap-1 rounded-[8px] bg-sunk pl-1.5 pr-2.5 text-xs font-semibold text-ink2 hover:text-ink"
+                  aria-label="Back to results"
+                  title="Back (←)"
+                >
                   <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{crumb}</span>
                 </button>
@@ -538,7 +836,13 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     back();
                   }
                 }}
-                placeholder={target ? (target.kind === "pick" ? "Filter your library…" : "Filter actions…") : "Search projects, clips and your library, or paste video links…"}
+                placeholder={
+                  target
+                    ? target.kind === "pick"
+                      ? "Filter your library…"
+                      : "Filter actions…"
+                    : "Search projects, clips and your library, or paste video links…"
+                }
                 className="h-[52px] min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink3 focus-visible:outline-none"
                 aria-label={target ? "Filter actions" : "Search"}
               />
@@ -563,7 +867,9 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     ))}
                   </SkeletonRegion>
                 )}
-                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && <div className="px-3 py-8 text-center text-sm text-ink3">Nothing found</div>}
+                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && (
+                  <div className="px-3 py-8 text-center text-sm text-ink3">No matches</div>
+                )}
                 {items.map((it, i) => {
                   const head = it.group !== lastGroup ? it.group : null;
                   lastGroup = it.group;
@@ -574,9 +880,16 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                       <div data-idx={i} onMouseMove={() => setCursor(i)} className={`flex w-full items-center gap-1 rounded-[10px] ${sel ? "bg-sunk" : ""}`}>
                         <button onClick={it.run} className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2.5 py-2 text-left">
                           {it.thumb ? (
-                            <img src={it.thumb} alt="" referrerPolicy="no-referrer" className={`shrink-0 rounded-[6px] object-cover ${it.group === "Clips" || it.tall ? "h-9 w-[20px]" : "h-8 w-[56px]"}`} />
+                            <img
+                              src={it.thumb}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              className={`shrink-0 rounded-[6px] object-cover ${it.group === "Clips" || it.tall ? "h-9 w-[20px]" : "h-8 w-[56px]"}`}
+                            />
                           ) : (
-                            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-sunk ${it.danger ? "text-err" : "text-ink2"}`}>{it.icon ?? <FolderOpen className="h-4 w-4" />}</span>
+                            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-sunk ${it.danger ? "text-err" : "text-ink2"}`}>
+                              {it.icon ?? <FolderOpen className="h-4 w-4" />}
+                            </span>
                           )}
                           <span className="min-w-0 flex-1">
                             <span className={`block truncate text-[13px] font-semibold ${it.danger ? "text-err" : ""}`}>{it.label}</span>
@@ -601,13 +914,26 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     </div>
                   );
                 })}
-                {!target && !linkMode && searching && searchQ.data?.truncated && items.length > 0 && <div className="px-3 pb-1 pt-2 text-xs text-ink3">More match than shown. Keep typing to narrow it down.</div>}
+                {!target && !linkMode && searching && searchQ.data?.truncated && items.length > 0 && (
+                  <div className="px-3 pb-1 pt-2 text-xs text-ink3">More match than shown. Keep typing to narrow it down.</div>
+                )}
               </div>
             </ScrollArea>
             {target?.kind === "pick" && (
               <label className="flex items-center gap-2 border-t border-line px-4 py-2 text-xs text-ink2">
                 Seconds, if you pick an image
-                <input className="input h-7 w-16 px-2 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={pickSec} placeholder="its own" onChange={(e) => setPickSec(e.target.value)} aria-label="Seconds an image is shown" />s
+                <input
+                  className="input h-7 w-16 px-2 py-0 text-xs"
+                  type="number"
+                  min={1}
+                  max={10}
+                  step={0.5}
+                  value={pickSec}
+                  placeholder="its own"
+                  onChange={(e) => setPickSec(e.target.value)}
+                  aria-label="Seconds an image is shown"
+                />
+                s
               </label>
             )}
             <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap border-t border-line px-4 py-2 text-[11px] text-ink3">
@@ -676,39 +1002,43 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           );
         }}
       />
-      <ConfirmDialog
-        open={confirm?.kind === "asset"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title="Remove from your library?"
-        body={`“${confirm?.title ?? ""}” is hidden from pickers and defaults. Projects that use it keep rendering with it. You can restore it for 30 days.`}
-        confirm="Remove"
-        danger
+      <DeleteAssetDialog
+        asset={
+          confirm?.kind === "asset"
+            ? (library?.find((x) => x.id === confirm.id) ?? { id: confirm.id, name: confirm.title, usedBy: 0, usedByTemplates: 0 })
+            : null
+        }
+        onClose={() => setConfirm(null)}
         onConfirm={() => {
           const c = confirm!;
           const a = library?.find((x) => x.id === c.id);
           removeAsset.mutateAsync({ id: c.id }).then(
             () => {
               refresh();
+              void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
               notifyDeleted({
                 items: [{ kind: "asset", id: c.id, title: c.title }],
-                restorable: "for 30 days",
+                restorable: assetWindow.restorable,
                 canPurge: !a?.usedBy && !a?.usedByClips && !a?.usedByTemplates,
               });
             },
-            (err: Error) => toast.error(`Couldn’t remove: ${err.message.slice(0, 120)}`),
+            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
       />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
-        onOpenChange={(o) => !o && setConfirm(null)}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+          setForgetDecisions(false);
+        }}
         title="Delete this project?"
-        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted.`}
+        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
           const c = confirm!;
-          del.mutateAsync({ id: c.id }).then(
+          del.mutateAsync({ id: c.id, forgetDecisions }).then(
             (r) => {
               refresh();
               notifyDeleted({
@@ -720,12 +1050,14 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
             (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
-      />
+      >
+        <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirm?.kind === "clip"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this clip?"
-        body={`“${confirm?.title ?? ""}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        body={`“${confirm?.title ?? ""}” is hidden from the project. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() => {

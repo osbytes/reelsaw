@@ -20,7 +20,10 @@ function fakeDb() {
           events.push(v);
           return Promise.resolve();
         }
-        return { onConflictDoUpdate: () => Promise.resolve(void rows.set(v.key, { key: v.key, value: v.value, updatedBy: v.updatedBy ?? null, updatedAt: new Date() })) };
+        return {
+          onConflictDoUpdate: () =>
+            Promise.resolve(void rows.set(v.key, { key: v.key, value: v.value, updatedBy: v.updatedBy ?? null, updatedAt: new Date() })),
+        };
       },
     }),
     delete: () => ({ where: () => Promise.resolve(void rows.clear()) }),
@@ -45,15 +48,26 @@ describe("resolveModels", () => {
     assert.equal(resolveModels(env, { align: "groq:whisper-large-v3-turbo" }, false).align, "groq:whisper-large-v3-turbo");
   });
   it("parseOverride keeps only provider:model strings for the three kinds", () => {
-    assert.deepEqual(parseOverride({ language: "anthropic:claude-haiku-4.5", transcription: 3, align: "nope", other: "x:y" }), { language: "anthropic:claude-haiku-4.5" });
+    assert.deepEqual(parseOverride({ language: "anthropic:claude-haiku-4.5", transcription: 3, align: "nope", other: "x:y" }), {
+      language: "anthropic:claude-haiku-4.5",
+    });
     assert.deepEqual(parseOverride(null), {});
   });
 });
 
 describe("supportsWordTimestamps", () => {
   it("whisper everywhere, deepgram/assemblyai/groq; not gpt-4o-transcribe", () => {
-    for (const id of ["openai:whisper-1", "gateway:openai/whisper-1", "openai:Systran/faster-whisper-small", "deepgram:nova-3", "assemblyai:best", "groq:whisper-large-v3-turbo"]) assert.equal(supportsWordTimestamps(id), true, id);
-    for (const id of ["openai:gpt-4o-transcribe", "gateway:openai/gpt-4o-mini-transcribe", "gateway:google/gemini-3.5-transcribe"]) assert.equal(supportsWordTimestamps(id), false, id);
+    for (const id of [
+      "openai:whisper-1",
+      "gateway:openai/whisper-1",
+      "openai:Systran/faster-whisper-small",
+      "deepgram:nova-3",
+      "assemblyai:best",
+      "groq:whisper-large-v3-turbo",
+    ])
+      assert.equal(supportsWordTimestamps(id), true, id);
+    for (const id of ["openai:gpt-4o-transcribe", "gateway:openai/gpt-4o-mini-transcribe", "gateway:google/gemini-3.5-transcribe"])
+      assert.equal(supportsWordTimestamps(id), false, id);
   });
 });
 
@@ -90,14 +104,22 @@ describe("createModelSettings", () => {
       { pollMs: 0 },
     );
     await ms.attach(db);
-    await assert.rejects(() => ms.set({ transcription: "openai:gpt-4o-transcribe", language: "anthropic:claude-haiku-4.5" }, actor), /transcription: no word timestamps/);
+    await assert.rejects(
+      () => ms.set({ transcription: "openai:gpt-4o-transcribe", language: "anthropic:claude-haiku-4.5" }, actor),
+      /transcription: no word timestamps/,
+    );
     assert.equal(rows.size, 0);
     assert.deepEqual(ms.get(), env);
   });
 
   it("ignores a stored override that no longer verifies (key removed) and says why", async () => {
     const { db, rows } = fakeDb();
-    rows.set("models", { key: "models", value: { language: "anthropic:claude-haiku-4.5", transcription: "deepgram:nova-3" }, updatedBy: "x", updatedAt: new Date() });
+    rows.set("models", {
+      key: "models",
+      value: { language: "anthropic:claude-haiku-4.5", transcription: "deepgram:nova-3" },
+      updatedBy: "x",
+      updatedAt: new Date(),
+    });
     const ms = createModelSettings(
       config,
       log,

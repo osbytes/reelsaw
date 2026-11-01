@@ -1,0 +1,8 @@
+node_modules/
+# `zapier-platform build` / `push` output
+build/
+*.zip
+# local env for `zapier-platform invoke` / live tests; never commit keys
+.env
+.environment
+coverage/

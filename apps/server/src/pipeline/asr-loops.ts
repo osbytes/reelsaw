@@ -21,6 +21,9 @@
  * Cite: openai/whisper transcribe.py; faster-whisper#465; openai community "Whisper hallucination";
  * issue report 218 (project dee69555, 2270× "no" from 40:28–49:59 and a 10-minute prompt-list loop).
  */
+import { z } from "zod";
+import type { StepKeyInput } from "./steps.js";
+
 import { randomUUID } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import type { TranscriptFlag, Word } from "@reelsaw/shared";
@@ -37,7 +40,11 @@ const MIN_RATIO_BYTES = 80;
 const MIN_UNIQUE_TOKENS = 40;
 const UNIQUE_FRAC_LOOP = 0.12;
 
-export const tokenKey = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
+export const tokenKey = (s: string) =>
+  s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}']+/gu, "");
 
 /** Uncompressed / zlib-compressed length. Higher = more repetitive. Same definition as openai/whisper. */
 export function compressionRatio(text: string): number {
@@ -217,4 +224,30 @@ export function flagsFromCollapse(raw: Word[], result: CollapseResult): Transcri
       status: "auto" as const,
     };
   });
+}
+
+/** Bumped when the way a chunk is transcribed changes (prompt retry rule, options), so saved chunk steps stop applying. */
+export const CHUNK_STEP_VERSION = "chunk-1";
+
+/** What a saved chunk step holds: counts and timing only. The words stay in `transcript_chunks`, which the stage reads. */
+export const chunkStepSchema = z.object({
+  chunkIndex: z.number().int().min(0),
+  segments: z.number().int().min(0),
+  words: z.number().int().min(0),
+  durationMs: z.number().int().min(0),
+  fromRow: z.boolean(),
+});
+export type ChunkStepOutput = z.infer<typeof chunkStepSchema>;
+
+export function chunkStepName(index: number): string {
+  return `chunk:${index}`;
+}
+
+/** The key a chunk's step is saved under: the ASR cache hash (model, options and the audio bytes) plus the chunk's place and the rule version. */
+export function chunkStepKey(cacheKey: string, model: string, index: number, offsetSec: number): StepKeyInput {
+  return { input: cacheKey, model, promptVersion: CHUNK_STEP_VERSION, params: { index, offsetMs: Math.round(offsetSec * 1000) } };
+}
+
+export function chunkStepOutput(index: number, text: string, segments: number, durationMs: number, fromRow = false): ChunkStepOutput {
+  return { chunkIndex: index, segments, words: text.split(/\s+/).filter(Boolean).length, durationMs: Math.max(0, Math.round(durationMs)), fromRow };
 }

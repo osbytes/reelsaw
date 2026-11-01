@@ -64,7 +64,13 @@ describe("runsOf", () => {
       at(640, "project.done", { clips: 3, failed: 1, runSeq: 2, runReason: "retry", runSec: 40 }),
     ];
     const runs = runsOf(log);
-    assert.deepEqual(runs.map((r) => [r.seq, r.reason, r.outcome, r.runSec]), [[1, "created", "failed", 5], [2, "retry", "done", 40]]);
+    assert.deepEqual(
+      runs.map((r) => [r.seq, r.reason, r.outcome, r.runSec]),
+      [
+        [1, "created", "failed", 5],
+        [2, "retry", "done", 40],
+      ],
+    );
     assert.equal(runs[0]!.error, "boom");
     assert.deepEqual(runs[1]!.clips, { done: 3, failed: 1 });
     assert.deepEqual(runs[1]!.stages, { ingest: 10 });

@@ -19,7 +19,16 @@ export type Field =
   | { key: Key; label: string; kind: "url" | "text" | "secret"; placeholder?: string };
 
 export const ACCESS_FIELDS: Field[] = [
-  { key: "SIGNUP_MODE", label: "Sign-ups", kind: "enum", options: [{ value: "open", label: "Open" }, { value: "approval", label: "Approval" }, { value: "closed", label: "Closed" }] },
+  {
+    key: "SIGNUP_MODE",
+    label: "Sign-ups",
+    kind: "enum",
+    options: [
+      { value: "open", label: "Open" },
+      { value: "approval", label: "Approval" },
+      { value: "closed", label: "Closed" },
+    ],
+  },
   { key: "REQUIRE_EMAIL_VERIFICATION", label: "Email verification", kind: "bool", on: "Required", off: "Off" },
   { key: "MAX_SIGNUPS_PER_IP_PER_DAY", label: "Sign-ups per address per day", kind: "int", unit: "accounts", zero: "unlimited" },
   { key: "BLOCK_DISPOSABLE_EMAILS", label: "Temporary email domains", kind: "bool", on: "Refused", off: "Allowed" },
@@ -55,15 +64,23 @@ export const LIMIT_FIELDS: Field[] = [
   { key: "MAX_UPLOAD_MB", label: "Largest upload", kind: "int", min: 1, unit: "MB" },
   { key: "MAX_SOURCE_FILE_MB", label: "Largest link download", kind: "int", min: 1, unit: "MB" },
   { key: "ALLOW_PRIVATE_SOURCE_URLS", label: "Links to private networks", kind: "bool", on: "Allowed", off: "Blocked" },
+  { key: "MAX_WEBHOOKS_PER_USER", label: "Webhooks per account", kind: "int", unit: "webhooks", zero: "unlimited" },
+  { key: "ALLOW_PRIVATE_WEBHOOK_URLS", label: "Webhooks to private networks", kind: "bool", on: "Allowed", off: "Blocked" },
+  { key: "MEDIA_LINK_TTL_DAYS", label: "Share links last", kind: "int", min: 1, unit: "days" },
+  { key: "MEDIA_LINK_ALLOW_NEVER", label: "Share links that never expire", kind: "bool", on: "Allowed", off: "Not allowed" },
 ];
 
 export const RETENTION_FIELDS: Field[] = [
   { key: "SOURCE_RETENTION_DAYS", label: "Keep source videos", kind: "int", unit: "days", zero: "forever" },
   { key: "CLIP_RETENTION_DAYS", label: "Keep rendered clips", kind: "int", unit: "days", zero: "forever" },
   { key: "DELETED_RETENTION_DAYS", label: "Keep deleted items restorable", kind: "int", unit: "days", zero: "forever" },
+  { key: "SCRATCH_CACHE_HOURS", label: "Keep worker copies of stored files", kind: "int", unit: "idle hours", zero: "forever" },
   { key: "EVENT_RETENTION_DAYS", label: "Keep project events", kind: "int", unit: "days", zero: "forever" },
   { key: "LLM_USAGE_RETENTION_DAYS", label: "Keep usage rows", kind: "int", unit: "days", zero: "forever" },
   { key: "ADMIN_EVENT_RETENTION_DAYS", label: "Keep the admin log", kind: "int", unit: "days", zero: "forever" },
+  { key: "DECISION_RETENTION_DAYS", label: "Keep users' decisions", kind: "int", unit: "days", zero: "forever" },
+  { key: "MEDIA_LINK_RETENTION_DAYS", label: "Keep revoked share links listed", kind: "int", unit: "days", zero: "forever" },
+  { key: "WEBHOOK_DELIVERY_RETENTION_DAYS", label: "Keep webhook delivery logs", kind: "int", unit: "days", zero: "forever" },
 ];
 
 export const PIPELINE_FIELDS: Field[] = [
@@ -117,7 +134,19 @@ const describe = (f: Field, v: unknown): string => {
  * comes from (.env or set here) and a way back to .env. Changes are drafted per group and saved together,
  * because the server validates the result as a whole (a captcha needs both keys).
  */
-export function InstanceSettingsGroup({ id, title, intro, fields, children }: { id: string; title: string; intro: string; fields: Field[]; children?: ReactNode }) {
+export function InstanceSettingsGroup({
+  id,
+  title,
+  intro,
+  fields,
+  children,
+}: {
+  id: string;
+  title: string;
+  intro: string;
+  fields: Field[];
+  children?: ReactNode;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const q = useInstanceSettings();
@@ -131,7 +160,7 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
       onSuccess: (_st, input) => {
         setDraft({});
         const names = fields.filter((f) => f.key in input).map((f) => f.label);
-        toast(`Saved: ${names.join(", ")}. Every process applies it within a few seconds.`);
+        toast(`Saved: ${names.join(", ")}. Every process applies it within a few seconds`);
         void qc.invalidateQueries({ queryKey: trpc.admin.settings.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.system.status.pathKey() });
@@ -191,14 +220,23 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
       ) : (
         <div className="flex flex-col divide-y divide-line">
           {fields.map((f) => (
-            <FieldRow key={f.key} field={f} state={s} draft={draft[f.key]} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} disabled={save.isPending} />
+            <FieldRow
+              key={f.key}
+              field={f}
+              state={s}
+              draft={draft[f.key]}
+              onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+              disabled={save.isPending}
+            />
           ))}
         </div>
       )}
       {children}
       {/* always-present footer, so saving never shifts the rows above */}
       <div className="flex min-h-9 flex-wrap items-center justify-end gap-2">
-        <span className="mr-auto min-h-5 text-xs text-ink3">{problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}</span>
+        <span className="mr-auto min-h-5 text-xs text-ink3">
+          {problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}
+        </span>
         <button type="button" className="btn-quiet" disabled={!dirty || save.isPending} onClick={() => setDraft({})}>
           Discard
         </button>
@@ -210,7 +248,19 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
   );
 }
 
-function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Field; state: State; draft: string | null | undefined; onChange: (v: string | null) => void; disabled: boolean }) {
+function FieldRow({
+  field: f,
+  state: s,
+  draft,
+  onChange,
+  disabled,
+}: {
+  field: Field;
+  state: State;
+  draft: string | null | undefined;
+  onChange: (v: string | null) => void;
+  disabled: boolean;
+}) {
   const values = s.values as Record<string, unknown>;
   const env = s.env as Record<string, unknown>;
   const source = s.source as Record<string, "env" | "db">;
@@ -224,15 +274,44 @@ function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Fi
 
   let control: ReactNode;
   if (f.kind === "enum" && f.options.length <= 3) {
-    control = <Segmented value={value} options={f.options.map((o) => ({ value: o.value, label: o.label }))} onChange={(v) => onChange(v)} size="sm" className="w-full" />;
+    control = (
+      <Segmented
+        value={value}
+        options={f.options.map((o) => ({ value: o.value, label: o.label }))}
+        onChange={(v) => onChange(v)}
+        size="sm"
+        className="w-full"
+      />
+    );
   } else if (f.kind === "enum") {
     control = <Select ariaLabel={f.label} className="w-full" value={value} onValueChange={onChange} options={f.options} disabled={disabled} />;
   } else if (f.kind === "bool") {
-    control = <Segmented value={value === "true" ? "true" : "false"} options={[{ value: "true", label: f.on ?? "On" }, { value: "false", label: f.off ?? "Off" }]} onChange={(v) => onChange(v)} size="sm" className="w-full" />;
+    control = (
+      <Segmented
+        value={value === "true" ? "true" : "false"}
+        options={[
+          { value: "true", label: f.on ?? "On" },
+          { value: "false", label: f.off ?? "Off" },
+        ]}
+        onChange={(v) => onChange(v)}
+        size="sm"
+        className="w-full"
+      />
+    );
   } else if (f.kind === "int") {
     control = (
       <div className="flex items-center gap-2">
-        <input id={inputId} className="input tabular-nums" type="number" inputMode="numeric" min={f.min ?? 0} max={f.max} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+        <input
+          id={inputId}
+          className="input tabular-nums"
+          type="number"
+          inputMode="numeric"
+          min={f.min ?? 0}
+          max={f.max}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
         {f.unit && <span className="w-16 shrink-0 text-xs text-ink3">{f.unit}</span>}
       </div>
     );
@@ -251,7 +330,11 @@ function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Fi
     );
   }
 
-  const sourceText = resetting ? `will go back to .env: ${describe(f, env[f.key])}` : fromDb ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""} · .env has ${describe(f, env[f.key])}` : "from .env";
+  const sourceText = resetting
+    ? `will go back to .env: ${describe(f, env[f.key])}`
+    : fromDb
+      ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""} · .env has ${describe(f, env[f.key])}`
+      : "from .env";
 
   return (
     <div className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-start">

@@ -26,7 +26,7 @@ export interface ProviderHttp {
   unavailableUntil(provider: string): number;
 }
 
-export function createProviderHttp(deps: { fetch?: typeof fetch; version: string; log: Logger; now?: () => number }): ProviderHttp {
+export function createProviderHttp(deps: { fetch?: typeof fetch | undefined; version: string; log: Logger; now?: () => number }): ProviderHttp {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const parked = new Map<string, number>();
@@ -60,13 +60,21 @@ export function createProviderHttp(deps: { fetch?: typeof fetch; version: string
       if (res.status === 429) {
         const retry = Number(res.headers.get("retry-after"));
         const reset = Number(res.headers.get("x-ratelimit-reset") ?? res.headers.get("ratelimit-reset"));
-        const wait = Number.isFinite(retry) && retry > 0 ? retry * 1000 : Number.isFinite(reset) && reset > 0 ? (reset > 1e9 ? reset * 1000 - now() : reset * 1000) : DEFAULT_COOLDOWN_MS;
+        const wait =
+          Number.isFinite(retry) && retry > 0
+            ? retry * 1000
+            : Number.isFinite(reset) && reset > 0
+              ? reset > 1e9
+                ? reset * 1000 - now()
+                : reset * 1000
+              : DEFAULT_COOLDOWN_MS;
         const resumeAt = now() + Math.min(Math.max(wait, 1000), 60 * 60_000);
         parked.set(provider, resumeAt);
         deps.log.warn({ provider, until: new Date(resumeAt).toISOString() }, "provider rate limited; parked");
         throw new ProviderUnavailable(provider, resumeAt);
       }
-      if (res.status === 401 || res.status === 403) throw new ProviderError(`${provider} refused the key (HTTP ${res.status}); check it under Settings → System.`);
+      if (res.status === 401 || res.status === 403)
+        throw new ProviderError(`${provider} refused the key (HTTP ${res.status}); check it under Settings → System.`);
       if (!res.ok) throw new ProviderError(`${provider} answered HTTP ${res.status}`);
       return res.json().catch(() => {
         throw new ProviderError(`${provider} answered with something that is not JSON`);
@@ -79,7 +87,8 @@ export function createProviderHttp(deps: { fetch?: typeof fetch; version: string
 export const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 export const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 export const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : typeof v === "number" ? String(v) : undefined);
-export const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined);
+export const num = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined;
 export const httpsUrl = (v: unknown): string | undefined => {
   const s = str(v);
   if (!s) return undefined;

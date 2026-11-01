@@ -25,8 +25,14 @@ export interface AssetRefRow {
   role: "intro" | "outro" | "layer";
 }
 
-type ClipIn = { id: string; bumpers?: { intro?: string | null; outro?: string | null } | null; layers?: unknown; overlays?: unknown; audio?: unknown };
-type ProjectIn = { id: string; settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null };
+type ClipIn = {
+  id: string;
+  bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined } | null;
+  layers?: unknown;
+  overlays?: unknown;
+  audio?: unknown;
+};
+type ProjectIn = { id: string; settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null };
 
 /** Pure: the rows one clip should have. The same asset twice in a role collapses to one row. */
 export function refsForClip(projectId: string, clip: ClipIn): AssetRefRow[] {
@@ -59,7 +65,12 @@ export async function syncClipRefs(db: Db, projectId: string, clip: ClipIn): Pro
 /** Replace the rows of several clips of one project (one delete, one insert). */
 export async function syncClipsRefs(db: Db, projectId: string, clips: ClipIn[]): Promise<void> {
   if (!clips.length) return;
-  await db.delete(schema.assetRefs).where(sql`${schema.assetRefs.clipId} in (${sql.join(clips.map((c) => sql`${c.id}`), sql`, `)})`);
+  await db.delete(schema.assetRefs).where(
+    sql`${schema.assetRefs.clipId} in (${sql.join(
+      clips.map((c) => sql`${c.id}`),
+      sql`, `,
+    )})`,
+  );
   const rows = clips.flatMap((c) => refsForClip(projectId, c));
   if (rows.length) await db.insert(schema.assetRefs).values(rows);
 }
@@ -104,7 +115,10 @@ export async function assetRefsReady(db: Db): Promise<boolean> {
  * `all: true` (reelsaw library reindex) runs to the end and restarts from the beginning. Once finished the flag is
  * set and ticks return at once: new writes keep the table current from then on.
  */
-export async function backfillAssetRefs(svc: Services, opts: { all?: boolean; budgetMs?: number } = {}): Promise<{ done: boolean; projects: number; clips: number; refs: number }> {
+export async function backfillAssetRefs(
+  svc: Services,
+  opts: { all?: boolean; budgetMs?: number } = {},
+): Promise<{ done: boolean; projects: number; clips: number; refs: number }> {
   const db = svc.database.db;
   const state = opts.all ? {} : await getState<{ done: boolean; cursor: string }>(db, BACKFILL_KEY);
   if (state.done) return { done: true, projects: 0, clips: 0, refs: 0 };
@@ -113,7 +127,13 @@ export async function backfillAssetRefs(svc: Services, opts: { all?: boolean; bu
     size: BACKFILL_BATCH,
     deadline: opts.all ? Infinity : deadlineIn(opts.budgetMs ?? BACKFILL_BUDGET_MS),
     start: state.cursor ?? null,
-    fetch: async (cursor, size) => db.select({ id: schema.projects.id }).from(schema.projects).where(cursor ? gt(schema.projects.id, cursor) : undefined).orderBy(schema.projects.id).limit(size),
+    fetch: async (cursor, size) =>
+      db
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(cursor ? gt(schema.projects.id, cursor) : undefined)
+        .orderBy(schema.projects.id)
+        .limit(size),
     cursorOf: (row) => row.id,
     handle: async (rows) => {
       for (const { id } of rows) {

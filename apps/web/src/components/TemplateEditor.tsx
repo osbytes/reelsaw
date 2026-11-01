@@ -1,6 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Undo2, Redo2, Keyboard, Loader2, Trash2, Eye, Type, Image as ImageIcon, Music as MusicIcon, PencilLine, AlignCenterHorizontal, AlignCenterVertical, BringToFront, SendToBack, Copy, Maximize2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Undo2,
+  Redo2,
+  Keyboard,
+  Loader2,
+  Trash2,
+  Eye,
+  Type,
+  Image as ImageIcon,
+  Music as MusicIcon,
+  PencilLine,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  BringToFront,
+  SendToBack,
+  Copy,
+  Maximize2,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   MAX_CLIP_LAYERS,
@@ -28,19 +46,20 @@ import {
   type ClipLayer,
   type LayerTiming,
   type Style,
+  type TemplateBumpers,
   type TemplateLayer,
 } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
 import { useShortcut, useShortcuts, useSheetKey, MOD } from "../lib/shortcuts";
-import { useUnsavedFlag } from "../lib/unsaved";
+import { useLeaveGuard, useUnsavedFlag } from "../lib/unsaved";
 import { loadTextFonts } from "../lib/fonts";
 import { ScrollArea } from "./scroll-area";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, type Framing, type PreviewAssetOverlay } from "./VerticalPreview";
 import { Timeline, type EditorSection, type LayerBlock } from "./Timeline";
 import { Modal, Segmented, Select } from "./ui";
-import { useBumperLibrary, type LibraryAsset } from "./BumperField";
+import { BumperSelects, useBumperLibrary, type LibraryAsset, type SlotChoices } from "./BumperField";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { Thumb, clockText } from "./BumperCombobox";
 import { ShortcutSheet } from "./ShortcutSheet";
@@ -51,6 +70,7 @@ export interface EditorTemplate {
   id: string;
   name: string;
   layers: TemplateLayer[];
+  bumpers: TemplateBumpers | null;
 }
 
 interface Props {
@@ -67,7 +87,27 @@ type Mode = LayerTiming["mode"];
 interface TemplateDoc {
   name: string;
   layers: TemplateLayer[];
+  /** intro / outro the template sets; null = neither (clips keep their own) */
+  bumpers: TemplateBumpers | null;
 }
+
+/** A template slot as the intro / outro picker shows it: unset = "keep" (clips keep their own), null = "none". */
+const toChoices = (b: TemplateBumpers | null): SlotChoices => ({
+  intro: b?.intro === undefined ? "keep" : (b.intro ?? "none"),
+  outro: b?.outro === undefined ? "keep" : (b.outro ?? "none"),
+  ...(b?.introSec ? { introSec: b.introSec } : {}),
+  ...(b?.outroSec ? { outroSec: b.outroSec } : {}),
+});
+const fromChoices = (c: SlotChoices): TemplateBumpers | null => {
+  const b: TemplateBumpers = {};
+  for (const s of ["intro", "outro"] as const) {
+    if (c[s] === "keep") continue;
+    b[s] = c[s] === "none" ? null : c[s];
+    const sec = c[`${s}Sec`];
+    if (b[s] && sec) b[`${s}Sec`] = clamp(sec, 1, 10);
+  }
+  return Object.keys(b).length ? b : null;
+};
 
 const PREVIEW_KEY = "rs-template-preview-sec";
 const SNAP_KEY = "rs-editor-snap";
@@ -144,7 +184,23 @@ const fmtPrecise = (t: number) => {
 };
 
 /** A seconds / percent field: commits on blur or Enter, ↑↓ nudge; empty commits `null` when `optional`. */
-function NumField({ value, onCommit, label, step = 0.1, suffix, optional, width = "w-[64px]" }: { value: number | undefined; onCommit: (v: number | null) => void; label: string; step?: number; suffix: string; optional?: boolean; width?: string }) {
+function NumField({
+  value,
+  onCommit,
+  label,
+  step = 0.1,
+  suffix,
+  optional,
+  width = "w-[64px]",
+}: {
+  value: number | undefined;
+  onCommit: (v: number | null) => void;
+  label: string;
+  step?: number;
+  suffix: string;
+  optional?: boolean;
+  width?: string;
+}) {
   const show = (v: number | undefined) => (v === undefined ? "" : String(Number(v.toFixed(2))));
   const [text, setText] = useState(show(value));
   const [focused, setFocused] = useState(false);
@@ -202,7 +258,13 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   return (
     <label className="flex cursor-pointer items-center justify-between gap-3 text-[13px]">
       <span>{label}</span>
-      <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-acc" : "bg-line2"}`}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-acc" : "bg-line2"}`}
+      >
         <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
       </button>
     </label>
@@ -220,10 +282,18 @@ function Swatches({ colors, value, onChange, label }: { colors: string[]; value:
           aria-label={`${label} ${c}`}
           onClick={() => onChange(c)}
           className="h-[30px] w-[30px] rounded-full"
-          style={{ background: c, border: on(c) ? "2px solid var(--ink)" : "2px solid var(--line)", outline: on(c) ? "2px solid var(--panel)" : "none", outlineOffset: -4 }}
+          style={{
+            background: c,
+            border: on(c) ? "2px solid var(--ink)" : "2px solid var(--line)",
+            outline: on(c) ? "2px solid var(--panel)" : "none",
+            outlineOffset: -4,
+          }}
         />
       ))}
-      <label className="relative grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-full border-2 border-dashed border-line2 text-xs text-ink3" title="Custom colour">
+      <label
+        className="relative grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-full border-2 border-dashed border-line2 text-xs text-ink3"
+        title="Custom colour"
+      >
         +
         <input type="color" className="absolute inset-0 cursor-pointer opacity-0" value={value} onChange={(e) => onChange(e.target.value.toUpperCase())} />
       </label>
@@ -239,7 +309,17 @@ const TEXT_SIZES: Array<{ v: number; l: string }> = [
 ];
 
 /** The Timing row of a card: the mode, its fields, and the timing in words. */
-function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLayer; window: [number, number] | null; len: number; onTiming: (t: LayerTiming, key?: string) => void }) {
+function TimingRow({
+  layer: l,
+  window: w,
+  len,
+  onTiming,
+}: {
+  layer: TemplateLayer;
+  window: [number, number] | null;
+  len: number;
+  onTiming: (t: LayerTiming, key?: string) => void;
+}) {
   const t = l.timing;
   const min = layerMinSeconds(l.kind);
   const switchTo = (mode: Mode) => {
@@ -254,23 +334,50 @@ function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLaye
         <span className="truncate text-[11px] text-ink3">{timingText(t)}</span>
       </div>
       <ScrollArea className="w-full">
-        <Segmented size="sm" className="w-max min-w-full" value={t.mode} onChange={switchTo} options={LAYER_TIMING_MODES.map((m) => ({ value: m, label: LAYER_TIMING_LABEL[m] }))} ariaLabel="Timing" />
+        <Segmented
+          size="sm"
+          className="w-max min-w-full"
+          value={t.mode}
+          onChange={switchTo}
+          options={LAYER_TIMING_MODES.map((m) => ({ value: m, label: LAYER_TIMING_LABEL[m] }))}
+          ariaLabel="Timing"
+        />
       </ScrollArea>
       {t.mode === "head" && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
           <span className="text-ink3">From</span>
-          <NumField label="Seconds after the start it appears" suffix="s" value={t.start} onCommit={(v) => v !== null && onTiming({ ...t, start: r2(clamp(v, 0, t.end - min)) })} />
+          <NumField
+            label="Seconds after the start it appears"
+            suffix="s"
+            value={t.start}
+            onCommit={(v) => v !== null && onTiming({ ...t, start: r2(clamp(v, 0, t.end - min)) })}
+          />
           <span className="text-ink3">to</span>
-          <NumField label="Seconds after the start it ends" suffix="s" value={t.end} onCommit={(v) => v !== null && onTiming({ ...t, end: r2(Math.max(t.start + min, v)) })} />
+          <NumField
+            label="Seconds after the start it ends"
+            suffix="s"
+            value={t.end}
+            onCommit={(v) => v !== null && onTiming({ ...t, end: r2(Math.max(t.start + min, v)) })}
+          />
           <span className="text-ink3">after the start</span>
         </div>
       )}
       {t.mode === "tail" && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
           <span className="text-ink3">Starts</span>
-          <NumField label="Seconds before the end it appears" suffix="s" value={t.start} onCommit={(v) => v !== null && onTiming({ ...t, start: r2(Math.max(t.end + min, v)) })} />
+          <NumField
+            label="Seconds before the end it appears"
+            suffix="s"
+            value={t.start}
+            onCommit={(v) => v !== null && onTiming({ ...t, start: r2(Math.max(t.end + min, v)) })}
+          />
           <span className="text-ink3">and ends</span>
-          <NumField label="Seconds before the end it ends" suffix="s" value={t.end} onCommit={(v) => v !== null && onTiming({ ...t, end: r2(clamp(v, 0, t.start - min)) })} />
+          <NumField
+            label="Seconds before the end it ends"
+            suffix="s"
+            value={t.end}
+            onCommit={(v) => v !== null && onTiming({ ...t, end: r2(clamp(v, 0, t.start - min)) })}
+          />
           <span className="text-ink3">before the end</span>
         </div>
       )}
@@ -279,9 +386,21 @@ function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLaye
         <div className="flex flex-col gap-1.5 text-xs">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <span className="text-ink3">From</span>
-            <NumField label="Start, percent of the clip" step={1} suffix="%" value={Math.round(t.start * 1000) / 10} onCommit={(v) => v !== null && onTiming({ ...t, start: r4(clamp(v / 100, 0, t.end - 0.01)) })} />
+            <NumField
+              label="Start, percent of the clip"
+              step={1}
+              suffix="%"
+              value={Math.round(t.start * 1000) / 10}
+              onCommit={(v) => v !== null && onTiming({ ...t, start: r4(clamp(v / 100, 0, t.end - 0.01)) })}
+            />
             <span className="text-ink3">to</span>
-            <NumField label="End, percent of the clip" step={1} suffix="%" value={Math.round(t.end * 1000) / 10} onCommit={(v) => v !== null && onTiming({ ...t, end: r4(clamp(v / 100, t.start + 0.01, 1)) })} />
+            <NumField
+              label="End, percent of the clip"
+              step={1}
+              suffix="%"
+              value={Math.round(t.end * 1000) / 10}
+              onCommit={(v) => v !== null && onTiming({ ...t, end: r4(clamp(v / 100, t.start + 0.01, 1)) })}
+            />
             <span className="text-ink3">of the clip</span>
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -321,8 +440,28 @@ function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLaye
  * One template layer in the inspector: the header (what it is, where it lands at the preview length, remove), the
  * fields of its kind (the clip editor's LayerCard), and the Timing row in place of from / to seconds.
  */
-function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading, onSelect, onPatch, onRemove }: { layer: TemplateLayer; window: [number, number] | null; len: number; asset: LibraryAsset | undefined; selected: boolean; loading: boolean; onSelect: () => void; onPatch: (patch: TemplatePatch, key?: string) => void; onRemove: () => void }) {
-  const removed = loading ? "…" : "Removed from the library";
+function TemplateLayerCard({
+  layer: l,
+  window: w,
+  len,
+  asset,
+  selected,
+  loading,
+  onSelect,
+  onPatch,
+  onRemove,
+}: {
+  layer: TemplateLayer;
+  window: [number, number] | null;
+  len: number;
+  asset: LibraryAsset | undefined;
+  selected: boolean;
+  loading: boolean;
+  onSelect: () => void;
+  onPatch: (patch: TemplatePatch, key?: string) => void;
+  onRemove: () => void;
+}) {
+  const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
@@ -330,12 +469,25 @@ function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading,
     const o = l.kind === "audio" ? 1 : (l.opacity ?? 1);
     return (
       <Field label="Opacity" hint={<span className="font-mono">{pct(o)}%</span>}>
-        <input type="range" min={10} max={100} step={5} value={pct(o)} onChange={(e) => onPatch({ opacity: Number(e.target.value) === 100 ? undefined : Number(e.target.value) / 100 }, `ly-o-${l.id}`)} className="accent-[var(--acc)]" aria-label={aria} />
+        <input
+          type="range"
+          min={10}
+          max={100}
+          step={5}
+          value={pct(o)}
+          onChange={(e) => onPatch({ opacity: Number(e.target.value) === 100 ? undefined : Number(e.target.value) / 100 }, `ly-o-${l.id}`)}
+          className="accent-[var(--acc)]"
+          aria-label={aria}
+        />
       </Field>
     );
   };
   return (
-    <div data-layer-card={l.id} onClick={onSelect} className={`flex cursor-pointer flex-col gap-2 rounded-[12px] p-2.5 ${selected ? "border-2 border-acc" : "border border-line"}`}>
+    <div
+      data-layer-card={l.id}
+      onClick={onSelect}
+      className={`flex cursor-pointer flex-col gap-2 rounded-[12px] p-2.5 ${selected ? "border-2 border-acc" : "border border-line"}`}
+    >
       <div className="flex items-center gap-2">
         {l.kind === "text" ? (
           <span className="grid h-9 w-5 shrink-0 place-items-center rounded-[4px] bg-sunk text-ink2">
@@ -387,12 +539,24 @@ function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading,
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Size">
-              <Segmented size="sm" value={sizeIdx >= 0 ? TEXT_SIZES[sizeIdx]!.v : -1} onChange={(v) => onPatch({ size: v })} options={TEXT_SIZES.map((sz) => ({ value: sz.v, label: sz.l }))} ariaLabel="Text size" />
+              <Segmented
+                size="sm"
+                value={sizeIdx >= 0 ? TEXT_SIZES[sizeIdx]!.v : -1}
+                onChange={(v) => onPatch({ size: v })}
+                options={TEXT_SIZES.map((sz) => ({ value: sz.v, label: sz.l }))}
+                ariaLabel="Text size"
+              />
             </Field>
             {opacityField("Text opacity")}
           </div>
           <Field label="Font">
-            <Select size="sm" ariaLabel="Text font" value={l.font ?? TEXT_FONTS[0].family} onValueChange={(v) => onPatch({ font: v === TEXT_FONTS[0].family ? undefined : v })} options={TEXT_FONTS.map((f) => ({ value: f.family, label: f.label }))} />
+            <Select
+              size="sm"
+              ariaLabel="Text font"
+              value={l.font ?? TEXT_FONTS[0].family}
+              onValueChange={(v) => onPatch({ font: v === TEXT_FONTS[0].family ? undefined : v })}
+              options={TEXT_FONTS.map((f) => ({ value: f.family, label: f.label }))}
+            />
           </Field>
           <Field label="Colour">
             <Swatches label="Text colour" colors={TEXT_COLORS} value={l.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => onPatch({ color: c })} />
@@ -404,13 +568,40 @@ function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading,
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Left / right" hint={<span className="font-mono">{pct(l.x)}%</span>}>
-              <input type="range" min={0} max={100} step={1} value={pct(l.x)} onChange={(e) => onPatch({ x: Number(e.target.value) / 100 }, `ly-x-${l.id}`)} className="accent-[var(--acc)]" aria-label="Layer position across" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={pct(l.x)}
+                onChange={(e) => onPatch({ x: Number(e.target.value) / 100 }, `ly-x-${l.id}`)}
+                className="accent-[var(--acc)]"
+                aria-label="Layer position across"
+              />
             </Field>
             <Field label="Up / down" hint={<span className="font-mono">{pct(l.y)}%</span>}>
-              <input type="range" min={0} max={100} step={1} value={pct(l.y)} onChange={(e) => onPatch({ y: Number(e.target.value) / 100 }, `ly-y-${l.id}`)} className="accent-[var(--acc)]" aria-label="Layer position down" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={pct(l.y)}
+                onChange={(e) => onPatch({ y: Number(e.target.value) / 100 }, `ly-y-${l.id}`)}
+                className="accent-[var(--acc)]"
+                aria-label="Layer position down"
+              />
             </Field>
             <Field label="Width" hint={<span className="font-mono">{pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)}%</span>}>
-              <input type="range" min={5} max={100} step={1} value={pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)} onChange={(e) => onPatch({ w: Number(e.target.value) / 100 }, `ly-w-${l.id}`)} className="accent-[var(--acc)]" aria-label="Layer width" />
+              <input
+                type="range"
+                min={5}
+                max={100}
+                step={1}
+                value={pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)}
+                onChange={(e) => onPatch({ w: Number(e.target.value) / 100 }, `ly-w-${l.id}`)}
+                className="accent-[var(--acc)]"
+                aria-label="Layer width"
+              />
             </Field>
             {opacityField("Layer opacity")}
           </div>
@@ -421,17 +612,40 @@ function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading,
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Level" hint={<span className="font-mono">{pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)}%</span>}>
-              <input type="range" min={0} max={100} step={5} value={pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)} onChange={(e) => onPatch({ volume: Number(e.target.value) / 100 }, `ly-vol-${l.id}`)} className="accent-[var(--acc)]" aria-label="Sound level" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)}
+                onChange={(e) => onPatch({ volume: Number(e.target.value) / 100 }, `ly-vol-${l.id}`)}
+                className="accent-[var(--acc)]"
+                aria-label="Sound level"
+              />
             </Field>
             <Field label="Fade in / out" hint={<span className="font-mono">{(l.fade ?? CLIP_AUDIO_DEFAULTS.fade).toFixed(1)}s</span>}>
-              <input type="range" min={0} max={5} step={0.5} value={l.fade ?? CLIP_AUDIO_DEFAULTS.fade} onChange={(e) => onPatch({ fade: Number(e.target.value) }, `ly-fade-${l.id}`)} className="accent-[var(--acc)]" aria-label="Sound fade" />
+              <input
+                type="range"
+                min={0}
+                max={5}
+                step={0.5}
+                value={l.fade ?? CLIP_AUDIO_DEFAULTS.fade}
+                onChange={(e) => onPatch({ fade: Number(e.target.value) }, `ly-fade-${l.id}`)}
+                className="accent-[var(--acc)]"
+                aria-label="Sound fade"
+              />
             </Field>
           </div>
           <Switch checked={l.duck ?? CLIP_AUDIO_DEFAULTS.duck} onChange={(v) => onPatch({ duck: v })} label="Lower it while someone speaks" />
           <Switch checked={l.loop ?? CLIP_AUDIO_DEFAULTS.loop} onChange={(v) => onPatch({ loop: v })} label="Repeat if it is shorter than its window" />
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-ink3">Track from</span>
-            <NumField label="Seconds into the track" suffix="s" value={l.offset ?? 0} onCommit={(v) => v !== null && onPatch({ offset: Math.max(0, r2(v)) || undefined })} />
+            <NumField
+              label="Seconds into the track"
+              suffix="s"
+              value={l.offset ?? 0}
+              onCommit={(v) => v !== null && onPatch({ offset: Math.max(0, r2(v)) || undefined })}
+            />
           </div>
         </div>
       )}
@@ -443,7 +657,11 @@ function LiveTimeline({ clock, ...props }: Omit<ComponentProps<typeof Timeline>,
   return <Timeline {...props} current={useClock(clock)} />;
 }
 
-function LivePreview({ clock, overlaysAt, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "time" | "assetOverlays"> & { clock: Clock; overlaysAt: (t: number) => PreviewAssetOverlay[] }) {
+function LivePreview({
+  clock,
+  overlaysAt,
+  ...props
+}: Omit<ComponentProps<typeof VerticalPreview>, "time" | "assetOverlays"> & { clock: Clock; overlaysAt: (t: number) => PreviewAssetOverlay[] }) {
   const t = useClock(clock);
   const assetOverlays = useMemo(() => overlaysAt(t), [overlaysAt, t]);
   return <VerticalPreview {...props} assetOverlays={assetOverlays} time={t} />;
@@ -468,10 +686,10 @@ const noop = () => {};
 export function TemplateEditor({ template, onExit }: Props) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const history = useHistory<TemplateDoc>(() => ({ name: template.name, layers: template.layers }));
+  const history = useHistory<TemplateDoc>(() => ({ name: template.name, layers: template.layers, bumpers: template.bumpers ?? null }));
   const doc = history.state;
-  const { name, layers } = doc;
-  const [saved, setSaved] = useState<TemplateDoc>(() => ({ name: template.name, layers: template.layers }));
+  const { name, layers, bumpers } = doc;
+  const [saved, setSaved] = useState<TemplateDoc>(() => ({ name: template.name, layers: template.layers, bumpers: template.bumpers ?? null }));
   const edit = (fn: (d: TemplateDoc) => TemplateDoc, key?: string) => history.set(fn, key);
 
   const [previewSec, setPreviewSecRaw] = useState(readPreviewSec);
@@ -502,7 +720,6 @@ export function TemplateEditor({ template, onExit }: Props) {
   const [safe, setSafe] = useState(true);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
-  const [guard, setGuard] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
   const clock = useMemo(() => createClock(0), []);
@@ -512,7 +729,9 @@ export function TemplateEditor({ template, onExit }: Props) {
   }, [layers, selectedLayer]);
   useEffect(() => {
     if (!selectedLayer) return;
-    const id = requestAnimationFrame(() => document.querySelector(`[data-layer-card="${selectedLayer}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+    const id = requestAnimationFrame(() =>
+      document.querySelector(`[data-layer-card="${selectedLayer}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
     return () => cancelAnimationFrame(id);
   }, [selectedLayer]);
   // a shorter preview pulls the playhead inside it
@@ -552,7 +771,8 @@ export function TemplateEditor({ template, onExit }: Props) {
   const sections: EditorSection[] = useMemo(() => [{ start: 0, end: len, mode: "auto" }], [len]);
 
   const setLayers = (fn: (list: TemplateLayer[]) => TemplateLayer[], key?: string) => edit((d) => ({ ...d, layers: fn(d.layers) }), key);
-  const patchLayer = (id: string, patch: TemplatePatch, key?: string) => setLayers((list) => list.map((l) => (l.id === id ? ({ ...l, ...patch } as TemplateLayer) : l)), key);
+  const patchLayer = (id: string, patch: TemplatePatch, key?: string) =>
+    setLayers((list) => list.map((l) => (l.id === id ? ({ ...l, ...patch } as TemplateLayer) : l)), key);
   /** a block dragged or trimmed on the lane: the new window in the layer's own mode (a trimmed "whole clip" becomes "from the start") */
   const moveLayer = (id: string, [a, b]: [number, number], key?: string) => {
     const l = layers.find((x) => x.id === id);
@@ -572,8 +792,9 @@ export function TemplateEditor({ template, onExit }: Props) {
     const i = layers.findIndex((l) => l.id === id);
     const l = layers[i];
     if (!l) return;
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
-    const copy: TemplateLayer = l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
+    const copy: TemplateLayer =
+      l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
     setLayers((list) => [...list.slice(0, i + 1), copy, ...list.slice(i + 1)]);
     setSelectedLayer(copy.id);
     toast("Duplicated");
@@ -593,19 +814,44 @@ export function TemplateEditor({ template, onExit }: Props) {
     return (
       <>
         {o.kind === "text" && <OverlayMenuItem icon={<PencilLine className="h-3.5 w-3.5" />} label="Edit text" kbd="dbl-click" onSelect={ctx.editText} />}
-        <OverlayMenuItem icon={<AlignCenterHorizontal className="h-3.5 w-3.5" />} label="Centre left / right" disabled={l.x === 0.5} onSelect={() => patchLayer(l.id, { x: 0.5 })} />
-        <OverlayMenuItem icon={<AlignCenterVertical className="h-3.5 w-3.5" />} label="Centre up / down" disabled={l.y === 0.5} onSelect={() => patchLayer(l.id, { y: 0.5 })} />
-        <OverlayMenuItem icon={<Maximize2 className="h-3.5 w-3.5" />} label="Show for the whole clip" disabled={l.timing.mode === "fill"} onSelect={() => patchLayer(l.id, { timing: { mode: "fill" } })} />
+        <OverlayMenuItem
+          icon={<AlignCenterHorizontal className="h-3.5 w-3.5" />}
+          label="Centre left / right"
+          disabled={l.x === 0.5}
+          onSelect={() => patchLayer(l.id, { x: 0.5 })}
+        />
+        <OverlayMenuItem
+          icon={<AlignCenterVertical className="h-3.5 w-3.5" />}
+          label="Centre up / down"
+          disabled={l.y === 0.5}
+          onSelect={() => patchLayer(l.id, { y: 0.5 })}
+        />
+        <OverlayMenuItem
+          icon={<Maximize2 className="h-3.5 w-3.5" />}
+          label="Show for the whole clip"
+          disabled={l.timing.mode === "fill"}
+          onSelect={() => patchLayer(l.id, { timing: { mode: "fill" } })}
+        />
         {o.kind === "asset" && (
           <>
             <OverlayMenuSeparator />
-            <OverlayMenuItem icon={<BringToFront className="h-3.5 w-3.5" />} label="Bring to front" disabled={layers[layers.length - 1]?.id === l.id} onSelect={() => orderLayer(l.id, "front")} />
-            <OverlayMenuItem icon={<SendToBack className="h-3.5 w-3.5" />} label="Send to back" disabled={layers[0]?.id === l.id} onSelect={() => orderLayer(l.id, "back")} />
+            <OverlayMenuItem
+              icon={<BringToFront className="h-3.5 w-3.5" />}
+              label="Bring to front"
+              disabled={layers[layers.length - 1]?.id === l.id}
+              onSelect={() => orderLayer(l.id, "front")}
+            />
+            <OverlayMenuItem
+              icon={<SendToBack className="h-3.5 w-3.5" />}
+              label="Send to back"
+              disabled={layers[0]?.id === l.id}
+              onSelect={() => orderLayer(l.id, "back")}
+            />
           </>
         )}
         <OverlayMenuSeparator />
         <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
-        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="⌫" onSelect={() => removeLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="Delete" onSelect={() => removeLayer(l.id)} />
       </>
     );
   };
@@ -622,7 +868,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     return [start, r2(Math.min(len, start + dur))];
   };
   const pushLayer = (l: ClipLayer, note: string, timing?: LayerTiming) => {
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
     const base = templateFromLayers([l], { startSec: 0, endSec: len })[0]!;
     const tl: TemplateLayer = timing ? { ...base, timing } : base;
     setLayers((list) => [...list, tl]);
@@ -631,22 +877,42 @@ export function TemplateEditor({ template, onExit }: Props) {
     if (t < l.start || t > l.end) seek(l.start);
     toast(`${note} · ${timingText(tl.timing).toLowerCase()}`);
   };
-  type NewLayerAsset = Pick<LibraryAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null; hasAudio?: boolean };
+  type NewLayerAsset = Pick<LibraryAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null | undefined; hasAudio?: boolean | undefined };
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const d = assetLayerDefaultsFor(asset);
     const [start, end] = layerWindow(t, Math.min(d.windowSec, len - t));
-    pushLayer({ id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: d.y, w: d.w, ...(d.loop ? { loop: true } : {}) }, `${asset.name} added`);
+    pushLayer(
+      { id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: d.y, w: d.w, ...(d.loop ? { loop: true } : {}) },
+      `${asset.name} added`,
+    );
   };
   const addTextLayer = (t: number) => {
     const [start, end] = layerWindow(t, 4);
-    pushLayer({ id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color }, "Text added");
+    pushLayer(
+      { id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color },
+      "Text added",
+    );
   };
   const addSoundLayer = (asset: NewLayerAsset, t: number) => {
     const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec });
     const oneShot = defaults === SFX_AUDIO_DEFAULTS;
     const [start, end] = oneShot ? layerWindow(t, Math.max(0.5, asset.durationSec)) : [0, len];
     // music is a bed under the whole clip, cut to length; a one-shot sound anchors to the nearer edge
-    pushLayer({ id: newLayerId(), kind: "audio", assetId: asset.id, start, end, volume: defaults.volume, duck: defaults.duck, fade: defaults.fade, loop: defaults.loop }, `${asset.name} added`, oneShot ? undefined : { mode: "fill" });
+    pushLayer(
+      {
+        id: newLayerId(),
+        kind: "audio",
+        assetId: asset.id,
+        start,
+        end,
+        volume: defaults.volume,
+        duck: defaults.duck,
+        fade: defaults.fade,
+        loop: defaults.loop,
+      },
+      `${asset.name} added`,
+      oneShot ? undefined : { mode: "fill" },
+    );
   };
 
   const layerBlocks: LayerBlock[] = useMemo(
@@ -654,9 +920,16 @@ export function TemplateEditor({ template, onExit }: Props) {
       resolved.layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = libraryAssets.get(l.assetId);
-        const nm = a?.name ?? (assetsLoading ? "…" : "removed");
+        const nm = a?.name ?? (assetsLoading ? "…" : "deleted");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name: nm, kind: "audio" as const };
-        return { id: l.id, start: l.start, end: l.end, name: nm, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
+        return {
+          id: l.id,
+          start: l.start,
+          end: l.end,
+          name: nm,
+          kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const),
+          thumbnailUrl: a?.thumbnailUrl,
+        };
       }),
     [resolved, libraryAssets, assetsLoading],
   );
@@ -667,11 +940,40 @@ export function TemplateEditor({ template, onExit }: Props) {
           .filter(isVisualLayer)
           .filter((l) => t >= l.start - 0.001 && t <= l.end + 0.001)
           .flatMap((l): PreviewAssetOverlay[] => {
-            if (l.kind === "text") return [{ kind: "text", id: l.id, text: l.text, x: l.x, y: l.y, size: l.size ?? TEXT_OVERLAY_DEFAULTS.size, color: l.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!l.box, opacity: l.opacity ?? 1, ...(l.font ? { font: l.font } : {}) }];
+            if (l.kind === "text")
+              return [
+                {
+                  kind: "text",
+                  id: l.id,
+                  text: l.text,
+                  x: l.x,
+                  y: l.y,
+                  size: l.size ?? TEXT_OVERLAY_DEFAULTS.size,
+                  color: l.color ?? TEXT_OVERLAY_DEFAULTS.color,
+                  box: !!l.box,
+                  opacity: l.opacity ?? 1,
+                  ...(l.font ? { font: l.font } : {}),
+                },
+              ];
             const a = libraryAssets.get(l.assetId);
             if (!a) return [];
             const aspect = a.width > 0 && a.height > 0 ? a.width / a.height : 0;
-            return [{ kind: "asset", id: l.id, url: `/media/assets/${a.id}`, name: a.name, aspect, x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1, video: a.kind === "video", loop: l.loop ?? isStickerAsset(a), offsetSec: t - l.start }];
+            return [
+              {
+                kind: "asset",
+                id: l.id,
+                url: `/media/assets/${a.id}`,
+                name: a.name,
+                aspect,
+                x: l.x,
+                y: l.y,
+                w: l.w ?? ASSET_OVERLAY_DEFAULT_W,
+                opacity: l.opacity ?? 1,
+                video: a.kind === "video",
+                loop: l.loop ?? isStickerAsset(a),
+                offsetSec: t - l.start,
+              },
+            ];
           }),
     [resolved, libraryAssets],
   );
@@ -750,9 +1052,12 @@ export function TemplateEditor({ template, onExit }: Props) {
     }
     const sent = doc;
     try {
-      await update.mutateAsync({ id: template.id, name: sent.name.trim(), layers: sent.layers });
+      await update.mutateAsync({ id: template.id, name: sent.name.trim(), layers: sent.layers, bumpers: sent.bumpers });
       setSaved(sent);
-      await Promise.all([qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() }), qc.invalidateQueries({ queryKey: trpc.layerTemplates.get.queryKey({ id: template.id }) })]);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() }),
+        qc.invalidateQueries({ queryKey: trpc.layerTemplates.get.queryKey({ id: template.id }) }),
+      ]);
       toast("Saved");
       return true;
     } catch (err) {
@@ -760,7 +1065,8 @@ export function TemplateEditor({ template, onExit }: Props) {
       return false;
     }
   }
-  const requestExit = () => (dirty ? setGuard(true) : onExit());
+  const guard = useLeaveGuard(dirty, onExit);
+  const requestExit = guard.requestExit;
   useUnsavedFlag("template-editor", dirty);
   useEffect(() => {
     const on = (e: BeforeUnloadEvent) => {
@@ -816,11 +1122,21 @@ export function TemplateEditor({ template, onExit }: Props) {
             <button className="btn-ghost text-xs" disabled={full} onClick={() => addTextLayer(clock.get())}>
               <Type className="h-3.5 w-3.5" /> Text
             </button>
-            <button className="btn-ghost text-xs" disabled={full} onClick={() => setPicker({ kind: "audio", t: clock.get() })} title="Music under the whole clip, or a sound effect at the playhead">
+            <button
+              className="btn-ghost text-xs"
+              disabled={full}
+              onClick={() => setPicker({ kind: "audio", t: clock.get() })}
+              title="Music under the whole clip, or a sound effect at the playhead"
+            >
               <MusicIcon className="h-3.5 w-3.5" /> Sound
             </button>
           </div>
-          {layers.length === 0 && <p className="text-xs leading-snug text-ink2">A logo in the first seconds, a call to action at the end, a watermark or a music bed under the whole clip. Each layer has a timing, so the template fits a clip of any length.</p>}
+          {layers.length === 0 && (
+            <p className="text-xs leading-snug text-ink2">
+              A logo in the first seconds, a call to action at the end, a watermark or a music bed under the whole clip. Each layer has a timing, so the
+              template fits a clip of any length.
+            </p>
+          )}
           {[...layers]
             .sort((a, b) => (windows.get(a.id)?.[0] ?? Infinity) - (windows.get(b.id)?.[0] ?? Infinity) || a.id.localeCompare(b.id))
             .map((l) => (
@@ -837,8 +1153,19 @@ export function TemplateEditor({ template, onExit }: Props) {
                 onRemove={() => removeLayer(l.id)}
               />
             ))}
+          <section aria-labelledby="template-bumpers" className="flex flex-col gap-2 border-t border-line pt-3">
+            <span id="template-bumpers" className="text-[13px] font-bold">
+              Intro & outro
+            </span>
+            <BumperSelects template value={toChoices(bumpers)} onChange={(v) => edit((d) => ({ ...d, bumpers: fromChoices(v) }), "bumpers")} />
+            <p className="text-[11px] leading-snug text-ink3">
+              Played before and after the clip. Applying the template sets them as the clip’s own; Clip’s own leaves each clip’s choice alone.
+            </p>
+          </section>
           <p className="text-[11px] leading-snug text-ink3">
-            From the start and Before the end keep their seconds on every clip; Whole clip stretches; Proportional is a share of the clip. Change the preview length to see the template fit a shorter or longer clip. Drag a picture or text on the preview to move it, a block on the timeline to change its timing.
+            From the start and Before the end keep their seconds on every clip; Whole clip stretches; Proportional is a share of the clip. Change the preview
+            length to see the template fit a shorter or longer clip. Drag a picture or text on the preview to move it, a block on the timeline to change its
+            timing.
           </p>
         </div>
       </ScrollArea>
@@ -850,9 +1177,17 @@ export function TemplateEditor({ template, onExit }: Props) {
   const canvasHeader = (
     <div className={`flex w-full flex-wrap items-center gap-2 ${compact ? "" : "min-h-9"}`}>
       <span className="text-xs font-semibold text-ink2">Preview length</span>
-      <Segmented size="sm" value={previewSec} onChange={setPreviewSec} options={TEMPLATE_PREVIEW_SECONDS.map((s) => ({ value: s, label: `${s} s`, title: `Lay the template out on a ${s} s clip` }))} ariaLabel="Preview length" />
+      <Segmented
+        size="sm"
+        value={previewSec}
+        onChange={setPreviewSec}
+        options={TEMPLATE_PREVIEW_SECONDS.map((s) => ({ value: s, label: `${s} s`, title: `Lay the template out on a ${s} s clip` }))}
+        ariaLabel="Preview length"
+      />
       {/* always present, so the count appearing never moves the controls */}
-      <span className={`min-w-0 truncate text-xs ${skipped ? "text-warn" : "text-ink3"}`}>{skipped ? `▲ ${skipped} layer${skipped === 1 ? "" : "s"} left out at ${len} s` : ""}</span>
+      <span className={`min-w-0 truncate text-xs ${skipped ? "text-warn" : "text-ink3"}`}>
+        {skipped ? `▲ ${skipped} layer${skipped === 1 ? "" : "s"} left out at ${len} s` : ""}
+      </span>
       <span className="flex-1" />
       <button className={chip} aria-pressed={safe} onClick={() => setSafe(!safe)} title="Show the TikTok safe zones">
         <Eye className="h-3.5 w-3.5" /> {safe ? "Safe zones" : "No safe zones"}
@@ -886,13 +1221,19 @@ export function TemplateEditor({ template, onExit }: Props) {
 
   // ----- timeline -----
   const tbtn = "grid h-[34px] min-w-[34px] place-items-center rounded-[10px] border border-line bg-panel px-2 text-[13px] text-ink hover:bg-sunk";
-  const abtn = "inline-flex h-[30px] items-center gap-1 rounded-[8px] border border-line bg-panel px-2 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
+  const abtn =
+    "inline-flex h-[30px] items-center gap-1 rounded-[8px] border border-line bg-panel px-2 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
   const transport = (
     <>
       <button className={tbtn} onClick={() => (setPlaying(false), seek(clock.get() - FRAME))} title="Previous frame (←)" aria-label="Previous frame">
         ◀︎❙
       </button>
-      <button className="grid h-[34px] w-[44px] place-items-center rounded-[10px] bg-ink text-bg" onClick={togglePlay} title="Play / pause (Space)" aria-label={playing ? "Pause" : "Play"}>
+      <button
+        className="grid h-[34px] w-[44px] place-items-center rounded-[10px] bg-ink text-bg"
+        onClick={togglePlay}
+        title="Play / pause (Space)"
+        aria-label={playing ? "Pause" : "Play"}
+      >
         {playing ? "❚❚" : "▶"}
       </button>
       <button className={tbtn} onClick={() => (setPlaying(false), seek(clock.get() + FRAME))} title="Next frame (→)" aria-label="Next frame">
@@ -925,7 +1266,12 @@ export function TemplateEditor({ template, onExit }: Props) {
       onSelect={noop}
       detected={[]}
       toolbar={
-        <button className={abtn} disabled={!selectedLayer} onClick={() => selectedLayer && removeLayer(selectedLayer)} title={selectedLayer ? "Remove the selected layer (Delete)" : "Select a layer first"}>
+        <button
+          className={abtn}
+          disabled={!selectedLayer}
+          onClick={() => selectedLayer && removeLayer(selectedLayer)}
+          title={selectedLayer ? "Remove the selected layer (Delete)" : "Select a layer first"}
+        >
           <Trash2 className="h-3.5 w-3.5" /> Remove
         </button>
       }
@@ -948,7 +1294,8 @@ export function TemplateEditor({ template, onExit }: Props) {
   );
 
   // ----- header -----
-  const hb = "grid h-[34px] w-[34px] place-items-center rounded-[10px] border border-line bg-panel text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
+  const hb =
+    "grid h-[34px] w-[34px] place-items-center rounded-[10px] border border-line bg-panel text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
   const header = (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:gap-3 sm:px-4">
       <button className="btn-quiet px-2" onClick={requestExit} title="Back to templates">
@@ -976,12 +1323,21 @@ export function TemplateEditor({ template, onExit }: Props) {
       <button className={hb} disabled={!history.canRedo} onClick={history.redo} title={`Redo (${MOD}⇧Z)`} aria-label="Redo">
         <Redo2 className="h-4 w-4" />
       </button>
-      <span className={`hidden min-w-[6.5rem] whitespace-nowrap rounded-full px-2.5 py-1 text-center text-xs font-semibold md:inline ${dirty ? "bg-warn-soft" : "bg-ok-soft"}`}>{dirty ? "Unsaved" : "● Saved"}</span>
+      <span
+        className={`hidden min-w-[6.5rem] whitespace-nowrap rounded-full px-2.5 py-1 text-center text-xs font-semibold md:inline ${dirty ? "bg-warn-soft" : "bg-ok-soft"}`}
+      >
+        {dirty ? "Unsaved" : "● Saved"}
+      </span>
       <button className={`${hb} hidden sm:grid`} onClick={() => setKeysOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
         <Keyboard className="h-4 w-4" />
       </button>
       <ThemeToggle className="hidden sm:inline-flex" />
-      <button className="btn-primary min-w-[5.5rem] justify-center" disabled={busy || !dirty || !nameOk} onClick={() => void save()} title={nameOk ? `Save the template (${MOD}S)` : "Give the template a name first"}>
+      <button
+        className="btn-primary min-w-[5.5rem] justify-center"
+        disabled={busy || !dirty || !nameOk}
+        onClick={() => void save()}
+        title={nameOk ? `Save the template (${MOD}S)` : "Give the template a name first"}
+      >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
         Save
       </button>
@@ -1046,20 +1402,20 @@ export function TemplateEditor({ template, onExit }: Props) {
         />
       ))}
 
-      <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
+      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">You have unsaved changes to this template.</p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setGuard(false)}>
+          <button className="btn-ghost" onClick={guard.stay}>
             Keep editing
           </button>
-          <button className="btn-danger" onClick={onExit}>
+          <button className="btn-danger" onClick={guard.leave}>
             Discard
           </button>
           <button
             className="btn-primary"
             disabled={busy || !nameOk}
             onClick={async () => {
-              if (await save()) onExit();
+              if (await save()) guard.leave();
             }}
           >
             Save &amp; leave

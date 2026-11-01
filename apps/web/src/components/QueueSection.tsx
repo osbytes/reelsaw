@@ -84,7 +84,11 @@ export function QueueSection() {
   const qDebounced = useDebounced(q, 250);
 
   const filter = useMemo(
-    () => ({ q: qDebounced.trim() || undefined, stage: (stage || undefined) as "ingest" | "transcribe" | "refine" | "analyze" | "render" | "prepare" | undefined, since: sinceIso(since) }),
+    () => ({
+      q: qDebounced.trim() || undefined,
+      stage: (stage || undefined) as "ingest" | "transcribe" | "refine" | "analyze" | "render" | "prepare" | undefined,
+      since: sinceIso(since),
+    }),
     [qDebounced, stage, since],
   );
   const dirty = !!(q.trim() || stage || since);
@@ -130,7 +134,13 @@ export function QueueSection() {
     retry
       .mutateAsync({ ...filter, ids })
       .then((r) => {
-        toast.success(r.retried ? `Retried ${r.retried}${r.skipped ? ` · skipped ${r.skipped}` : ""}` : r.skipped ? `Nothing to retry (${r.skipped} skipped)` : "Nothing matched");
+        toast.success(
+          r.retried
+            ? `Retried ${r.retried}${r.skipped ? ` · skipped ${r.skipped}` : ""}`
+            : r.skipped
+              ? `Nothing to retry (${r.skipped} skipped)`
+              : "No matches",
+        );
         invalidate();
         if (thenClose) closeFail();
       })
@@ -145,11 +155,12 @@ export function QueueSection() {
     <section id="queue" className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-[15px] font-bold">Queue</h2>
-        <span className="min-h-4 text-xs text-ink3">
-          {d ? `${running} running · ${waiting} waiting` : queue.error ? queue.error.message : ""}
-        </span>
+        <span className="min-h-4 text-xs text-ink3">{d ? `${running} running · ${waiting} waiting` : queue.error ? queue.error.message : ""}</span>
       </div>
-      <p className="text-[13px] text-ink2">Jobs waiting and running on this instance, and failed work you can retry after a platform fix (disk full, model down, encoder missing). Retry uses the same path as the owner&apos;s Retry button.</p>
+      <p className="text-[13px] text-ink2">
+        Jobs waiting and running on this instance, and failed work you can retry after a platform fix (disk full, model down, encoder missing). Retry uses the
+        same path as the owner&apos;s Retry button.
+      </p>
 
       {!d && !queue.error ? (
         <SkeletonRegion label="Loading queue…" className="flex flex-col gap-2">
@@ -249,7 +260,7 @@ export function QueueSection() {
               ? items.length
                 ? `Showing ${items.length} of ${total}${truncated ? "+" : ""}`
                 : filtered
-                  ? "No failed work matches this filter."
+                  ? "No failed work matches this filter"
                   : "No failed projects or clips."
               : failures.error
                 ? failures.error.message
@@ -289,11 +300,21 @@ export function QueueSection() {
                 </colgroup>
                 <thead>
                   <tr className="text-left text-xs text-ink3">
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">Item</th>
-                    <th scope="col" className="sticky top-0 z-[1] hidden bg-panel py-1 font-medium sm:table-cell">Owner</th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">Stage</th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">Reason</th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">When</th>
+                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                      Item
+                    </th>
+                    <th scope="col" className="sticky top-0 z-[1] hidden bg-panel py-1 font-medium sm:table-cell">
+                      Owner
+                    </th>
+                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                      Stage
+                    </th>
+                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                      Reason
+                    </th>
+                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                      When
+                    </th>
                     <th scope="col" className="sticky top-0 z-[1] bg-panel py-1">
                       <span className="sr-only">Actions</span>
                     </th>
@@ -303,17 +324,28 @@ export function QueueSection() {
                   {items.map((row) => (
                     <tr key={`${row.kind}:${row.id}`} className="border-t border-line/60">
                       <td className="truncate py-1.5">
-                        <button type="button" className="block w-full truncate text-left text-ink hover:underline" onClick={() => openFail({ kind: row.kind, id: row.id })}>
+                        <button
+                          type="button"
+                          className="block w-full truncate text-left text-ink hover:underline"
+                          onClick={() => openFail({ kind: row.kind, id: row.id })}
+                        >
                           {row.title}
                         </button>
-                        <div className="truncate text-[11px] text-ink3">{row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"}</div>
+                        <div className="truncate text-[11px] text-ink3">
+                          {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"}
+                        </div>
                       </td>
                       <td className="hidden truncate py-1.5 text-xs text-ink2 sm:table-cell" title={row.ownerEmail}>
                         {row.ownerEmail}
                       </td>
                       <td className="truncate py-1.5">{row.stage}</td>
                       <td className="truncate py-1.5 text-xs text-ink2">
-                        <button type="button" className="block w-full truncate text-left hover:underline" title={row.error ?? undefined} onClick={() => openFail({ kind: row.kind, id: row.id })}>
+                        <button
+                          type="button"
+                          className="block w-full truncate text-left hover:underline"
+                          title={row.error ?? undefined}
+                          onClick={() => openFail({ kind: row.kind, id: row.id })}
+                        >
                           {row.snippet}
                         </button>
                       </td>
@@ -321,7 +353,12 @@ export function QueueSection() {
                         {ago(row.failedAt)}
                       </td>
                       <td className="py-1.5 text-right">
-                        <button type="button" className="btn-ghost h-8 min-w-[3.5rem] px-2 text-xs" disabled={retry.isPending} onClick={() => onRetry([{ kind: row.kind, id: row.id }])}>
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 min-w-[3.5rem] px-2 text-xs"
+                          disabled={retry.isPending}
+                          onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
+                        >
                           Retry
                         </button>
                       </td>
@@ -331,7 +368,12 @@ export function QueueSection() {
               </table>
               {(failures.hasNextPage || failures.isFetchingNextPage) && (
                 <div ref={more} className="flex h-10 items-center justify-center">
-                  <button type="button" className="btn-ghost h-8 min-w-[8rem] text-xs" disabled={failures.isFetchingNextPage} onClick={() => void failures.fetchNextPage()}>
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 min-w-[8rem] text-xs"
+                    disabled={failures.isFetchingNextPage}
+                    onClick={() => void failures.fetchNextPage()}
+                  >
                     {failures.isFetchingNextPage ? "Loading…" : `Load ${Math.min(PAGE, Math.max(0, total - items.length))} more`}
                   </button>
                 </div>
@@ -344,7 +386,7 @@ export function QueueSection() {
       <ConfirmDialog
         open={confirmBulk}
         onOpenChange={setConfirmBulk}
-        title="Retry matching failures"
+        title="Retry matching failures?"
         body={`Retry up to ${Math.min(PAGE, total)} failed ${Math.min(PAGE, total) === 1 ? "item" : "items"} that match this filter. Each one uses the same path as the owner Retry button, so live-job limits still apply.`}
         confirm="Retry matching"
         onConfirm={() => onRetry()}
@@ -361,12 +403,15 @@ export function QueueSection() {
           <>
             <Dialog.Description asChild>
               <p className="text-sm text-ink2">
-                {detail.kind === "clip" ? (detail.projectTitle ? `Clip on ${detail.projectTitle}` : "Clip") : "Project"} · {detail.stage} · {detail.ownerEmail} · {ago(detail.failedAt)}
+                {detail.kind === "clip" ? (detail.projectTitle ? `Clip on ${detail.projectTitle}` : "Clip") : "Project"} · {detail.stage} · {detail.ownerEmail}{" "}
+                · {ago(detail.failedAt)}
               </p>
             </Dialog.Description>
             <p className="min-h-4 text-xs text-ink3">{retryHint(detail)}</p>
             <ScrollArea className="max-h-[min(16rem,40dvh)] rounded-[10px] border border-line bg-sunk">
-              <pre className="whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-ink">{detail.error?.trim() || "Failed with no reason recorded"}</pre>
+              <pre className="whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-ink">
+                {detail.error?.trim() || "Failed with no reason recorded"}
+              </pre>
             </ScrollArea>
             <div className="flex flex-wrap justify-end gap-2">
               <button
@@ -383,7 +428,12 @@ export function QueueSection() {
               >
                 Open project
               </Link>
-              <button type="button" className="btn-ink min-w-[5.5rem]" disabled={retry.isPending} onClick={() => onRetry([{ kind: detail.kind, id: detail.id }], true)}>
+              <button
+                type="button"
+                className="btn-ink min-w-[5.5rem]"
+                disabled={retry.isPending}
+                onClick={() => onRetry([{ kind: detail.kind, id: detail.id }], true)}
+              >
                 Retry
               </button>
             </div>

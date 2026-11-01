@@ -102,12 +102,8 @@ export async function consumeEmailVerifyToken(db: Db, email: string, token: stri
 export async function gateEmailVerification(db: Db, token: string): Promise<VerifyGate> {
   const jwt = readVerifyJwt(token);
   const email = jwt.email;
-  const user = email
-    ? await db.query.user.findFirst({ where: eq(schema.user.email, email), columns: { emailVerified: true } })
-    : undefined;
-  const row = email
-    ? await db.query.verification.findFirst({ where: eq(schema.verification.identifier, emailVerifyIdentifier(email)) })
-    : undefined;
+  const user = email ? await db.query.user.findFirst({ where: eq(schema.user.email, email), columns: { emailVerified: true } }) : undefined;
+  const row = email ? await db.query.verification.findFirst({ where: eq(schema.verification.identifier, emailVerifyIdentifier(email)) }) : undefined;
   const now = Date.now();
   const decision = decideEmailVerifyGate({
     jwt,

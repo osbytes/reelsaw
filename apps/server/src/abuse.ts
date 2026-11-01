@@ -22,6 +22,7 @@ import type { Services } from "./services.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import { limitsFor, type Entitlements, type InstanceLimits } from "./quota.js";
 import type { Logger } from "./log.js";
+import type { Config } from "./config.js";
 
 const DISPOSABLE = new Set<string>(disposable);
 
@@ -30,15 +31,40 @@ const DISPOSABLE = new Set<string>(disposable);
  * Docker deployment) the proxy's headers name it; otherwise they are whatever the client sent, so they are
  * ignored and the guard keys on "unknown" (which never counts).
  */
-export function clientIp(headers: Headers, trustProxy: boolean): string | null {
-  if (!trustProxy) return null;
-  const cf = headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
-  const real = headers.get("x-real-ip")?.trim();
-  if (real) return real;
-  const xff = headers.get("x-forwarded-for");
-  const first = xff?.split(",")[0]?.trim();
-  return first || null;
+export function clientIp(headers: Headers, trust: Pick<Config, "TRUST_PROXY" | "TRUSTED_PROXY_HEADER" | "TRUSTED_PROXY_HOPS">): string | null {
+  if (!trust.TRUST_PROXY) return null;
+  const value = headers.get(trust.TRUSTED_PROXY_HEADER);
+  if (!value) return null;
+  if (trust.TRUSTED_PROXY_HEADER !== "x-forwarded-for") return value.trim() || null;
+  // each trusted proxy appends the address it saw, so the client is `hops` entries from the right; anything a client
+  // prepends sits to the left of that and is ignored. Fewer entries than hops means the request did not come through them.
+  const entries = value.split(",").map((e) => e.trim());
+  return entries[entries.length - trust.TRUSTED_PROXY_HOPS] || null;
+}
+
+/**
+ * Fixed-window counter per key (a client address), in memory: for cheap guards on unauthenticated endpoints where a
+ * database round trip per request is not worth it. Each process counts for itself, so with N replicas the real cap is up to N times `max`.
+ */
+export class WindowCounter {
+  private readonly buckets = new Map<string, { window: number; n: number }>();
+  constructor(
+    private readonly max: number,
+    private readonly windowMs = 86_400_000,
+    private readonly now: () => number = Date.now,
+  ) {}
+  /** Counts one request; false when `key` is over the cap for this window. */
+  hit(key: string): boolean {
+    const window = Math.floor(this.now() / this.windowMs);
+    if (this.buckets.size > 10_000) for (const [k, b] of this.buckets) if (b.window !== window) this.buckets.delete(k);
+    const b = this.buckets.get(key);
+    if (!b || b.window !== window) {
+      this.buckets.set(key, { window, n: 1 });
+      return true;
+    }
+    b.n += 1;
+    return b.n <= this.max;
+  }
 }
 
 /** One key per real mailbox: lower-case; gmail ignores dots and everything after `+`; other providers honour `+tags` too. */
@@ -74,7 +100,12 @@ export class SignupRefused extends Error {}
  * form shows. Counts are read from the database, so they hold across replicas; a race between two sign-ups
  * from one IP can overshoot the cap by one, which is fine for a guard.
  */
-export async function signupGuard(db: Db, s: Pick<RuntimeSettings, "MAX_SIGNUPS_PER_IP_PER_DAY" | "BLOCK_DISPOSABLE_EMAILS">, input: { email: string; ip: string | null }, log: Logger): Promise<{ emailKey: string; signupIp: string | null }> {
+export async function signupGuard(
+  db: Db,
+  s: Pick<RuntimeSettings, "MAX_SIGNUPS_PER_IP_PER_DAY" | "BLOCK_DISPOSABLE_EMAILS">,
+  input: { email: string; ip: string | null },
+  log: Logger,
+): Promise<{ emailKey: string; signupIp: string | null }> {
   const key = emailKey(input.email);
   if (s.BLOCK_DISPOSABLE_EMAILS && isDisposable(input.email)) {
     log.warn({ domain: emailDomain(input.email), ip: input.ip }, "sign-up refused: disposable email domain");
@@ -86,7 +117,7 @@ export async function signupGuard(db: Db, s: Pick<RuntimeSettings, "MAX_SIGNUPS_
     throw new SignupRefused(ACCOUNT_EXISTS_MESSAGE);
   }
   if (s.MAX_SIGNUPS_PER_IP_PER_DAY > 0 && input.ip) {
-    const [{ n }] = await db
+    const [{ n } = { n: 0 }] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.user)
       .where(and(eq(schema.user.signupIp, input.ip), gte(schema.user.createdAt, new Date(Date.now() - 86_400_000))));
@@ -122,8 +153,13 @@ export async function checkRequestRate(db: Db, instance: InstanceLimits, userId:
   ).rows;
   const minute = Number(row?.minute ?? 0);
   const hour = Number(row?.hour ?? 0);
-  if (s.MAX_REQUESTS_PER_MINUTE > 0 && minute > s.MAX_REQUESTS_PER_MINUTE) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `More than ${s.MAX_REQUESTS_PER_MINUTE} changes in a minute from this account. Slow down and try again shortly.` });
-  if (s.MAX_REQUESTS_PER_HOUR > 0 && hour > s.MAX_REQUESTS_PER_HOUR) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `More than ${s.MAX_REQUESTS_PER_HOUR} changes in an hour from this account. Try again later.` });
+  if (s.MAX_REQUESTS_PER_MINUTE > 0 && minute > s.MAX_REQUESTS_PER_MINUTE)
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `More than ${s.MAX_REQUESTS_PER_MINUTE} changes in a minute from this account. Slow down and try again shortly.`,
+    });
+  if (s.MAX_REQUESTS_PER_HOUR > 0 && hour > s.MAX_REQUESTS_PER_HOUR)
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `More than ${s.MAX_REQUESTS_PER_HOUR} changes in an hour from this account. Try again later.` });
 }
 
 /** Buckets older than two hours are never read again. */
@@ -145,14 +181,32 @@ export const FLAG_HELP: Record<AbuseFlag, string> = {
  * admin event is written only when it changed. Looks at accounts created in the last 30 days, in one grouped
  * query per rule, so the cost does not grow with the whole user table.
  */
-export async function flagAccounts(svc: Pick<Services, "database" | "log" | "tx"> & { telemetry?: Services["telemetry"] }): Promise<{ checked: number; flagged: number; changed: number }> {
+export async function flagAccounts(
+  svc: Pick<Services, "database" | "log" | "tx"> & { telemetry?: Services["telemetry"] },
+): Promise<{ checked: number; flagged: number; changed: number }> {
   const db = svc.database.db;
   const log = svc.log.child({ module: "abuse" });
   const since = sql`now() - interval '30 days'`;
-  const recent = await db.select({ id: schema.user.id, email: schema.user.email, signupIp: schema.user.signupIp, flags: schema.user.flags, role: schema.user.role }).from(schema.user).where(sql`${schema.user.createdAt} >= ${since}`).limit(5000);
+  const recent = await db
+    .select({ id: schema.user.id, email: schema.user.email, signupIp: schema.user.signupIp, flags: schema.user.flags, role: schema.user.role })
+    .from(schema.user)
+    .where(sql`${schema.user.createdAt} >= ${since}`)
+    .limit(5000);
   if (!recent.length) return { checked: 0, flagged: 0, changed: 0 };
-  const sharedIps = new Set((await db.execute<{ signup_ip: string }>(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip having count(*) >= 3`)).rows.map((r) => r.signup_ip));
-  const burstIps = new Set((await db.execute<{ signup_ip: string }>(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= 5`)).rows.map((r) => r.signup_ip));
+  const sharedIps = new Set(
+    (
+      await db.execute<{ signup_ip: string }>(
+        sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip having count(*) >= 3`,
+      )
+    ).rows.map((r) => r.signup_ip),
+  );
+  const burstIps = new Set(
+    (
+      await db.execute<{ signup_ip: string }>(
+        sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= 5`,
+      )
+    ).rows.map((r) => r.signup_ip),
+  );
   let flagged = 0;
   let changed = 0;
   for (const u of recent) {
@@ -167,7 +221,9 @@ export async function flagAccounts(svc: Pick<Services, "database" | "log" | "tx"
     changed++;
     await svc.tx(async (t) => {
       await t.db.update(schema.user).set({ flags: next, updatedAt: new Date() }).where(eq(schema.user.id, u.id));
-      await t.db.insert(schema.adminEvents).values({ type: "user.flagged", actorId: null, userId: u.id, email: u.email, payload: { flags: next, was: u.flags ?? [] } });
+      await t.db
+        .insert(schema.adminEvents)
+        .values({ type: "user.flagged", actorId: null, userId: u.id, email: u.email, payload: { flags: next, was: u.flags ?? [] } });
     });
     log[next.length ? "warn" : "info"]({ userId: u.id, flags: next, was: u.flags ?? [] }, next.length ? "account flagged" : "account flags cleared");
     if (next.length) svc.telemetry?.capture("user.flagged", u.id, { flags: next });

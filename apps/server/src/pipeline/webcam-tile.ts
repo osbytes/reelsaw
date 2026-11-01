@@ -208,7 +208,9 @@ export function tileCandidates(rgb: Uint8Array, w: number, h: number, box: PBox,
   const lefts = candidates(clampInt(fx1 - 0.3 * fw, 1, w - 2), clampInt(cx - reachX, 0, w - 1), -1, 0, (x) => (x === 0 ? 0 : vEdge(L, w, x, ry1, ry2)));
   const rights = candidates(clampInt(fx2 + 0.3 * fw, 1, w - 2), clampInt(cx + reachX, 0, w - 1), 1, w - 1, (x) => (x === w - 1 ? 0 : vEdge(L, w, x, ry1, ry2)));
   const tops = candidates(clampInt(fy1 - 0.3 * fh, 1, h - 2), clampInt(cy - reachY, 0, h - 1), -1, 0, (y) => (y === 0 ? 0 : hEdge(L, w, h, y, cx1, cx2)));
-  const bottoms = candidates(clampInt(fy2 + 0.3 * fh, 1, h - 2), clampInt(cy + reachY, 0, h - 1), 1, h - 1, (y) => (y === h - 1 ? 0 : hEdge(L, w, h, y, cx1, cx2)));
+  const bottoms = candidates(clampInt(fy2 + 0.3 * fh, 1, h - 2), clampInt(cy + reachY, 0, h - 1), 1, h - 1, (y) =>
+    y === h - 1 ? 0 : hEdge(L, w, h, y, cx1, cx2),
+  );
   const minW = TILE.minFaceMul * fw;
   const minH = TILE.minFaceMul * fh;
   const maxW = TILE.maxFrac * w;
@@ -238,8 +240,13 @@ export function tileCandidates(rgb: Uint8Array, w: number, h: number, box: PBox,
           if (s < hold) continue;
           // a picture right up to every edge, frame edges included: a rectangle drawn around the flat band
           // above the tile (band edge, frame top, tile bottom) is not the tile
-          if (!pictureInside((p, q) => vEdge(L, w, l.at + 3, p, q), t.at, b.at + 1) || !pictureInside((p, q) => vEdge(L, w, r.at - 3, p, q), t.at, b.at + 1)) continue;
-          if (!pictureInside((p, q) => hEdge(L, w, h, t.at + 3, p, q), l.at, r.at + 1) || !pictureInside((p, q) => hEdge(L, w, h, b.at - 3, p, q), l.at, r.at + 1)) continue;
+          if (!pictureInside((p, q) => vEdge(L, w, l.at + 3, p, q), t.at, b.at + 1) || !pictureInside((p, q) => vEdge(L, w, r.at - 3, p, q), t.at, b.at + 1))
+            continue;
+          if (
+            !pictureInside((p, q) => hEdge(L, w, h, t.at + 3, p, q), l.at, r.at + 1) ||
+            !pictureInside((p, q) => hEdge(L, w, h, b.at - 3, p, q), l.at, r.at + 1)
+          )
+            continue;
           rects.push({
             x1: Number((l.at / w).toFixed(3)),
             y1: Number((t.at / h).toFixed(3)),
@@ -263,7 +270,12 @@ export function tileCandidates(rgb: Uint8Array, w: number, h: number, box: PBox,
  * neighbour bleeds in) that differ from the rectangle's median luma by more than `bandStep`: 0 for a
  * flat band, a few percent with a name plate in it, most of them for a slide or a window.
  */
-function unevenShare(L: Float32Array, w: number, r: { x1: number; y1: number; x2: number; y2: number }, hole: { x1: number; y1: number; x2: number; y2: number }): number {
+function unevenShare(
+  L: Float32Array,
+  w: number,
+  r: { x1: number; y1: number; x2: number; y2: number },
+  hole: { x1: number; y1: number; x2: number; y2: number },
+): number {
   const hx1 = hole.x1 - 2;
   const hx2 = hole.x2 + 2;
   const hy1 = hole.y1 - 2;
@@ -309,7 +321,7 @@ function flatBand(L: Float32Array, w: number, h: number, t: { x1: number; y1: nu
 
 export interface ClipTile {
   tile: ContentRegion;
-  band?: BandSide;
+  band?: BandSide | undefined;
   /** share of face frames that showed the tile */
   share: number;
 }
@@ -326,7 +338,11 @@ export interface ClipTile {
 export function aggregateTile(samples: Array<{ tiles?: TileProbe[] }>): ClipTile | undefined {
   if (!samples.length) return undefined;
   const r3 = (v: number) => Number(v.toFixed(3));
-  const within = (a: ContentRegion, b: ContentRegion) => Math.abs(a.x1 - b.x1) <= TILE.stable && Math.abs(a.y1 - b.y1) <= TILE.stable && Math.abs(a.x2 - b.x2) <= TILE.stable && Math.abs(a.y2 - b.y2) <= TILE.stable;
+  const within = (a: ContentRegion, b: ContentRegion) =>
+    Math.abs(a.x1 - b.x1) <= TILE.stable &&
+    Math.abs(a.y1 - b.y1) <= TILE.stable &&
+    Math.abs(a.x2 - b.x2) <= TILE.stable &&
+    Math.abs(a.y2 - b.y2) <= TILE.stable;
   const clusters: Array<{ seed: ContentRegion; members: TileProbe[]; frames: number }> = [];
   for (const s of samples) {
     const seen = new Set<number>();
@@ -347,7 +363,12 @@ export function aggregateTile(samples: Array<{ tiles?: TileProbe[] }>): ClipTile
   const area = (c: ContentRegion) => (c.x2 - c.x1) * (c.y2 - c.y1);
   const pick = clusters.filter((c) => c.frames >= best * TILE.tie).sort((a, b) => area(b.seed) - area(a.seed))[0]!;
   const m = pick.members;
-  const tile: ContentRegion = { x1: r3(median(m.map((t) => t.x1))), y1: r3(median(m.map((t) => t.y1))), x2: r3(median(m.map((t) => t.x2))), y2: r3(median(m.map((t) => t.y2))) };
+  const tile: ContentRegion = {
+    x1: r3(median(m.map((t) => t.x1))),
+    y1: r3(median(m.map((t) => t.y1))),
+    x2: r3(median(m.map((t) => t.x2))),
+    y2: r3(median(m.map((t) => t.y2))),
+  };
   const bands = new Map<BandSide, number>();
   for (const t of m) if (t.band) bands.set(t.band, (bands.get(t.band) ?? 0) + 1);
   const top = [...bands.entries()].sort((a, b) => b[1] - a[1])[0];

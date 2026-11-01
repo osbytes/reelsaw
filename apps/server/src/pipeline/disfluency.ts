@@ -16,6 +16,7 @@
  * a wrong jump cut is worse than a missed "um".
  */
 import { generateText, Output, type LanguageModel } from "ai";
+import { abortOpt, callSignal, isAbortError } from "./steps.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
@@ -23,32 +24,143 @@ import type { Logger } from "../log.js";
 
 const FILLERS = new Set(["um", "uh", "umm", "uhh", "uhm", "er", "erm", "ah", "hmm", "mm", "mhm"]);
 /** Closed-class words. Two adjacent words of the same class ("into between", "a the") may be a substitution repair. */
-const PREPOSITIONS = new Set("about above across after against along among around at before behind below beneath beside between beyond by despite during except for from in inside into near of off on onto out outside over past since through throughout toward towards under underneath until unto up upon via with within without".split(" "));
+const PREPOSITIONS = new Set(
+  "about above across after against along among around at before behind below beneath beside between beyond by despite during except for from in inside into near of off on onto out outside over past since through throughout toward towards under underneath until unto up upon via with within without".split(
+    " ",
+  ),
+);
 const DETERMINERS = new Set("a an the my your his her its our their".split(" "));
 /** Prepositions that double as verb particles ("laid out against", "pick up for"): never the first word of a repair. */
 const PARTICLES = new Set("out up down over off in on through back along around away across by".split(" "));
 /** Legitimate two-word prepositions; never treat these as repairs. */
-const COMPOUNDS = new Set(["out of", "up to", "on to", "in between", "due to", "next to", "according to", "as to", "as for", "because of", "instead of", "ahead of", "along with", "apart from", "aside from", "away from", "close to", "far from", "inside of", "off of", "out from", "over to", "prior to", "thanks to", "together with", "up until", "up against", "down to", "in to", "on by", "by for", "for about", "at about", "in about", "from about", "to about", "of about", "in under", "at around", "for around", "in around", "to around", "from under", "from behind", "from within", "from across", "out at", "in for", "up for", "down for", "over for", "through to", "up with", "down with", "in with", "on with", "off with", "out with", "along to", "over with", "through with"]);
+const COMPOUNDS = new Set([
+  "out of",
+  "up to",
+  "on to",
+  "in between",
+  "due to",
+  "next to",
+  "according to",
+  "as to",
+  "as for",
+  "because of",
+  "instead of",
+  "ahead of",
+  "along with",
+  "apart from",
+  "aside from",
+  "away from",
+  "close to",
+  "far from",
+  "inside of",
+  "off of",
+  "out from",
+  "over to",
+  "prior to",
+  "thanks to",
+  "together with",
+  "up until",
+  "up against",
+  "down to",
+  "in to",
+  "on by",
+  "by for",
+  "for about",
+  "at about",
+  "in about",
+  "from about",
+  "to about",
+  "of about",
+  "in under",
+  "at around",
+  "for around",
+  "in around",
+  "to around",
+  "from under",
+  "from behind",
+  "from within",
+  "from across",
+  "out at",
+  "in for",
+  "up for",
+  "down for",
+  "over for",
+  "through to",
+  "up with",
+  "down with",
+  "in with",
+  "on with",
+  "off with",
+  "out with",
+  "along to",
+  "over with",
+  "through with",
+]);
 /** Words people double on purpose ("very, very", "really really", "blah blah", "no no no"): never a certain stutter. */
-const EMPHATIC = new Set("very really so much many more most too way far long big little bad good super pretty totally always never ever no yes yeah yep okay ok blah bye ha haha hey wow please thank thanks again".split(" "));
+const EMPHATIC = new Set(
+  "very really so much many more most too way far long big little bad good super pretty totally always never ever no yes yeah yep okay ok blah bye ha haha hey wow please thank thanks again".split(
+    " ",
+  ),
+);
 /**
  * Words that cannot end a clause (nominative pronouns, conjunctions, articles, most prepositions).
  * "I, I think" / "and, and this" can only be a stutter; "show you, you don't" can be two clauses.
  */
-const NEVER_CLAUSE_FINAL = new Set("i we they he she and but or nor so because if when while although though the a an my your our their his its of to in at on for with from into onto than as".split(" "));
+const NEVER_CLAUSE_FINAL = new Set(
+  "i we they he she and but or nor so because if when while although though the a an my your our their his its of to in at on for with from into onto than as".split(
+    " ",
+  ),
+);
 const DISCOURSE = new Set(["like", "you know", "i mean", "you know like", "like you know"]);
 const classOf = (w: string) => (PREPOSITIONS.has(w) ? "prep" : DETERMINERS.has(w) ? "det" : null);
 /** Letters and digits of any script plus apostrophes; diacritics are kept ("über" stays "über"). */
-export const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[’‘]/g, "'").replace(/[^\p{L}\p{N}']+/gu, "");
+export const norm = (s: string) =>
+  s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[^\p{L}\p{N}']+/gu, "");
 /** Short closed-class word: deleting one is only safe when the repair repeats or replaces it right away. */
-const FUNCTION_WORDS = new Set([...PREPOSITIONS, ...DETERMINERS, ..."to like and or but so that this these those it i you we they he she me him her us them is was are were be been am do did does have has had will would can could just then than as if what which who how".split(" ")]);
+const FUNCTION_WORDS = new Set([
+  ...PREPOSITIONS,
+  ...DETERMINERS,
+  ..."to like and or but so that this these those it i you we they he she me him her us them is was are were be been am do did does have has had will would can could just then than as if what which who how".split(
+    " ",
+  ),
+]);
 export const isFunctionWord = (w: string) => FUNCTION_WORDS.has(norm(w)) || FILLERS.has(norm(w));
 const endsSentence = (w: Word | undefined) => !!w && /[.!?]["')\]]?$/.test(w.text);
 const endsClause = (w: Word | undefined) => !!w && /[,;:]["')\]]?$/.test(w.text);
 
+/** Bump when the rewrite or verifier prompt changes: saved windows (job_steps) are keyed on it. */
+export const DISFLUENCY_PROMPT_VERSION = "disfluency-1";
+
+/**
+ * How a stage saves the model passes' units (a rewrite window, a verifier batch) as it goes, so a retry or a timeout
+ * resumes from the windows already done (refine.ts wires this to `ctx.step` / `ctx.steps`). Absent: every unit just runs.
+ */
+export interface DisfluencyCheckpoint {
+  /** run `fn` over `items` with the stage's concurrency, reporting progress for the phase */
+  all<I, R>(items: readonly I[], phase: "rewrite" | "verify", fn: (item: I, index: number, signal: AbortSignal) => Promise<R>): Promise<R[]>;
+  /** one saved unit: the stored output when `key` matches, else `fn` under its own time limit (`calls` model calls' worth) */
+  step<T>(
+    name: string,
+    key: { input: unknown; params?: unknown },
+    fn: (signal: AbortSignal) => Promise<T>,
+    schema: z.ZodType<T>,
+    o: { signal: AbortSignal; calls?: number },
+  ): Promise<T>;
+}
+
 export interface DisfluencyOptions {
   log?: Logger;
   signal?: AbortSignal;
+  /** save the model passes' units as steps (see DisfluencyCheckpoint) */
+  checkpoint?: DisfluencyCheckpoint | undefined;
+  /** errors that must end the run, never be skipped as one window's bad answer (a stage timeout, a superseded job) */
+  isFatal?: (err: unknown) => boolean;
+  /** limit on each model call, ms */
+  timeoutMs?: number;
   telemetry?: boolean;
   autoConfidence?: number;
   /** word indices already covered by other flags; never overlap them */
@@ -81,7 +193,10 @@ function mkFlag(words: Word[], c: { index: number; span: number; subkind: Transc
     span: c.span,
     start: words[c.index]!.start,
     end: words[Math.min(words.length - 1, c.index + c.span - 1)]!.end,
-    heard: words.slice(c.index, c.index + c.span).map((w) => w.text).join(" "),
+    heard: words
+      .slice(c.index, c.index + c.span)
+      .map((w) => w.text)
+      .join(" "),
     suggested: "",
     confidence: Number(confidence.toFixed(2)),
     status: confidence >= auto ? "auto" : "pending",
@@ -123,7 +238,14 @@ export function findRuleCandidates(words: Word[], reserved = new Set<number>()):
         i = j;
         continue;
       }
-      out.push({ index: i, span: 1, subkind: "repetition", prior: certain ? 0.96 : emphatic ? 0.55 : 0.75, certain, why: comma ? "repeat across a comma" : emphatic ? "repeated emphasis word" : "immediate repeat" });
+      out.push({
+        index: i,
+        span: 1,
+        subkind: "repetition",
+        prior: certain ? 0.96 : emphatic ? 0.55 : 0.75,
+        certain,
+        why: comma ? "repeat across a comma" : emphatic ? "repeated emphasis word" : "immediate repeat",
+      });
       claim(i, 1);
       continue;
     }
@@ -131,8 +253,25 @@ export function findRuleCandidates(words: Word[], reserved = new Set<number>()):
     // pairs are reliable; preposition pairs are usually a phrase ending then another starting
     // ("paid for out of", "proud of in"), so they only become candidates.
     const c0 = classOf(w);
-    if (c0 && n1 && n1 !== w && classOf(n1) === c0 && !PARTICLES.has(w) && !COMPOUNDS.has(`${w} ${n1}`) && !taken.has(i + 1) && !endsClause(words[i]) && !endsSentence(words[i])) {
-      out.push({ index: i, span: 1, subkind: "repair", prior: c0 === "det" ? 0.75 : 0.45, certain: false, why: `${c0 === "det" ? "determiner" : "preposition"} swapped for another` });
+    if (
+      c0 &&
+      n1 &&
+      n1 !== w &&
+      classOf(n1) === c0 &&
+      !PARTICLES.has(w) &&
+      !COMPOUNDS.has(`${w} ${n1}`) &&
+      !taken.has(i + 1) &&
+      !endsClause(words[i]) &&
+      !endsSentence(words[i])
+    ) {
+      out.push({
+        index: i,
+        span: 1,
+        subkind: "repair",
+        prior: c0 === "det" ? 0.75 : 0.45,
+        certain: false,
+        why: `${c0 === "det" ? "determiner" : "preposition"} swapped for another`,
+      });
       claim(i, 1);
       continue;
     }
@@ -142,7 +281,14 @@ export function findRuleCandidates(words: Word[], reserved = new Set<number>()):
     if (n1 && n2 === w && n3 === n1 && !taken.has(i + 1) && !endsSentence(words[i + 1])) {
       const comma = endsClause(words[i + 1]);
       const certain = !comma || NEVER_CLAUSE_FINAL.has(w);
-      out.push({ index: i, span: 2, subkind: "repetition", prior: certain ? 0.94 : 0.75, certain, why: comma ? "phrase repeated across a comma" : "phrase repeated" });
+      out.push({
+        index: i,
+        span: 2,
+        subkind: "repetition",
+        prior: certain ? 0.94 : 0.75,
+        certain,
+        why: comma ? "phrase repeated across a comma" : "phrase repeated",
+      });
       claim(i, 2);
       i += 1;
     }
@@ -171,7 +317,8 @@ export function deletedIndices(original: string[], rewritten: string[]): number[
   const n = original.length;
   const m = rewritten.length;
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i]![j] = original[i] === rewritten[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--) dp[i]![j] = original[i] === rewritten[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
   const deleted: number[] = [];
   let i = 0;
   let j = 0;
@@ -212,7 +359,8 @@ export function roughCopy(words: Word[], i: number, span: number): { ok: boolean
     // only short words: the repair must restart on the same word or swap in the same kind of word, immediately
     const first = r[0]!;
     const sameStart = next[0] === first || next[1] === first;
-    const swap = r.length === 1 && classOf(first) !== null && classOf(first) === classOf(next[0]!) && !PARTICLES.has(first) && !COMPOUNDS.has(`${first} ${next[0]}`);
+    const swap =
+      r.length === 1 && classOf(first) !== null && classOf(first) === classOf(next[0]!) && !PARTICLES.has(first) && !COMPOUNDS.has(`${first} ${next[0]}`);
     if (sameStart) return { ok: true, prior: 0.7, subkind: "repair" };
     if (swap) return { ok: true, prior: 0.55, subkind: "repair" };
     return { ok: false, prior: 0, subkind: "repair" };
@@ -241,25 +389,40 @@ export async function findModelCandidates(model: LanguageModel, words: Word[], o
   const reserved = opts.reserved ?? new Set<number>();
   const starts: number[] = [];
   for (let from = 0; from < words.length; from += WINDOW) starts.push(from);
-  const rewrites = await mapWindows(starts.length, opts.concurrency ?? 3, async (k) => {
-    if (opts.signal?.aborted) return undefined;
+  const rewriteWindow = async (k: number, signal: AbortSignal | undefined): Promise<string> => {
     const slice = words.slice(starts[k]!, starts[k]! + WINDOW);
+    const { output } = await generateText({
+      model,
+      temperature: 0,
+      maxRetries: 1,
+      ...abortOpt(signal),
+      output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
+      telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
+      prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
+    });
+    return output.cleaned;
+  };
+  const ck = opts.checkpoint;
+  // only a window the model answered badly is skipped; a timeout, a cancel or a superseded job ends the pass
+  const runWindow = async (k: number, signal: AbortSignal | undefined): Promise<string | undefined> => {
+    signal?.throwIfAborted();
     try {
-      const { output } = await generateText({
-        model,
-        temperature: 0,
-        maxRetries: 1,
-        abortSignal: opts.signal,
-        output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
-        telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
-        prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
-      });
-      return output.cleaned;
+      if (!ck || !signal) return await rewriteWindow(k, callSignal(opts.signal, opts.timeoutMs));
+      const input = words.slice(starts[k]!, starts[k]! + WINDOW).map((w) => w.text);
+      return await ck.step(`window:${k}`, { input, params: { window: WINDOW } }, (sig) => rewriteWindow(k, sig), z.string(), { signal });
     } catch (err) {
-      opts.log?.warn({ err }, "disfluency model pass failed for a window, continuing");
+      if (isAbortError(err) || opts.signal?.aborted || opts.isFatal?.(err)) throw err;
+      opts.log?.warn({ err, window: k }, "disfluency model pass failed for a window, continuing");
       return undefined;
     }
-  });
+  };
+  const rewrites: Array<string | undefined> = ck
+    ? await ck.all(
+        starts.map((_, k) => k),
+        "rewrite",
+        (k, _i, signal) => runWindow(k, signal),
+      )
+    : await mapWindows(starts.length, opts.concurrency ?? 3, (k) => runWindow(k, undefined));
   const out: Candidate[] = [];
   starts.forEach((from, k) => {
     const cleaned = rewrites[k];
@@ -308,7 +471,12 @@ const verdictSchema = z.object({
 });
 
 /** Second opinion on uncertain candidates, in batches. Returns verdicts by candidate position. */
-export async function verifyCandidates(model: LanguageModel, words: Word[], cands: Candidate[], opts: DisfluencyOptions = {}): Promise<Map<number, { cut: boolean; confidence: number }>> {
+export async function verifyCandidates(
+  model: LanguageModel,
+  words: Word[],
+  cands: Candidate[],
+  opts: DisfluencyOptions = {},
+): Promise<Map<number, { cut: boolean; confidence: number }>> {
   const result = new Map<number, { cut: boolean; confidence: number }>();
   const BATCH = 6;
   const batches: number[][] = [];
@@ -322,38 +490,58 @@ export async function verifyCandidates(model: LanguageModel, words: Word[], cand
     const t = (ws: Word[]) => ws.map((w) => w.text).join(" ");
     return { spoken: t(words.slice(a, b)), edited: t([...words.slice(a, c.index), ...words.slice(c.index + c.span, b)]) };
   };
-  const ask = async (ids: number[]) => {
+  const rejected = (opts.rejectedExamples ?? []).slice(0, 8);
+  type Verdict = { id: number; cut: boolean; confidence: number };
+  const ask = async (ids: number[], signal: AbortSignal | undefined): Promise<Verdict[]> => {
     const { output } = await generateText({
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: opts.signal,
+      ...abortOpt(signal),
       output: Output.object({ schema: verdictSchema, name: "verdicts" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies.verify", recordInputs: false, recordOutputs: false },
       prompt: verifyPrompt(
         ids.map((id, q) => ({ id: q + 1, ...pair(cands[id]!) })),
-        (opts.rejectedExamples ?? []).slice(0, 8),
+        rejected,
       ),
     });
+    const out: Verdict[] = [];
     for (const v of output.verdicts) {
       const id = ids[v.id - 1];
-      if (id !== undefined) result.set(id, { cut: v.verdict === "cut", confidence: v.confidence ?? 0.8 });
+      if (id !== undefined) out.push({ id, cut: v.verdict === "cut", confidence: v.confidence ?? 0.8 });
     }
+    return out;
   };
-  await mapWindows(batches.length, opts.concurrency ?? 3, async (k) => {
+  const fatal = (err: unknown) => isAbortError(err) || !!opts.signal?.aborted || !!opts.isFatal?.(err);
+  // one batch; a batch the model cannot answer is retried one candidate at a time, and a candidate it still cannot answer is dropped
+  const verifyBatch = async (ids: number[], signal: AbortSignal | undefined): Promise<Verdict[]> => {
     try {
-      await ask(batches[k]!);
-    } catch {
-      // small models sometimes break the schema on a batch: retry one at a time
-      for (const id of batches[k]!) {
+      return await ask(ids, signal);
+    } catch (err) {
+      if (fatal(err)) throw err; // a timeout or a cancel is not the model's bad answer
+      const out: Verdict[] = [];
+      for (const id of ids) {
         try {
-          await ask([id]);
-        } catch (err) {
-          opts.log?.warn({ err }, "disfluency verification failed for a candidate; dropped");
+          out.push(...(await ask([id], signal)));
+        } catch (err2) {
+          if (fatal(err2)) throw err2;
+          opts.log?.warn({ err: err2 }, "disfluency verification failed for a candidate; dropped");
         }
       }
+      return out;
     }
-  });
+  };
+  const ck = opts.checkpoint;
+  const verdictsOut = z.array(z.object({ id: z.number().int(), cut: z.boolean(), confidence: z.number() }));
+  const perBatch = ck
+    ? await ck.all(batches, "verify", (ids, k, signal) =>
+        ck.step(`verify:${k}`, { input: ids.map((id) => pair(cands[id]!)), params: { rejected } }, (sig) => verifyBatch(ids, sig), verdictsOut, {
+          signal,
+          calls: 3,
+        }),
+      )
+    : await mapWindows(batches.length, opts.concurrency ?? 3, (k) => verifyBatch(batches[k]!, callSignal(opts.signal, opts.timeoutMs)));
+  for (const list of perBatch) for (const v of list ?? []) result.set(v.id, { cut: v.cut, confidence: v.confidence });
   return result;
 }
 
@@ -367,11 +555,16 @@ export interface DisfluencyTraceEntry {
   certain: boolean;
   prior: number;
   why: string;
-  verdict?: { cut: boolean; confidence: number } | null;
+  verdict?: { cut: boolean; confidence: number } | null | undefined;
   outcome: string;
 }
 
-export async function detectDisfluencies(model: LanguageModel | null, words: Word[], opts: DisfluencyOptions = {}, trace?: DisfluencyTraceEntry[]): Promise<TranscriptFlag[]> {
+export async function detectDisfluencies(
+  model: LanguageModel | null,
+  words: Word[],
+  opts: DisfluencyOptions = {},
+  trace?: DisfluencyTraceEntry[],
+): Promise<TranscriptFlag[]> {
   const auto = opts.autoConfidence ?? 0.85;
   const reserved = new Set(opts.reserved ?? []);
   const rules = findRuleCandidates(words, reserved);
@@ -383,7 +576,21 @@ export async function detectDisfluencies(model: LanguageModel | null, words: Wor
   const verdicts = useModel && uncertain.length ? await verifyCandidates(model!, words, uncertain, opts) : null;
   const flags: TranscriptFlag[] = [];
   const note = (c: Candidate, outcome: string, verdict?: { cut: boolean; confidence: number } | null) =>
-    trace?.push({ wordIndex: c.index, span: c.span, text: words.slice(c.index, c.index + c.span).map((w) => w.text).join(" "), subkind: c.subkind, source: rules.includes(c) ? "rule" : "model", certain: c.certain, prior: c.prior, why: c.why, verdict, outcome });
+    trace?.push({
+      wordIndex: c.index,
+      span: c.span,
+      text: words
+        .slice(c.index, c.index + c.span)
+        .map((w) => w.text)
+        .join(" "),
+      subkind: c.subkind,
+      source: rules.includes(c) ? "rule" : "model",
+      certain: c.certain,
+      prior: c.prior,
+      why: c.why,
+      verdict,
+      outcome,
+    });
   for (const c of all) {
     const pause = pauseAfter(words, c.index + c.span - 1);
     if (c.certain) {
@@ -413,7 +620,13 @@ export async function detectDisfluencies(model: LanguageModel | null, words: Wor
 }
 
 /** Time ranges (clip-relative) to cut out of a clip for the applied disfluency flags. */
-export function cutRanges(flags: TranscriptFlag[], clipStart: number, clipEnd: number, pad = 0, minCut = 0.05): Array<{ start: number; end: number; manual?: boolean }> {
+export function cutRanges(
+  flags: TranscriptFlag[],
+  clipStart: number,
+  clipEnd: number,
+  pad = 0,
+  minCut = 0.05,
+): Array<{ start: number; end: number; manual?: boolean }> {
   const ranges = flags
     .filter((f) => f.kind === "disfluency" && (f.status === "auto" || f.status === "accepted"))
     .map((f) => ({ start: Math.max(clipStart, f.start - pad), end: Math.min(clipEnd, f.end + pad), manual: f.subkind === "manual" }))

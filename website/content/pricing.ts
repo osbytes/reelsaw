@@ -29,7 +29,13 @@ export const PRICING: PricingPlan[] = [
     watermark: true,
     firstVideoFreeMinutes: 60,
     blurb: "Try the whole pipeline on your own video.",
-    bullets: ["Your first video free, up to 60 minutes", "Then 20 minutes of source video a month", "2 GB of storage, 10 projects", "Every layout, caption style and the MCP server", "A small watermark on the clips"],
+    bullets: [
+      "Your first video free, up to 60 minutes",
+      "Then 20 minutes of source video a month",
+      "2 GB of storage, 10 projects",
+      "Every layout, caption style and the MCP server",
+      "A small watermark on the clips",
+    ],
   },
   {
     name: "starter",

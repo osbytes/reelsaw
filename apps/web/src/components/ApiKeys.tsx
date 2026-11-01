@@ -1,11 +1,25 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
+import { useTRPC } from "../lib/trpc";
+import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea } from "./scroll-area";
 
-type Key = { id: string; name: string | null; start: string | null; createdAt: Date | string; lastRequest: Date | string | null };
+type Key = {
+  id: string;
+  name: string | null;
+  start: string | null;
+  createdAt: Date | string;
+  lastRequest: Date | string | null;
+  permissions?: Record<string, string[]> | null;
+};
+
+/** What a key may do beyond a normal account. A key with no record (never an administrator) shows nothing; older keys were granted admin by migration. */
+function adminLabel(k: Key): string | null {
+  return k.permissions?.admin?.includes("write") ? "can administer" : null;
+}
 
 function when(d: Date | string | null | undefined) {
   if (!d) return "never";
@@ -19,7 +33,10 @@ function when(d: Date | string | null | undefined) {
  */
 export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const qc = useQueryClient();
+  const trpc = useTRPC();
+  const me = useMe();
   const [name, setName] = useState("");
+  const [admin, setAdmin] = useState(false);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [confirm, setConfirm] = useState<Key | null>(null);
 
@@ -31,19 +48,18 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       return r.data.apiKeys as Key[];
     },
   });
-  const create = useMutation({
-    mutationFn: async (n: string) => {
-      const r = await authClient.apiKey.create({ name: n });
-      if (r.error || !r.data) throw new Error(r.error?.message ?? "Could not create the key");
-      return r.data as Key & { key: string };
-    },
-    onSuccess: (k, n) => {
-      setFresh({ name: n, key: k.key });
-      setName("");
-      void qc.invalidateQueries({ queryKey: ["apiKeys"] });
-    },
-    onError: (e) => toast.error(e.message),
-  });
+  // created on the server: permissions cannot be set from the browser
+  const create = useMutation(
+    trpc.me.createApiKey.mutationOptions({
+      onSuccess: (k) => {
+        setFresh({ name: k.name, key: k.key });
+        setName("");
+        setAdmin(false);
+        void qc.invalidateQueries({ queryKey: ["apiKeys"] });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const remove = useMutation({
     mutationFn: async (id: string) => {
       const r = await authClient.apiKey.delete({ keyId: id });
@@ -61,10 +77,16 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   };
   const keys = list.data ?? [];
   const claudeCmd = fresh ? `claude mcp add --transport http reelsaw ${mcpUrl} --header "Authorization: Bearer ${fresh.key}"` : "";
-  const json = fresh ? JSON.stringify({ mcpServers: { reelsaw: { type: "http", url: mcpUrl, headers: { Authorization: `Bearer ${fresh.key}` } } } }, null, 2) : "";
+  const json = fresh
+    ? JSON.stringify({ mcpServers: { reelsaw: { type: "http", url: mcpUrl, headers: { Authorization: `Bearer ${fresh.key}` } } } }, null, 2)
+    : "";
   // for clients that launch a command: `reelsaw mcp` serves the same tools over stdio from inside the app container
   const stdio = fresh
-    ? JSON.stringify({ mcpServers: { reelsaw: { command: "docker", args: ["exec", "-i", "-e", `REELSAW_API_KEY=${fresh.key}`, "reelsaw-app-1", "reelsaw", "mcp"] } } }, null, 2)
+    ? JSON.stringify(
+        { mcpServers: { reelsaw: { command: "docker", args: ["exec", "-i", "-e", `REELSAW_API_KEY=${fresh.key}`, "reelsaw-app-1", "reelsaw", "mcp"] } } },
+        null,
+        2,
+      )
         // the args array on one line: seven one-word entries do not need seven lines
         .replace(/\[\s+([^\]]+?)\s+\]/, (_, inner: string) => `[${inner.split(/,\s+/).join(", ")}]`)
     : "";
@@ -76,29 +98,42 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         <span className="font-mono text-xs text-ink3">{mcpUrl}</span>
       </div>
       <p className="text-[13px] text-ink2">
-        A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you: create projects, read transcripts, edit and download clips. Send it as{" "}
-        <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are shown once.
+        A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you: create projects, read transcripts, edit and download clips.
+        Send it as <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are shown once.
       </p>
 
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim()) create.mutate(name.trim());
+          if (name.trim()) create.mutate({ name: name.trim(), admin: admin && me.data?.role === "admin" });
         }}
       >
-        <input className="input max-w-xs flex-1" placeholder="Key name, e.g. claude-code on my laptop" value={name} onChange={(e) => setName(e.target.value)} maxLength={32} aria-label="Key name" />
+        <input
+          className="input max-w-xs flex-1"
+          placeholder="Key name, e.g. claude-code on my laptop"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={32}
+          aria-label="Key name"
+        />
         <button className="btn-ink min-w-[7.5rem]" type="submit" disabled={!name.trim() || create.isPending}>
           {create.isPending ? "Creating…" : "Create key"}
         </button>
+        {me.data?.role === "admin" && (
+          <label className="flex basis-full items-start gap-2 text-[13px] text-ink2">
+            <input type="checkbox" className="mt-0.5" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
+            <span>
+              Allow instance administration (admin tools over MCP): change instance settings, retry failed work. Leave off for agents that only edit videos.
+            </span>
+          </label>
+        )}
       </form>
 
       {fresh && (
         <div className="flex flex-col gap-2 rounded-[12px] border border-acc/40 bg-acc-soft p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <b className="text-[13px]">
-              Key “{fresh.name}” created. Copy it now; it will not be shown again.
-            </b>
+            <b className="text-[13px]">Key “{fresh.name}” created. Copy it now; it will not be shown again.</b>
             <button className="btn-quiet text-xs" onClick={() => setFresh(null)} aria-label="Dismiss">
               Done
             </button>
@@ -135,7 +170,8 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
             <div className="flex flex-col gap-1 sm:col-span-2">
               <div className="flex items-center justify-between text-xs text-ink2">
                 <span>
-                  Command (stdio), for clients that launch a program instead of calling a URL. <span className="font-mono">reelsaw-app-1</span> is the app container (<span className="font-mono">docker ps</span>).
+                  Command (stdio), for clients that launch a program instead of calling a URL. <span className="font-mono">reelsaw-app-1</span> is the app
+                  container (<span className="font-mono">docker ps</span>).
                 </span>
                 <button className="btn-quiet text-xs" onClick={() => copy(stdio, "Config")}>
                   Copy
@@ -171,8 +207,16 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
               <span />
             </li>
             {keys.map((k) => (
-              <li key={k.id} className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]">
-                <span className="truncate font-semibold">{k.name ?? "unnamed"}</span>
+              <li
+                key={k.id}
+                className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]"
+              >
+                <span className="truncate font-semibold">
+                  {k.name ?? "unnamed"}
+                  {adminLabel(k) && me.data?.role === "admin" ? (
+                    <span className="ml-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
+                  ) : null}
+                </span>
                 <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
                   <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
                     Revoke
@@ -194,11 +238,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Revoke this key?"
-        body={
-          <>
-            Anything using “{confirm?.name ?? "this key"}” stops working immediately.
-          </>
-        }
+        body={<>Anything using “{confirm?.name ?? "this key"}” stops working immediately.</>}
         confirm="Revoke"
         danger
         onConfirm={() => {

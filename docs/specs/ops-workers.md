@@ -57,6 +57,8 @@ pipeline already do.
 | Fact | Where |
 |---|---|
 | Eight stage queues, exclusive + singletonKey, fair priority | `queue/boss.ts` |
+| Backstop expiry per job: analyze/refine = clamp(1800 s, 1800 s + project duration x factor, 24 h), factor 4 when the language model is self-hosted at enqueue time, else 1; other queues use the queue default. Disk leases live as long as the longest possible job (24 h) | `expireInSecondsFor`, `MAX_JOB_EXPIRE_SECONDS`, `queue/boss.ts`; `DISK_LEASE_TTL_MS` |
+| Time budget of Finding moments: per model call (`LLM_CALL_TIMEOUT_SECONDS`) and idle (`STAGE_IDLE_TIMEOUT_MINUTES`), parts saved in `job_steps`; an attempt that saved a part gets one more retry; `NonRetryableError` fails at once | `pipeline/steps.ts`, `StageContext.step`, `queue/workers.ts` |
 | Failed project: `projects.status=failed`, `projects.error`, event `project.failed` | `pipeline/common.ts` `failProject` |
 | Mid-retry: event `stage.failed` with attempt/max | `stageFailedAttempt` |
 | Failed clip: `clips.status=failed`, diagnostics, `clip.failed` | `pipeline/render.ts` |

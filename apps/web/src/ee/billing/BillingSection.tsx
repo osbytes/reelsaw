@@ -54,7 +54,7 @@ export default function BillingSection() {
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
     const p = q.data.plans.find((x) => x.name === wanted);
     if (!p || !p.price) return;
-    if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already.`);
+    if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
     setInterval_(wantedInterval);
     toast(`Taking you to Stripe for ${p.label}…`);
     checkout.mutate({ plan: wanted, interval: wantedInterval });
@@ -67,9 +67,9 @@ export default function BillingSection() {
   const polled = useRef(0);
   useEffect(() => {
     if (!outcome) return;
-    if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment.");
-    else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment.");
-    else if (outcome === "canceled") toast("Checkout canceled; nothing changed.");
+    if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment");
+    else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment");
+    else if (outcome === "canceled") toast("Checkout canceled; nothing changed");
     const planBefore = q.data?.plan.name;
     const t = window.setInterval(() => {
       polled.current += 1;
@@ -143,22 +143,32 @@ export default function BillingSection() {
           <>
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-[22px] font-bold tracking-tight">{d.plan.label}</span>
-              {d.plan.price && <span className="font-mono text-sm text-ink2">{sub?.interval === "year" ? `$${d.plan.price.year}/yr` : `$${d.plan.price.month}/mo`}</span>}
-              <span className={`chip ${d.watermark.on ? "bg-warn-soft text-warn" : "bg-acc-soft text-acc-text"}`}>{d.watermark.on ? "◇ watermark on" : "◆ no watermark"}</span>
+              {d.plan.price && (
+                <span className="font-mono text-sm text-ink2">{sub?.interval === "year" ? `$${d.plan.price.year}/yr` : `$${d.plan.price.month}/mo`}</span>
+              )}
+              <span className={`chip ${d.watermark.on ? "bg-warn-soft text-warn" : "bg-acc-soft text-acc-text"}`}>
+                {d.watermark.on ? "◇ watermark on" : "◆ no watermark"}
+              </span>
             </div>
             <p className="min-h-5 text-sm text-ink2">{statusLine}</p>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-ink2">Minutes this period</span>
                 {bar(d.usage.MAX_SOURCE_MINUTES_PER_MONTH, minutesCap)}
-                <span className="text-xs tabular-nums text-ink3">{minutesCap ? `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} of ${num.format(minutesCap)} min` : `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} min, no cap`}</span>
+                <span className="text-xs tabular-nums text-ink3">
+                  {minutesCap
+                    ? `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} of ${num.format(minutesCap)} min`
+                    : `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} min, no cap`}
+                </span>
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-ink2">Storage</span>
                 {bar(d.usage.MAX_STORAGE_MB, storageCap)}
-                <span className="text-xs tabular-nums text-ink3">{storageCap ? `${gb(d.usage.MAX_STORAGE_MB)} of ${gb(storageCap)}` : `${gb(d.usage.MAX_STORAGE_MB)}, no cap`}</span>
+                <span className="text-xs tabular-nums text-ink3">
+                  {storageCap ? `${gb(d.usage.MAX_STORAGE_MB)} of ${gb(storageCap)}` : `${gb(d.usage.MAX_STORAGE_MB)}, no cap`}
+                </span>
                 <span className="text-xs text-ink3">
-                  Removed projects still count until you{" "}
+                  Deleted projects still count until you{" "}
                   <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
                     delete them forever
                   </Link>
@@ -168,11 +178,20 @@ export default function BillingSection() {
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-ink2">Projects</span>
                 {bar(d.usage.MAX_PROJECTS_PER_USER, projectsCap)}
-                <span className="text-xs tabular-nums text-ink3">{projectsCap ? `${num.format(d.usage.MAX_PROJECTS_PER_USER)} of ${num.format(projectsCap)}` : `${num.format(d.usage.MAX_PROJECTS_PER_USER)}, no cap`}</span>
+                <span className="text-xs tabular-nums text-ink3">
+                  {projectsCap
+                    ? `${num.format(d.usage.MAX_PROJECTS_PER_USER)} of ${num.format(projectsCap)}`
+                    : `${num.format(d.usage.MAX_PROJECTS_PER_USER)}, no cap`}
+                </span>
               </div>
             </div>
             <div className="flex min-h-9 flex-wrap items-center gap-2">
-              <button className="btn-ghost min-w-[9rem]" disabled={!d.canManage || portal.isPending} title={d.canManage ? "Invoices, card, cancel" : "Appears once you have picked a plan"} onClick={() => portal.mutate()}>
+              <button
+                className="btn-ghost min-w-[9rem]"
+                disabled={!d.canManage || portal.isPending}
+                title={d.canManage ? "Invoices, card, cancel" : "Appears once you have picked a plan"}
+                onClick={() => portal.mutate()}
+              >
                 {portal.isPending ? "…" : "Manage billing"}
               </button>
               <span className="text-xs text-ink3">Invoices, payment method and cancellation are on Stripe's portal.</span>
@@ -186,7 +205,13 @@ export default function BillingSection() {
           <h2 className="text-[15px] font-bold">Plans</h2>
           <div className="flex rounded-[9px] bg-sunk p-0.5" role="group" aria-label="Billing interval">
             {(["month", "year"] as const).map((i) => (
-              <button key={i} type="button" className={`h-7 min-w-[5.5rem] rounded-[7px] px-3 text-xs font-semibold ${intervalShown === i ? "bg-panel text-ink shadow-sm" : "text-ink2"}`} aria-pressed={intervalShown === i} onClick={() => setInterval_(i)}>
+              <button
+                key={i}
+                type="button"
+                className={`h-7 min-w-[5.5rem] rounded-[7px] px-3 text-xs font-semibold ${intervalShown === i ? "bg-panel text-ink shadow-sm" : "text-ink2"}`}
+                aria-pressed={intervalShown === i}
+                onClick={() => setInterval_(i)}
+              >
                 {i === "month" ? "Monthly" : "Yearly"}
               </button>
             ))}
@@ -208,11 +233,18 @@ export default function BillingSection() {
                   <span className="text-sm font-bold">{p.label}</span>
                   {d?.plan.name === p.name && <span className="chip bg-acc-soft text-acc-text">current</span>}
                 </div>
-                <div className="font-mono text-[22px] font-bold tracking-tight">{p.price ? (intervalShown === "year" ? `$${p.price.year}` : `$${p.price.month}`) : "$0"}<span className="text-xs font-normal text-ink3">{p.price ? (intervalShown === "year" ? " / year" : " / month") : ""}</span></div>
+                <div className="font-mono text-[22px] font-bold tracking-tight">
+                  {p.price ? (intervalShown === "year" ? `$${p.price.year}` : `$${p.price.month}`) : "$0"}
+                  <span className="text-xs font-normal text-ink3">{p.price ? (intervalShown === "year" ? " / year" : " / month") : ""}</span>
+                </div>
                 <p className="min-h-10 text-xs text-ink2">{p.blurb}</p>
                 <ul className="flex flex-col gap-1 text-xs text-ink2">
                   {p.firstVideoFreeMinutes > 0 && <li>First video free up to {p.firstVideoFreeMinutes} minutes</li>}
-                  <li>{p.limits.MAX_SOURCE_MINUTES_PER_MONTH ? `${num.format(p.limits.MAX_SOURCE_MINUTES_PER_MONTH)} minutes of video a month` : "Unlimited minutes"}</li>
+                  <li>
+                    {p.limits.MAX_SOURCE_MINUTES_PER_MONTH
+                      ? `${num.format(p.limits.MAX_SOURCE_MINUTES_PER_MONTH)} minutes of video a month`
+                      : "Unlimited minutes"}
+                  </li>
                   <li>{p.limits.MAX_STORAGE_MB ? `${gb(p.limits.MAX_STORAGE_MB)} of storage` : "Unlimited storage"}</li>
                   <li>{p.limits.MAX_PROJECTS_PER_USER ? `${num.format(p.limits.MAX_PROJECTS_PER_USER)} projects` : "Unlimited projects"}</li>
                   <li>{p.watermark ? "Small watermark" : "No watermark"}</li>
@@ -220,11 +252,27 @@ export default function BillingSection() {
                 </ul>
                 <div className="mt-auto pt-2">
                   {p.price ? (
-                    <button className={`${d?.plan.name === p.name ? "btn-ghost" : "btn-ink"} h-9 w-full`} disabled={checkout.isPending || !d || (d.plan.name === p.name && (d.subscription?.interval ?? "month") === intervalShown)} onClick={() => checkout.mutate({ plan: p.name, interval: intervalShown })}>
-                    {checkout.isPending && checkout.variables?.plan === p.name ? "…" : d?.plan.name === p.name ? ((d.subscription?.interval ?? "month") === intervalShown ? "Current plan" : `Switch to ${intervalShown === "year" ? "yearly" : "monthly"}`) : d?.plan.price && d.plan.price.month > p.price.month ? "Downgrade" : "Upgrade"}
+                    <button
+                      className={`${d?.plan.name === p.name ? "btn-ghost" : "btn-ink"} h-9 w-full`}
+                      disabled={checkout.isPending || !d || (d.plan.name === p.name && (d.subscription?.interval ?? "month") === intervalShown)}
+                      onClick={() => checkout.mutate({ plan: p.name, interval: intervalShown })}
+                    >
+                      {checkout.isPending && checkout.variables?.plan === p.name
+                        ? "…"
+                        : d?.plan.name === p.name
+                          ? (d.subscription?.interval ?? "month") === intervalShown
+                            ? "Current plan"
+                            : `Switch to ${intervalShown === "year" ? "yearly" : "monthly"}`
+                          : d?.plan.price && d.plan.price.month > p.price.month
+                            ? "Downgrade"
+                            : "Upgrade"}
                     </button>
                   ) : (
-                    <button className="btn-ghost h-9 w-full" disabled title={d?.plan.name === "free" ? "You are on Free" : "Cancel from Manage billing; Free applies when the period ends"}>
+                    <button
+                      className="btn-ghost h-9 w-full"
+                      disabled
+                      title={d?.plan.name === "free" ? "You are on Free" : "Cancel from Manage billing; Free applies when the period ends"}
+                    >
                       {d?.plan.name === "free" ? "Current plan" : "Cancel to return here"}
                     </button>
                   )}
@@ -233,7 +281,9 @@ export default function BillingSection() {
             ),
           )}
         </div>
-        <p className="text-xs text-ink3">Prices in USD; tax is added at checkout where it applies. Yearly is ten months for twelve. Changing plans is prorated by Stripe.</p>
+        <p className="text-xs text-ink3">
+          Prices in USD; tax is added at checkout where it applies. Yearly is ten months for twelve. Changing plans is prorated by Stripe.
+        </p>
       </section>
     </>
   );

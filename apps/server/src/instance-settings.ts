@@ -41,18 +41,41 @@ interface Def<S extends z.ZodTypeAny = z.ZodTypeAny> {
   /** encrypted at rest, masked everywhere outside the server */
   secret?: true;
 }
-const def = <S extends z.ZodTypeAny>(group: SettingGroup, schema: S, help: string, extra: Partial<Pick<Def, "optional" | "secret">> = {}): Def<S> => ({ group, schema, help, ...extra });
+const def = <S extends z.ZodTypeAny>(group: SettingGroup, schema: S, help: string, extra: Partial<Pick<Def, "optional" | "secret">> = {}): Def<S> => ({
+  group,
+  schema,
+  help,
+  ...extra,
+});
 
 const int0 = z.number().int().min(0);
 const url = z.string().trim().url().max(500).or(z.literal(""));
 const days = (what: string) => `${what} 0 = keep forever.`;
 
 export const RUNTIME_SETTINGS = {
-  SIGNUP_MODE: def("access", z.enum(["open", "approval", "closed"]), "Who may sign up: open (anyone, right for a public instance with email confirmation), approval (new accounts wait for an admin; a private box) or closed (nobody). The first account is always the admin."),
-  REQUIRE_EMAIL_VERIFICATION: def("access", z.boolean(), "New users must click the verification link before they can sign in. The link works for 24 hours and is single-use; an expired one offers a new send. Needs an email driver in .env."),
-  CAPTCHA_PROVIDER: def("access", z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).or(z.literal("")), "Bot protection on sign-up, sign-in and password reset: cloudflare-turnstile, google-recaptcha or hcaptcha; empty = off. Needs both keys.", { optional: true }),
+  SIGNUP_MODE: def(
+    "access",
+    z.enum(["open", "approval", "closed"]),
+    "Who may sign up: open (anyone, right for a public instance with email confirmation), approval (new accounts wait for an admin; a private box) or closed (nobody). The first account is always the admin.",
+  ),
+  REQUIRE_EMAIL_VERIFICATION: def(
+    "access",
+    z.boolean(),
+    "New users must click the verification link before they can sign in. The link works for 24 hours and is single-use; an expired one offers a new send. Needs an email driver in .env.",
+  ),
+  CAPTCHA_PROVIDER: def(
+    "access",
+    z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).or(z.literal("")),
+    "Bot protection on sign-up, sign-in and password reset: cloudflare-turnstile, google-recaptcha or hcaptcha; empty = off. Needs both keys.",
+    { optional: true },
+  ),
   CAPTCHA_SITE_KEY: def("access", z.string().trim().max(200), "Public captcha key the browser widget uses; empty = unset.", { optional: true }),
-  CAPTCHA_SECRET_KEY: def("access", z.string().trim().max(200), "Secret captcha key the server verifies with; stored encrypted, never shown again; empty = unset.", { optional: true, secret: true }),
+  CAPTCHA_SECRET_KEY: def(
+    "access",
+    z.string().trim().max(200),
+    "Secret captcha key the server verifies with; stored encrypted, never shown again; empty = unset.",
+    { optional: true, secret: true },
+  ),
   MAX_SIGNUPS_PER_IP_PER_DAY: def("access", int0, "Accounts one network address may create per day. 0 = unlimited. Needs TRUST_PROXY behind a reverse proxy."),
   BLOCK_DISPOSABLE_EMAILS: def("access", z.boolean(), "Refuse sign-ups from known temporary-address domains (a vendored list of about 120k domains)."),
   TERMS_URL: def("access", url, "Terms of service link shown on the sign-up form; empty = none.", { optional: true }),
@@ -62,52 +85,172 @@ export const RUNTIME_SETTINGS = {
   MAX_SOURCE_MINUTES_PER_DAY: def("limits", int0, "Minutes of source video an account may add per day (UTC). 0 = unlimited."),
   MAX_NEW_PROJECTS_PER_HOUR: def("limits", int0, "Projects an account may create per hour. 0 = unlimited."),
   MAX_LIVE_JOBS_PER_USER: def("limits", int0, "Queued plus running jobs an account's own requests may add to. 0 = unlimited."),
-  MAX_RERENDERS_PER_HOUR: def("limits", int0, "Re-renders and hand-made clips an account may ask for per hour. 0 = unlimited."),
-  MAX_STORAGE_MB: def("limits", int0, "MB of sources, uploads, renders and intros/outros an account may keep (deleted items count until they are deleted forever). 0 = unlimited."),
-  MAX_SOURCE_MINUTES_PER_MONTH: def("limits", int0, "Minutes of source video an account may add per period: its billing period when it has a plan, else the calendar month (UTC). 0 = unlimited."),
-  WATERMARK_NON_ADMINS: def("limits", z.boolean(), "Burn a small watermark into the clips of accounts that are not admins. A paid plan removes it, and an admin can switch it per user on the Users page."),
+  MAX_RERENDERS_PER_HOUR: def("limits", int0, "Re-renders, hand-made clips and re-runs (re-analyze, refine) an account may ask for per hour. 0 = unlimited."),
+  MAX_STORAGE_MB: def(
+    "limits",
+    int0,
+    "MB of sources, uploads, renders and intros/outros an account may keep (deleted items count until they are deleted forever). 0 = unlimited.",
+  ),
+  MAX_SOURCE_MINUTES_PER_MONTH: def(
+    "limits",
+    int0,
+    "Minutes of source video an account may add per period: its billing period when it has a plan, else the calendar month (UTC). 0 = unlimited.",
+  ),
+  WATERMARK_NON_ADMINS: def(
+    "limits",
+    z.boolean(),
+    "Burn a small watermark into the clips of accounts that are not admins. A paid plan removes it, and an admin can switch it per user on the Users page.",
+  ),
   WATERMARK_TEXT: def("limits", z.string().trim().min(1).max(60), "The watermark text, e.g. your site name."),
-  MAX_REQUESTS_PER_MINUTE: def("limits", int0, "Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited. Admins can override per user on the Users page."),
+  MAX_REQUESTS_PER_MINUTE: def(
+    "limits",
+    int0,
+    "Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited. Admins can override per user on the Users page.",
+  ),
   MAX_REQUESTS_PER_HOUR: def("limits", int0, "Changes an account may make per hour. 0 = unlimited."),
   MAX_UPLOAD_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest accepted file upload, in MB."),
   MAX_SOURCE_FILE_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest file a link source may download (yt-dlp --max-filesize), in MB."),
   ALLOW_PRIVATE_SOURCE_URLS: def("limits", z.boolean(), "Let link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard)."),
+  MAX_WEBHOOKS_PER_USER: def("limits", int0, "Webhook endpoints an account may add. 0 = unlimited. Admins can override per user on the Users page."),
+  ALLOW_PRIVATE_WEBHOOK_URLS: def(
+    "limits",
+    z.boolean(),
+    "Let webhook URLs point at LAN or loopback hosts (a self-hosted n8n next to Reelsaw), over http too. Off, they must be public https (SSRF guard).",
+  ),
+  MEDIA_LINK_TTL_DAYS: def("limits", z.number().int().min(1).max(3650), "Share links last this many days unless the owner picks less."),
+  MEDIA_LINK_ALLOW_NEVER: def("limits", z.boolean(), "Owners may make a share link that never expires (they can still revoke it)."),
 
-  TRANSCRIPT_CORRECTION: def("pipeline", z.boolean(), "After transcription, fix misheard names with the language model. On by default; off closes the ceiling so no project runs it (projects opt out via refineEntities)."),
-  DISFLUENCY_REMOVAL: def("pipeline", z.boolean(), "Detect fillers, repetitions and false starts after transcription. Off by default; turn on so projects may opt in via refineDisfluency."),
-  DISFLUENCY_LLM: def("pipeline", z.boolean(), "Model pass on top of rule-based disfluency detection. Off by default. Ignored when disfluency removal is off. Turn on so projects may opt in via disfluencyLlm."),
-  REFINE_SCENES: def("pipeline", z.boolean(), "Scan the video for on-screen text (burned-in captions, watermarks, slides) during refine. On by default; off closes the ceiling (projects opt out via refineScenes). Shot cuts are always detected."),
+  TRANSCRIPT_CORRECTION: def(
+    "pipeline",
+    z.boolean(),
+    "After transcription, fix misheard names with the language model. On by default; off closes the ceiling so no project runs it (projects opt out via refineEntities).",
+  ),
+  DISFLUENCY_REMOVAL: def(
+    "pipeline",
+    z.boolean(),
+    "Detect fillers, repetitions and false starts after transcription. Off by default; turn on so projects may opt in via refineDisfluency.",
+  ),
+  DISFLUENCY_LLM: def(
+    "pipeline",
+    z.boolean(),
+    "Model pass on top of rule-based disfluency detection. Off by default. Ignored when disfluency removal is off. Turn on so projects may opt in via disfluencyLlm.",
+  ),
+  LLM_CALL_TIMEOUT_SECONDS: def(
+    "pipeline",
+    z.number().int().min(0).max(86_400),
+    "Longest one model call may take (all its HTTP attempts together) before its step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one, and for a self-hosted transcription at least twice the chunk's audio length. Time spent waiting for a provider slot does not count. A slow CPU-only model may need more.",
+  ),
+  STAGE_IDLE_TIMEOUT_MINUTES: def(
+    "pipeline",
+    z.number().int().min(0).max(1440),
+    "A stage made of checkpointed steps (finding moments) is stopped when no step has finished for this long; Retry continues where it stopped. 0 = auto: 1.5 times the model call timeout.",
+  ),
+  REFINE_SCENES: def(
+    "pipeline",
+    z.boolean(),
+    "Scan the video for on-screen text (burned-in captions, watermarks, slides) during refine. On by default; off closes the ceiling (projects opt out via refineScenes). Shot cuts are always detected.",
+  ),
 
   SOURCE_RETENTION_DAYS: def("retention", int0, days("Delete stored source videos this many days after upload; the project stays and Retry re-fetches.")),
   CLIP_RETENTION_DAYS: def("retention", int0, days("Delete rendered clip files this many days after rendering; the clip stays and can be re-rendered.")),
   DELETED_RETENTION_DAYS: def("retention", int0, days("Deleted projects and replaced clips stay restorable this long, then rows and files go.")),
+  SCRATCH_CACHE_HOURS: def(
+    "retention",
+    int0,
+    "With an S3 store, drop a worker's local copies of the sources and rendered clips of finished projects after this many idle hours; a job pulls them back from the bucket when it needs them, and a worker short of disk drops the least recently used ones first. 0 = keep them on the worker. The local store needs nothing: scratch and store are the same file.",
+  ),
   EVENT_RETENTION_DAYS: def("retention", int0, days("Prune project events older than this; each project keeps its run skeleton.")),
   LLM_USAGE_RETENTION_DAYS: def("retention", int0, days("Prune model and transcription usage rows older than this.")),
   ADMIN_EVENT_RETENTION_DAYS: def("retention", int0, days("Prune the admin event log after this many days.")),
+  MEDIA_LINK_RETENTION_DAYS: def("retention", int0, days("Delete revoked and expired share links this many days after they stopped working.")),
+  WEBHOOK_DELIVERY_RETENTION_DAYS: def("retention", int0, days("Delete webhook delivery log rows older than this.")),
+  DECISION_RETENTION_DAYS: def(
+    "retention",
+    int0,
+    days("Prune users' recorded decisions (accepts, rejects, edits Reelsaw learns from) older than this. They outlive deleted projects until then."),
+  ),
+  STEP_RETENTION_DAYS: def(
+    "retention",
+    int0,
+    days(
+      "Drop the saved checkpoints (finding-moments windows) of a finished project this many days after it last changed; a Retry sooner than that reuses them.",
+    ),
+  ),
 
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),
-  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: def("operations", z.number().int().min(1).max(180), "Minutes to wait after the first project in a batch finishes before emailing that the clips are ready, so several projects land in one note. Sent only when an email driver is set and the account has not come back since those projects finished. A project that finishes while a note is already waiting joins that note."),
-  UPDATE_CHECK: def("operations", z.boolean(), "Ask GitHub for the latest release and tell admins when a newer Reelsaw exists. Only the request leaves the machine."),
-  HEALTH_DETAILS: def("operations", z.boolean(), "Include machine numbers in GET /api/health for anonymous callers (private networks only). Admins always get them."),
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: def(
+    "operations",
+    z.number().int().min(1).max(180),
+    "Minutes to wait after the first project in a batch finishes before emailing that the clips are ready, so several projects land in one note. Sent only when an email driver is set and the account has not come back since those projects finished. A project that finishes while a note is already waiting joins that note.",
+  ),
+  UPDATE_CHECK: def(
+    "operations",
+    z.boolean(),
+    "Ask GitHub for the latest release and tell admins when a newer Reelsaw exists. Only the request leaves the machine.",
+  ),
+  HEALTH_DETAILS: def(
+    "operations",
+    z.boolean(),
+    "Include machine numbers in GET /api/health for anonymous callers (private networks only). Admins always get them.",
+  ),
 
-  CATALOG_URL: def("library", z.string().trim().url().max(500), "Where the Reelsaw catalog manifest (sounds, icons, stickers) is fetched from, hourly; the starter pack bundled with Reelsaw is used until a newer one arrives."),
-  PEXELS_API_KEY: def("library", z.string().trim().max(200), "Pexels API key (free): enables stock photos and portrait videos in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
-  PIXABAY_API_KEY: def("library", z.string().trim().max(200), "Pixabay API key (free): enables photos, illustrations, vectors and videos in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
-  FREESOUND_API_KEY: def("library", z.string().trim().max(200), "Freesound API key (free): enables sound effects in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
-  GIPHY_API_KEY: def("library", z.string().trim().max(200), "Giphy API key: enables GIFs and stickers in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
-  KLIPY_API_KEY: def("library", z.string().trim().max(200), "Klipy API key: enables GIF search in Browse (experimental). Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
-  ICONIFY_API_URL: def("library", z.string().trim().url().max(500), "Iconify API used for icon search; the public one by default, or your own self-hosted instance (https)."),
-  OPENVERSE_ENABLED: def("library", z.boolean(), "Show Openverse (Creative Commons images and audio, no key) in Browse. Off by default until you have checked its limits for your use."),
+  CATALOG_URL: def(
+    "library",
+    z.string().trim().url().max(500),
+    "Where the Reelsaw catalog manifest (sounds, icons, stickers) is fetched from, hourly; the starter pack bundled with Reelsaw is used until a newer one arrives.",
+  ),
+  PEXELS_API_KEY: def(
+    "library",
+    z.string().trim().max(200),
+    "Pexels API key (free): enables stock photos and portrait videos in Browse. Stored encrypted; empty = provider hidden.",
+    { optional: true, secret: true },
+  ),
+  PIXABAY_API_KEY: def(
+    "library",
+    z.string().trim().max(200),
+    "Pixabay API key (free): enables photos, illustrations, vectors and videos in Browse. Stored encrypted; empty = provider hidden.",
+    { optional: true, secret: true },
+  ),
+  FREESOUND_API_KEY: def(
+    "library",
+    z.string().trim().max(200),
+    "Freesound API key (free): enables sound effects in Browse. Stored encrypted; empty = provider hidden.",
+    { optional: true, secret: true },
+  ),
+  GIPHY_API_KEY: def("library", z.string().trim().max(200), "Giphy API key: enables GIFs and stickers in Browse. Stored encrypted; empty = provider hidden.", {
+    optional: true,
+    secret: true,
+  }),
+  KLIPY_API_KEY: def(
+    "library",
+    z.string().trim().max(200),
+    "Klipy API key: enables GIF search in Browse (experimental). Stored encrypted; empty = provider hidden.",
+    { optional: true, secret: true },
+  ),
+  ICONIFY_API_URL: def(
+    "library",
+    z.string().trim().url().max(500),
+    "Iconify API used for icon search; the public one by default, or your own self-hosted instance (https).",
+  ),
+  OPENVERSE_ENABLED: def(
+    "library",
+    z.boolean(),
+    "Show Openverse (Creative Commons images and audio, no key) in Browse. Off by default until you have checked its limits for your use.",
+  ),
 } satisfies Record<string, Def>;
 
 export type RuntimeKey = keyof typeof RUNTIME_SETTINGS;
 export const RUNTIME_KEYS = Object.keys(RUNTIME_SETTINGS) as RuntimeKey[];
 /** The settings in force, typed like the environment they default from. */
 export type RuntimeSettings = Pick<Config, RuntimeKey>;
-export type SettingsPatch = { [K in RuntimeKey]?: z.infer<(typeof RUNTIME_SETTINGS)[K]["schema"]> | null };
+export type SettingsPatch = { [K in RuntimeKey]?: z.infer<(typeof RUNTIME_SETTINGS)[K]["schema"]> | null | undefined };
 
 /** A patch as the API takes it: each key optional; null = back to the environment. Descriptions double as tool docs. */
-export const settingsPatchSchema = z.object(Object.fromEntries(RUNTIME_KEYS.map((k) => [k, RUNTIME_SETTINGS[k].schema.nullable().optional().describe(RUNTIME_SETTINGS[k].help)])) as { [K in RuntimeKey]: z.ZodOptional<z.ZodNullable<(typeof RUNTIME_SETTINGS)[K]["schema"]>> });
+export const settingsPatchSchema = z.object(
+  Object.fromEntries(RUNTIME_KEYS.map((k) => [k, RUNTIME_SETTINGS[k].schema.nullable().optional().describe(RUNTIME_SETTINGS[k].help)])) as {
+    [K in RuntimeKey]: z.ZodOptional<z.ZodNullable<(typeof RUNTIME_SETTINGS)[K]["schema"]>>;
+  },
+);
 
 export const isSecret = (k: RuntimeKey) => !!(RUNTIME_SETTINGS[k] as Def).secret;
 export const isOptional = (k: RuntimeKey) => !!(RUNTIME_SETTINGS[k] as Def).optional;
@@ -180,8 +323,10 @@ export function resolveSettings(config: Config, override: Override): RuntimeSett
  */
 export function problemsOf(s: RuntimeSettings, deps: { emailEnabled: boolean }): Partial<Record<RuntimeKey, string>> {
   const out: Partial<Record<RuntimeKey, string>> = {};
-  if (s.REQUIRE_EMAIL_VERIFICATION && !deps.emailEnabled) out.REQUIRE_EMAIL_VERIFICATION = "Email verification needs an email driver: set EMAIL_DRIVER in .env first.";
-  if (s.CAPTCHA_PROVIDER && (!s.CAPTCHA_SITE_KEY || !s.CAPTCHA_SECRET_KEY)) out.CAPTCHA_PROVIDER = "A captcha provider needs both the site key and the secret key.";
+  if (s.REQUIRE_EMAIL_VERIFICATION && !deps.emailEnabled)
+    out.REQUIRE_EMAIL_VERIFICATION = "Email verification needs an email driver: set EMAIL_DRIVER in .env first.";
+  if (s.CAPTCHA_PROVIDER && (!s.CAPTCHA_SITE_KEY || !s.CAPTCHA_SECRET_KEY))
+    out.CAPTCHA_PROVIDER = "A captcha provider needs both the site key and the secret key.";
   return out;
 }
 

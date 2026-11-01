@@ -79,9 +79,17 @@ export function ThemeSync() {
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, toggle] = useTheme();
   return (
-    <button type="button" className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`} onClick={toggle} title={theme === "dark" ? "Light theme" : "Dark theme"} aria-label="Toggle theme">
+    <button
+      type="button"
+      className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`}
+      onClick={toggle}
+      title={theme === "dark" ? "Light theme" : "Dark theme"}
+      aria-label="Toggle theme"
+    >
       {/* fixed-size slot: the icon swaps after hydration without moving anything */}
-      <span className="grid h-4 w-4 place-items-center">{theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className={`h-4 w-4 ${theme ? "" : "opacity-0"}`} />}</span>
+      <span className="grid h-4 w-4 place-items-center">
+        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className={`h-4 w-4 ${theme ? "" : "opacity-0"}`} />}
+      </span>
     </button>
   );
 }

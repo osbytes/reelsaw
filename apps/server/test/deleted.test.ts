@@ -110,7 +110,9 @@ describe("listDeleted and purge", { skip: notReady ?? false }, () => {
 
   it("purges a removed library item and refuses one that is still live", async () => {
     // purge trusts asset_refs only once its backfill is done (a booted app does it; a bare migrated DB has not)
-    await h.pool.query(`insert into instance_settings (key, value, updated_by) values ('asset_refs.backfill', '{"done": true}'::jsonb, 'system') on conflict (key) do nothing`);
+    await h.pool.query(
+      `insert into instance_settings (key, value, updated_by) values ('asset_refs.backfill', '{"done": true}'::jsonb, 'system') on conflict (key) do nothing`,
+    );
     const liveId = `a-${randomUUID().slice(0, 8)}`;
     const goneId = `a-${randomUUID().slice(0, 8)}`;
     await h.pool.query(

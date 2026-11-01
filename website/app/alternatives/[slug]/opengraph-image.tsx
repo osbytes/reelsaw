@@ -1,13 +1,5 @@
 import { COMPETITORS, competitorBySlug } from "@/content/competitors";
-import {
-  defaultOgAlt,
-  defaultOgDescription,
-  defaultOgTitle,
-  ogBlurb,
-  ogContentType,
-  ogSize,
-  renderOgImage,
-} from "@/lib/og";
+import { defaultOgAlt, defaultOgDescription, defaultOgTitle, ogBlurb, ogContentType, ogSize, renderOgImage } from "@/lib/og";
 
 export const size = ogSize;
 export const contentType = ogContentType;

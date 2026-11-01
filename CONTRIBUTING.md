@@ -6,11 +6,20 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 
 - Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md): the consistency, concurrency and UI rules every
   change follows. Agent instructions live in `AGENTS.md` (the only agent file; see the process principles).
-- Everyday commands (typecheck, build, deploy, evals, tests) are listed in `AGENTS.md`.
+- Everyday commands (typecheck, lint, build, deploy, evals, tests) are listed in `AGENTS.md`.
+- Files are UTF-8 with LF line endings (`.gitattributes` normalises them on commit, `.editorconfig`
+  tells your editor). Biome lints and formats the TypeScript and JavaScript in the app and `website/`
+  (`biome.json`): `pnpm format` formats, `pnpm lint` lints. Unformatted code and lint errors fail CI
+  and the pre-commit hook; lint warnings are known debt to fix as you touch the code. Your editor's
+  Biome extension can format on save. The one-time reformat is listed in `.git-blame-ignore-revs`
+  (GitHub skips it in blame; locally, `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
+- TypeScript runs `strict` plus `noUncheckedIndexedAccess` (an index read may be `undefined`) and
+  `exactOptionalPropertyTypes` (`foo?: T` means absent, not `undefined`: write `foo?: T | undefined`
+  when a caller passes `undefined`, or leave the key out with `...(x ? { foo: x } : {})`).
 - Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
 - `pnpm install` sets up the Git hooks in `lefthook.yml` (via `scripts/hook.mjs`, so they run on
-  Windows Git as well as macOS and Linux): a gitleaks scan of staged changes before each commit,
-  the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push.
+  Windows Git as well as macOS and Linux): a gitleaks scan and a Biome lint of staged changes before
+  each commit, the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push.
   The scans need `gitleaks` and `zizmor` on your PATH and are skipped with a note without them. CI
   runs the same checks (`security` workflow) either way.
 - Pipeline behaviour (selection, cuts, framing, transcription) changes only with an eval run
@@ -22,9 +31,10 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 - Typecheck both apps, run `pnpm --filter @reelsaw/server test` against a local stack, and check
   UI changes in the browser at phone width. Desktop device mode does not simulate the URL bar;
   a bottom bar that only fails on a real phone is the `100vh` gap ([docs/UI.md](docs/UI.md)).
-  CI runs only the stack-free tests
-  (`test:unit`) and `eval:offline` (all model-free eval suites against the baselines), so the stack
-  tests and `pnpm eval` with a model are on you.
+  CI runs the stack-free tests (`test:unit`), `eval:offline` (all model-free eval suites against
+  the baselines) and, unless the change is only docs or Markdown, the stack tests against a mock
+  model (`test:stack`, [docs/EVALS.md](docs/EVALS.md#stack-tests-in-ci)), so `pnpm eval` with a
+  model is on you.
 - `pnpm eval <suite> --update` refuses to record regressions; pass `--accept-regressions "<reason>"`
   when a worse number is intended. Never read the `heldout` disfluency cases while tuning (see
   `docs/EVALS.md`).

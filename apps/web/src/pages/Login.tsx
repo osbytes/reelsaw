@@ -16,7 +16,8 @@ import {
 } from "@reelsaw/shared";
 import { authClient, sendVerificationEmail, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
-import { Logo, ThemeToggle } from "../App";
+import { ThemeToggle } from "../App";
+import { AuthCardHeader } from "../components/AuthCardHeader";
 import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
@@ -61,7 +62,10 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const location = useLocation();
-  const routedNotice = location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string" ? location.state.notice : null;
+  const routedNotice =
+    location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string"
+      ? location.state.notice
+      : null;
   const [expiredLink, setExpiredLink] = useState(fromLink.expired);
   const [afterSignUp, setAfterSignUp] = useState(() => typeof routedNotice === "string" && routedNotice.includes(CONFIRM_EMAIL_THEN_SIGN_IN));
   const [notice, setNotice] = useState<string | null>(fromLink.expired ? VERIFY_EMAIL_EXPIRED_NOTICE : routedNotice);
@@ -73,8 +77,11 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const captcha = status.data?.captcha ?? null;
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const onToken = useCallback((t: string | null) => setCaptchaToken(t), []);
+  // a captcha token is single-use: after a failed attempt the widget must be solved again, so it remounts
+  const [captchaAttempt, setCaptchaAttempt] = useState(0);
   // arriving from an OAuth authorize redirect (MCP connector): after sign-in, hand the signed query back
-  const oauthQuery = /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
+  const oauthQuery =
+    /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
   const canResend = status.data?.emailEnabled !== false && shouldOfferResendVerification({ errorCode, expiredLink, afterSignUp });
   useDocumentTitle(expiredLink ? "This link expired · Reelsaw" : mode === "signup" ? "Create account · Reelsaw" : "Sign in · Reelsaw");
 
@@ -112,6 +119,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     if (res.error) {
       setBusy(false);
       setCaptchaToken(null);
+      setCaptchaAttempt((n) => n + 1);
       setErrorCode(res.error.code ?? null);
       return setError(res.error.message ?? "Something went wrong");
     }
@@ -119,9 +127,12 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     // to sign-in with the password they just chose. Leaving for a fresh form is where a password
     // manager offers a new strong password, and that sign-in then fails.
     if (mode === "signup" && res.data && res.data.token == null) {
+      // the account exists: count it, or the funnel loses every sign-up that has to confirm an email first
+      track("signup_completed", { plan: plan ?? undefined, confirm_email: true });
       const text = signupCreatedNotice(signupMode);
       setBusy(false);
       setCaptchaToken(null);
+      setCaptchaAttempt((n) => n + 1);
       setNotice(text);
       setAfterSignUp(true);
       setMode("login");
@@ -141,84 +152,109 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
 
   return (
     <ScrollArea className="h-dvh">
-    <div className="relative flex min-h-dvh items-center justify-center p-6">
-      <ThemeToggle className="absolute right-4 top-4" />
-      <form onSubmit={submit} className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-        <Logo />
-        <div>
-          <h1 className="text-[26px] font-bold tracking-tight">{expiredLink ? "This link expired" : mode === "login" ? "Sign in" : "Create account"}</h1>
-          <p className="mt-1 text-sm text-ink2">Running on <span className="font-mono text-[13px]">{window.location.host}</span></p>
-        </div>
-        {mode === "signup" && (
+      <div className="relative flex min-h-dvh items-center justify-center p-6">
+        <ThemeToggle className="absolute right-4 top-4" />
+        <form onSubmit={submit} className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
+          <AuthCardHeader title={expiredLink ? "This link expired" : mode === "login" ? "Sign in" : "Create account"} />
+          {mode === "signup" && (
+            <div>
+              <label className="label">Name</label>
+              <input className="input" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+          )}
           <div>
-            <label className="label">Name</label>
-            <input className="input" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="label">Email</label>
+            <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
-        )}
-        <div>
-          <label className="label">Email</label>
-          <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        {!expiredLink && (
-          <div>
-            <label className="label">Password</label>
-            <input
-              key={mode}
-              className="input"
-              name="password"
-              type="password"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {mode === "login" && (
-              <p className="mt-1.5 text-right">
-                <Link to={resetPasswordPath(email)} className="text-xs text-ink3 no-underline hover:text-ink">
-                  Forgot password?
-                </Link>
-              </p>
-            )}
-          </div>
-        )}
-        {mode === "signup" && plan && <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>}
-        {mode === "signup" && signupMode === "approval" && <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>}
-        {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
-          <p className="text-xs leading-relaxed text-ink3">
-            By creating an account you accept the{" "}
-            {status.data.termsUrl && <a href={status.data.termsUrl} target="_blank" rel="noreferrer">terms</a>}
-            {status.data.termsUrl && status.data.privacyUrl && " and "}
-            {status.data.privacyUrl && <a href={status.data.privacyUrl} target="_blank" rel="noreferrer">privacy policy</a>}.
-          </p>
-        )}
-        {oauthQuery && <p className="text-xs leading-relaxed text-ink2">An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</p>}
-        {!expiredLink && captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
-        {(error || notice) && (
-          <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
-        )}
-        <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
-          {busy ? "…" : expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}
-        </button>
-        {canResend && !expiredLink && (
-          <button type="button" className="w-full min-w-[12rem] text-center text-xs text-ink3 hover:text-ink" onClick={() => void resend()} disabled={busy || !email.trim()}>
-            Send a new confirmation
+          {!expiredLink && (
+            <div>
+              <label className="label">Password</label>
+              <input
+                key={mode}
+                className="input"
+                name="password"
+                type="password"
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {mode === "login" && (
+                <p className="mt-1.5 text-right">
+                  <Link to={resetPasswordPath(email)} className="text-xs text-ink3 no-underline hover:text-ink">
+                    Forgot password?
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
+          {mode === "signup" && plan && (
+            <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>
+          )}
+          {mode === "signup" && signupMode === "approval" && (
+            <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>
+          )}
+          {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
+            <p className="text-xs leading-relaxed text-ink3">
+              By creating an account you accept the{" "}
+              {status.data.termsUrl && (
+                <a href={status.data.termsUrl} target="_blank" rel="noreferrer">
+                  terms
+                </a>
+              )}
+              {status.data.termsUrl && status.data.privacyUrl && " and "}
+              {status.data.privacyUrl && (
+                <a href={status.data.privacyUrl} target="_blank" rel="noreferrer">
+                  privacy policy
+                </a>
+              )}
+              .
+            </p>
+          )}
+          {oauthQuery && (
+            <p className="text-xs leading-relaxed text-ink2">
+              An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.
+            </p>
+          )}
+          {!expiredLink && captcha && <Captcha key={captchaAttempt} provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
+          {(error || notice) && (
+            <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
+          )}
+          <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
+            {busy ? "…" : expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}
           </button>
-        )}
-        {signupMode !== "closed" ? (
-          <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setExpiredLink(false); }}>
-            {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
-          </button>
-        ) : (
-          <p className="min-h-4 text-center text-xs text-ink3">Sign-ups are closed on this instance.</p>
-        )}
-      </form>
-      <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
-        <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-          github.com/osbytes/reelsaw
-        </a>
-      </p>
-    </div>
+          {canResend && !expiredLink && (
+            <button
+              type="button"
+              className="w-full min-w-[12rem] text-center text-xs text-ink3 hover:text-ink"
+              onClick={() => void resend()}
+              disabled={busy || !email.trim()}
+            >
+              Send a new confirmation
+            </button>
+          )}
+          {signupMode !== "closed" ? (
+            <button
+              type="button"
+              className="w-full text-center text-xs text-ink3 hover:text-ink"
+              onClick={() => {
+                setMode(mode === "login" ? "signup" : "login");
+                setExpiredLink(false);
+              }}
+            >
+              {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+            </button>
+          ) : (
+            <p className="min-h-4 text-center text-xs text-ink3">Sign-ups are closed on this instance.</p>
+          )}
+        </form>
+        <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
+            github.com/osbytes/reelsaw
+          </a>
+        </p>
+      </div>
     </ScrollArea>
   );
 }

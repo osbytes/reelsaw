@@ -42,17 +42,17 @@ export interface RefineResult {
   skipped: Array<{ range: CutRange; reason: string }>;
 }
 export interface CutDeps {
-  log?: Logger;
+  log?: Logger | undefined;
   /** called before each verification so long searches show progress (cut index, total, attempt) */
-  onProgress?: (cut: number, total: number, attempt: number) => void;
+  onProgress?: ((cut: number, total: number, attempt: number) => void) | undefined;
   ffmpegPath: string;
   /** transcribe an mp3 buffer; returns words with timestamps relative to the buffer start */
   transcribe: (audio: Buffer) => Promise<Word[]>;
   /** CTC forced alignment (16 kHz float PCM + known words → spans relative to the PCM start) */
   align?: (pcm: Float32Array, words: string[]) => Promise<Array<{ text: string; start?: number; end?: number; score?: number }>>;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   /** spoken language of the transcript; the English-only CTC aligner is skipped for any other */
-  language?: string | null;
+  language?: string | null | undefined;
 }
 
 function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
@@ -68,17 +68,42 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
 }
 
 const pcm = (d: CutDeps, source: string, start: number, duration: number) =>
-  runFfmpeg(d.ffmpegPath, ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(SR), "-f", "s16le", "pipe:1"], d.signal).then(
-    (b) => new Int16Array(b.buffer, b.byteOffset, Math.floor(b.byteLength / 2)),
-  );
+  runFfmpeg(
+    d.ffmpegPath,
+    ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(SR), "-f", "s16le", "pipe:1"],
+    d.signal,
+  ).then((b) => new Int16Array(b.buffer, b.byteOffset, Math.floor(b.byteLength / 2)));
 const mp3 = (d: CutDeps, source: string, start: number, duration: number) =>
-  runFfmpeg(d.ffmpegPath, ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(SR), "-b:a", "64k", "-f", "mp3", "pipe:1"], d.signal);
+  runFfmpeg(
+    d.ffmpegPath,
+    ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(SR), "-b:a", "64k", "-f", "mp3", "pipe:1"],
+    d.signal,
+  );
 
 /** Just the removed audio, padded with silence so the recogniser has no surrounding words to lean on. */
 const pieceMp3 = (d: CutDeps, source: string, start: number, duration: number) =>
   runFfmpeg(
     d.ffmpegPath,
-    ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(SR), "-af", "adelay=400:all=1,apad=pad_dur=0.4", "-b:a", "64k", "-f", "mp3", "pipe:1"],
+    [
+      "-ss",
+      start.toFixed(3),
+      "-t",
+      duration.toFixed(3),
+      "-i",
+      source,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      String(SR),
+      "-af",
+      "adelay=400:all=1,apad=pad_dur=0.4",
+      "-b:a",
+      "64k",
+      "-f",
+      "mp3",
+      "pipe:1",
+    ],
     d.signal,
   );
 
@@ -101,12 +126,27 @@ const seamMp3 = (d: CutDeps, source: string, a0: number, a1: number, b0: number,
   runFfmpeg(
     d.ffmpegPath,
     [
-      "-ss", Math.max(0, a0 - 0.5).toFixed(3), "-t", (b1 - a0 + 1).toFixed(3), "-i", source,
+      "-ss",
+      Math.max(0, a0 - 0.5).toFixed(3),
+      "-t",
+      (b1 - a0 + 1).toFixed(3),
+      "-i",
+      source,
       "-filter_complex",
       `[0:a]atrim=start=${(a0 - Math.max(0, a0 - 0.5)).toFixed(3)}:end=${(a1 - Math.max(0, a0 - 0.5) + 0.02).toFixed(3)},asetpts=PTS-STARTPTS[x];` +
         `[0:a]atrim=start=${(b0 - Math.max(0, a0 - 0.5)).toFixed(3)}:end=${(b1 - Math.max(0, a0 - 0.5)).toFixed(3)},asetpts=PTS-STARTPTS[y];` +
         `[x][y]acrossfade=d=0.02:c1=tri:c2=tri[o]`,
-      "-map", "[o]", "-ac", "1", "-ar", String(SR), "-b:a", "64k", "-f", "mp3", "pipe:1",
+      "-map",
+      "[o]",
+      "-ac",
+      "1",
+      "-ar",
+      String(SR),
+      "-b:a",
+      "64k",
+      "-f",
+      "mp3",
+      "pipe:1",
     ],
     d.signal,
   );
@@ -158,8 +198,8 @@ export interface Located {
   /** aligned word indices of the first and last deleted word */
   from: number;
   to: number;
-  prevIdx?: number;
-  nextIdx?: number;
+  prevIdx?: number | undefined;
+  nextIdx?: number | undefined;
   /** tokens that differ from the expected words (0 = exact) */
   drift: number;
 }
@@ -167,7 +207,8 @@ export interface Located {
 function tokenDistance(a: string[], b: string[]) {
   const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) dp[0]![j] = j;
-  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
   return dp[a.length]![b.length]!;
 }
 
@@ -180,7 +221,14 @@ function tokenDistance(a: string[], b: string[]) {
  * ("could be another occurrence" otherwise); a manual one is placed by its position alone.
  * `aligned` times and `range` share one time base.
  */
-export function locate(aligned: Word[], prev: Word | undefined, deleted: Word[], next: Word | undefined, range?: { start: number; end: number }, opts: { manual?: boolean; maxDistance?: number } = {}): Located | null {
+export function locate(
+  aligned: Word[],
+  prev: Word | undefined,
+  deleted: Word[],
+  next: Word | undefined,
+  range?: { start: number; end: number },
+  opts: { manual?: boolean; maxDistance?: number } = {},
+): Located | null {
   const al = normalizeWithSpans(aligned.map((w) => w.text));
   const del = normalizeTokens(deleted.map((w) => w.text));
   if (!del.length) return null;
@@ -223,7 +271,11 @@ export function locate(aligned: Word[], prev: Word | undefined, deleted: Word[],
       const c: Cand = { from, to, prevIdx, nextIdx, drift, score, fit };
       const nearer = c.fit > (best?.fit ?? -Infinity) + 1e-6;
       const level = !!best && Math.abs(c.fit - best.fit) <= 1e-6;
-      const better = !best || (opts.manual ? nearer || (level && (c.drift < best.drift || (c.drift === best.drift && c.score > best.score))) : c.score > best.score || (c.score === best.score && (c.drift < best.drift || (c.drift === best.drift && nearer))));
+      const better =
+        !best ||
+        (opts.manual
+          ? nearer || (level && (c.drift < best.drift || (c.drift === best.drift && c.score > best.score)))
+          : c.score > best.score || (c.score === best.score && (c.drift < best.drift || (c.drift === best.drift && nearer))));
       if (better) best = c;
     }
   }
@@ -279,8 +331,24 @@ export async function refineCuts(
     let attempt = 0;
     const verify = async (cut: CutRange): Promise<Verdict> => {
       deps.onProgress?.(ri, ranges.length, ++attempt);
-      const heard = normalizeTokens((await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => w.text));
-      const stillThere = del.length === 1 ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0]) : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
+      const heard = normalizeTokens(
+        (
+          await deps.transcribe(
+            await seamMp3(
+              deps,
+              source,
+              clipStart + Math.max(0, cut.start - 1.2),
+              clipStart + cut.start,
+              clipStart + cut.end,
+              clipStart + Math.min(duration, cut.end + 1.2),
+            ),
+          )
+        ).map((w) => w.text),
+      );
+      const stillThere =
+        del.length === 1
+          ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0])
+          : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
       const prevOk = !prev || heard.includes(norm(prev.text));
       const nextOk = !next || heard.includes(norm(next.text));
       // leftovers: anything heard between the neighbours (a cut that takes "in" but leaves "-to"
@@ -299,11 +367,16 @@ export async function refineCuts(
       if (prevOk && nextOk && stillThere && !leftover) {
         removed = normalizeTokens((await deps.transcribe(await pieceMp3(deps, source, clipStart + cut.start, cut.end - cut.start))).map((w) => w.text));
         if (del.every((t) => soundsLike(removed, t))) {
-          deps.log?.info({ span: [r.start, r.end], seamHeard: heard.join(" "), removedHeard: removed.join(" ") }, "seam check fooled by language model; removed audio confirms the cut");
+          deps.log?.info(
+            { span: [r.start, r.end], seamHeard: heard.join(" "), removedHeard: removed.join(" ") },
+            "seam check fooled by language model; removed audio confirms the cut",
+          );
           return { ok: true, prevOk, nextOk, partial: false };
         }
       }
-      reasons.push(`${cut.start.toFixed(3)}-${cut.end.toFixed(3)}: heard "${heard.join(" ")}" (prev ${prevOk ? "ok" : "lost"}, next ${nextOk ? "ok" : "lost"}, deleted ${stillThere ? "audible" : "gone"}${leftover ? `, leftover "${leftover}"` : ""}${removed.length ? `, removed piece "${removed.join(" ")}"` : ""})`);
+      reasons.push(
+        `${cut.start.toFixed(3)}-${cut.end.toFixed(3)}: heard "${heard.join(" ")}" (prev ${prevOk ? "ok" : "lost"}, next ${nextOk ? "ok" : "lost"}, deleted ${stillThere ? "audible" : "gone"}${leftover ? `, leftover "${leftover}"` : ""}${removed.length ? `, removed piece "${removed.join(" ")}"` : ""})`,
+      );
       return { ok: false, prevOk, nextOk, partial: prevOk && nextOk };
     };
 
@@ -360,7 +433,9 @@ export async function refineCuts(
     }
     const loc = locate(aligned, prev, deleted, next, r, { manual });
     if (!loc) {
-      giveUp(`re-alignment could not find "${deleted.map((w) => w.text).join(" ")}" ${manual ? "where you cut it" : "between its neighbours"} (heard: ${aligned.map((w) => w.text).join(" ")})`);
+      giveUp(
+        `re-alignment could not find "${deleted.map((w) => w.text).join(" ")}" ${manual ? "where you cut it" : "between its neighbours"} (heard: ${aligned.map((w) => w.text).join(" ")})`,
+      );
       continue;
     }
     const dStart = aligned[loc.from]!.start;
@@ -403,7 +478,8 @@ export async function refineCuts(
     const sQuiet = qs.level <= quietRatio * qs.local;
     const eQuiet = qe.level <= quietRatio * qe.local;
     const primary = { start: (sQuiet ? qs.t : dStart - w0) + w0, end: (eQuiet ? qe.t : dEnd - w0) + w0 };
-    if (!sQuiet || !eQuiet) deps.log?.debug({ span: [r.start, r.end], noQuietGap: !sQuiet && !eQuiet ? "both" : !sQuiet ? "start" : "end" }, "no quiet gap, using aligned boundary");
+    if (!sQuiet || !eQuiet)
+      deps.log?.debug({ span: [r.start, r.end], noQuietGap: !sQuiet && !eQuiet ? "both" : !sQuiet ? "start" : "end" }, "no quiet gap, using aligned boundary");
 
     // Candidate seams, most conservative first. Coarticulated words ("disappear‿into") rarely split
     // cleanly at one boundary, so widen step by step towards each neighbour (never into it) and
@@ -437,8 +513,11 @@ export async function refineCuts(
     // then a grid of small shifts around the aligned cut, nearest first: alignment can be off by a
     // syllable in either direction, and the verifier tells us which way is right
     const grid: CutRange[] = [];
-    for (const ds of [0, 0.05, 0.1, -0.05, -0.1]) for (const de of [0, 0.06, 0.12, 0.18, 0.24, -0.06]) grid.push({ start: primary.start + ds, end: primary.end + de });
-    grid.sort((x, y) => Math.abs(x.start - primary.start) + Math.abs(x.end - primary.end) - (Math.abs(y.start - primary.start) + Math.abs(y.end - primary.end)));
+    for (const ds of [0, 0.05, 0.1, -0.05, -0.1])
+      for (const de of [0, 0.06, 0.12, 0.18, 0.24, -0.06]) grid.push({ start: primary.start + ds, end: primary.end + de });
+    grid.sort(
+      (x, y) => Math.abs(x.start - primary.start) + Math.abs(x.end - primary.end) - (Math.abs(y.start - primary.start) + Math.abs(y.end - primary.end)),
+    );
     for (const g of grid) add(g.start, g.end);
     add(prevEnd + 0.005, nextStart - 0.005); // everything between the neighbours
     const MAX_TRIES = opts.verify === false ? 1 : 8;
@@ -481,7 +560,15 @@ export async function refineCuts(
       giveUp(`verification failed after ${reasons.length} attempt(s): ${reasons.join("; ")}`);
       continue;
     }
-    deps.log?.debug({ span: [r.start, r.end], cut: [accepted.start, accepted.end], via: cand.includes(accepted) ? `candidate ${cand.indexOf(accepted) + 1}` : "directed walk", tries: reasons.length + 1 }, "cut accepted");
+    deps.log?.debug(
+      {
+        span: [r.start, r.end],
+        cut: [accepted.start, accepted.end],
+        via: cand.includes(accepted) ? `candidate ${cand.indexOf(accepted) + 1}` : "directed walk",
+        tries: reasons.length + 1,
+      },
+      "cut accepted",
+    );
     accept(accepted);
   }
   return { cuts, skipped };
@@ -492,16 +579,32 @@ export async function refineCuts(
  * words around the span. The window is built from whole words (with margin) so the text matches the
  * audio at both edges; clip-relative seconds. Null when alignment can't place the needed words.
  */
-async function ctcBoundaries(deps: CutDeps, source: string, clipStart: number, duration: number, words: Word[], deleted: Word[], prev: Word | undefined, next: Word | undefined): Promise<{ dStart: number; dEnd: number; prevEnd: number; nextStart: number } | null> {
+async function ctcBoundaries(
+  deps: CutDeps,
+  source: string,
+  clipStart: number,
+  duration: number,
+  words: Word[],
+  deleted: Word[],
+  prev: Word | undefined,
+  next: Word | undefined,
+): Promise<{ dStart: number; dEnd: number; prevEnd: number; nextStart: number } | null> {
   const s0 = deleted[0]!.start;
   const s1 = deleted[deleted.length - 1]!.end;
   const ctxWords = words.filter((w) => w.end > s0 - 2.2 && w.start < s1 + 2.2);
   if (!ctxWords.length) return null;
   const a0 = Math.max(0, ctxWords[0]!.start - 0.5);
   const a1 = Math.min(duration, ctxWords[ctxWords.length - 1]!.end + 0.5);
-  const raw = await runFfmpeg(deps.ffmpegPath, ["-ss", (clipStart + a0).toFixed(3), "-t", (a1 - a0).toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"], deps.signal);
+  const raw = await runFfmpeg(
+    deps.ffmpegPath,
+    ["-ss", (clipStart + a0).toFixed(3), "-t", (a1 - a0).toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"],
+    deps.signal,
+  );
   const pcmF = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
-  const spans = await deps.align!(pcmF, ctxWords.map((w) => w.text));
+  const spans = await deps.align!(
+    pcmF,
+    ctxWords.map((w) => w.text),
+  );
   const idx = (w: Word | undefined) => (w ? ctxWords.indexOf(w) : -1);
   const di = deleted.map((d) => idx(d));
   const pi = idx(prev);

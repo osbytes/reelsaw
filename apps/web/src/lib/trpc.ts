@@ -2,6 +2,7 @@ import { createTRPCContext } from "@trpc/tanstack-react-query";
 import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from "@trpc/client";
 import type { AppRouter } from "@reelsaw/server";
 import { FetchEventSource } from "./sse";
+import { noteServerBuild } from "./stale-chunk";
 
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
@@ -16,7 +17,15 @@ export function makeTrpcClient() {
           EventSource: FetchEventSource,
           eventSourceOptions: { withCredentials: true },
         }),
-        false: httpBatchLink({ url: "/api/trpc", fetch: (url, opts) => fetch(url, { ...opts, credentials: "include" }) }),
+        false: httpBatchLink({
+          url: "/api/trpc",
+          fetch: async (url, opts) => {
+            // tRPC types `signal` as `AbortSignal | undefined`, which RequestInit does not allow with exactOptionalPropertyTypes
+            const res = await fetch(url, { ...(opts as RequestInit | undefined), credentials: "include" });
+            noteServerBuild(res.headers.get("x-reelsaw-build"));
+            return res;
+          },
+        }),
       }),
     ],
   });

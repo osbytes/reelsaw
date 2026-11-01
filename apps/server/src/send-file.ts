@@ -8,7 +8,12 @@ import { contentTypeFor } from "./storage/index.js";
  * copy is revalidated with a 304 instead of re-sent; `revalidate` makes the browser ask every time, for a
  * file whose URL stays the same when its content changes (a re-rendered clip and its thumbnail).
  */
-export async function sendFile(req: Request, file: string, downloadName?: string, opts: { revalidate?: boolean } = {}): Promise<Response> {
+export async function sendFile(
+  req: Request,
+  file: string,
+  downloadName?: string,
+  opts: { revalidate?: boolean; inlineName?: string; cacheControl?: string } = {},
+): Promise<Response> {
   let st: fs.Stats;
   try {
     st = await fsp.stat(file);
@@ -19,16 +24,18 @@ export async function sendFile(req: Request, file: string, downloadName?: string
   const headers: Record<string, string> = {
     "Content-Type": contentTypeFor(file),
     "Accept-Ranges": "bytes",
-    "Cache-Control": opts.revalidate ? "private, no-cache" : "private, max-age=3600",
+    "Cache-Control": opts.cacheControl ?? (opts.revalidate ? "private, no-cache" : "private, max-age=3600"),
     ETag: etag,
     "Last-Modified": st.mtime.toUTCString(),
   };
   const inm = req.headers.get("if-none-match");
-  if (inm && inm.split(",").some((t) => t.trim() === etag)) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": headers["Cache-Control"]! } });
+  if (inm && inm.split(",").some((t) => t.trim() === etag))
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": headers["Cache-Control"]! } });
   // a range on a changed file must not be stitched onto the old one
   const ifRange = req.headers.get("if-range");
   const rangeOk = !ifRange || ifRange === etag || ifRange === headers["Last-Modified"];
   if (downloadName) headers["Content-Disposition"] = `attachment; filename="${downloadName.replace(/"/g, "")}"`;
+  else if (opts.inlineName) headers["Content-Disposition"] = `inline; filename="${opts.inlineName.replace(/"/g, "")}"`;
   let start = 0;
   let end = st.size - 1;
   let status = 200;
@@ -47,4 +54,3 @@ export async function sendFile(req: Request, file: string, downloadName?: string
   headers["Content-Length"] = String(end - start + 1);
   return new Response(Readable.toWeb(fs.createReadStream(file, { start, end })) as ReadableStream, { status, headers });
 }
-

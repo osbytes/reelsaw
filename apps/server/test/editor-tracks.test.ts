@@ -35,9 +35,23 @@ describe("coverTimeline adjust", () => {
   });
 
   it("merges neighbours only when the adjust is equal", () => {
-    const same = coverTimeline(10, [{ start: 0, end: 5, mode: "split", offsetX: 0.1 }, { start: 5, end: 10, mode: "split", offsetX: 0.1 }], "auto");
+    const same = coverTimeline(
+      10,
+      [
+        { start: 0, end: 5, mode: "split", offsetX: 0.1 },
+        { start: 5, end: 10, mode: "split", offsetX: 0.1 },
+      ],
+      "auto",
+    );
     assert.equal(same.length, 1);
-    const differ = coverTimeline(10, [{ start: 0, end: 5, mode: "split", offsetX: 0.1 }, { start: 5, end: 10, mode: "split", offsetX2: 0.1 }], "auto");
+    const differ = coverTimeline(
+      10,
+      [
+        { start: 0, end: 5, mode: "split", offsetX: 0.1 },
+        { start: 5, end: 10, mode: "split", offsetX2: 0.1 },
+      ],
+      "auto",
+    );
     assert.equal(differ.length, 2);
   });
 });
@@ -81,7 +95,10 @@ describe("subjectTrack", () => {
     const r = subjectTrack(twoFaces(), 0.72, [], 0);
     assert.equal(r.fixed, false);
     assert.ok(r.track.length > 1);
-    assert.ok(r.track.every((p) => Math.abs(p.x - 0.7) < 0.03), JSON.stringify(r.track.slice(0, 3)));
+    assert.ok(
+      r.track.every((p) => Math.abs(p.x - 0.7) < 0.03),
+      JSON.stringify(r.track.slice(0, 3)),
+    );
   });
 
   it("falls back to a fixed crop when no face is within reach", () => {
@@ -93,7 +110,20 @@ describe("subjectTrack", () => {
 });
 
 describe("overlayChain", () => {
-  const item = (over: Partial<LoadedOverlay> = {}): LoadedOverlay => ({ id: "a", assetId: "x", path: "/x.png", kind: "image", loop: false, start: 1, end: 4, x: 0.5, y: 0.5, w: 0.3, opacity: 1, ...over });
+  const item = (over: Partial<LoadedOverlay> = {}): LoadedOverlay => ({
+    id: "a",
+    assetId: "x",
+    path: "/x.png",
+    kind: "image",
+    loop: false,
+    start: 1,
+    end: 4,
+    x: 0.5,
+    y: 0.5,
+    w: 0.3,
+    opacity: 1,
+    ...over,
+  });
 
   it("scales, composites and enables an image over its window", () => {
     const { chain, out } = overlayChain([item()], 1, 1080, 1920, "[in]");
@@ -160,7 +190,19 @@ describe("overlayInputArgs", () => {
 });
 
 describe("music under the clip", () => {
-  const m = (over: Partial<LoadedMusic> = {}): LoadedMusic => ({ id: "t1", assetId: "a", path: "/m.mp3", start: 2, end: 12, offset: 0, volume: 0.25, duck: true, fade: 0.5, loop: true, ...over });
+  const m = (over: Partial<LoadedMusic> = {}): LoadedMusic => ({
+    id: "t1",
+    assetId: "a",
+    path: "/m.mp3",
+    start: 2,
+    end: 12,
+    offset: 0,
+    volume: 0.25,
+    duck: true,
+    fade: 0.5,
+    loop: true,
+    ...over,
+  });
 
   it("trims, fades, levels, delays and ducks the track under the speech, then mixes without a level drop", () => {
     const g = musicMix([m()], 3, "[ca]", 30);
@@ -214,7 +256,13 @@ describe("text overlays", () => {
   });
 
   it("writes a layer-1 event with the size, colour and alpha of the text", () => {
-    const ass = buildAss([], { width: 1080, height: 1920, font: "DejaVu Sans", style, texts: [{ text: "Hello {there}", start: 1, end: 4, x: 0.25, y: 0.5, size: 0.05, color: "#FFD84D", box: true, opacity: 0.5 }] });
+    const ass = buildAss([], {
+      width: 1080,
+      height: 1920,
+      font: "DejaVu Sans",
+      style,
+      texts: [{ text: "Hello {there}", start: 1, end: 4, x: 0.25, y: 0.5, size: 0.05, color: "#FFD84D", box: true, opacity: 0.5 }],
+    });
     const line = ass.split("\n").find((l) => l.startsWith("Dialogue: 1,"));
     assert.ok(line, ass);
     assert.ok(line!.includes(",TextBox,"), line);
@@ -226,7 +274,12 @@ describe("text overlays", () => {
     const under = buildAss([], { width: 1080, height: 1920, font: "DejaVu Sans", style, watermark: "reelsaw.com", watermarkUnderLogo: true });
     const alone = buildAss([], { width: 1080, height: 1920, font: "DejaVu Sans", style, watermark: "reelsaw.com" });
     const line = (s: string) => s.split("\n").find((l) => l.startsWith("Dialogue: 2,"))!;
-    assert.ok(line(under).includes(`\\pos(${Math.round(WATERMARK_LOGO.x * 1080)},${Math.round(watermarkTextY() * 1920)})}{\\fs${Math.round(1920 * WATERMARK_LOGO.textSize)}}reelsaw.com`), line(under));
+    assert.ok(
+      line(under).includes(
+        `\\pos(${Math.round(WATERMARK_LOGO.x * 1080)},${Math.round(watermarkTextY() * 1920)})}{\\fs${Math.round(1920 * WATERMARK_LOGO.textSize)}}reelsaw.com`,
+      ),
+      line(under),
+    );
     // the text starts just under the logo's bottom edge
     const logoBottom = WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2;
     assert.ok(watermarkTextY() - WATERMARK_LOGO.textSize / 2 > logoBottom && watermarkTextY() - WATERMARK_LOGO.textSize / 2 - logoBottom < 0.01);

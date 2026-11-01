@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { QuotaAction, QuotaRefusal } from "@reelsaw/shared";
 import { openReport } from "../lib/report";
+import { track } from "../lib/telemetry";
 
 export function quotaFromError(err: unknown): QuotaRefusal | undefined {
   if (!err || typeof err !== "object") return;
@@ -16,17 +17,20 @@ function isRefusal(v: unknown): v is QuotaRefusal {
 
 function Action({ action, quota }: { action: QuotaAction; quota: QuotaRefusal }) {
   const cls = action.kind === "upgrade" || action.kind === "request" ? "btn-primary py-1.5 text-xs no-underline" : "btn-ghost py-1.5 text-xs no-underline";
+  // the server's `quota.refused` counts who hit the limit; this counts who acted on it (upgrade, request, free space)
+  const clicked = () => track("quota_action_clicked", { key: quota.key, action: action.kind });
   if (action.kind === "request") {
     return (
       <button
         type="button"
         className={cls}
-        onClick={() =>
+        onClick={() => {
+          clicked();
           openReport({
             prefill: `I'd like more capacity on my current plan (${quota.key.replaceAll("_", " ").toLowerCase()}).`,
             tags: { source: "quota-capacity", limit: quota.key },
-          })
-        }
+          });
+        }}
       >
         {action.label}
       </button>
@@ -34,20 +38,20 @@ function Action({ action, quota }: { action: QuotaAction; quota: QuotaRefusal })
   }
   if (action.href.startsWith("http")) {
     return (
-      <a href={action.href} className={cls}>
+      <a href={action.href} className={cls} onClick={clicked}>
         {action.label}
       </a>
     );
   }
   return (
-    <Link to={action.href} className={cls}>
+    <Link to={action.href} className={cls} onClick={clicked}>
       {action.label}
     </Link>
   );
 }
 
 /** Sentence plus the upgrade / request / free-space actions the server attached to a quota refusal. */
-export function QuotaNotice({ message, quota, className }: { message: string; quota?: QuotaRefusal; className?: string }) {
+export function QuotaNotice({ message, quota, className }: { message: string; quota?: QuotaRefusal | undefined; className?: string }) {
   return (
     <div className={`flex min-w-0 flex-col gap-2 ${className ?? ""}`}>
       <p className="text-[13px] leading-snug text-err">{message}</p>

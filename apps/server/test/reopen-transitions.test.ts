@@ -50,7 +50,11 @@ describe("startRun / reopening a project", { skip: notReady ?? false }, () => {
         h.tx((u) => startRun(u, id, { reason: "rerender", status: "rendering", stage: "render" })),
         h.tx((u) => startRun(u, id, { reason: "rerender", status: "rendering", stage: "render" })),
       ]);
-      assert.deepEqual(results.filter((r) => r !== null), [2], `round ${round}: exactly one winner`);
+      assert.deepEqual(
+        results.filter((r) => r !== null),
+        [2],
+        `round ${round}: exactly one winner`,
+      );
       assert.equal((await row(id)).run_seq, 2);
       assert.equal(await h.eventCount(id, "run.started"), 1, `round ${round}`);
     }
@@ -73,7 +77,10 @@ describe("startRun / reopening a project", { skip: notReady ?? false }, () => {
     const clips = [await h.makeClip(id, 0, "done"), await h.makeClip(id, 1, "done"), await h.makeClip(id, 2, "done")];
     const results = await Promise.all([h.tx((u) => requestRenders(h.svc, u, id, clips)), h.tx((u) => requestRenders(h.svc, u, id, clips))]);
     // the second batch finds its clips already pending (it waited on their locks), so it skips them
-    assert.equal(results.reduce((n, r) => n + r.rerendered, 0), 3);
+    assert.equal(
+      results.reduce((n, r) => n + r.rerendered, 0),
+      3,
+    );
     assert.equal(await h.eventCount(id, "run.started"), 1);
     assert.equal((await row(id)).status, "rendering");
     const jobs = await h.jobsFor(clips);

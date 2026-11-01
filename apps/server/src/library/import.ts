@@ -17,9 +17,16 @@ import type { Services } from "../services.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { sha256File } from "../pipeline/bumpers.js";
-import { createAsset, downloadAsUpload, sharedSourceWhere, type FetchDeps } from "./service.js";
+import { createAsset, downloadAsUpload, insertUploadWithinQuota, sharedSourceWhere, type FetchDeps } from "./service.js";
 import { createCatalog, type Catalog } from "./catalog.js";
-import { createProviderHttp, createProviderRegistry, ProviderError, ProviderUnavailable, type CatalogSearchResult, type ProviderRegistry } from "./providers/index.js";
+import {
+  createProviderHttp,
+  createProviderRegistry,
+  ProviderError,
+  ProviderUnavailable,
+  type CatalogSearchResult,
+  type ProviderRegistry,
+} from "./providers/index.js";
 
 interface Parts {
   catalog: Catalog;
@@ -48,18 +55,26 @@ export function asTrpc(err: unknown): never {
 }
 
 export interface SearchInput {
-  provider?: string;
+  provider?: string | undefined;
   q: string;
-  kind?: AssetKind;
-  cursor?: string;
+  kind?: AssetKind | undefined;
+  cursor?: string | undefined;
   limit?: number;
-  license?: "cc0" | "by";
+  license?: "cc0" | "by" | undefined;
 }
 /** `provider` omitted = the Reelsaw catalog. */
 export async function catalogSearch(svc: Services, input: SearchInput): Promise<CatalogSearchResult & { provider: string }> {
   const provider = input.provider ?? "reelsaw";
   try {
-    return { provider, ...(await libraryProviders(svc).registry.search(provider, input.q, { kind: input.kind, cursor: input.cursor, limit: input.limit, license: input.license })) };
+    return {
+      provider,
+      ...(await libraryProviders(svc).registry.search(provider, input.q, {
+        kind: input.kind,
+        cursor: input.cursor,
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        license: input.license,
+      })),
+    };
   } catch (err) {
     return asTrpc(err);
   }
@@ -68,8 +83,8 @@ export async function catalogSearch(svc: Services, input: SearchInput): Promise<
 export interface ImportInput {
   provider: string;
   externalId: string;
-  color?: string;
-  tags?: string[];
+  color?: string | undefined;
+  tags?: string[] | undefined;
 }
 export interface ImportedAsset {
   id: string;
@@ -90,8 +105,9 @@ async function localAsUpload(svc: Services, userId: string, file: string, name: 
   const id = randomUUID();
   const size = (await fs.stat(file)).size;
   const filename = `${name.replace(/[\\/]/g, "_")}.${ext}`.slice(0, 200);
-  await svc.storage.putFile(keys.upload(id, `.${ext}`), file);
-  await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey: keys.upload(id, `.${ext}`), sizeBytes: size });
+  const storageKey = keys.upload(id, `.${ext}`);
+  await svc.storage.putFile(storageKey, file);
+  await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: size });
   return { uploadId: id, filename, sizeBytes: size };
 }
 
@@ -100,7 +116,18 @@ type SharedKey = { provider: string; externalId: string; variant: string };
 async function existingShared(svc: Services, key: SharedKey): Promise<ImportedAsset | null> {
   const [row] = await svc.database.db.select().from(schema.assets).where(sharedSourceWhere(key)).limit(1);
   if (!row) return null;
-  return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, width: row.width, height: row.height, hasAudio: row.hasAudio, duplicate: true, restored: false };
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    mime: row.mime,
+    durationSec: row.durationSec,
+    width: row.width,
+    height: row.height,
+    hasAudio: row.hasAudio,
+    duplicate: true,
+    restored: false,
+  };
 }
 
 /** `shared` replaces the database-backed steps (tests); the defaults are the real ones. */
@@ -120,7 +147,8 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
     if (already) return already;
     let upload: { uploadId: string; filename: string };
     if (r.localPath) {
-      if (r.sha256 && (await sha256File(r.localPath)) !== r.sha256) throw new ProviderError("The bundled file does not match the catalog (corrupted install?).");
+      if (r.sha256 && (await sha256File(r.localPath)) !== r.sha256)
+        throw new ProviderError("The bundled file does not match the catalog (corrupted install?).");
       upload = await localAsUpload(svc, userId, r.localPath, r.name, r.ext);
     } else {
       upload = await downloadAsUpload(svc, userId, r.url, { ...deps, name: r.name, ext: r.ext });
@@ -139,7 +167,15 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
       }
     }
     const tags = [...new Set([...(r.tags ?? []), ...(input.tags ?? [])].map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 30);
-    return await shared.create(svc, { userId: null, actorId: userId, uploadId: upload.uploadId, name: r.name.slice(0, 120), tags, provenance, system: input.provider === "reelsaw" });
+    return await shared.create(svc, {
+      userId: null,
+      actorId: userId,
+      uploadId: upload.uploadId,
+      name: r.name.slice(0, 120),
+      tags,
+      provenance,
+      system: input.provider === "reelsaw",
+    });
   } catch (err) {
     return asTrpc(err);
   }

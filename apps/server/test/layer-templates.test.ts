@@ -5,13 +5,32 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { layerTimingSchema, resolveTemplateLayers, templateFromLayers, templateWindow, timingText, type ClipLayer, type TemplateLayer } from "@reelsaw/shared";
+import {
+  layerTimingSchema,
+  mergeTemplateBumpers,
+  resolveTemplateLayers,
+  templateBumperSlots,
+  templateFromLayers,
+  templateWindow,
+  timingText,
+  type ClipLayer,
+  type TemplateLayer,
+} from "@reelsaw/shared";
+import { templateBumpersText, templateBumpersWith } from "../src/library/templates.js";
 
 const logo: TemplateLayer = { id: "t-logo", kind: "asset", assetId: "a1", x: 0.5, y: 0.1, w: 0.3, timing: { mode: "head", start: 0, end: 3 } };
 const cta: TemplateLayer = { id: "t-cta", kind: "text", text: "Link in bio", x: 0.5, y: 0.8, timing: { mode: "tail", start: 4, end: 0 } };
 const mark: TemplateLayer = { id: "t-mark", kind: "asset", assetId: "a2", x: 0.9, y: 0.9, w: 0.1, timing: { mode: "fill" } };
 const music: TemplateLayer = { id: "t-music", kind: "audio", assetId: "m1", volume: 0.5, duck: true, fade: 1, loop: true, timing: { mode: "fill" } };
-const interrupt: TemplateLayer = { id: "t-mid", kind: "asset", assetId: "a3", x: 0.5, y: 0.5, w: 0.4, timing: { mode: "relative", start: 0.4, end: 0.6, maxSec: 3 } };
+const interrupt: TemplateLayer = {
+  id: "t-mid",
+  kind: "asset",
+  assetId: "a3",
+  x: 0.5,
+  y: 0.5,
+  w: 0.4,
+  timing: { mode: "relative", start: 0.4, end: 0.6, maxSec: 3 },
+};
 
 describe("templateWindow", () => {
   it("keeps head and tail in real seconds whatever the length", () => {
@@ -59,7 +78,10 @@ describe("resolveTemplateLayers", () => {
         ["audio", 100, 130],
       ],
     );
-    assert.ok(layers.every((l) => /^ly-[a-z0-9]{4}$/.test(l.id)), "ids are lane ids");
+    assert.ok(
+      layers.every((l) => /^ly-[a-z0-9]{4}$/.test(l.id)),
+      "ids are lane ids",
+    );
     assert.equal(new Set(layers.map((l) => l.id)).size, 4, "ids are distinct");
     const m = layers[3]!;
     assert.ok(m.kind === "audio" && m.volume === 0.5 && m.loop === true && m.fade === 1, "sound settings travel");
@@ -68,7 +90,10 @@ describe("resolveTemplateLayers", () => {
   it("reports the layers that had no room instead of failing", () => {
     const { layers, skipped } = resolveTemplateLayers([{ ...logo, timing: { mode: "head", start: 10, end: 12 } }, cta], { startSec: 0, endSec: 6 });
     assert.deepEqual(skipped, ["t-logo"]);
-    assert.deepEqual(layers.map((l) => [l.start, l.end]), [[2, 6]]);
+    assert.deepEqual(
+      layers.map((l) => [l.start, l.end]),
+      [[2, 6]],
+    );
   });
   it("lets the caller keep the template ids (the template editor previews with them)", () => {
     const { layers } = resolveTemplateLayers([logo], { startSec: 0, endSec: 30 }, (l) => l.id);
@@ -78,7 +103,8 @@ describe("resolveTemplateLayers", () => {
 
 describe("templateFromLayers", () => {
   const clip = { startSec: 200, endSec: 260 };
-  const on = (start: number, end: number, extra: Partial<ClipLayer> = {}): ClipLayer => ({ id: "x", kind: "text", text: "t", x: 0.5, y: 0.5, start: clip.startSec + start, end: clip.startSec + end, ...extra } as ClipLayer);
+  const on = (start: number, end: number, extra: Partial<ClipLayer> = {}): ClipLayer =>
+    ({ id: "x", kind: "text", text: "t", x: 0.5, y: 0.5, start: clip.startSec + start, end: clip.startSec + end, ...extra }) as ClipLayer;
   it("spanning layers fill, edge layers anchor, inner layers anchor to the nearer edge with their length", () => {
     const [fill, head, tail, nearStart, nearEnd] = templateFromLayers([on(0, 60), on(0.1, 3), on(55, 60), on(10, 13), on(40, 47)], clip);
     assert.deepEqual(fill!.timing, { mode: "fill" });
@@ -98,6 +124,39 @@ describe("templateFromLayers", () => {
       back.map((l) => [l.start, l.end]),
       original.map((l) => [l.start, l.end]),
     );
+  });
+});
+
+describe("template intro / outro", () => {
+  it("names only the slots it sets", () => {
+    assert.deepEqual(templateBumperSlots(null), []);
+    assert.deepEqual(templateBumperSlots({}), []);
+    assert.deepEqual(templateBumperSlots({ outro: null }), ["outro"]);
+    assert.deepEqual(templateBumperSlots({ intro: "v1", outro: "i2" }), ["intro", "outro"]);
+  });
+  it("sets the template's slots on a clip and leaves the others", () => {
+    // the clip had its own outro and follows the project for the intro; the template sets the intro only
+    assert.deepEqual(mergeTemplateBumpers({ outro: "o1", outroSec: 4 }, { intro: "i1", introSec: 2 }), { outro: "o1", outroSec: 4, intro: "i1", introSec: 2 });
+    // the template's outro replaces the clip's, seconds included; null = no outro
+    assert.deepEqual(mergeTemplateBumpers({ outro: "o1", outroSec: 4 }, { outro: "o2" }), { outro: "o2" });
+    assert.deepEqual(mergeTemplateBumpers({ outro: "o1" }, { outro: null, outroSec: 3 }), { outro: null }); // seconds only travel with an asset
+    // a template that sets nothing changes nothing; nothing at all is null (follow the project)
+    assert.deepEqual(mergeTemplateBumpers({ intro: "i1" }, null), { intro: "i1" });
+    assert.equal(mergeTemplateBumpers(null, {}), null);
+  });
+  it("fills only the slots a new clip has not chosen with onlyUnset", () => {
+    assert.deepEqual(mergeTemplateBumpers({ intro: null }, { intro: "i1", outro: "o1" }, { onlyUnset: true }), { intro: null, outro: "o1" });
+  });
+  it("edits a template's slots from CLI choices", () => {
+    assert.deepEqual(templateBumpersWith(null, { intro: "i1", introSec: 2 }), { intro: "i1", introSec: 2 });
+    assert.deepEqual(templateBumpersWith({ intro: "i1", introSec: 2, outro: "o1" }, { intro: "keep" }), { outro: "o1" });
+    assert.deepEqual(templateBumpersWith({ outro: "o1" }, { outro: "none" }), { outro: null });
+    assert.deepEqual(templateBumpersWith({ outro: "o1" }, { outroSec: 5 }), { outro: "o1", outroSec: 5 });
+    assert.equal(templateBumpersWith({ intro: "i1" }, { intro: "keep" }), null);
+  });
+  it("describes them for listings", () => {
+    assert.equal(templateBumpersText(null), "");
+    assert.equal(templateBumpersText({ intro: "i1", introSec: 2, outro: null }), "; intro i1 2 s, outro none");
   });
 });
 

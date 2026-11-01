@@ -170,12 +170,17 @@ export function otelLogFromLine(line: string, scrub: (value: string) => string =
     addLogAttribute(attributes, k, v, scrub, 1);
   }
   const severity =
-    level >= 60 ? { severityNumber: 21, severityText: "FATAL" }
-    : level >= 50 ? { severityNumber: 17, severityText: "ERROR" }
-    : level >= 40 ? { severityNumber: 13, severityText: "WARN" }
-    : level >= 30 ? { severityNumber: 9, severityText: "INFO" }
-    : level >= 20 ? { severityNumber: 5, severityText: "DEBUG" }
-    : { severityNumber: 1, severityText: "TRACE" };
+    level >= 60
+      ? { severityNumber: 21, severityText: "FATAL" }
+      : level >= 50
+        ? { severityNumber: 17, severityText: "ERROR" }
+        : level >= 40
+          ? { severityNumber: 13, severityText: "WARN" }
+          : level >= 30
+            ? { severityNumber: 9, severityText: "INFO" }
+            : level >= 20
+              ? { severityNumber: 5, severityText: "DEBUG" }
+              : { severityNumber: 1, severityText: "TRACE" };
   return { ...severity, body: scrub(row.msg), attributes };
 }
 
@@ -192,7 +197,17 @@ function addLogAttribute(out: Record<string, string | number | boolean>, key: st
     return;
   }
   if (Array.isArray(value)) {
-    if (value.length > 0 && value.every((x) => x == null || isScalar(x))) addLogAttribute(out, key, value.filter((x) => x != null).map(String).join(" "), scrub, 0);
+    if (value.length > 0 && value.every((x) => x == null || isScalar(x)))
+      addLogAttribute(
+        out,
+        key,
+        value
+          .filter((x) => x != null)
+          .map(String)
+          .join(" "),
+        scrub,
+        0,
+      );
     return;
   }
   if (depth > 0 && isPlain(value)) {
@@ -200,13 +215,17 @@ function addLogAttribute(out: Record<string, string | number | boolean>, key: st
   }
 }
 
-/** Attribute bag for a Sentry span-duration metric. Drops non-scalars so a bad attribute cannot fail the span. */
+/**
+ * Attribute bag for the span-duration metric. Span attributes are per-call (project, clip and job ids,
+ * attempt numbers, argument counts); on a metric each distinct value is a new series. Keep the span
+ * name, its status, and string or boolean attributes that are not ids.
+ */
 export function spanMetricAttributes(name: string, ok: boolean, attributes: Record<string, unknown>): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = { span: name, status: ok ? "ok" : "error" };
   for (const [k, v] of Object.entries(attributes)) {
+    if (/(?:^|[._])id$|[a-z]Id$/.test(k)) continue; // project_id, messaging.message.id, jobId
     if (typeof v === "string") out[k] = v.length > 200 ? v.slice(0, 200) : v;
     else if (typeof v === "boolean") out[k] = v;
-    else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
   }
   return out;
 }

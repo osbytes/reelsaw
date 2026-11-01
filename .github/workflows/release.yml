@@ -1,11 +1,15 @@
 # Release: on a version tag (v1.2.3), build the image for amd64 + arm64, check it carries no
 # source, push it to GHCR (always) and Docker Hub (when configured), and attach the install
-# folder (deploy/) to the GitHub release.
+# folder (deploy/) to the GitHub release; then publish the version to the MCP registry
+# (publish-mcp.yml, skipped for pre-releases).
 #
 # Configure (Settings → Secrets and variables → Actions):
 #   vars.GHCR_IMAGE        optional, default ghcr.io/<owner>/reelsaw
 #   vars.DOCKERHUB_IMAGE   optional, e.g. osbytes/reelsaw; Docker Hub is skipped unless this and
 #   secrets.DOCKERHUB_USERNAME / secrets.DOCKERHUB_TOKEN are set
+#   secrets.SENTRY_AUTH_TOKEN, vars.SENTRY_ORG, vars.SENTRY_PROJECT
+#                          optional: upload the bundles' source maps to Sentry (they never ship in the image)
+#                          and attach the release's commits; skipped unless all three are set
 name: release
 
 on:
@@ -20,6 +24,8 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     permissions:
       contents: write      # create the GitHub release
       packages: write      # push to GHCR
@@ -31,6 +37,9 @@ jobs:
       DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,13 +66,13 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - if: steps.v.outputs.dockerhub == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
@@ -96,8 +105,16 @@ jobs:
             REELSAW_VERSION=${{ steps.v.outputs.version }}
             REELSAW_COMMIT=${{ steps.v.outputs.commit }}
             REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            SENTRY_ORG=${{ vars.SENTRY_ORG }}
+            SENTRY_PROJECT=${{ vars.SENTRY_PROJECT }}
+          # a BuildKit secret: never in a layer, the cache or the build log
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
+          # layer cache in GHCR, not the Actions cache: Actions caches are scoped to the ref, so a cache
+          # written by one tag was never readable by the next (every release built from scratch and
+          # spent ~7 min uploading a cache nothing used). The ci.yml stack job reads it too.
+          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd
 
       - name: No source in the image; bundle and ONNX models load on both architectures
         env:
@@ -131,6 +148,16 @@ jobs:
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(-t "$t"); done <<< "$TAGS"
           docker buildx imagetools create "${args[@]}" "$STAGING"
+
+      # the Sentry release the maps were uploaded under gets its commits (suspect commits on new issues) and is finalized
+      - name: Sentry release
+        if: startsWith(github.ref, 'refs/tags/v') && env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != '' && env.SENTRY_PROJECT != ''
+        env:
+          RELEASE: reelsaw@${{ steps.v.outputs.version }}
+        run: |
+          npx --yes @sentry/cli@2.39.1 releases new -p "$SENTRY_PROJECT" "$RELEASE"
+          npx --yes @sentry/cli@2.39.1 releases set-commits "$RELEASE" --auto --ignore-missing || echo "commits not attached (is the GitHub integration installed in Sentry?)"
+          npx --yes @sentry/cli@2.39.1 releases finalize "$RELEASE"
 
       - name: Install folder
         env:
@@ -176,3 +203,15 @@ jobs:
             out/reelsaw-${{ steps.v.outputs.version }}.zip
             out/reelsaw-${{ steps.v.outputs.version }}.zip.intoto.jsonl
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # a reusable workflow, not `on: release` in publish-mcp.yml: the release above is created with
+  # GITHUB_TOKEN, and events from GITHUB_TOKEN never start other workflows
+  mcp-registry:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    permissions:
+      contents: read
+      id-token: write # OIDC login to the registry
+    uses: $/.github/workflows/publish-mcp.yml
+    with:
+      version: ${{ needs.image.outputs.version }}

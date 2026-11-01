@@ -1,5 +1,5 @@
 {
-  "id": "1fea74a7-f40a-411d-836c-257b8fc17400",
+  "id": "4348136c-f32f-4bd8-b245-591947bcf027",
   "prevId": "facf260f-5ee0-4e27-91bd-e0af89787511",
   "version": "7",
   "dialect": "postgresql",
@@ -1396,81 +1396,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.completion_notices": {
-      "name": "completion_notices",
-      "schema": "",
-      "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "bigint",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "completion_notices_user_id_idx": {
-          "name": "completion_notices_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "completion_notices_event_id_project_events_id_fk": {
-          "name": "completion_notices_event_id_project_events_id_fk",
-          "tableFrom": "completion_notices",
-          "tableTo": "project_events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "completion_notices_user_id_user_id_fk": {
-          "name": "completion_notices_user_id_user_id_fk",
-          "tableFrom": "completion_notices",
-          "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.instance_settings": {
       "name": "instance_settings",
       "schema": "",
@@ -1909,6 +1834,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "stage_seq": {
+          "name": "stage_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "stage_started_at": {
           "name": "stage_started_at",
@@ -2880,12 +2812,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "last_active_at": {
-          "name": "last_active_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",

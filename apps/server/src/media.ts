@@ -14,21 +14,21 @@ export interface RunResult {
   stderr: string;
 }
 export interface RunOptions {
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   /** each complete stderr line (split on \n or \r, so carriage-return progress bars arrive as lines) */
-  onStderr?: (line: string) => void;
+  onStderr?: ((line: string) => void) | undefined;
   /** each complete stdout line; yt-dlp writes its `[download]` progress here, not to stderr */
   onStdout?: (line: string) => void;
   cwd?: string;
 }
 export interface ProbeInfo {
   durationSec: number;
-  width?: number;
-  height?: number;
+  width?: number | undefined;
+  height?: number | undefined;
   hasAudio: boolean;
-  fps?: number;
+  fps?: number | undefined;
   /** frames in the first video stream when the container says (an animated GIF or WebP has more than one) */
-  frames?: number;
+  frames?: number | undefined;
 }
 
 export class CommandError extends Error {
@@ -99,13 +99,14 @@ export function encoderCandidates(requested: EncoderSetting, platform: NodeJS.Pl
 /** Wrapper around the external media binaries (ffmpeg, ffprobe, yt-dlp). */
 export interface MediaTools {
   run(bin: string, args: string[], opts?: RunOptions): Promise<RunResult>;
-  ffmpeg(args: string[], opts?: { signal?: AbortSignal; onProgress?: (sec: number) => void }): Promise<RunResult>;
+  ffmpeg(args: string[], opts?: { signal?: AbortSignal | undefined; onProgress?: (sec: number) => void }): Promise<RunResult>;
   /** the H.264 encoder renders use, decided by `check()` from FFMPEG_ENCODER and a probe */
   encoder(): EncoderChoice;
   /** `-c:v …` for the encoder in use (or a named one, for a software retry after a hardware failure) */
   videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
-  ytdlp(args: string[], opts?: RunOptions): Promise<RunResult>;
+  /** `proxyId`: the YTDLP_PROXY candidate that served it, "direct" with no pool, "explicit" when `args` carry `--proxy` */
+  ytdlp(args: string[], opts?: RunOptions): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
@@ -174,7 +175,28 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
   /** Encode a few black frames with `enc`; the error text says why a hardware encoder is unusable. */
   async function probeEncoder(enc: VideoEncoder): Promise<string | null> {
     try {
-      await execFileAsync(config.FFMPEG_PATH, ["-hide_banner", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:r=30:d=0.2", "-frames:v", "3", "-pix_fmt", "yuv420p", ...videoEncodeArgs(enc), "-f", "null", "-"], { timeout: 20_000 });
+      await execFileAsync(
+        config.FFMPEG_PATH,
+        [
+          "-hide_banner",
+          "-nostdin",
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "color=c=black:s=256x256:r=30:d=0.2",
+          "-frames:v",
+          "3",
+          "-pix_fmt",
+          "yuv420p",
+          ...videoEncodeArgs(enc),
+          "-f",
+          "null",
+          "-",
+        ],
+        { timeout: 20_000 },
+      );
       return null;
     } catch (err) {
       const e = err as NodeJS.ErrnoException & { stderr?: string; killed?: boolean };
@@ -193,7 +215,10 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const failure = await probeEncoder(enc);
       if (!failure) return { name: enc, requested, reason: `${enc} passed the boot probe${requested === "auto" ? "" : " (FFMPEG_ENCODER)"}` };
       failures.push(`${enc}: ${failure}`);
-      if (requested !== "auto") throw new Error(`FFMPEG_ENCODER=${enc} cannot encode on this machine (${failure}). Give the container the GPU (docker-compose.gpu.yml) or set FFMPEG_ENCODER=auto.`);
+      if (requested !== "auto")
+        throw new Error(
+          `FFMPEG_ENCODER=${enc} cannot encode on this machine (${failure}). Give the container the GPU (docker-compose.gpu.yml) or set FFMPEG_ENCODER=auto.`,
+        );
     }
     return { name: "libx264", requested, reason: `no hardware encoder available (${failures.join("; ")})` };
   }
@@ -240,10 +265,13 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
       const prefix = [...js, ...cookies];
       if (args.includes("--proxy") || ytdlpPool.size === 0) {
-        return run(config.YTDLP_PATH, [...prefix, ...args], opts);
+        return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], opts)), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
       }
-      const { value } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }), opts?.signal);
-      return value;
+      const { value, id } = await ytdlpPool.run(
+        (choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }),
+        opts?.signal,
+      );
+      return { ...value, proxyId: id };
     },
 
     async ffprobe(file) {
@@ -260,7 +288,14 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
         const [n, d] = video.r_frame_rate.split("/").map(Number);
         if (n && d) fps = n / d;
       }
-      return { durationSec: duration, width: video?.width, height: video?.height, hasAudio: !!audio, fps, ...(Number(video?.nb_frames) > 0 ? { frames: Number(video?.nb_frames) } : {}) };
+      return {
+        durationSec: duration,
+        width: video?.width,
+        height: video?.height,
+        hasAudio: !!audio,
+        fps,
+        ...(Number(video?.nb_frames) > 0 ? { frames: Number(video?.nb_frames) } : {}),
+      };
     },
 
     async extractAudio(input, output, signal) {
@@ -280,7 +315,20 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       try {
         await run(
           config.FFMPEG_PATH,
-          ["-hide_banner", "-nostdin", ...ffmpegPipeThreads, ...seek, "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
+          [
+            "-hide_banner",
+            "-nostdin",
+            ...ffmpegPipeThreads,
+            ...seek,
+            "-i",
+            input,
+            "-an",
+            "-vf",
+            "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score",
+            "-f",
+            "null",
+            "-",
+          ],
           {
             signal,
             onStderr: (line) => {
@@ -289,9 +337,11 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
           },
         );
       } catch (err) {
+        // never `[]` for a failure: an empty list is stored as "the detector ran and found no cuts". The caller decides
+        // what a failed decode means (a pipeline step records it and retries; a render carries on without cuts).
         if (signal?.aborted) throw err;
-        log.warn({ err }, "scene detection failed, continuing without scene cuts");
-        return [];
+        log.warn({ err }, "scene detection failed");
+        throw new Error(`Shot-change detection failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`.slice(0, 300), { cause: err });
       }
       const { times, scores } = parseSceneScores(lines);
       return pickSceneCuts(times, scores, { floor });

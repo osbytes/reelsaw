@@ -27,7 +27,9 @@ describe("unit of work", { skip: notReady ?? false }, () => {
     h.mine.add(clipId);
     await assert.rejects(
       h.tx(async (u) => {
-        await u.db.insert(schema.clips).values({ id: clipId, projectId, index: 0, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
+        await u.db
+          .insert(schema.clips)
+          .values({ id: clipId, projectId, index: 0, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
         await u.emit(projectId, "clip.done", { clipId });
         const jobId = await u.enqueue(QUEUES.render, { projectId, clipId, gen: 1 });
         assert.ok(jobId, "the job was created inside the unit");
@@ -44,7 +46,9 @@ describe("unit of work", { skip: notReady ?? false }, () => {
     const clipId = `c-commit-${Date.now()}`;
     h.mine.add(clipId);
     await h.tx(async (u) => {
-      await u.db.insert(schema.clips).values({ id: clipId, projectId, index: 1, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
+      await u.db
+        .insert(schema.clips)
+        .values({ id: clipId, projectId, index: 1, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
       await u.emit(projectId, "clip.done", { clipId });
       await u.enqueue(QUEUES.render, { projectId, clipId, gen: 1 });
     });

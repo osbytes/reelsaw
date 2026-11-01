@@ -5,7 +5,28 @@
  * apostrophes. Everything is reduced to a canonical token so those never count as a mismatch.
  */
 
-const UNITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const UNITS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 const UNIT_VALUE = new Map(UNITS.map((w, i) => [w, i] as const));
 const TENS_VALUE = new Map(TENS.flatMap((w, i) => (w ? [[w, i * 10] as const] : [])));

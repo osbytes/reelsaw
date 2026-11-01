@@ -28,11 +28,19 @@ describe("unsubscribe link", () => {
   });
 
   it("gives the one-click header pair", () => {
-    assert.deepEqual(unsubscribeHeaders("https://x.test/u?a=1"), { "List-Unsubscribe": "<https://x.test/u?a=1>", "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" });
+    assert.deepEqual(unsubscribeHeaders("https://x.test/u?a=1"), {
+      "List-Unsubscribe": "<https://x.test/u?a=1>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
   });
 
   it("puts the headers and a visible link on the ready note, and nothing without a URL", () => {
-    const base = { greeting: null, projects: [{ id: "p1", title: "Talk", clips: 3, failed: 0, rerender: false, highlights: [], more: 0 }], hidden: 0, milestone: null };
+    const base = {
+      greeting: null,
+      projects: [{ id: "p1", title: "Talk", clips: 3, failed: 0, rerender: false, highlights: [], more: 0 }],
+      hidden: 0,
+      milestone: null,
+    };
     const url = "https://app.example.com/api/email/unsubscribe?u=u1&topic=ready&t=abc";
     const mail = templates.clipsReady("https://app.example.com", { ...base, unsubscribeUrl: url });
     assert.equal(mail.headers?.["List-Unsubscribe"], `<${url}>`);

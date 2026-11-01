@@ -5,10 +5,12 @@ import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { BulkBumpersPopover } from "./BumperField";
 import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
 import { ConfirmDialog, MoreButton } from "./ui";
+import { useCopyShareLink } from "./ShareLinks";
 
 interface BatchClip {
   id: string;
@@ -24,12 +26,27 @@ interface BatchClip {
  * The selection's actions, one compact row at the bottom of the clips list. Re-render and Export stay
  * on the row; copy, intro/outro, template, retry and delete live in ⋯. Sticky inside the clips ScrollArea.
  */
-export function BatchBar({ projectId, selected, introId, outroId, onClear, onChanged }: { projectId: string; selected: BatchClip[]; introId?: string | null; outroId?: string | null; onClear: () => void; onChanged: () => void }) {
+export function BatchBar({
+  projectId,
+  selected,
+  introId,
+  outroId,
+  onClear,
+  onChanged,
+}: {
+  projectId: string;
+  selected: BatchClip[];
+  introId?: string | null | undefined;
+  outroId?: string | null | undefined;
+  onClear: () => void;
+  onChanged: () => void;
+}) {
   const trpc = useTRPC();
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
   const notifyDeleted = useDeletedToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const keepWindow = useRestoreWindow("clip", confirmDelete);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const done = selected.filter((c) => c.status === "done");
@@ -52,12 +69,18 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
       .then(() => toast(`Title, caption + hashtags of ${selected.length} clip${selected.length === 1 ? "" : "s"} copied`))
       .catch(() => toast.error("Couldn’t copy"));
   const n = (k: number) => `${k} clip${k === 1 ? "" : "s"}`;
+  const copyShareLink = useCopyShareLink();
   const exportHref = `/api/projects/${projectId}/export.zip?clips=${done.map((c) => c.id).join(",")}`;
   const later = (fn: () => void) => window.setTimeout(fn, 0);
 
   return (
     <SelectionBar label="Selected clips" count={selected.length} onClear={onClear}>
-      <button className="btn-ghost" disabled={!renderable.length || many.isPending} title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"} onClick={() => run(renderable, "Re-rendering")}>
+      <button
+        className="btn-ghost"
+        disabled={!renderable.length || many.isPending}
+        title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"}
+        onClick={() => run(renderable, "Re-rendering")}
+      >
         Re-render
       </button>
       {done.length ? (
@@ -78,6 +101,14 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
             <DropdownMenu.Item className="menu-item" onSelect={() => void copyAll()}>
               Copy text
             </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className="menu-item"
+              disabled={!done.length}
+              title={done.length ? "A link anyone can download the zip of these clips from, without signing in" : "None of the selected clips is rendered yet"}
+              onSelect={() => copyShareLink({ kind: "export", projectId, clipIds: done.map((c) => c.id) }, `a zip of ${n(done.length)}`)}
+            >
+              Copy link to zip
+            </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setBumpersOpen(true))}>
               Intro / outro…
             </DropdownMenu.Item>
@@ -90,19 +121,35 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-            <DropdownMenu.Item className="menu-item text-err" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
-              Delete
+            <DropdownMenu.Item className="menu-item-danger" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
+              Delete…
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <BulkBumpersPopover projectId={projectId} clipIds={selected.map((c) => c.id)} rerenderable={renderable.length} projectIntroId={introId} projectOutroId={outroId} onDone={onChanged} open={bumpersOpen} onOpenChange={setBumpersOpen} />
-      <BulkTemplateButton projectId={projectId} clips={selected} rerenderable={renderable.length} onDone={onChanged} open={templateOpen} onOpenChange={setTemplateOpen} />
+      <BulkBumpersPopover
+        projectId={projectId}
+        clipIds={selected.map((c) => c.id)}
+        rerenderable={renderable.length}
+        projectIntroId={introId}
+        projectOutroId={outroId}
+        onDone={onChanged}
+        open={bumpersOpen}
+        onOpenChange={setBumpersOpen}
+      />
+      <BulkTemplateButton
+        projectId={projectId}
+        clips={selected}
+        rerenderable={renderable.length}
+        onDone={onChanged}
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+      />
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={selected.length === 1 ? "Delete this clip?" : `Delete ${selected.length} clips?`}
-        body={`${selected.length === 1 ? `“${selected[0]?.title ?? "This clip"}” is` : `${selected.length} clips are`} hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete forever ${selected.length === 1 ? "it" : "them"}.`}
+        body={`${selected.length === 1 ? `“${selected[0]?.title || "Untitled clip"}” is` : `${selected.length} clips are`} hidden from the project. ${keepWindow.hint(selected.length > 1)} Storage still counts until you delete ${selected.length === 1 ? "it" : "them"} forever.`}
         confirm={selected.length === 1 ? "Delete clip" : "Delete clips"}
         danger
         onConfirm={() => {

@@ -19,11 +19,11 @@ export type FailureStage = (typeof FAILURE_STAGES)[number];
 export type FailureKind = "project" | "clip";
 
 export interface FailureFilter {
-  q?: string;
-  stage?: FailureStage;
-  since?: string;
-  cursor?: string;
-  limit?: number;
+  q?: string | undefined;
+  stage?: FailureStage | undefined;
+  since?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
 }
 
 export interface FailureItem {
@@ -175,9 +175,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
           .orderBy(desc(schema.clips.updatedAt), desc(schema.clips.id))
           .limit(FETCH)
       : Promise.resolve([]),
-    wantProjects
-      ? db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(projectWhere)
-      : Promise.resolve([{ n: 0 }]),
+    wantProjects ? db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(projectWhere) : Promise.resolve([{ n: 0 }]),
   ]);
 
   const clips = clipRows.filter((c) => !stage || clipFailureStage(c) === stage);
@@ -233,10 +231,7 @@ export async function getFailure(svc: Services, kind: FailureKind, id: string): 
   const [item] = await loadByIds(svc, [{ kind, id }]);
   if (!item) return null;
   if (kind === "clip") {
-    const [p] = await svc.database.db
-      .select({ status: schema.projects.status })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, item.projectId));
+    const [p] = await svc.database.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, item.projectId));
     if (p?.status === "failed") return null;
   }
   return item;
@@ -256,7 +251,7 @@ export async function retryFailures(
   svc: Services,
   filter: FailureFilter,
   actor: FailureActor | null,
-  opts: { ids?: Array<{ kind: FailureKind; id: string }>; limit?: number } = {},
+  opts: { ids?: Array<{ kind: FailureKind; id: string }> | undefined; limit?: number | undefined } = {},
 ): Promise<RetryResult> {
   const limit = Math.min(FAILURE_PAGE, Math.max(1, opts.limit ?? FAILURE_PAGE));
   let items: FailureItem[];

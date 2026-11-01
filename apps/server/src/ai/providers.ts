@@ -55,18 +55,41 @@ export interface ProviderSettings {
   state(): ProviderState[];
   refresh(): Promise<void>;
   /** Store a key and/or base URL (null clears that field; a row with nothing left is deleted). */
-  set(provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }, actor: { id: string; email: string }): Promise<void>;
+  set(
+    provider: string,
+    patch: { apiKey?: string | null | undefined; baseUrl?: string | null | undefined },
+    actor: { id: string; email: string },
+  ): Promise<void>;
   stop(): void;
 }
 
 export function providerDescriptors(config: Pick<Config, "OPENAI_COMPATIBLE_NAME">): ProviderDescriptor[] {
   return [
-    { provider: config.OPENAI_COMPATIBLE_NAME, title: "Ollama / OpenAI-compatible server", keyEnv: [], baseUrlEnv: "OPENAI_COMPATIBLE_BASE_URL", docsUrl: "https://ollama.com/library" },
-    { provider: "openai", title: "OpenAI", keyEnv: ["OPENAI_API_KEY"], baseUrlEnv: "OPENAI_BASE_URL", keyHint: "sk-…", docsUrl: "https://platform.openai.com/api-keys" },
+    {
+      provider: config.OPENAI_COMPATIBLE_NAME,
+      title: "Ollama / OpenAI-compatible server",
+      keyEnv: [],
+      baseUrlEnv: "OPENAI_COMPATIBLE_BASE_URL",
+      docsUrl: "https://ollama.com/library",
+    },
+    {
+      provider: "openai",
+      title: "OpenAI",
+      keyEnv: ["OPENAI_API_KEY"],
+      baseUrlEnv: "OPENAI_BASE_URL",
+      keyHint: "sk-…",
+      docsUrl: "https://platform.openai.com/api-keys",
+    },
     { provider: "anthropic", title: "Anthropic", keyEnv: ["ANTHROPIC_API_KEY"], keyHint: "sk-ant-…", docsUrl: "https://console.anthropic.com/settings/keys" },
     { provider: "google", title: "Google", keyEnv: ["GOOGLE_GENERATIVE_AI_API_KEY"], keyHint: "AIza…", docsUrl: "https://aistudio.google.com/app/apikey" },
     { provider: "groq", title: "Groq", keyEnv: ["GROQ_API_KEY"], keyHint: "gsk_…", docsUrl: "https://console.groq.com/keys" },
-    { provider: "gateway", title: "Vercel AI Gateway", keyEnv: ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"], keyHint: "vck_…", docsUrl: "https://vercel.com/ai-gateway" },
+    {
+      provider: "gateway",
+      title: "Vercel AI Gateway",
+      keyEnv: ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"],
+      keyHint: "vck_…",
+      docsUrl: "https://vercel.com/ai-gateway",
+    },
     { provider: "deepgram", title: "Deepgram", keyEnv: ["DEEPGRAM_API_KEY"], docsUrl: "https://console.deepgram.com/" },
     { provider: "assemblyai", title: "AssemblyAI", keyEnv: ["ASSEMBLYAI_API_KEY"], docsUrl: "https://www.assemblyai.com/app" },
   ];
@@ -76,7 +99,10 @@ export function providerDescriptors(config: Pick<Config, "OPENAI_COMPATIBLE_NAME
 export function envCredentials(config: Config, provider: string): ProviderCredentials {
   const d = providerDescriptors(config).find((p) => p.provider === provider);
   if (!d) return {};
-  const apiKey = provider === config.OPENAI_COMPATIBLE_NAME ? config.OPENAI_COMPATIBLE_API_KEY : d.keyEnv.map((k) => (config as unknown as Record<string, string | undefined>)[k] ?? process.env[k]).find(Boolean);
+  const apiKey =
+    provider === config.OPENAI_COMPATIBLE_NAME
+      ? config.OPENAI_COMPATIBLE_API_KEY
+      : d.keyEnv.map((k) => (config as unknown as Record<string, string | undefined>)[k] ?? process.env[k]).find(Boolean);
   const baseUrl = provider === "openai" ? config.OPENAI_BASE_URL : provider === config.OPENAI_COMPATIBLE_NAME ? config.OPENAI_COMPATIBLE_BASE_URL : undefined;
   return { ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) };
 }
@@ -96,7 +122,7 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
     const seen = JSON.stringify(all.map((r) => [r.provider, r.apiKeyEnc, r.baseUrl, r.updatedAt]));
     if (seen === lastSeen) return;
     lastSeen = seen;
-    const next = new Map<string, (typeof rows extends Map<string, infer V> ? V : never)>();
+    const next = new Map<string, typeof rows extends Map<string, infer V> ? V : never>();
     for (const r of all) {
       let apiKey: string | undefined;
       let unreadable = false;
@@ -105,10 +131,20 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
           apiKey = box.decrypt(r.apiKeyEnc);
         } catch {
           unreadable = true;
-          log.warn({ provider: r.provider }, "stored API key cannot be decrypted (BETTER_AUTH_SECRET changed?); using the environment until it is entered again");
+          log.warn(
+            { provider: r.provider },
+            "stored API key cannot be decrypted (BETTER_AUTH_SECRET changed?); using the environment until it is entered again",
+          );
         }
       }
-      next.set(r.provider, { ...(apiKey ? { apiKey } : {}), ...(r.baseUrl ? { baseUrl: r.baseUrl } : {}), last4: r.apiKeyHint, unreadable, updatedAt: r.updatedAt, updatedBy: r.updatedBy });
+      next.set(r.provider, {
+        ...(apiKey ? { apiKey } : {}),
+        ...(r.baseUrl ? { baseUrl: r.baseUrl } : {}),
+        last4: r.apiKeyHint,
+        unreadable,
+        updatedAt: r.updatedAt,
+        updatedBy: r.updatedBy,
+      });
     }
     rows = next;
     ver++;
@@ -164,11 +200,24 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
           await tx
             .insert(schema.providerSettings)
             .values({ provider, apiKeyEnc, apiKeyHint, baseUrl, updatedBy: actor.email })
-            .onConflictDoUpdate({ target: schema.providerSettings.provider, set: { apiKeyEnc, apiKeyHint, baseUrl, updatedBy: actor.email, updatedAt: new Date() } });
+            .onConflictDoUpdate({
+              target: schema.providerSettings.provider,
+              set: { apiKeyEnc, apiKeyHint, baseUrl, updatedBy: actor.email, updatedAt: new Date() },
+            });
         } else {
           await tx.delete(schema.providerSettings).where(eq(schema.providerSettings.provider, provider));
         }
-        await tx.insert(schema.adminEvents).values({ type: "provider.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { provider, key: patch.apiKey === undefined ? "kept" : patch.apiKey ? "set" : "cleared", baseUrl: patch.baseUrl === undefined ? "kept" : (baseUrl ?? "cleared") } });
+        await tx.insert(schema.adminEvents).values({
+          type: "provider.changed",
+          actorId: actor.id,
+          userId: actor.id,
+          email: actor.email,
+          payload: {
+            provider,
+            key: patch.apiKey === undefined ? "kept" : patch.apiKey ? "set" : "cleared",
+            baseUrl: patch.baseUrl === undefined ? "kept" : (baseUrl ?? "cleared"),
+          },
+        });
       });
       lastSeen = "";
       await load();

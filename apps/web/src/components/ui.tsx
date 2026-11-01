@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { ScrollArea } from "./scroll-area";
@@ -39,7 +39,7 @@ export function StatusBadge({ status, label, tone }: { status: ProjectStatus | C
 }
 
 /** Inline status: glyph + word in the tone colour, no background. */
-export function StatusText({ status, label, className = "" }: { status: ProjectStatus | ClipStatus; label?: string; className?: string }) {
+export function StatusText({ status, label, className = "" }: { status: ProjectStatus | ClipStatus; label?: string | undefined; className?: string }) {
   const [g, w, t] = statusMeta(status);
   return (
     <span className={`text-xs font-semibold whitespace-nowrap ${TONE_FG[t]} ${className}`}>
@@ -85,7 +85,21 @@ export function ProgressBar({ value, className = "" }: { value: number; classNam
 }
 
 /** Pill segmented control on a sunk track. */
-export function Segmented<T extends string | number>({ value, options, onChange, className = "", size = "md", ariaLabel }: { value: T; options: Array<{ value: T; label: ReactNode; title?: string }>; onChange: (v: T) => void; className?: string; size?: "sm" | "md"; ariaLabel?: string }) {
+export function Segmented<T extends string | number>({
+  value,
+  options,
+  onChange,
+  className = "",
+  size = "md",
+  ariaLabel,
+}: {
+  value: T;
+  options: Array<{ value: T; label: ReactNode; title?: string }>;
+  onChange: (v: T) => void;
+  className?: string;
+  size?: "sm" | "md";
+  ariaLabel?: string;
+}) {
   return (
     <div className={`seg ${className}`} role="radiogroup" aria-label={ariaLabel}>
       {options.map((o) => (
@@ -110,7 +124,19 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 /** Centered confirm / info dialog in the design's style. */
-export function Modal({ open, onOpenChange, title, children, width = 420 }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode; width?: number }) {
+export function Modal({
+  open,
+  onOpenChange,
+  title,
+  children,
+  width = 420,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  title: ReactNode;
+  children: ReactNode;
+  width?: number | undefined;
+}) {
   // portaled menus (Select, Combobox) live outside this node; a click on one is not a dismiss
   const keepIfMenu = (e: { target: EventTarget | null; preventDefault: () => void }) => {
     if (e.target instanceof Element && e.target.closest(".menu")) e.preventDefault();
@@ -133,23 +159,67 @@ export function Modal({ open, onOpenChange, title, children, width = 420 }: { op
   );
 }
 
-export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger, onConfirm }: { open: boolean; onOpenChange: (o: boolean) => void; title: string; body: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void }) {
+/** Cancel / confirm over a one-paragraph body; `children` go under it (e.g. a list of what still uses the item). */
+/**
+ * A yes/no question before an action. When `onConfirm` returns a promise the dialog stays open with
+ * the button busy until it settles, and a failure shows here instead of vanishing with the dialog.
+ */
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  body,
+  confirm,
+  danger,
+  onConfirm,
+  children,
+  width,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  title: string;
+  body: ReactNode;
+  confirm: string;
+  danger?: boolean;
+  onConfirm: () => void | Promise<unknown>;
+  children?: ReactNode;
+  width?: number;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+  const run = async () => {
+    const r = onConfirm();
+    if (!(r instanceof Promise)) return onOpenChange(false);
+    setBusy(true);
+    setError(null);
+    try {
+      await r;
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title={title}>
+    <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title={title} width={width}>
       <Dialog.Description asChild>
         <p className="text-sm leading-relaxed text-ink2">{body}</p>
       </Dialog.Description>
+      {children}
+      {error && (
+        <p role="alert" className="text-sm text-err">
+          {error}
+        </p>
+      )}
       <div className="mt-1 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={() => onOpenChange(false)}>
+        <button className="btn-ghost" disabled={busy} onClick={() => onOpenChange(false)}>
           Cancel
         </button>
-        <button
-          className={danger ? "btn bg-err font-semibold text-white hover:brightness-110" : "btn-ink"}
-          onClick={() => {
-            onConfirm();
-            onOpenChange(false);
-          }}
-        >
+        <button className={danger ? "btn-danger-solid" : "btn-ink"} disabled={busy} aria-busy={busy} onClick={() => void run()}>
           {confirm}
         </button>
       </div>
@@ -160,14 +230,34 @@ export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger
 /** Radix Select never accepts "" as an item value, so "no choice" travels as this. */
 const NONE = "__none__";
 
-export type SelectOption = { value: string; label: ReactNode; hint?: string; disabled?: boolean };
+export type SelectOption = { value: string; label: ReactNode; hint?: string | undefined; disabled?: boolean };
 
 /**
  * The one dropdown for choosing a value (never a native `<select>`). The trigger matches `.input`
  * (md) or a compact button (sm); give it a width via `className` so a longer label never shifts layout.
  * An option with value "" is allowed (it means "unset").
  */
-export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
+export function Select({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  size = "md",
+  className = "",
+  ariaLabel,
+  onClick,
+  disabled,
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  size?: "sm" | "md" | undefined;
+  className?: string | undefined;
+  ariaLabel: string;
+  onClick?: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+}) {
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
     // z-[80]: a Select inside Modal (overlay z-70) must paint above it. Combobox uses the same z-index.
@@ -189,13 +279,23 @@ export function Select({ value, onValueChange, options, placeholder, size = "md"
         </RadixSelect.Trigger>
       </div>
       <RadixSelect.Portal>
-        <RadixSelect.Content position="popper" sideOffset={6} collisionPadding={12} className="menu pointer-events-auto z-[80] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0">
+        <RadixSelect.Content
+          position="popper"
+          sideOffset={6}
+          collisionPadding={12}
+          className="menu pointer-events-auto z-[80] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0"
+        >
           <RadixSelect.ScrollUpButton className="flex h-6 items-center justify-center text-ink3">
             <ChevronUp className="h-4 w-4" />
           </RadixSelect.ScrollUpButton>
           <RadixSelect.Viewport className="p-1.5">
             {options.map((o) => (
-              <RadixSelect.Item key={o.value || NONE} value={o.value === "" ? NONE : o.value} disabled={o.disabled} className="menu-item pr-8 data-[state=checked]:font-semibold relative">
+              <RadixSelect.Item
+                key={o.value || NONE}
+                value={o.value === "" ? NONE : o.value}
+                disabled={o.disabled}
+                className="menu-item pr-8 data-[state=checked]:font-semibold relative"
+              >
                 <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
                 {o.hint && <span className="menu-hint">{o.hint}</span>}
                 <RadixSelect.ItemIndicator className="absolute right-2.5 inline-flex">
@@ -220,7 +320,25 @@ export type ComboboxOption = { value: string; label: string; hint?: string };
  * (Radix Popover + cmdk). Same trigger as `Select`; give it a width via `className`. Rich rows
  * (thumbnails, badges) are a purpose-built picker such as BumperCombobox.
  */
-export function Combobox({ value, onValueChange, options, placeholder = "Choose…", emptyText = "No matches", className = "", ariaLabel, size = "md" }: { value: string; onValueChange: (v: string) => void; options: ComboboxOption[]; placeholder?: string; emptyText?: string; className?: string; ariaLabel: string; size?: "sm" | "md" }) {
+export function Combobox({
+  value,
+  onValueChange,
+  options,
+  placeholder = "Choose…",
+  emptyText = "No matches",
+  className = "",
+  ariaLabel,
+  size = "md",
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: ComboboxOption[];
+  placeholder?: string;
+  emptyText?: string;
+  className?: string;
+  ariaLabel: string;
+  size?: "sm" | "md";
+}) {
   const [open, setOpen] = useState(false);
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   const current = options.find((o) => o.value === value);
@@ -239,9 +357,17 @@ export function Combobox({ value, onValueChange, options, placeholder = "Choose�
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="menu pointer-events-auto z-[80] w-[max(var(--radix-popover-trigger-width),12rem)] overflow-hidden p-0">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="menu pointer-events-auto z-[80] w-[max(var(--radix-popover-trigger-width),12rem)] overflow-hidden p-0"
+        >
           <Command loop>
-            <Command.Input placeholder="Type to filter…" className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
+            <Command.Input
+              placeholder="Type to filter…"
+              className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
+            />
             <ScrollArea className="max-h-[min(260px,calc(var(--radix-popover-content-available-height)-60px))]">
               <Command.List className="p-1.5">
                 <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">{emptyText}</Command.Empty>
@@ -270,7 +396,10 @@ export function Combobox({ value, onValueChange, options, placeholder = "Choose�
 }
 
 /** The ⋯ button that opens a row's or page's action menu (use as `DropdownMenu.Trigger asChild`). `sm` is the height of a `btn-ghost text-xs` row button (2rem), `md` of a header button (2.25rem); square. */
-export const MoreButton = forwardRef<HTMLButtonElement, Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> & { "aria-label": string; size?: "sm" | "md" }>(function MoreButton({ className = "", size = "sm", ...props }, ref) {
+export const MoreButton = forwardRef<
+  HTMLButtonElement,
+  Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> & { "aria-label": string; size?: "sm" | "md" }
+>(function MoreButton({ className = "", size = "sm", ...props }, ref) {
   return (
     <button ref={ref} type="button" title="More actions" {...props} className={`btn-ghost shrink-0 px-0 ${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${className}`}>
       <MoreHorizontal className="h-4 w-4" />

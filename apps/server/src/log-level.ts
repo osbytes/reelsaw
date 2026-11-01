@@ -37,7 +37,7 @@ export interface LogLevelSettings {
   /** re-read the stored override (every process does this on a timer) */
   refresh(): Promise<LogLevelState>;
   /** set an override for `forMs` (default 15 min, max 24 h); `null` clears it */
-  set(spec: string | null, actor: string, forMs?: number, waitAcksMs?: number): Promise<LogLevelState & { acks?: number }>;
+  set(spec: string | null, actor: string, forMs?: number, waitAcksMs?: number): Promise<LogLevelState & { acks?: number | undefined }>;
   stop(): void;
 }
 
@@ -54,7 +54,10 @@ export function mergeLogLevels(base: LogLevels, spec: string): LogLevels {
   return { global: over.global, modules: { ...base.modules, ...over.modules } };
 }
 
-export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; listen?: boolean } = {}): LogLevelSettings & { attach(db: Db, connectionString?: string): Promise<LogLevelState> } {
+export function createLogLevelSettings(
+  log: Logger,
+  opts: { pollMs?: number; listen?: boolean } = {},
+): LogLevelSettings & { attach(db: Db, connectionString?: string): Promise<LogLevelState> } {
   const instanceId = randomUUID().slice(0, 8);
   let url: string | undefined;
   let listener: pg.Client | undefined;
@@ -65,7 +68,11 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
   let override: LogLevelState["override"] = null;
   let applied = "";
 
-  const state = (): LogLevelState => ({ effective: control ? formatLogLevels(control.effective()) : "info", env: control ? formatLogLevels(control.base) : "info", override });
+  const state = (): LogLevelState => ({
+    effective: control ? formatLogLevels(control.effective()) : "info",
+    env: control ? formatLogLevels(control.base) : "info",
+    override,
+  });
 
   function apply(next: LogLevelState["override"]) {
     override = next;
@@ -73,7 +80,9 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
     if (!control || key === applied) return;
     applied = key;
     control.apply(next ? mergeLogLevels(control.base, next.spec) : null);
-    log.child({ module: "log" }).warn({ levels: state().effective, until: next?.until ?? null }, next ? "log level override applied" : "log level back to the environment's");
+    log
+      .child({ module: "log" })
+      .warn({ levels: state().effective, until: next?.until ?? null }, next ? "log level override applied" : "log level back to the environment's");
   }
 
   async function load(): Promise<LogLevelState> {
@@ -91,7 +100,11 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
       }
     }
     apply(null);
-    if (row) await db.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY)).catch(() => {});
+    if (row)
+      await db
+        .delete(schema.instanceSettings)
+        .where(eq(schema.instanceSettings.key, KEY))
+        .catch(() => {});
     return state();
   }
 
@@ -114,7 +127,11 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
         }
       })();
       void load()
-        .then(() => db?.execute(sql`select pg_notify(${LOG_LEVEL_ACK_CHANNEL}, ${JSON.stringify({ token, id: `${process.pid}@${instanceId}`, applied: state().effective })})`))
+        .then(() =>
+          db?.execute(
+            sql`select pg_notify(${LOG_LEVEL_ACK_CHANNEL}, ${JSON.stringify({ token, id: `${process.pid}@${instanceId}`, applied: state().effective })})`,
+          ),
+        )
         .catch((err) => log.warn({ module: "log", err }, "log level change not applied"));
     });
     c.on("error", retry);
@@ -210,7 +227,47 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
 }
 
 /** Module names used in code (the `module` binding), so the picker offers them before they have logged anything. */
-export const KNOWN_LOG_MODULES = ["accounts", "ai", "analyze", "asr", "auth", "boot", "bumpers", "cli", "cut-preview", "cuts", "db", "email", "events", "export", "http", "ingest", "llm", "log", "mcp", "media", "models", "ops", "otel", "providers", "prune", "queue", "reconcile", "refine", "render", "resources", "retention", "storage", "sweep", "transcribe", "uow", "uploads", "watchdog", "web", "worker"] as const;
+export const KNOWN_LOG_MODULES = [
+  "accounts",
+  "ai",
+  "analyze",
+  "asr",
+  "auth",
+  "boot",
+  "bumpers",
+  "cli",
+  "cut-preview",
+  "cuts",
+  "db",
+  "email",
+  "events",
+  "export",
+  "http",
+  "ingest",
+  "llm",
+  "log",
+  "mcp",
+  "media",
+  "models",
+  "ops",
+  "otel",
+  "providers",
+  "prune",
+  "queue",
+  "reconcile",
+  "refine",
+  "render",
+  "resources",
+  "retention",
+  "storage",
+  "sweep",
+  "transcribe",
+  "uow",
+  "uploads",
+  "watchdog",
+  "web",
+  "worker",
+] as const;
 
 /** The levels a person may pick, most severe first (not `silent`: it hides errors too). */
 export const PICKABLE_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;

@@ -8,6 +8,7 @@
  *     cannot rewrite the transcript, and timestamps are preserved.
  */
 import { generateText, Output, type LanguageModel } from "ai";
+import { abortOpt, callSignal } from "./steps.js";
 import { z } from "zod";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
 import { randomUUID } from "node:crypto";
@@ -92,11 +93,15 @@ export function entitiesFromText(input: string): string[] {
     });
     flush();
   }
-  return [...out].filter((e) => e.length >= 3 && e.length <= 40).filter((e) => !GENERIC_LEAD.has(e.split(/\s+/)[0]!.toLowerCase()) || e.split(/\s+/).length > 2);
+  return [...out]
+    .filter((e) => e.length >= 3 && e.length <= 40)
+    .filter((e) => !GENERIC_LEAD.has(e.split(/\s+/)[0]!.toLowerCase()) || e.split(/\s+/).length > 2);
 }
 
 /** Capitalized phrases that start with these are marketing copy, not names ("Try Copia", "Get started"). */
-const GENERIC_LEAD = new Set("try get use watch subscribe join learn start check download visit follow click see read listen buy sign find free new how why what".split(" "));
+const GENERIC_LEAD = new Set(
+  "try get use watch subscribe join learn start check download visit follow click see read listen buy sign find free new how why what".split(" "),
+);
 
 export function extractEntities(meta: SourceMetaLike | null | undefined, vocabulary?: string): string[] {
   const out = new Set<string>();
@@ -108,12 +113,14 @@ export function extractEntities(meta: SourceMetaLike | null | undefined, vocabul
   for (const e of entitiesFromText(text)) out.add(e);
   // dedupe case-insensitively, keep the first spelling, cap the list
   const seen = new Set<string>();
-  return [...out].filter((e) => {
-    const k = e.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  }).slice(0, 60);
+  return [...out]
+    .filter((e) => {
+      const k = e.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 60);
 }
 
 /** Vendor-specific vocabulary hint options keyed by provider id. */
@@ -143,14 +150,20 @@ const properNounSchema = z.object({ names: z.array(z.string()) });
  * spelling). Generic hashtags like "Budgeting" or "PersonalFinance" would otherwise trigger
  * corrections of ordinary words.
  */
-export async function filterProperNouns(model: LanguageModel, entities: string[], context: { title?: string; uploader?: string }, signal?: AbortSignal): Promise<string[]> {
+export async function filterProperNouns(
+  model: LanguageModel,
+  entities: string[],
+  context: { title?: string; uploader?: string | undefined },
+  signal?: AbortSignal,
+  timeoutMs?: number,
+): Promise<string[]> {
   if (!entities.length) return [];
   try {
     const { output } = await generateText({
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: signal,
+      ...abortOpt(callSignal(signal, timeoutMs)),
       output: Output.object({ schema: properNounSchema, name: "names" }),
       prompt: `From the list below, return only the items that are proper nouns or fixed-spelling terms a transcriber might misspell: people, companies, brands, products, places, software names, acronyms.
 Drop generic topics, hashtags made of ordinary words, and plain English words or phrases.
@@ -170,7 +183,12 @@ Respond with JSON {"names":[...]} using the exact spellings from the list.`,
 
 /** Letters and digits of any script, lowercased and without diacritics ("Zoë" matches "Zoe"). */
 export function norm(s: string) {
-  return s.normalize("NFKD").replace(/\p{M}+/gu, "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return s
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function levenshtein(a: string, b: string): number {
@@ -224,7 +242,10 @@ export function findCandidates(words: Word[], entities: string[], threshold = 0.
     for (const { e, tokens } of ents) {
       for (const span of new Set([tokens, Math.max(1, tokens - 1), tokens + 1])) {
         if (i + span > words.length) continue;
-        const heard = words.slice(i, i + span).map((w) => w.text).join(" ");
+        const heard = words
+          .slice(i, i + span)
+          .map((w) => w.text)
+          .join(" ");
         if (norm(heard) === norm(e)) continue; // already right
         if (entityNorms.has(norm(heard))) continue; // already spelled like another known name (Copia vs copiacash)
         const heardTokens = words.slice(i, i + span).map((w) => norm(w.text));
@@ -270,7 +291,10 @@ export interface CorrectionResult {
   applied: Array<{ heard: string; entity: string; at: number }>;
   candidates: number;
   /** every candidate and what happened to it (stage artifact for diagnosis / reports) */
-  trace?: { entities: string[]; candidates: Array<{ wordIndex: number; heard: string; proposed: string; replace?: boolean; confidence?: number; outcome: string }> };
+  trace?: {
+    entities: string[];
+    candidates: Array<{ wordIndex: number; heard: string; proposed: string; replace?: boolean; confidence?: number; outcome: string }>;
+  };
 }
 
 /** Rebuild the corrected word list from the as-heard words plus every auto/accepted flag. */
@@ -336,14 +360,24 @@ export async function correctTranscript(
   model: LanguageModel,
   words: Word[],
   entities: string[],
-  context: { title?: string; uploader?: string },
-  opts: { signal?: AbortSignal; telemetry?: boolean; autoConfidence?: number; minFlagConfidence?: number; log?: Logger } = {},
+  context: { title?: string; uploader?: string | undefined },
+  opts: {
+    signal?: AbortSignal /** limit on each model call, ms */;
+    timeoutMs?: number;
+    telemetry?: boolean;
+    autoConfidence?: number;
+    minFlagConfidence?: number;
+    log?: Logger;
+  } = {},
 ): Promise<CorrectionResult> {
   const autoConfidence = opts.autoConfidence ?? 0.85;
   const minFlagConfidence = opts.minFlagConfidence ?? 0.4;
-  entities = await filterProperNouns(model, entities, context, opts.signal);
+  entities = await filterProperNouns(model, entities, context, opts.signal, opts.timeoutMs);
   const candidates = findCandidates(words, entities);
-  const trace: NonNullable<CorrectionResult["trace"]> = { entities, candidates: candidates.map((c) => ({ wordIndex: c.wordIndex, heard: c.heard, proposed: c.entity, outcome: "model failed" })) };
+  const trace: NonNullable<CorrectionResult["trace"]> = {
+    entities,
+    candidates: candidates.map((c) => ({ wordIndex: c.wordIndex, heard: c.heard, proposed: c.entity, outcome: "model failed" })),
+  };
   const none = { words, rawWords: words, flags: [], applied: [], candidates: candidates.length, trace };
   if (!candidates.length) return none;
 
@@ -366,7 +400,7 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
       prompt,
       temperature: 0,
       maxRetries: 2,
-      abortSignal: opts.signal,
+      ...abortOpt(callSignal(opts.signal, opts.timeoutMs)),
       output: Output.object({ schema: decisionSchema, name: "decisions" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.correct-entities", recordInputs: false, recordOutputs: false },
     });
@@ -382,7 +416,11 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
   for (const c of candidates.sort((a, b) => a.wordIndex - b.wordIndex)) {
     const d = byId.get(c.id);
     const tr = traced.get(c)!;
-    Object.assign(tr, { replace: d?.replace, confidence: d?.confidence, outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < minFlagConfidence ? "low confidence" : "flagged" });
+    Object.assign(tr, {
+      replace: d?.replace,
+      confidence: d?.confidence,
+      outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < minFlagConfidence ? "low confidence" : "flagged",
+    });
     if (!d || !d.replace || d.confidence < minFlagConfidence) continue;
     if (c.wordIndex < lastEnd) {
       tr.outcome = "overlaps an earlier fix";

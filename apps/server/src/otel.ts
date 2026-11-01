@@ -14,9 +14,10 @@
  * and a trace it drops stays dropped here. Resolution helpers live in otel-config.ts.
  */
 import { createRequire } from "node:module";
-import { trace, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
-import { applyServerSampler, publicFromResolved, resolveOtlp, type OtelPublic } from "./otel-config.js";
+import { trace, SpanKind, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
+import { applyServerSampler, publicFromResolved, resolveOtlp, spanMetricAttributes, type OtelPublic } from "./otel-config.js";
 import { setOtelLogsEnabled } from "./otel-log.js";
+import { histogram } from "./metrics.js";
 
 export type { OtelPublic } from "./otel-config.js";
 export { resolveOtlp } from "./otel-config.js";
@@ -27,27 +28,19 @@ export interface Otel {
   enabled: boolean;
   /** browser-safe OTLP config for system.status; null when off or headers are not public */
   public: OtelPublic;
-  /** Sentry SDK metrics (runtime gauges + span durations). OTLP metrics stay off for that endpoint. */
+  /** Sentry SDK metrics (runtime gauges + metrics.ts). OTLP metrics stay off for that endpoint. */
   sentryMetrics: boolean;
   shutdown(): Promise<void>;
-}
-
-export type SpanMetric = (info: { name: string; durationMs: number; ok: boolean; attributes: Attributes }) => void;
-
-let spanMetric: SpanMetric | null = null;
-
-/** Registered by telemetry.ts once Sentry is initialised. No-op until then, and never throws into the span. */
-export function setSpanMetric(fn: SpanMetric | null): void {
-  spanMetric = fn;
 }
 
 function start(): Otel {
   if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
   const cfg = resolveOtlp(process.env);
+  const operatorSampler = !!process.env.OTEL_TRACES_SAMPLER?.trim();
   // Before the SDK loads: it reads OTEL_TRACES_SAMPLER when it starts. The browser uses cfg.sampleRate.
   applyServerSampler(process.env, cfg.sampleRate);
   const require = createRequire(import.meta.url);
-  const { NodeSDK, metrics } = require("@opentelemetry/sdk-node");
+  const { NodeSDK, metrics, tracing } = require("@opentelemetry/sdk-node");
   const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
   const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
   const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
@@ -75,6 +68,14 @@ function start(): Otel {
           exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 30_000),
         })
       : undefined,
+    // unless the operator chose a sampler: parent-based at OTEL_TRACES_SAMPLE_RATE, minus orphan client spans
+    ...(operatorSampler
+      ? {}
+      : {
+          sampler: new tracing.ParentBasedSampler({
+            root: dropOrphanClientSpans(new tracing.TraceIdRatioBasedSampler(cfg.sampleRate), tracing.SamplingDecision.NOT_RECORD),
+          }),
+        }),
     instrumentations: [
       getNodeAutoInstrumentations({
         "@opentelemetry/instrumentation-fs": { enabled: false },
@@ -114,6 +115,20 @@ function start(): Otel {
   return { enabled: true, public: publicFromResolved(cfg), sentryMetrics: cfg.sentryMetrics, shutdown: () => sdk.shutdown() };
 }
 
+/**
+ * A root sampler that drops client spans with no parent: an S3 read, a pg query or a fetch that no request, job or
+ * stage span is around (pg-boss polling, a stream read after its handler returned). Alone, each is a one-span trace
+ * with nothing to explain it, and together they were most of the trace volume. Everything else goes to `inner`.
+ */
+export function dropOrphanClientSpans<S extends { shouldSample(...a: unknown[]): unknown }>(inner: S, notRecord: number) {
+  return {
+    shouldSample(context: unknown, traceId: string, name: string, kind: SpanKind, attributes: Attributes, links: unknown) {
+      return kind === SpanKind.CLIENT ? { decision: notRecord } : inner.shouldSample(context, traceId, name, kind, attributes, links);
+    },
+    toString: () => `DropOrphanClientSpans{${String(inner)}}`,
+  };
+}
+
 export const otel: Otel = start();
 export const tracer = trace.getTracer("reelsaw");
 
@@ -132,12 +147,8 @@ export async function withSpan<T>(name: string, attributes: Attributes, fn: (spa
       span.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
       throw err;
     } finally {
-      // Record while the span is still current so Sentry can attach its trace id. Never fail the work.
-      try {
-        spanMetric?.({ name, durationMs: performance.now() - t0, ok, attributes });
-      } catch {
-        /* metric export must not change the span's result */
-      }
+      // Recorded while the span is still current so Sentry can attach its trace id. histogram() never throws.
+      histogram("reelsaw.span.duration", (performance.now() - t0) / 1000, "s", spanMetricAttributes(name, ok, attributes));
       span.end();
     }
   });

@@ -72,7 +72,13 @@ export interface EventHandler<T extends ProjectEventType> {
    * `again` queues another run for the same key (a batch cut short) on a unit of work, so it commits
    * with whatever the handler records about this run.
    */
-  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal; again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null> }) => Promise<void>;
+  handle: (ctx: {
+    event: EmittedEvent<T>;
+    key: string;
+    svc: Services;
+    signal: AbortSignal;
+    again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null>;
+  }) => Promise<void>;
 }
 
 /** event type → handler name → handler */
@@ -121,7 +127,11 @@ export const eventHandlerQueue = (type: ProjectEventType, name: string) => `even
 
 /** `EVENT_<EVENT>_<HANDLER>_<NAME>`: project.done + readyEmail + DELAY_MINUTES → EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES */
 export function eventHandlerSetting(type: ProjectEventType, handler: string, name: string): string {
-  const part = (x: string) => x.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+  const part = (x: string) =>
+    x
+      .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .toUpperCase();
   return `EVENT_${part(type)}_${part(handler)}_${part(name)}`;
 }
 
@@ -138,7 +148,8 @@ export interface EventHandlerQueue {
 export function eventHandlerQueues(map: EventHandlerMap): EventHandlerQueue[] {
   const out: EventHandlerQueue[] = [];
   for (const [type, handlers] of Object.entries(map) as Array<[ProjectEventType, Record<string, EventHandler<ProjectEventType>> | undefined]>) {
-    for (const [name, def] of Object.entries(handlers ?? {})) out.push({ name: eventHandlerQueue(type, name), type, handler: name, def, policy: policyOf(def), options: { ...EVENT_HANDLER_DEFAULTS, ...def.queue } });
+    for (const [name, def] of Object.entries(handlers ?? {}))
+      out.push({ name: eventHandlerQueue(type, name), type, handler: name, def, policy: policyOf(def), options: { ...EVENT_HANDLER_DEFAULTS, ...def.queue } });
   }
   return out;
 }

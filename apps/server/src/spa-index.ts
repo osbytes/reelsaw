@@ -7,6 +7,7 @@ import path from "node:path";
  * in Google Search.
  */
 export function isSpaIndexPath(urlPath: string): boolean {
-  if (urlPath.startsWith("/api/") || urlPath.startsWith("/media/")) return false;
+  // /.well-known/* is machine-read (OAuth discovery when MCP_OAUTH is on): a 404 when nothing serves it, never the page
+  if (urlPath.startsWith("/api/") || urlPath.startsWith("/media/") || urlPath.startsWith("/.well-known/")) return false;
   return path.posix.extname(urlPath) === "";
 }

@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2 } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2, Users } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -32,13 +32,15 @@ import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { reloadIfNewBuild } from "./lib/stale-chunk";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
 import { Toaster } from "sonner";
 
 /** The "cut monogram" mark: an ExtraBold Hanken Grotesk "r" (outlined, so it never waits on the web font) sliced by a cut in the accent colour. Same drawing as public/favicon.svg. */
-const MARK_R = "M23.69 47V24.32H30.07V30.5L29.2 30.55Q29.3 28.6 30.3 27.09Q31.3 25.57 32.82 24.71Q34.34 23.84 35.94 23.84Q37.11 23.84 38.17 24.17Q39.23 24.49 40.39 25.22L37.35 30.93Q36.87 30.61 36.06 30.38Q35.25 30.14 34.45 30.14Q33.6 30.14 32.81 30.44Q32.03 30.74 31.43 31.38Q30.83 32.01 30.48 33.01Q30.26 33.65 30.14 34.65Q30.03 35.65 30.03 37.55V47Z";
+const MARK_R =
+  "M23.69 47V24.32H30.07V30.5L29.2 30.55Q29.3 28.6 30.3 27.09Q31.3 25.57 32.82 24.71Q34.34 23.84 35.94 23.84Q37.11 23.84 38.17 24.17Q39.23 24.49 40.39 25.22L37.35 30.93Q36.87 30.61 36.06 30.38Q35.25 30.14 34.45 30.14Q33.6 30.14 32.81 30.44Q32.03 30.74 31.43 31.38Q30.83 32.01 30.48 33.01Q30.26 33.65 30.14 34.65Q30.03 35.65 30.03 37.55V47Z";
 
 export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: string }) {
   return (
@@ -64,15 +66,21 @@ export function Logo() {
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, toggle] = useTheme();
   return (
-    <button className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`} onClick={toggle} title={theme === "dark" ? "Light theme" : "Dark theme"} aria-label="Toggle theme">
+    <button
+      className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`}
+      onClick={toggle}
+      title={theme === "dark" ? "Light theme" : "Dark theme"}
+      aria-label="Toggle theme"
+    >
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
   );
 }
 
-/** Account menu: settings (with the update hint for admins), report, sign out. Theme and Report live here on a 390 px bar so the header keeps nav + search. */
+/** Account menu: settings (with the update hint for admins), report, sign out. Theme, Report and an admin's Users live here on a 390 px bar so the header keeps nav + search. */
 function Avatar() {
   const { data } = useSession();
+  const me = useMe();
   const navigate = useNavigate();
   const [theme, toggleTheme] = useTheme();
   const u = data?.user;
@@ -86,7 +94,11 @@ function Avatar() {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="relative grid h-[30px] w-[30px] place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text" title={u.email} aria-label="Account">
+        <button
+          className="relative grid h-[30px] w-[30px] place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text"
+          title={u.email}
+          aria-label="Account"
+        >
           {initials}
           <UpdateDot />
         </button>
@@ -98,6 +110,11 @@ function Avatar() {
             <SettingsIcon className="h-4 w-4" /> Settings
             <UpdateMenuHint />
           </DropdownMenu.Item>
+          {me.data?.role === "admin" && (
+            <DropdownMenu.Item className="menu-item sm:hidden" onSelect={() => navigate("/admin/users")}>
+              <Users className="h-4 w-4" /> Users
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate(DELETED_PATH)}>
             <Trash2 className="h-4 w-4" /> Deleted
           </DropdownMenu.Item>
@@ -126,7 +143,7 @@ function Avatar() {
   );
 }
 
-/** Admins only: link to user management, with the number waiting for approval. */
+/** Admins only: link to user management, with the number waiting for approval. Below sm it is in the account menu instead. */
 function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const me = useMe();
   const trpc = useTRPC();
@@ -134,9 +151,13 @@ function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const pending = useQuery({ ...trpc.admin.users.pendingCount.queryOptions(), enabled: isAdmin, refetchInterval: 30_000 });
   if (!isAdmin) return null;
   return (
-    <NavLink to="/admin/users" className={nav}>
+    <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
       Users
-      {pending.data ? <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">{pending.data}</span> : null}
+      {pending.data ? (
+        <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+          {pending.data}
+        </span>
+      ) : null}
     </NavLink>
   );
 }
@@ -145,7 +166,11 @@ function SearchButton() {
   const open = useCommandPalette();
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
   return (
-    <button onClick={() => open()} className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]" aria-label="Search">
+    <button
+      onClick={() => open()}
+      className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]"
+      aria-label="Search"
+    >
       <Search className="h-4 w-4 shrink-0" />
       <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">Search or paste a link…</span>
       <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
@@ -154,7 +179,8 @@ function SearchButton() {
 }
 
 export function TopBar() {
-  const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-2.5 py-[7px] whitespace-nowrap no-underline sm:px-3 ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
+  const nav = ({ isActive }: { isActive: boolean }) =>
+    `rounded-[9px] px-2.5 py-[7px] whitespace-nowrap no-underline sm:px-3 ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
   const loc = useLocation();
   const inProjects = loc.pathname === "/" || loc.pathname.startsWith("/p/") || loc.pathname === "/new";
   return (
@@ -295,10 +321,25 @@ function TelemetryBridge() {
   }, [otel]);
   useEffect(() => {
     if (!session) identify(null);
-    else if (me.data) identify({ id: me.data.id, email: me.data.email, name: me.data.name, role: me.data.role });
+    else if (me.data) identify({ id: me.data.id, role: me.data.role });
   }, [session, me.data]);
   useEffect(() => {
     pageview(loc.pathname);
+  }, [loc.pathname]);
+  return null;
+}
+
+/** A fresh page per project: ⌘K from one project to another must not carry dialogs, run logs or timers across. */
+function KeyedProjectPage() {
+  const { id } = useParams();
+  return <ProjectPage key={id} />;
+}
+
+/** After a deploy, the first route change loads the new build instead of asking for chunks that are gone. */
+function NewBuildOnNavigate() {
+  const loc = useLocation();
+  useEffect(() => {
+    reloadIfNewBuild();
   }, [loc.pathname]);
   return null;
 }
@@ -318,32 +359,117 @@ export function App() {
   ]);
   return (
     <>
-    <TelemetryBridge />
-    <UploadsProvider>
-    <CommandPaletteProvider>
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<LoginPage signup />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/consent" element={<ConsentPage />} />
-      <Route path="/" element={<Protected><HomePage /></Protected>} />
-      <Route path={DELETED_PATH} element={<Protected><DeletedPage /></Protected>} />
-      <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
-      <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
-      <Route path="/templates" element={<Protected><TemplatesPage /></Protected>} />
-      <Route path="/templates/:id" element={<Protected bare><TemplateEditorPage /></Protected>} />
-      <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
-      <Route path={BILLING_PATH} element={<Protected><SettingsPage /></Protected>} />
-      <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />
-      <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
-      <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
-      <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-    <ReportDialog />
-    <AppToaster />
-    </CommandPaletteProvider>
-    </UploadsProvider>
+      <TelemetryBridge />
+      <NewBuildOnNavigate />
+      <UploadsProvider>
+        <CommandPaletteProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<LoginPage signup />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/consent" element={<ConsentPage />} />
+            <Route
+              path="/"
+              element={
+                <Protected>
+                  <HomePage />
+                </Protected>
+              }
+            />
+            <Route
+              path={DELETED_PATH}
+              element={
+                <Protected>
+                  <DeletedPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/new"
+              element={
+                <Protected>
+                  <NewProjectPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/library"
+              element={
+                <Protected>
+                  <LibraryPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/templates"
+              element={
+                <Protected>
+                  <TemplatesPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/templates/:id"
+              element={
+                <Protected bare>
+                  <TemplateEditorPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <Protected>
+                  <SettingsPage />
+                </Protected>
+              }
+            />
+            <Route
+              path={BILLING_PATH}
+              element={
+                <Protected>
+                  <SettingsPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/settings/system"
+              element={
+                <Protected admin>
+                  <SettingsPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <Protected admin>
+                  <AdminUsersPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/p/:id"
+              element={
+                <Protected>
+                  <KeyedProjectPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/p/:id/clips/:clipId"
+              element={
+                <Protected bare>
+                  <ClipEditorPage />
+                </Protected>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+          <ReportDialog />
+          <AppToaster />
+        </CommandPaletteProvider>
+      </UploadsProvider>
     </>
   );
 }

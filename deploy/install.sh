@@ -135,6 +135,13 @@ if [ -f "$ENV_FILE" ]; then
   PORT=$(envget PORT); PORT=${PORT:-3000}
   pinned=$(envget REELSAW_IMAGE); [ -n "$pinned" ] && IMAGE="$pinned"
 fi
+# Volumes outlive a deleted folder or .env: a database from an earlier install under the same project
+# name keeps the password it was created with. The installer keeps that data and resets the password
+# from .env once the database is up (below), so .env is always the source of truth.
+PRIOR_DB=""; PRIOR_DIR=""
+docker volume inspect "${PROJECT}_pgdata" >/dev/null 2>&1 && PRIOR_DB=1
+PRIOR_DIR=$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
+  --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null | grep -v "^$DIR\$" | head -1 || true)
 
 # ---- Ollama on this host: running, installed, and which models are already pulled ----
 OLLAMA_API=http://localhost:11434
@@ -347,6 +354,8 @@ compose() { docker compose -p "$PROJECT" ${PROFILES[@]+"${PROFILES[@]}"} "$@"; }
 say "Plan"
 if [ -n "$EXISTING" ]; then note "Update the install in $DIR (its .env is kept; delete it to start over)"; else note "Install into $DIR"; fi
 note "Image: $IMAGE"
+if [ -z "$EXISTING" ] && [ -n "$PRIOR_DB" ]; then note "Database: keeping ${PROJECT}_pgdata from an earlier install; its password is set from the new .env"; fi
+if [ -n "$PRIOR_DIR" ]; then note "Containers started from $PRIOR_DIR are replaced (their volumes are kept)"; fi
 if [ "$AI" = local ]; then
   note "Language model: $LLM in Ollama ($LLM_WHY)"
   case "$OLLAMA_INSTALL" in
@@ -415,7 +424,7 @@ name: reelsaw
 
 x-app: &app
   image: ${REELSAW_IMAGE:-ghcr.io/osbytes/reelsaw:latest}
-  stop_grace_period: 330s
+  stop_grace_period: ${STOP_GRACE_PERIOD:-330s}
   restart: unless-stopped
   depends_on:
     db:
@@ -583,6 +592,17 @@ if [ "$AI" = local ]; then
     for _ in $(seq 1 30); do compose exec -T ollama ollama list >/dev/null 2>&1 && break; sleep 1; done
     compose exec -T ollama ollama pull "$LLM" </dev/null
   fi
+fi
+
+# the database first: an existing volume keeps the password it was created with, so set it from .env
+# before the app connects (idempotent; psql over the container's socket needs no password)
+say "Starting the database"
+compose up -d db </dev/null
+for _ in $(seq 1 60); do compose exec -T db pg_isready -U reelsaw -d reelsaw >/dev/null 2>&1 && break; sleep 1; done
+pw=$(envget POSTGRES_PASSWORD); pw=${pw//\'/\'\'}
+if [ -n "$pw" ]; then
+  compose exec -T db psql -U reelsaw -d reelsaw -q -v ON_ERROR_STOP=1 -c "alter user reelsaw password '$pw'" </dev/null >/dev/null 2>&1 \
+    || warn "couldn't set the database password from .env; if the app logs 'password authentication failed', see the troubleshooting section of deploy/README.md"
 fi
 
 say "Starting Reelsaw"

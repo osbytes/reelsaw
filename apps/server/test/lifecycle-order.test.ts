@@ -9,7 +9,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import type pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq } from "drizzle-orm";
 import { createUnitOfWork } from "../src/uow.js";
@@ -22,9 +22,24 @@ import type { Services } from "../src/services.js";
 import type { Config } from "../src/config.js";
 import { db } from "./helpers.js";
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const noQueue = { enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false, admission: async () => ({ userId: null, live: 0, userRendersLastHour: 0 }) } as unknown as Queue;
+const noQueue = {
+  enqueue: async () => null,
+  cancelLiveJobs: async () => {},
+  hasLiveJob: async () => false,
+  admission: async () => ({ userId: null, live: 0, userLive: 0, userRendersLastHour: 0 }),
+} as unknown as Queue;
 
 describe("lock order of API mutations against render completions", () => {
   let pool: pg.Pool;
@@ -36,7 +51,13 @@ describe("lock order of API mutations against render completions", () => {
   const txLog = { ...(quiet as object), warn: (_o: unknown, msg: string) => void (/retrying/.test(msg) && retries++) } as never;
   const tx = (fn: Parameters<ReturnType<typeof createUnitOfWork>>[0]) => createUnitOfWork(pool, noQueue, txLog)(fn);
   const api = () =>
-    appRouter.createCaller({ svc, who: { user: { id: userId, role: "user" }, blocked: null } as never, req: new Request("http://test.local"), requestId: "test", log: quiet });
+    appRouter.createCaller({
+      svc,
+      who: { user: { id: userId, role: "user", approvedAt: new Date() }, blocked: null } as never,
+      req: new Request("http://test.local"),
+      requestId: "test",
+      log: quiet,
+    });
 
   before(async () => {
     pool = db();
@@ -44,7 +65,15 @@ describe("lock order of API mutations against render completions", () => {
     await pool.query(`insert into "user" (id, name, email, approved_at) values ($1, 'Test', $2, now())`, [userId, `${userId}@example.test`]);
     // only what these procedures reach: the unit of work and (after commit) file deletes of superseded renders
     // settings: the per-account request rate (abuse.ts) reads the instance caps on every mutation; none here
-    svc = { tx, database: { db: drizzle(pool, { schema }) as unknown as Db, pool }, storage: { delete: async () => {} }, paths: { project: () => "/nonexistent" }, log: quiet, settings: { get: () => ({}) }, entitlements: null } as unknown as Services;
+    svc = {
+      tx,
+      database: { db: drizzle(pool, { schema }) as unknown as Db, pool },
+      storage: { delete: async () => {} },
+      paths: { project: () => "/nonexistent" },
+      log: quiet,
+      settings: { get: () => ({}) },
+      entitlements: null,
+    } as unknown as Services;
   });
   after(async () => {
     for (const id of projects) await pool.query("delete from projects where id = $1", [id]);
@@ -57,12 +86,18 @@ describe("lock order of API mutations against render completions", () => {
   async function seed(clips: number, rendering: number) {
     const id = randomUUID();
     projects.push(id);
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, stage, run_seq, settings) values ($1, $2, 'Lock order test', 'url', 'https://example.com/v.mp4', 'rendering', 'render', 1, '{}')`, [id, userId]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, stage, run_seq, settings) values ($1, $2, 'Lock order test', 'url', 'https://example.com/v.mp4', 'rendering', 'render', 1, '{}')`,
+      [id, userId],
+    );
     const ids: string[] = [];
     for (let i = 0; i < clips; i++) {
       const cid = randomUUID();
       ids.push(cid);
-      await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, render_gen, origin) values ($1, $2, $3, 'c', 'h', 0, 10, 50, 'r', '[]', $4, 2, 'ai')`, [cid, id, i, i < rendering ? "rendering" : "failed"]);
+      await pool.query(
+        `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, render_gen, origin) values ($1, $2, $3, 'c', 'h', 0, 10, 50, 'r', '[]', $4, 2, 'ai')`,
+        [cid, id, i, i < rendering ? "rendering" : "failed"],
+      );
     }
     return { id, ids };
   }
@@ -72,7 +107,10 @@ describe("lock order of API mutations against render completions", () => {
     tx(async (u) => {
       const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
       if (cur?.gen !== 2) return; // superseded by a re-render: the stale job exits
-      await u.db.update(schema.clips).set({ status: "done", updatedAt: new Date() }).where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, 2)));
+      await u.db
+        .update(schema.clips)
+        .set({ status: "done", updatedAt: new Date() })
+        .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, 2)));
       await u.emit(projectId, "clip.done", { clipId, index });
       await sleep(40); // hold the clip lock while the mutation runs: the window in which a project-first order deadlocks
       await finalizeProjectIfDone(svc, u, projectId);
@@ -110,7 +148,15 @@ describe("lock order of API mutations against render completions", () => {
     const create = () =>
       tx(async (u) => {
         await checkProjectQuota(u.db, config, userId, { lock: true });
-        await u.db.insert(schema.projects).values({ id: randomUUID(), userId, title: "Quota test", sourceType: "url", sourceUrl: "https://example.com/v.mp4", settings: {} as never, status: "queued" });
+        await u.db.insert(schema.projects).values({
+          id: randomUUID(),
+          userId,
+          title: "Quota test",
+          sourceType: "url",
+          sourceUrl: "https://example.com/v.mp4",
+          settings: {} as never,
+          status: "queued",
+        });
       });
     const results = await Promise.allSettled(Array.from({ length: 8 }, create));
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 2);

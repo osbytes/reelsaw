@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "stage_seq" integer DEFAULT 0 NOT NULL;

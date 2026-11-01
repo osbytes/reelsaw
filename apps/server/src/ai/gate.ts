@@ -16,13 +16,24 @@
  *
  * Why advisory locks and not a pg-boss queue: model calls are made inside jobs (many per job), not as jobs, and
  * a lock pool needs no schema, no extra worker and no change at the call sites.
+ *
+ * Time spent waiting for a slot is reported to the calling step (ai/slot-wait.ts), whose time limit pauses meanwhile:
+ * a queue is not a slow model.
  */
 import type pg from "pg";
 import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
+import { slotWaitListener } from "./slot-wait.js";
 
 /** Default cap for a self-hosted server; cloud providers are unlimited unless PROVIDER_CONCURRENCY names them. */
 export const SELF_HOSTED_DEFAULT = 2;
+/**
+ * `openai` pointed at a local server is Speaches (whisper) in the shipped stack. One transcription already uses every
+ * core of a CPU box, so a second one at once only halves both: no more audio per minute, and each call takes twice as
+ * long against its time limit (a 4-core box timed out every 10-minute chunk with two projects transcribing).
+ */
+export const SELF_HOSTED_OPENAI_DEFAULT = 1;
+const selfHostedDefault = (provider: string) => (provider === "openai" ? SELF_HOSTED_OPENAI_DEFAULT : SELF_HOSTED_DEFAULT);
 
 /** "ollama=2,openai=16" -> { ollama: 2, openai: 16 }. `compat` names the OpenAI-compatible provider whatever it is called. */
 export function parseProviderConcurrency(spec: string, compatName: string): Map<string, number> {
@@ -45,7 +56,15 @@ export interface ProviderGate {
   middleware(provider: string): LanguageModelMiddleware;
   /** enforce the limits across processes (Postgres advisory locks); until then they are per process */
   attach(pool: pg.Pool): void;
+  /**
+   * Connections the gate's own pool needs: one per in-flight limited call (the sum of the caps, 2..16).
+   * Not the app's main pool, or a burst of model calls would hold every connection pg-boss needs for its heartbeats.
+   */
+  poolSize(): number;
 }
+
+const GATE_POOL_MIN = 2;
+const GATE_POOL_MAX = 16;
 
 class Semaphore {
   active = 0;
@@ -78,21 +97,42 @@ const sleep = (ms: number, signal?: AbortSignal) =>
 
 /**
  * `isSelfHosted(provider)` is asked at call time (an admin can point a provider at a local server while running).
- * Explicit PROVIDER_CONCURRENCY entries win; otherwise self-hosted = SELF_HOSTED_DEFAULT, cloud = unlimited.
+ * Explicit PROVIDER_CONCURRENCY entries win; otherwise self-hosted = SELF_HOSTED_DEFAULT (SELF_HOSTED_OPENAI_DEFAULT
+ * for `openai`), cloud = unlimited.
  */
 export function createProviderGate(spec: string, compatName: string, isSelfHosted: (provider: string) => boolean, log: Logger): ProviderGate {
   const explicit = parseProviderConcurrency(spec, compatName);
   const sems = new Map<string, Semaphore>();
   let pool: pg.Pool | null = null;
-  const limitOf = (provider: string) => explicit.get(provider) ?? (isSelfHosted(provider) ? SELF_HOSTED_DEFAULT : 0);
+  const limitOf = (provider: string) => explicit.get(provider) ?? (isSelfHosted(provider) ? selfHostedDefault(provider) : 0);
 
   async function run<T>(provider: string, fn: () => PromiseLike<T>, signal?: AbortSignal): Promise<T> {
     if (limitOf(provider) <= 0) return await fn();
+    const listener = slotWaitListener();
+    let waiting = !!listener;
+    listener?.waiting();
+    /** the wait is over: told once, whether a slot was taken or the wait failed */
+    const acquired = () => {
+      if (!waiting) return;
+      waiting = false;
+      listener!.acquired();
+    };
+    try {
+      return await gated(provider, fn, acquired, signal);
+    } finally {
+      acquired();
+    }
+  }
+
+  async function gated<T>(provider: string, fn: () => PromiseLike<T>, acquired: () => void, signal?: AbortSignal): Promise<T> {
     let sem = sems.get(provider);
     if (!sem) sems.set(provider, (sem = new Semaphore()));
     await sem.acquire(() => Math.max(1, limitOf(provider)), signal);
     try {
-      if (!pool) return await fn();
+      if (!pool) {
+        acquired();
+        return await fn();
+      }
       const client = await pool.connect();
       const key = `provider:${provider}`;
       let slot = -1;
@@ -114,6 +154,7 @@ export function createProviderGate(spec: string, compatName: string, isSelfHoste
           }
           await sleep(wait + Math.random() * 100, signal);
         }
+        acquired();
         return await fn();
       } finally {
         if (slot >= 0) await client.query("select pg_advisory_unlock(hashtext($1), $2)", [key, slot]).catch((err: Error) => (broken = err));
@@ -133,6 +174,14 @@ export function createProviderGate(spec: string, compatName: string, isSelfHoste
     }),
     attach(p) {
       pool = p;
+    },
+    poolSize() {
+      // a provider with no limit never takes a slot (`run` calls `fn` directly), so only limited ones count: every
+      // explicit cap, plus the self-hosted default for the two providers that can be pointed at a local server
+      let total = 0;
+      for (const n of explicit.values()) total += n;
+      for (const p of new Set([compatName, "openai"])) if (!explicit.has(p)) total += selfHostedDefault(p);
+      return Math.min(GATE_POOL_MAX, Math.max(GATE_POOL_MIN, total));
     },
   };
 }

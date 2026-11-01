@@ -25,7 +25,10 @@ describe("pagination helpers", () => {
 
   it("pages: next cursor only when a row beyond the limit exists", () => {
     const rows = [1, 2, 3];
-    assert.deepEqual(pageOf(rows, 3, (n) => [n]), { items: [1, 2, 3], nextCursor: null });
+    assert.deepEqual(
+      pageOf(rows, 3, (n) => [n]),
+      { items: [1, 2, 3], nextCursor: null },
+    );
     const more = pageOf(rows, 2, (n) => [n]);
     assert.deepEqual(more.items, [1, 2]);
     assert.deepEqual(decodeCursor(more.nextCursor!, 1), [2]);

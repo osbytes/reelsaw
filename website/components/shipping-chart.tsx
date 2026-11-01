@@ -20,13 +20,7 @@ type CellAnchor = { top: number; bottom: number; cx: number };
 
 const TIP_PAD = 8;
 
-export function ShippingChart({
-  feed,
-  onSelectRelease,
-}: {
-  feed: ReleasesFeed;
-  onSelectRelease?: (tag: string) => void;
-}) {
+export function ShippingChart({ feed, onSelectRelease }: { feed: ReleasesFeed; onSelectRelease?: (tag: string) => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -111,7 +105,12 @@ export function ShippingChart({
         >
           <div className="col-start-1 row-start-1" />
           {feed.months.map((m) => (
-            <div key={`${m.label}-${m.weekIndex}`} className="h-3 text-[10px] leading-3 text-ink3" style={{ gridColumn: m.weekIndex + 2, gridRow: 1 }} aria-hidden>
+            <div
+              key={`${m.label}-${m.weekIndex}`}
+              className="h-3 text-[10px] leading-3 text-ink3"
+              style={{ gridColumn: m.weekIndex + 2, gridRow: 1 }}
+              aria-hidden
+            >
               {m.label}
             </div>
           ))}
@@ -149,20 +148,23 @@ export function ShippingChart({
         </div>
       </div>
       <Legend />
-      {mounted && openDay && anchor && createPortal(
-        <Tip
-          day={openDay}
-          anchor={anchor}
-          onEnter={cancelLeave}
-          onLeave={hoverOut}
-          onSelectRelease={(tag) => {
-            setPinned(false);
-            setOpen(null);
-            onSelectRelease?.(tag);
-          }}
-        />,
-        document.body,
-      )}
+      {mounted &&
+        openDay &&
+        anchor &&
+        createPortal(
+          <Tip
+            day={openDay}
+            anchor={anchor}
+            onEnter={cancelLeave}
+            onLeave={hoverOut}
+            onSelectRelease={(tag) => {
+              setPinned(false);
+              setOpen(null);
+              onSelectRelease?.(tag);
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
@@ -192,6 +194,7 @@ function Cell({
     ? `${utcLabel(day.date)}: ${commitsWord(day.commits)}${shipped ? `, shipped ${day.releases.map((r) => r.version).join(", ")}` : ""}`
     : utcLabel(day.date);
   return (
+    // biome-ignore lint/a11y/useFocusableInteractive: the button inside the cell takes focus (ARIA grid pattern)
     <div role="gridcell" className="relative" style={{ gridColumn: col, gridRow: row }}>
       <button
         ref={register}
@@ -205,7 +208,10 @@ function Cell({
         className={`relative block size-[var(--cell)] rounded-[2px] sm:rounded-[3px] ${live ? LEVEL_CLASS[day.level] : "bg-transparent"} ${live ? "hover:outline hover:outline-1 hover:outline-offset-0 hover:outline-ink3" : ""} ${open ? "outline outline-1 outline-offset-0 outline-ink" : ""} disabled:cursor-default`}
       >
         {shipped && live && (
-          <span className="pointer-events-none absolute top-1/2 left-1/2 size-[42%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc shadow-[0_0_0_1px_var(--acc-ink)]" aria-hidden />
+          <span
+            className="pointer-events-none absolute top-1/2 left-1/2 size-[42%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc shadow-[0_0_0_1px_var(--acc-ink)]"
+            aria-hidden
+          />
         )}
       </button>
     </div>

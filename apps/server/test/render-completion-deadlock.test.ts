@@ -8,7 +8,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import type pg from "pg";
 import { and, eq } from "drizzle-orm";
 import { createUnitOfWork, isRetryableTxError } from "../src/uow.js";
 import { finalizeProjectIfDone, lockProjectClips, startRun } from "../src/pipeline/lifecycle.js";
@@ -17,8 +17,23 @@ import type { Queue } from "../src/queue/boss.js";
 import type { Services } from "../src/services.js";
 import { db, signUp } from "./helpers.js";
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
-const noQueue = { enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false, admission: async () => ({ userId: null, live: 0, userRendersLastHour: 0 }) } as unknown as Queue;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
+const noQueue = {
+  enqueue: async () => null,
+  cancelLiveJobs: async () => {},
+  hasLiveJob: async () => false,
+  admission: async () => ({ userId: null, live: 0, userLive: 0, userRendersLastHour: 0 }),
+} as unknown as Queue;
 // finalize only touches svc for the after-commit workdir cleanup, which the unit of work logs and swallows
 const svc = {} as Services;
 
@@ -40,12 +55,18 @@ describe("render completions in parallel", () => {
   async function seed(clips: number) {
     const id = randomUUID();
     projects.push(id);
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, stage, run_seq, settings) values ($1, $2, 'Deadlock test', 'url', 'https://example.com/v.mp4', 'rendering', 'render', 1, '{}')`, [id, userId]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, stage, run_seq, settings) values ($1, $2, 'Deadlock test', 'url', 'https://example.com/v.mp4', 'rendering', 'render', 1, '{}')`,
+      [id, userId],
+    );
     const ids: string[] = [];
     for (let i = 0; i < clips; i++) {
       const cid = randomUUID();
       ids.push(cid);
-      await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, render_gen) values ($1, $2, $3, 'c', 'h', 0, 10, 50, 'r', '[]', 'rendering', 2)`, [cid, id, i]);
+      await pool.query(
+        `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, render_gen) values ($1, $2, $3, 'c', 'h', 0, 10, 50, 'r', '[]', 'rendering', 2)`,
+        [cid, id, i],
+      );
     }
     return { id, ids };
   }
@@ -55,7 +76,10 @@ describe("render completions in parallel", () => {
     tx(async (u) => {
       const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
       assert.equal(cur!.gen, 2);
-      await u.db.update(schema.clips).set({ status: "done", outputKey: `k/${clipId}`, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+      await u.db
+        .update(schema.clips)
+        .set({ status: "done", outputKey: `k/${clipId}`, updatedAt: new Date() })
+        .where(eq(schema.clips.id, clipId));
       await u.emit(projectId, "clip.done", { clipId, index });
       await finalizeProjectIfDone(svc, u, projectId);
     });
@@ -65,7 +89,11 @@ describe("render completions in parallel", () => {
       const { id, ids } = await seed(9);
       const results = await Promise.allSettled(ids.map((cid, i) => complete(id, cid, i)));
       const failed = results.filter((r) => r.status === "rejected");
-      assert.deepEqual(failed.map((r) => String((r as PromiseRejectedResult).reason)), [], `round ${round}`);
+      assert.deepEqual(
+        failed.map((r) => String((r as PromiseRejectedResult).reason)),
+        [],
+        `round ${round}`,
+      );
       const events = await pool.query(`select type from project_events where project_id = $1 and type in ('project.done', 'clip.done')`, [id]);
       assert.equal(events.rows.filter((e) => e.type === "clip.done").length, 9);
       assert.equal(events.rows.filter((e) => e.type === "project.done").length, 1, `round ${round}`);
@@ -80,11 +108,17 @@ describe("render completions in parallel", () => {
     await pool.query("update clips set status = 'done' where id = any($1) and index < 4", [ids]);
     const rerender = tx(async (u) => {
       await lockProjectClips(u, id);
-      await u.db.update(schema.clips).set({ status: "pending", updatedAt: new Date() }).where(and(eq(schema.clips.projectId, id), eq(schema.clips.index, 0)));
+      await u.db
+        .update(schema.clips)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(and(eq(schema.clips.projectId, id), eq(schema.clips.index, 0)));
       await startRun(u, id, { reason: "rerender", status: "rendering", stage: "render" });
     });
     const results = await Promise.allSettled([rerender, complete(id, ids[4]!, 4), complete(id, ids[5]!, 5)]);
-    assert.deepEqual(results.filter((r) => r.status === "rejected"), []);
+    assert.deepEqual(
+      results.filter((r) => r.status === "rejected"),
+      [],
+    );
     const done = await pool.query(`select count(*)::int n from project_events where project_id = $1 and type = 'project.done'`, [id]);
     assert.ok(done.rows[0].n <= 1);
   });
@@ -99,6 +133,10 @@ describe("render completions in parallel", () => {
     assert.equal(calls, 2);
     assert.equal(isRetryableTxError({ cause: { cause: { code: "40P01" } } }), true);
     assert.equal(isRetryableTxError(new Error("syntax")), false);
-    await assert.rejects(tx(async () => { throw Object.assign(new Error("unique"), { code: "23505" }); }));
+    await assert.rejects(
+      tx(async () => {
+        throw Object.assign(new Error("unique"), { code: "23505" });
+      }),
+    );
   });
 });

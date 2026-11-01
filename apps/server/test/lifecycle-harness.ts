@@ -59,7 +59,7 @@ export function lifecycleHarness() {
     tx,
     queue,
     log,
-    config: { CLEANUP_WORKDIR: false },
+    config: { CLEANUP_WORKDIR: false, REELSAW_VERSION: "test" },
     // the runtime settings a service function reads (instance-settings.ts); tests change the object in place
     settings: { get: () => runtime },
     database: { db: database, pool },
@@ -113,7 +113,8 @@ export function lifecycleHarness() {
       // every migration in this checkout's journal must be applied; drizzle records them in drizzle.__drizzle_migrations
       const journal = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "drizzle", "meta", "_journal.json"), "utf8")) as { entries: unknown[] };
       const applied = Number((await pool.query(`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => ({ rows: [{ n: 0 }] }))).rows[0].n);
-      if (applied < journal.entries.length) return `database schema is older than this checkout (${applied} of ${journal.entries.length} migrations applied): rebuild the stack or set TEST_DATABASE_URL to a migrated database`;
+      if (applied < journal.entries.length)
+        return `database schema is older than this checkout (${applied} of ${journal.entries.length} migrations applied): rebuild the stack or set TEST_DATABASE_URL to a migrated database`;
       if (!(await pool.query(`select to_regclass('pgboss.job') as t`)).rows[0].t) {
         await real.start();
         await real.boss.stop({ graceful: false, wait: true, close: false } as never);

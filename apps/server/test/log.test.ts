@@ -66,7 +66,10 @@ describe("module log levels", () => {
     log.child({ module: "render", clipId: "c1" }).debug("render detail");
     log.child({ module: "analyze" }).debug("analyze detail");
     log.child({ module: "analyze" }).info("analyze milestone");
-    assert.deepEqual(lines.map((l) => l.msg), ["render detail", "analyze milestone"]);
+    assert.deepEqual(
+      lines.map((l) => l.msg),
+      ["render detail", "analyze milestone"],
+    );
     assert.equal(lines[0]!.clipId, "c1");
     assert.equal(lines[0]!.module, "render");
   });
@@ -75,13 +78,19 @@ describe("module log levels", () => {
     log.child({ module: "http" }).info("request");
     log.child({ module: "http" }).warn("slow request");
     log.info("root line");
-    assert.deepEqual(lines.map((l) => l.msg), ["slow request", "root line"]);
+    assert.deepEqual(
+      lines.map((l) => l.msg),
+      ["slow request", "root line"],
+    );
   });
   it("nested children keep every parent binding (stage logger -> clip logger)", () => {
     const { log, lines } = capture("debug");
     const stage = log.child({ module: "render", stage: "render", projectId: "p1", jobId: "j1", runSeq: 3 });
     stage.child({ clipId: "c1" }).debug("layout per section");
-    assert.deepEqual({ module: lines[0]!.module, projectId: lines[0]!.projectId, jobId: lines[0]!.jobId, runSeq: lines[0]!.runSeq, clipId: lines[0]!.clipId }, { module: "render", projectId: "p1", jobId: "j1", runSeq: 3, clipId: "c1" });
+    assert.deepEqual(
+      { module: lines[0]!.module, projectId: lines[0]!.projectId, jobId: lines[0]!.jobId, runSeq: lines[0]!.runSeq, clipId: lines[0]!.clipId },
+      { module: "render", projectId: "p1", jobId: "j1", runSeq: 3, clipId: "c1" },
+    );
   });
   it("StageContext loggers carry module, projectId, jobId, runSeq and clipId", () => {
     const { log, lines } = capture("debug");
@@ -98,10 +107,12 @@ describe("module log levels", () => {
     const dir = path.join(import.meta.dirname, "../src/pipeline");
     const bad: string[] = [];
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".ts"))) {
-      fs.readFileSync(path.join(dir, f), "utf8").split("\n").forEach((line, i) => {
-        if (/svc\.log\.child\(/.test(line) && !line.includes("module:")) bad.push(`${f}:${i + 1}`);
-        if (/svc\.log\.child\(\{\s*(clipId|projectId)/.test(line)) bad.push(`${f}:${i + 1}`);
-      });
+      fs.readFileSync(path.join(dir, f), "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (/svc\.log\.child\(/.test(line) && !line.includes("module:")) bad.push(`${f}:${i + 1}`);
+          if (/svc\.log\.child\(\{\s*(clipId|projectId)/.test(line)) bad.push(`${f}:${i + 1}`);
+        });
     }
     assert.deepEqual(bad, [], "use ctx.log (StageContext.open) so lines carry module, projectId, jobId and runSeq");
   });
@@ -122,7 +133,10 @@ describe("module log levels", () => {
     log.child({ module: "other" }).debug("other module stays quiet");
     ctl.apply(null);
     render.debug("after");
-    assert.deepEqual(lines.map((l) => l.msg), ["during", "during nested"]);
+    assert.deepEqual(
+      lines.map((l) => l.msg),
+      ["during", "during nested"],
+    );
   });
   it("redacts secrets", () => {
     const { log, lines } = capture("info");
@@ -200,7 +214,10 @@ describe("request logging middleware", () => {
     await app.request("/api/health");
     await app.request("/media/x");
     await app.request("/api/ok");
-    assert.deepEqual(lines.map((l) => l.path), ["/api/ok"]);
+    assert.deepEqual(
+      lines.map((l) => l.path),
+      ["/api/ok"],
+    );
   });
   it("accessLevel never raises a tRPC response above info (onError reports it)", () => {
     assert.equal(accessLevel("POST", "/api/trpc/projects.create", 500), "info");
@@ -231,10 +248,23 @@ describe("log helpers", () => {
     assert.ok(String(f.error).length <= 201);
   });
   it("MCP argument summary has ids and sizes, never bodies", () => {
-    assert.deepEqual(argSummary({ projectId: "p1", caption: "a long caption body", limit: 5, hashtags: ["a", "b"], style: { font: "x" } }), { projectId: "p1", caption: "19 chars", limit: 5, hashtags: "2 items", style: "{font}" });
+    assert.deepEqual(argSummary({ projectId: "p1", caption: "a long caption body", limit: 5, hashtags: ["a", "b"], style: { font: "x" } }), {
+      projectId: "p1",
+      caption: "19 chars",
+      limit: 5,
+      hashtags: "2 items",
+      style: "{font}",
+    });
   });
   it("ffmpeg argv in logs hides the proxy and cookies", () => {
-    assert.deepEqual(loggableArgv(["--proxy", "http://user:pw@host:1", "--cookies", "/c.txt", "-i", "in.mp4"]), ["--proxy", "[redacted]", "--cookies", "[redacted]", "-i", "in.mp4"]);
+    assert.deepEqual(loggableArgv(["--proxy", "http://user:pw@host:1", "--cookies", "/c.txt", "-i", "in.mp4"]), [
+      "--proxy",
+      "[redacted]",
+      "--cookies",
+      "[redacted]",
+      "-i",
+      "in.mp4",
+    ]);
   });
   it("log file filter: ids, level, module, since", () => {
     const line = JSON.stringify({ level: 30, time: "2026-10-17T10:00:00.000Z", module: "render", projectId: "proj-1", msg: "x" });
@@ -251,11 +281,32 @@ describe("log helpers", () => {
 describe("structured log level input", () => {
   const known = ["http", "render", "analyze"];
   it("builds the spec string, global first", () => {
-    assert.equal(specFromStructured({ global: "info", modules: [{ module: "render", level: "debug" }, { module: "http", level: "warn" }] }, known), "info,render=debug,http=warn");
+    assert.equal(
+      specFromStructured(
+        {
+          global: "info",
+          modules: [
+            { module: "render", level: "debug" },
+            { module: "http", level: "warn" },
+          ],
+        },
+        known,
+      ),
+      "info,render=debug,http=warn",
+    );
     assert.equal(specFromStructured({ global: "warn", modules: [] }, known), "warn");
   });
   it("a repeated module keeps the last level, and the result parses", () => {
-    const spec = specFromStructured({ global: "info", modules: [{ module: "render", level: "debug" }, { module: "render", level: "trace" }] }, known);
+    const spec = specFromStructured(
+      {
+        global: "info",
+        modules: [
+          { module: "render", level: "debug" },
+          { module: "render", level: "trace" },
+        ],
+      },
+      known,
+    );
     assert.equal(spec, "info,render=trace");
     assert.deepEqual(parseLogLevels(spec).modules, { render: "trace" });
   });

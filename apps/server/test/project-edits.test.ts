@@ -40,7 +40,10 @@ describe("deleteClip", { skip: notReady ?? false }, () => {
     assert.ok(row.deleted_at);
     assert.equal(row.status, "failed"); // it never finished
     assert.equal(row.render_gen, gen + 1); // a render still running discards its output
-    assert.deepEqual((await h.jobsFor([busy])).filter((j) => j.state === "created" || j.state === "active"), []);
+    assert.deepEqual(
+      (await h.jobsFor([busy])).filter((j) => j.state === "created" || j.state === "active"),
+      [],
+    );
     assert.equal((await projectRow(projectId)).status, "done"); // the remaining clip was the only one left
     assert.equal(await h.eventCount(projectId, "clip.deleted"), 1);
     assert.equal((await deleteClip(h.svc, { id: userId, admin: false }, busy)).changed, false);
@@ -68,7 +71,7 @@ describe("deleteClip", { skip: notReady ?? false }, () => {
     const projectId = await h.makeProject(userId, "done");
     const clip = await h.makeClip(projectId, 0, "done");
     const stranger = await h.makeUser();
-    await assert.rejects(deleteClip(h.svc, { id: stranger, admin: false }, clip), /NOT_FOUND|No such project/);
+    await assert.rejects(deleteClip(h.svc, { id: stranger, admin: false }, clip), /NOT_FOUND|No project with that id/);
     assert.equal((await clipRow(clip)).deleted_at, null);
   });
 });
@@ -111,7 +114,7 @@ describe("updateProject", { skip: notReady ?? false }, () => {
     await assert.rejects(updateProject(h.svc, me(), projectId, { settings: { minClipSeconds: 90, maxClipSeconds: 60 } }), /minClipSeconds/);
     await assert.rejects(updateProject(h.svc, me(), projectId, { settings: { captionSize: 9 } as never }), /captionSize/);
     const stranger = await h.makeUser();
-    await assert.rejects(updateProject(h.svc, { id: stranger, admin: false }, projectId, { title: "Mine" }), /No such project/);
+    await assert.rejects(updateProject(h.svc, { id: stranger, admin: false }, projectId, { title: "Mine" }), /No project with that id/);
     assert.equal((await projectRow(projectId)).title, "New title");
   });
 });
@@ -129,7 +132,10 @@ describe("applyProjectFraming", { skip: notReady ?? false }, () => {
     done = await h.makeClip(projectId, 0, "done", { outputKey: "k0" });
     own = await h.makeClip(projectId, 1, "done", { outputKey: "k1" });
     rendering = await h.makeClip(projectId, 2, "rendering");
-    await h.pool.query(`update clips set layout_sections = '[{"start":0,"end":10,"mode":"face","offsetX":0.1}]'::jsonb, layout_override = 'face' where id = $1`, [own]);
+    await h.pool.query(
+      `update clips set layout_sections = '[{"start":0,"end":10,"mode":"face","offsetX":0.1}]'::jsonb, layout_override = 'face' where id = $1`,
+      [own],
+    );
   });
   const me = () => ({ id: userId, admin: false });
 
@@ -158,6 +164,6 @@ describe("applyProjectFraming", { skip: notReady ?? false }, () => {
 
   it("refuses other people's projects", async () => {
     const stranger = await h.makeUser();
-    await assert.rejects(applyProjectFraming(h.svc, { id: stranger, admin: false }, projectId, { reframe: "fit" }), /No such project/);
+    await assert.rejects(applyProjectFraming(h.svc, { id: stranger, admin: false }, projectId, { reframe: "fit" }), /No project with that id/);
   });
 });

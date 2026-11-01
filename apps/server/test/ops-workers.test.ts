@@ -1,7 +1,9 @@
 /** Worker registry: identity, live vs stale, sort order (no database). */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyWorkers, processRole, workerIdOf, WORKER_STALE_MS } from "../src/ops/workers.js";
+import { classifyWorkers, fleetPausedReason, pickWorkerWithRoom, processRole, workerIdOf, WORKER_STALE_MS } from "../src/ops/workers.js";
+import { DISK_QUEUES, gateDecision, listeningQueues } from "../src/queue/disk-gate.js";
+import { QUEUES } from "../src/queue/boss.js";
 import type { WorkerRenders, WorkerRole } from "../src/db/schema.js";
 
 const renders: WorkerRenders = { running: 0, limit: 2, max: 2, mode: "auto" };
@@ -73,5 +75,107 @@ describe("classifyWorkers", () => {
       items.map((w) => w.id),
       ["w1", "w2", "api", "gone"],
     );
+  });
+});
+
+describe("pickWorkerWithRoom (a job short of disk looks for another worker)", () => {
+  const w = (id: string, p: { seenAgoMs?: number; queues?: string[] | null; diskFreeMB?: number } = {}) => ({
+    id,
+    lastSeenAt: new Date(now.getTime() - (p.seenAgoMs ?? 1000)),
+    queues: p.queues === undefined ? [QUEUES.ingest, QUEUES.render] : p.queues,
+    diskFreeMB: p.diskFreeMB ?? 20_000,
+  });
+  it("finds a live worker on the queue with the required free MB, never itself", () => {
+    assert.deepEqual(pickWorkerWithRoom([w("me"), w("w2")], now, "me", QUEUES.ingest, 4096), { workerId: "w2" });
+    assert.equal(pickWorkerWithRoom([w("me")], now, "me", QUEUES.ingest, 4096), null);
+  });
+  it("skips stale workers, workers not on the queue (paused), and workers without the room", () => {
+    assert.equal(pickWorkerWithRoom([w("w2", { seenAgoMs: WORKER_STALE_MS + 1 })], now, "me", QUEUES.ingest, 4096), null);
+    assert.equal(pickWorkerWithRoom([w("w2", { queues: [QUEUES.refineEntities] })], now, "me", QUEUES.ingest, 4096), null);
+    assert.equal(pickWorkerWithRoom([w("w2", { diskFreeMB: 4095 })], now, "me", QUEUES.ingest, 4096), null);
+    assert.deepEqual(pickWorkerWithRoom([w("w2", { diskFreeMB: 4096 })], now, "me", QUEUES.ingest, 4096), { workerId: "w2" });
+  });
+  it("treats an unmeasurable disk (-1) as room", () => {
+    assert.deepEqual(pickWorkerWithRoom([w("w2", { diskFreeMB: -1 })], now, "me", QUEUES.render, 4096), { workerId: "w2" });
+  });
+  it("counts what jobs in flight have leased on that worker's volume as used", () => {
+    // 5 GB free but 2 GB promised to a download still running there: not room for a 4 GB job, room for a 3 GB one
+    assert.equal(pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: 5120 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 4096), null);
+    assert.deepEqual(pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: 5120 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 3072), { workerId: "w2" });
+    assert.deepEqual(
+      pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: -1 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 4096),
+      { workerId: "w2" },
+      "unmeasurable stays room",
+    );
+  });
+});
+
+describe("disk gate", () => {
+  it("pauses below the floor, resumes above the floor plus headroom, keeps in between (no flapping)", () => {
+    assert.equal(gateDecision({ freeMB: 2047, paused: false, minFreeMB: 2048, headroomMB: 1024 }), "pause");
+    assert.equal(gateDecision({ freeMB: 2048, paused: false, minFreeMB: 2048, headroomMB: 1024 }), "keep");
+    assert.equal(gateDecision({ freeMB: 2048, paused: true, minFreeMB: 2048, headroomMB: 1024 }), "keep");
+    assert.equal(gateDecision({ freeMB: 3071, paused: true, minFreeMB: 2048, headroomMB: 1024 }), "keep");
+    assert.equal(gateDecision({ freeMB: 3072, paused: true, minFreeMB: 2048, headroomMB: 1024 }), "resume");
+  });
+  it("never pauses on an unmeasurable disk, and reopens if it was paused", () => {
+    assert.equal(gateDecision({ freeMB: -1, paused: false, minFreeMB: 2048 }), "keep");
+    assert.equal(gateDecision({ freeMB: -1, paused: true, minFreeMB: 2048 }), "resume");
+  });
+  it("keeps the transcript-only refine queues while paused and drops the ones that read media (refine.scenes included)", () => {
+    const all = Object.values(QUEUES);
+    assert.deepEqual(listeningQueues(all, false), all);
+    const paused = listeningQueues(all, true);
+    assert.ok(DISK_QUEUES.every((q) => !paused.includes(q)));
+    assert.deepEqual(paused, [QUEUES.refineEntities, QUEUES.refineDisfluency]);
+  });
+});
+
+describe("fleetPausedReason", () => {
+  const now = new Date("2026-11-01T12:00:00Z");
+  const fresh = new Date(now.getTime() - 5_000);
+  const stale = new Date(now.getTime() - WORKER_STALE_MS - 1_000);
+  const jobs = [QUEUES.render];
+
+  it("is null when one process that takes jobs still has room", () => {
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: jobs, paused: "disk" },
+          { lastSeenAt: fresh, queues: jobs, paused: null },
+        ],
+        now,
+      ),
+      null,
+    );
+  });
+
+  it("names the reason when every live process that takes jobs is short", () => {
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: jobs, paused: "memory" },
+          { lastSeenAt: fresh, queues: jobs, paused: "CPU" },
+        ],
+        now,
+      ),
+      "memory",
+    );
+  });
+
+  it("ignores HTTP-only processes and stale rows", () => {
+    // the API box is busy but runs no jobs; the stale worker with room is gone
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: [], paused: "CPU" },
+          { lastSeenAt: stale, queues: jobs, paused: null },
+          { lastSeenAt: fresh, queues: jobs, paused: "disk" },
+        ],
+        now,
+      ),
+      "disk",
+    );
+    assert.equal(fleetPausedReason([{ lastSeenAt: fresh, queues: [], paused: "CPU" }], now), null);
   });
 });

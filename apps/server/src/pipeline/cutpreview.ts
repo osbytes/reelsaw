@@ -24,7 +24,7 @@ export interface CutPreviewPlan {
   cut: { start: number; end: number };
   source: CutSource;
   /** the search or the last render refused this cut: why */
-  refused?: string;
+  refused?: string | undefined;
 }
 
 const XF = 0.02;
@@ -50,7 +50,9 @@ function ffmpeg(bin: string, args: string[], signal?: AbortSignal): Promise<Buff
 
 async function load(svc: Services, userId: string, projectId: string, flagId: string) {
   const db = svc.database.db;
-  const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)) });
+  const project = await db.query.projects.findFirst({
+    where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)),
+  });
   if (!project?.sourceKey) return null;
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   const flag = transcript?.flags?.find((f) => f.id === flagId);
@@ -59,14 +61,23 @@ async function load(svc: Services, userId: string, projectId: string, flagId: st
   return { project, transcript, flag, input: "url" in loc ? loc.url : loc.file };
 }
 
-export async function planCutPreview(svc: Services, userId: string, projectId: string, flagId: string, opts: { exact?: boolean; signal?: AbortSignal } = {}): Promise<CutPreviewPlan | null> {
+export async function planCutPreview(
+  svc: Services,
+  userId: string,
+  projectId: string,
+  flagId: string,
+  opts: { exact?: boolean; signal?: AbortSignal } = {},
+): Promise<CutPreviewPlan | null> {
   const ctx = await load(svc, userId, projectId, flagId);
   if (!ctx) return null;
   const { flag, transcript, input, project } = ctx;
   const base = { flagId, heard: flag.heard, flag: { start: flag.start, end: flag.end } };
 
   // 1. the last render's verified boundaries
-  const clips = await svc.database.db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId), columns: { diagnostics: true, startSec: true, endSec: true } });
+  const clips = await svc.database.db.query.clips.findMany({
+    where: eq(schema.clips.projectId, projectId),
+    columns: { diagnostics: true, startSec: true, endSec: true },
+  });
   for (const c of clips) {
     const d = c.diagnostics;
     if (!d || flag.start < c.startSec || flag.end > c.endSec) continue;
@@ -86,7 +97,9 @@ export async function planCutPreview(svc: Services, userId: string, projectId: s
       const signal = opts.signal ? AbortSignal.any([opts.signal, budget]) : budget;
       const ws = Math.max(0, flag.start - 3);
       const we = Math.min(project.durationSec ?? flag.end + 3, flag.end + 3);
-      const words = (transcript.rawWords ?? transcript.words).filter((w) => w.end > ws && w.start < we).map((w) => ({ text: w.text, start: w.start - ws, end: w.end - ws }));
+      const words = (transcript.rawWords ?? transcript.words)
+        .filter((w) => w.end > ws && w.start < we)
+        .map((w) => ({ text: w.text, start: w.start - ws, end: w.end - ws }));
       const modelId = svc.models.get().align;
       const res = await refineCuts(
         {
@@ -103,11 +116,19 @@ export async function planCutPreview(svc: Services, userId: string, projectId: s
         [{ start: flag.start - ws, end: flag.end - ws, ...(flag.subkind === "manual" ? { manual: true } : {}) }],
         words,
       ).catch((err) => {
-        if (budget.aborted && !opts.signal?.aborted) return { cuts: [], skipped: [{ range: { start: 0, end: 0 }, reason: "No clean cut found within 30 s. The full render search may still find one." }] };
+        if (budget.aborted && !opts.signal?.aborted)
+          return { cuts: [], skipped: [{ range: { start: 0, end: 0 }, reason: "No clean cut found within 30 s. The full render search may still find one." }] };
         throw err;
       });
       const c = res.cuts[0];
-      r = remember(searchCache, key, c ? { cut: { start: Number((c.start + ws).toFixed(3)), end: Number((c.end + ws).toFixed(3)) } } : { refused: res.skipped[0]?.reason ?? "no clean cut found" }, 500);
+      r = remember(
+        searchCache,
+        key,
+        c
+          ? { cut: { start: Number((c.start + ws).toFixed(3)), end: Number((c.end + ws).toFixed(3)) } }
+          : { refused: res.skipped[0]?.reason ?? "no clean cut found" },
+        500,
+      );
     }
     if (r.cut) return { ...base, cut: r.cut, source: "search" };
     return { ...base, cut: { start: flag.start, end: flag.end }, source: "timestamps", refused: r.refused };
@@ -123,7 +144,7 @@ export async function cutPreviewAudio(
   userId: string,
   projectId: string,
   flagId: string,
-  opts: { pad: number; cut?: { start: number; end: number }; signal?: AbortSignal },
+  opts: { pad: number; cut?: { start: number; end: number } | undefined; signal?: AbortSignal },
 ): Promise<Buffer | null> {
   const ctx = await load(svc, userId, projectId, flagId);
   if (!ctx) return null;
@@ -139,7 +160,12 @@ export async function cutPreviewAudio(
     // same seam as the renderer: first piece runs XF past the cut so the crossfade consumes it
     const a = Math.max(0, opts.cut.start - ws);
     const b = Math.max(a, opts.cut.end - ws);
-    args.push("-filter_complex", `[0:a]atrim=end=${(a + XF).toFixed(3)},asetpts=PTS-STARTPTS[a];[0:a]atrim=start=${b.toFixed(3)},asetpts=PTS-STARTPTS[b];[a][b]acrossfade=d=${XF}:c1=tri:c2=tri[o]`, "-map", "[o]");
+    args.push(
+      "-filter_complex",
+      `[0:a]atrim=end=${(a + XF).toFixed(3)},asetpts=PTS-STARTPTS[a];[0:a]atrim=start=${b.toFixed(3)},asetpts=PTS-STARTPTS[b];[a][b]acrossfade=d=${XF}:c1=tri:c2=tri[o]`,
+      "-map",
+      "[o]",
+    );
   }
   args.push("-ac", "1", "-ar", "44100", "-b:a", "128k", "-f", "mp3", "pipe:1");
   const buf = await ffmpeg(svc.config.FFMPEG_PATH, args, opts.signal);

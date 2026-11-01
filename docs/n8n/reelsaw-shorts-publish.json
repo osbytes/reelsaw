@@ -1,0 +1,588 @@
+{
+  "name": "Reelsaw shorts 2/2: clips ready → publish",
+  "nodes": [
+    {
+      "id": "21fa879d-d0be-484a-8b97-b960a6d1fe1d",
+      "name": "Reelsaw webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "ce715fa1-c9a7-45f8-99d5-b701176ead9f",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reelsaw-clips",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "050e6345-7fbc-4d10-8b1e-8338967c6eed",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Checks that the delivery came from Reelsaw (Standard Webhooks, https://www.standardwebhooks.com):\n// webhook-signature holds \"v1,<base64 HMAC-SHA256 of `${webhook-id}.${webhook-timestamp}.${raw body}`>\",\n// keyed with the base64 part of the whsec_ secret. Deliveries older than 5 minutes are refused (replays).\n//\n// The signing secret: paste the whsec_… value Reelsaw showed when you added the webhook below, or (self-hosted\n// n8n) set the environment variable REELSAW_WEBHOOK_SECRET. During a secret rotation, list both secrets.\nconst SECRETS = ['whsec_PASTE_YOUR_SIGNING_SECRET'];\nconst TOLERANCE_SEC = 5 * 60;\n\nconst crypto = require('crypto'); // self-hosted n8n: NODE_FUNCTION_ALLOW_BUILTIN=crypto (n8n Cloud allows it)\n\nlet secrets = SECRETS;\ntry {\n  // $env is blocked on n8n Cloud and where N8N_BLOCK_ENV_ACCESS_IN_NODE=true; the list above is used then\n  if ($env.REELSAW_WEBHOOK_SECRET) secrets = $env.REELSAW_WEBHOOK_SECRET.split(',').map((s) => s.trim()).filter(Boolean);\n} catch {}\n\nconst item = $input.first();\nconst headers = item.json.headers ?? {};\n// The signature covers the exact bytes Reelsaw sent: the Webhook node keeps them with \"Raw Body\" on.\nconst body = item.binary?.data\n  ? (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')\n  : JSON.stringify(item.json.body);\n\nfunction check() {\n  const id = headers['webhook-id'];\n  const timestamp = headers['webhook-timestamp'];\n  const signatures = headers['webhook-signature'];\n  if (!id || !timestamp || !signatures) return 'Missing webhook-id, webhook-timestamp or webhook-signature header';\n  if (secrets.length === 0 || secrets.some((s) => s.includes('PASTE'))) return 'No signing secret set in the Verify signature node';\n  const ts = Number(timestamp);\n  if (!Number.isInteger(ts)) return 'webhook-timestamp is not a number';\n  const now = Math.floor(Date.now() / 1000);\n  if (now - ts > TOLERANCE_SEC) return 'Delivery is older than 5 minutes (a replay, or this clock is off)';\n  if (ts - now > TOLERANCE_SEC) return 'Delivery is more than 5 minutes in the future (this clock is off)';\n  const signed = Buffer.from(`${id}.${timestamp}.${body}`, 'utf8');\n  const expected = secrets.map((s) => crypto.createHmac('sha256', Buffer.from(s.replace(/^whsec_/, ''), 'base64')).update(signed).digest());\n  // several \"v1,<sig>\" separated by spaces while Reelsaw signs with an old and a new secret\n  for (const part of String(signatures).split(' ')) {\n    const [version, sig] = part.split(',');\n    if (version !== 'v1' || !sig) continue;\n    const given = Buffer.from(sig, 'base64');\n    if (expected.some((e) => e.length === given.length && crypto.timingSafeEqual(e, given))) return null;\n  }\n  return 'Signature does not match: check the signing secret';\n}\n\nconst reason = check();\nlet event = null;\nif (!reason) {\n  try {\n    event = JSON.parse(body);\n  } catch {\n    return [{ json: { valid: false, reason: 'Body is not JSON' } }];\n  }\n}\nreturn [{ json: { valid: !reason, reason, webhookId: headers['webhook-id'] ?? null, event } }];"
+      }
+    },
+    {
+      "id": "187e030f-ee9b-46aa-bb38-813d61985d46",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b335c009-67ac-40a1-a230-75183d0cab7c",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "db121286-b879-43b9-a73e-0cbe656e4649",
+      "name": "Accept",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { received: true } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "10d3056d-01c3-46c1-ba49-55c6b6ec377c",
+      "name": "Reject",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: $json.reason } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "74263301-8a3c-4b79-83bd-5603701c072e",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "97a28e0f-ed7d-404a-9f90-62bce6055046",
+              "name": "workflowTag",
+              "value": "n8n-shorts",
+              "type": "string"
+            },
+            {
+              "id": "13644de0-aa38-4bb5-8e6b-d5efb1a7fdd5",
+              "name": "publishOn",
+              "value": "project.done",
+              "type": "string"
+            },
+            {
+              "id": "1d9c3785-5ad8-4ea8-91b7-f9a7a30cfa37",
+              "name": "minScore",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "76c279ba-f6ca-49e9-b57c-befb467bda30",
+              "name": "maxClipsPerVideo",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "19935975-5ef7-4265-93cd-a74d4342587f",
+              "name": "addHashtags",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "937311a9-4a79-4c77-bbe3-af3732dc64bb",
+              "name": "bufferChannelIds",
+              "value": "YOUR_BUFFER_CHANNEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "6587df6c-1338-49bc-b5c0-664236007da9",
+              "name": "bufferYoutubeChannelIds",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "058753a7-e05b-43ae-9838-c1a2c77b3a9a",
+              "name": "bufferMode",
+              "value": "addToQueue",
+              "type": "string"
+            },
+            {
+              "id": "c581f431-8545-494c-8069-6c6035ccbe69",
+              "name": "bufferSaveToDraft",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "bee407a3-2562-40dc-9e7d-de9f3b8d39cf",
+              "name": "youtubeCategoryId",
+              "value": "22",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ee0726eb-0f9a-484d-b791-0c93776355a4",
+      "name": "Pick clips",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "// One item per clip to publish: the video's best maxClipsPerVideo rendered clips at or above minScore. Skips the\n// Send test delivery, other event types, projects another workflow started (metadata.workflow), and clips this\n// workflow already handed on (a re-run sends project.done again; Resend in Reelsaw's delivery log sends it once more).\nconst s = $('Settings').first().json;\nconst event = $('Verify signature').first().json.event;\nif (event.type !== s.publishOn) return [];\nconst metadata = event.metadata ?? {};\nif (s.workflowTag && metadata.workflow !== s.workflowTag) return [];\n\nconst store = $getWorkflowStaticData('global'); // kept between production executions, not manual test runs\nconst posted = new Set(store.postedClipIds ?? []);\nconst clips = event.type === 'clip.done' ? [event.data.clip] : (event.data.clips ?? []);\nconst picked = clips\n  .filter((c) => c && c.status === 'done' && c.shareUrl && (c.score ?? 0) >= s.minScore)\n  .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))\n  .slice(0, s.maxClipsPerVideo)\n  .filter((c) => !posted.has(c.id))\n  .sort((a, b) => a.index - b.index);\nstore.postedClipIds = [...posted, ...picked.map((c) => c.id)].slice(-2000);\n\nconst project = event.data.project;\nreturn picked.map((c) => {\n  const hashtags = (c.hashtags ?? []).map((h) => `#${h.replace(/^#/, '')}`);\n  const caption = c.caption || c.hook || c.title;\n  return {\n    json: {\n      projectId: project.id,\n      projectTitle: project.title,\n      projectUrl: project.url,\n      metadata,\n      clipId: c.id,\n      title: c.title,\n      caption,\n      hashtags,\n      text: s.addHashtags && hashtags.length ? `${caption}\\n\\n${hashtags.join(' ')}` : caption,\n      shareUrl: c.shareUrl,\n      thumbnailShareUrl: c.thumbnailShareUrl,\n      durationSec: c.durationSec,\n      score: c.score,\n    },\n  };\n});"
+      }
+    },
+    {
+      "id": "2b229b9b-18fb-44b8-905f-9a29d8db2c7c",
+      "name": "Build Buffer post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "// One Buffer createPost per clip and channel (https://developers.buffer.com/examples/create-video-post.html).\n// Buffer has no upload endpoint: it fetches the video from the share link when the post publishes, which for a\n// queued post can be days later. Reelsaw's share links last 90 days by default; revoking one breaks queued posts.\nconst s = $('Settings').first().json;\nconst list = (v) => String(v ?? '').split(',').map((x) => x.trim()).filter((x) => x && !x.startsWith('YOUR_'));\nconst channels = [\n  ...list(s.bufferChannelIds).map((id) => ({ id, youtube: false })),\n  ...list(s.bufferYoutubeChannelIds).map((id) => ({ id, youtube: true })),\n];\nif (!channels.length) throw new Error('Set bufferChannelIds or bufferYoutubeChannelIds in the Settings node');\n\nconst mutation = `mutation CreatePost($input: CreatePostInput!) {\n  createPost(input: $input) {\n    ... on PostActionSuccess { post { id dueAt } }\n    ... on MutationError { message }\n  }\n}`;\nreturn $input.all().flatMap(({ json: clip }) =>\n  channels.map((ch) => {\n    const input = {\n      channelId: ch.id,\n      text: clip.text,\n      schedulingType: 'automatic',\n      mode: s.bufferMode,\n      saveToDraft: s.bufferSaveToDraft,\n      assets: [{ video: { url: clip.shareUrl } }],\n    };\n    // YouTube needs a title and a category on create (YoutubePostMetadataInput)\n    if (ch.youtube) input.metadata = { youtube: { title: clip.title.slice(0, 100), categoryId: String(s.youtubeCategoryId) } };\n    return { json: { ...clip, channelId: ch.id, body: { query: mutation, variables: { input } } } };\n  }),\n);"
+      }
+    },
+    {
+      "id": "962fa260-f5ef-46d4-a8ed-e62efbf0ea4d",
+      "name": "Post to Buffer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.buffer.com",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "9f082355-c3fa-4dcb-9829-45f93d472d99",
+      "name": "Check Buffer answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "// Buffer answers 200 with { data: { createPost: { post } } } or a MutationError { message } (or GraphQL errors).\n// A clip Buffer refused on every channel is forgotten by Pick clips, so Resend in Reelsaw's delivery log retries it.\n// Failures fail the execution after the other posts went out, so one bad clip does not hold back the rest.\nconst results = $input.all().map((item, i) => {\n  const post = $('Build Buffer post').all()[i].json;\n  const r = item.json;\n  const created = r.data?.createPost?.post ?? null;\n  const error = created ? null : (r.error?.message ?? r.errors?.[0]?.message ?? r.data?.createPost?.message ?? 'No post in the answer');\n  return { clipId: post.clipId, title: post.title, channelId: post.channelId, bufferPostId: created?.id ?? null, dueAt: created?.dueAt ?? null, error };\n});\nconst posted = new Set(results.filter((r) => !r.error).map((r) => r.clipId));\nconst refused = new Set(results.filter((r) => r.error && !posted.has(r.clipId)).map((r) => r.clipId));\nconst store = $getWorkflowStaticData('global');\nstore.postedClipIds = (store.postedClipIds ?? []).filter((id) => !refused.has(id));\n\nconst failed = results.filter((r) => r.error);\nif (failed.length) throw new Error(`Buffer refused ${failed.length} post(s):\\n${failed.map((r) => `${r.title} → ${r.channelId}: ${r.error}`).join('\\n')}`);\nreturn results.map((r) => ({ json: r }));"
+      }
+    },
+    {
+      "id": "098b1577-ec82-4c04-baf4-d00c09d4aac4",
+      "name": "Download clip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -480
+      ],
+      "disabled": true,
+      "parameters": {
+        "url": "={{ $json.shareUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "1b97a87c-6336-4975-b875-95b2526db0c5",
+      "name": "Upload to YouTube Shorts",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -480
+      ],
+      "disabled": true,
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Pick clips').item.json.title.slice(0, 100) }}",
+        "regionCode": "US",
+        "categoryId": "22",
+        "binaryProperty": "data",
+        "options": {
+          "description": "={{ $('Pick clips').item.json.text }}\n\n#Shorts",
+          "privacyStatus": "private",
+          "tags": "={{ $('Pick clips').item.json.hashtags.map((h) => h.slice(1)).join(',') }}",
+          "selfDeclaredMadeForKids": false
+        }
+      }
+    },
+    {
+      "id": "555cbebd-3ff2-455c-a2c8-b072d3def4af",
+      "name": "POST each clip to your endpoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -300
+      ],
+      "disabled": true,
+      "parameters": {
+        "method": "POST",
+        "url": "https://example.com/YOUR_ENDPOINT",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "d4d34b69-489f-4635-a113-971beeade58b",
+      "name": "Add this webhook to Reelsaw (run once)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        480
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "68d9c278-0743-411b-8055-44b01f8387e9",
+      "name": "Subscribe settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        480
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dd4b8da5-b3d1-4f23-b424-8dc7151ae3a5",
+              "name": "reelsawUrl",
+              "value": "https://app.reelsaw.com",
+              "type": "string"
+            },
+            {
+              "id": "70789606-3ccb-4343-8b1c-7fca01f36b51",
+              "name": "webhookUrl",
+              "value": "https://YOUR_N8N_HOST/webhook/reelsaw-clips",
+              "type": "string"
+            },
+            {
+              "id": "766ac592-8b89-4639-b48d-bc0514be92fd",
+              "name": "events",
+              "value": "project.done",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0cdb28e5-7c44-4c2f-b6cc-942a1fe727eb",
+      "name": "Create webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Subscribe settings').first().json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_webhook', arguments: { url: $json.webhookUrl, events: $json.events.split(',').map((e) => e.trim()), description: 'n8n shorts publish' } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "0932226d-3781-4d99-8a46-bf518e3146a6",
+      "name": "Show signing secret",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        480
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// create_webhook answers { endpoint, secret }. The secret is shown only this once: paste it into the\n// Verify signature node (or REELSAW_WEBHOOK_SECRET), then activate this workflow.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nconst { endpoint, secret } = JSON.parse(text);\nreturn { json: { webhookId: endpoint.id, url: endpoint.url, events: endpoint.events, secret, next: 'Paste secret into the Verify signature node, save, and activate this workflow.' } };"
+      }
+    },
+    {
+      "id": "ed6694cc-ac3e-4c0c-b7b8-593874e32857",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -620
+      ],
+      "parameters": {
+        "width": 1000,
+        "height": 480,
+        "content": "## 2/2 Reelsaw clips ready → publish\n\nReelsaw POSTs a signed `project.done` here when a project's clips are rendered. **Verify signature** checks it (Standard Webhooks, 5 min replay window) and answers 401 if it is not from Reelsaw; then each rendered clip's `shareUrl` (downloads without a key) is posted to Buffer with its caption and hashtags.\n\n1. Subscribe: open **Reelsaw webhook**, copy the **Production URL**, then either Reelsaw **Settings → Webhooks → Add webhook** (event `project.done`), or paste it into **Subscribe settings** (plus the Reelsaw Header Auth credential on **Create webhook**) and run **Add this webhook to Reelsaw**.\n2. Paste the `whsec_…` secret (shown once) into `SECRETS` in **Verify signature**, or set `REELSAW_WEBHOOK_SECRET` on self-hosted n8n. Self-hosted n8n also needs `NODE_FUNCTION_ALLOW_BUILTIN=crypto`.\n3. Buffer: create a key at publish.buffer.com/settings/api, add a **Header Auth** credential (`Authorization` / `Bearer …`) on **Post to Buffer**, and put your channel ids in **Settings** (YouTube channels in `bufferYoutubeChannelIds`).\n4. Save, **activate** the workflow, then press **Send test** on the webhook in Reelsaw: the delivery log should show 200.\n\nOnly projects whose `metadata.workflow` equals `workflowTag` are posted (set by workflow 1/2). Each clip is posted once, even when `project.done` comes again after a re-run."
+      }
+    },
+    {
+      "id": "d773b356-231a-4fad-a531-018ee3a5e5ec",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        -800
+      ],
+      "parameters": {
+        "width": 520,
+        "height": 640,
+        "content": "### Other places to publish (disabled)\n\nEnable instead of, or next to, Buffer:\n- **Download clip → Upload to YouTube Shorts**: n8n's YouTube node with a YouTube OAuth2 credential. Uploads private by default; change `privacyStatus` once you trust it.\n- **POST each clip to your endpoint**: title, caption, hashtags and `shareUrl` as JSON to your own service.\n\nThey sit above Buffer so they run first: n8n runs branches top to bottom, and a Buffer refusal fails the execution.",
+        "color": 7
+      }
+    }
+  ],
+  "connections": {
+    "Reelsaw webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Accept",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Pick clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick clips": {
+      "main": [
+        [
+          {
+            "node": "Build Buffer post",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download clip",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "POST each clip to your endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Buffer post": {
+      "main": [
+        [
+          {
+            "node": "Post to Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Buffer": {
+      "main": [
+        [
+          {
+            "node": "Check Buffer answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download clip": {
+      "main": [
+        [
+          {
+            "node": "Upload to YouTube Shorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add this webhook to Reelsaw (run once)": {
+      "main": [
+        [
+          {
+            "node": "Subscribe settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subscribe settings": {
+      "main": [
+        [
+          {
+            "node": "Create webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create webhook": {
+      "main": [
+        [
+          {
+            "node": "Show signing secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

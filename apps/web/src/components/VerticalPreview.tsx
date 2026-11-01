@@ -1,7 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { textFontFamily } from "../lib/fonts";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, defaultStyle, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
+import {
+  OVERLAY_PAD_X,
+  OVERLAY_PAD_Y,
+  verticalCrop,
+  CAPTION_FONT_FRAC,
+  HOOK_FONT_FRAC,
+  groupCaptionLines,
+  lineSecondsFor,
+  captionMaxChars,
+  lineDisplayEnd,
+  emphasisKey,
+  speakerCrop,
+  cropX,
+  contentStackGeometry,
+  isFullFrame,
+  tileCrop,
+  defaultStyle,
+  captionYAt,
+  type ContentRegion,
+  type Style,
+  type SourceOverlay,
+  type SeamRun,
+} from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -19,9 +41,9 @@ export interface Framing {
   /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone */
   tile?: ContentRegion;
   /** a crop the user fixed on the first pane (the only pane, the top of a split, the speaker of a stack): shown at its own shape over a blurred copy */
-  crop?: ContentRegion;
+  crop?: ContentRegion | undefined;
   /** a crop the user fixed on the bottom pane of a split */
-  crop2?: ContentRegion;
+  crop2?: ContentRegion | undefined;
 }
 /** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
 export type PaneHit = 0 | 1 | "top";
@@ -70,7 +92,11 @@ export type PreviewAssetOverlay =
 
 /** Where a layout's crop panes sit in the 9:16 frame, as [top, bottom] fractions; a stack's top part is content, not a crop. */
 export function paneBands(f: Framing, srcW: number, srcH: number): Array<[number, number]> {
-  if (f.layout === "split") return [[0, 0.5], [0.5, 1]];
+  if (f.layout === "split")
+    return [
+      [0, 0.5],
+      [0.5, 1],
+    ];
   if (f.layout === "stack") return [[isFullFrame(f.content) ? Math.min(0.9, (1080 * srcH) / srcW / 1920) : 0.5, 1]];
   if (f.layout === "face" || f.layout === "center") return [[0, 1]];
   // a fitted frame has nothing to pan, unless the user fixed a crop on it (then the crop's window moves)
@@ -141,6 +167,8 @@ interface Props {
   framing: Framing;
   style: Style;
   words: PreviewWord[];
+  /** split / stack stretches on the words' clock: caption lines there sit on the seam, as the renderer places them */
+  seams?: SeamRun[];
   /** clip-relative playback time (drives karaoke + hook visibility) */
   time: number;
   hook?: string;
@@ -178,14 +206,26 @@ interface Props {
   showSafeZones?: boolean;
   platform?: Platform;
   /** small label in the top-left corner (e.g. which framing is showing) */
-  tag?: string;
+  tag?: string | undefined;
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
   className?: string;
 }
 
 /** A muted overlay video: looping stickers play on their own even while the clip is paused; b-roll follows the clip clock. */
-function OverlayVideo({ src, loop, offsetSec, playing, onSize }: { src: string; loop: boolean; offsetSec: number; playing: boolean; onSize: (w: number, h: number) => void }) {
+function OverlayVideo({
+  src,
+  loop,
+  offsetSec,
+  playing,
+  onSize,
+}: {
+  src: string;
+  loop: boolean;
+  offsetSec: number;
+  playing: boolean;
+  onSize: (w: number, h: number) => void;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   const follow = loop ? -1 : offsetSec;
   useEffect(() => {
@@ -203,11 +243,35 @@ function OverlayVideo({ src, loop, offsetSec, playing, onSize }: { src: string; 
     if (follow >= 0 && Math.abs(v.currentTime - follow) > 0.3) v.currentTime = Math.max(0, follow);
     if (v.paused) void v.play().catch(() => {});
   }, [playing, follow, src, loop]);
-  return <video ref={ref} src={src} muted playsInline autoPlay={loop} loop={loop} draggable={false} className="pointer-events-none h-full w-full object-contain" onLoadedMetadata={(e) => onSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)} />;
+  return (
+    <video
+      ref={ref}
+      src={src}
+      muted
+      playsInline
+      autoPlay={loop}
+      loop={loop}
+      draggable={false}
+      className="pointer-events-none h-full w-full object-contain"
+      onLoadedMetadata={(e) => onSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
+    />
+  );
 }
 
 /** One row of an overlay's right-click menu (the editor supplies them through `overlayMenu`). */
-export function OverlayMenuItem({ icon, label, kbd, disabled, onSelect }: { icon?: ReactNode; label: ReactNode; kbd?: string; disabled?: boolean; onSelect: () => void }) {
+export function OverlayMenuItem({
+  icon,
+  label,
+  kbd,
+  disabled,
+  onSelect,
+}: {
+  icon?: ReactNode;
+  label: ReactNode;
+  kbd?: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
   return (
     <ContextMenu.Item className="menu-item" disabled={disabled} onSelect={onSelect}>
       {icon}
@@ -296,7 +360,36 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, paneMenu, onHookChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({
+  source,
+  srcW,
+  srcH,
+  framing,
+  style,
+  words,
+  seams,
+  time,
+  hook,
+  emphasis,
+  alwaysShowHook,
+  onStyleChange,
+  onPan,
+  onPanEnd,
+  assetOverlays = [],
+  selectedOverlay = null,
+  onOverlaySelect,
+  onOverlayChange,
+  overlayMenu,
+  paneMenu,
+  onHookChange,
+  playing = true,
+  still,
+  showSafeZones,
+  platform = "tiktok",
+  tag,
+  overlays,
+  className = "",
+}: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
@@ -312,7 +405,13 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     if (editing && !assetOverlays.some((o) => o.id === editing)) setEditing(null);
   }, [editing, assetOverlays]);
   const [naturalAspect, setNaturalAspect] = useState<Record<string, number>>({});
-  const [drag, setDrag] = useState<null | "caption" | "hook" | { pan: 0 | 1 } | { overlay: string; mode: "move" | "size"; key: string; grab: { x: number; y: number }; orig: { x: number; y: number; w: number }; text: boolean }>(null);
+  const [drag, setDrag] = useState<
+    | null
+    | "caption"
+    | "hook"
+    | { pan: 0 | 1 }
+    | { overlay: string; mode: "move" | "size"; key: string; grab: { x: number; y: number }; orig: { x: number; y: number; w: number }; text: boolean }
+  >(null);
   const panX = useRef(0);
   const panY = useRef(0);
   const [snappedX, setSnappedX] = useState(false);
@@ -356,11 +455,18 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     return () => cancelAnimationFrame(raf);
   }, [source, srcW, srcH]);
 
-  const lines = useMemo(() => groupCaptionLines(words, style.wordsPerLine, lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize)), [words, style.wordsPerLine, style.captionSize]);
+  const lines = useMemo(
+    () => groupCaptionLines(words, style.wordsPerLine, lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize)),
+    [words, style.wordsPerLine, style.captionSize],
+  );
   const lineIdx = lines.findIndex((l, i) => time >= l[0]!.start && time <= lineDisplayEnd(lines, i));
   const line = lineIdx >= 0 ? lines[lineIdx] : alwaysShowHook ? lines[0] : undefined;
   const em = useMemo(() => new Set(style.emphasis ? (emphasis ?? []).map(emphasisKey) : []), [emphasis, style.emphasis]);
-  const activeIdx = line ? line.findIndex((w, i) => time >= (i === 0 ? line[0]!.start : w.start) && time < (i === line.length - 1 ? line[line.length - 1]!.end : line[i + 1]!.start)) : -1;
+  // placed once per line, at its midpoint (captionYAt), like the ASS file
+  const captionY = line ? captionYAt(style, seams ?? [], lineIdx >= 0 ? (line[0]!.start + lineDisplayEnd(lines, lineIdx)) / 2 : time) : style.captionY;
+  const activeIdx = line
+    ? line.findIndex((w, i) => time >= (i === 0 ? line[0]!.start : w.start) && time < (i === line.length - 1 ? line[line.length - 1]!.end : line[i + 1]!.start))
+    : -1;
   const showHook = style.showHook && !!hook && (alwaysShowHook || editingHook || time < style.hookSeconds);
   const width = (h * 9) / 16;
 
@@ -400,7 +506,14 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     onOverlaySelect?.(o.id);
     const r = boxRef.current.getBoundingClientRect();
     // for text the "width" being resized is the font size (fraction of the height)
-    setDrag({ overlay: o.id, mode, key: `g:ov-${mode}:${Date.now()}`, grab: { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }, orig: { x: o.x, y: o.y, w: o.kind === "text" ? o.size : o.w }, text: o.kind === "text" });
+    setDrag({
+      overlay: o.id,
+      mode,
+      key: `g:ov-${mode}:${Date.now()}`,
+      grab: { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height },
+      orig: { x: o.x, y: o.y, w: o.kind === "text" ? o.size : o.w },
+      text: o.kind === "text",
+    });
   }
   function onPointerMove(e: React.PointerEvent) {
     if (drag && typeof drag === "object" && "pan" in drag && boxRef.current && onPan) {
@@ -423,7 +536,12 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
       const px = (e.clientX - r.left) / r.width;
       const py = (e.clientY - r.top) / r.height;
       const r3 = (n: number) => Math.round(n * 1000) / 1000;
-      if (drag.mode === "move") onOverlayChange(drag.overlay, { x: r3(Math.max(0, Math.min(1, drag.orig.x + px - drag.grab.x))), y: r3(Math.max(0, Math.min(1, drag.orig.y + py - drag.grab.y))) }, drag.key);
+      if (drag.mode === "move")
+        onOverlayChange(
+          drag.overlay,
+          { x: r3(Math.max(0, Math.min(1, drag.orig.x + px - drag.grab.x))), y: r3(Math.max(0, Math.min(1, drag.orig.y + py - drag.grab.y))) },
+          drag.key,
+        );
       else if (drag.text) onOverlayChange(drag.overlay, { size: r3(Math.max(0.02, Math.min(0.12, drag.orig.w + (py - drag.grab.y) * 0.5))) }, drag.key);
       else {
         // width-only in the file (the renderer is scale=w:-2); grow from either axis so a downward corner drag still scales
@@ -467,7 +585,11 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     <>
       {onHookChange && <OverlayMenuItem label="Edit text" kbd="dbl-click" onSelect={() => setEditingHook(true)} />}
       <OverlayMenuItem label="Centre left / right" disabled={style.hookX === 0.5} onSelect={() => onStyleChange?.({ hookX: 0.5 })} />
-      <OverlayMenuItem label="Reset position" disabled={style.hookX === defaultStyle.hookX && style.hookY === defaultStyle.hookY} onSelect={() => onStyleChange?.({ hookX: defaultStyle.hookX, hookY: defaultStyle.hookY })} />
+      <OverlayMenuItem
+        label="Reset position"
+        disabled={style.hookX === defaultStyle.hookX && style.hookY === defaultStyle.hookY}
+        onSelect={() => onStyleChange?.({ hookX: defaultStyle.hookX, hookY: defaultStyle.hookY })}
+      />
       <OverlayMenuSeparator />
       <OverlayMenuItem label="Hide the hook" onSelect={() => onStyleChange?.({ showHook: false })} />
     </>
@@ -491,7 +613,17 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     <div
       ref={boxRef}
       className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
-      title={pannable ? (framing.layout === "split" ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them" : framing.crop ? "Drag the picture to move the crop; right-click to set it exactly" : "Drag the picture to re-centre the crop; right-click to set it exactly") : paneMenu ? "Right-click to fix the crop" : undefined}
+      title={
+        pannable
+          ? framing.layout === "split"
+            ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them"
+            : framing.crop
+              ? "Drag the picture to move the crop; right-click to set it exactly"
+              : "Drag the picture to re-centre the crop; right-click to set it exactly"
+          : paneMenu
+            ? "Right-click to fix the crop"
+            : undefined
+      }
       onPointerDown={onPanStart}
       onContextMenu={(e) => {
         if (!paneMenu || !boxRef.current) return;
@@ -500,17 +632,26 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
         if (hit === null) e.preventDefault();
         setMenuHit(hit);
       }}
-      onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
       {assetOverlays.map((o) => {
         const sel = o.id === selectedOverlay;
         const name = o.kind === "text" ? `“${o.text}”` : o.name;
         const isEditing = editing === o.id;
         const handle = sel && onOverlayChange && !isEditing && (
-          <span className="absolute bottom-0.5 right-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc" onPointerDown={(e) => onOverlayStart(o, "size", e)} aria-label={`Resize ${name}`} />
+          <span
+            className="absolute bottom-0.5 right-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc"
+            onPointerDown={(e) => onOverlayStart(o, "size", e)}
+            aria-label={`Resize ${name}`}
+          />
         );
         const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${isEditing ? "cursor-text" : onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
-        const hint = onOverlayChange ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", right-click for more" : ""}` : name;
+        const hint = onOverlayChange
+          ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", right-click for more" : ""}`
+          : name;
         // the editor's right-click menu around the block; right-clicking selects the layer first
         const withMenu = (node: ReactNode) =>
           overlayMenu ? (
@@ -541,7 +682,13 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
                 maxWidth: width * 0.88,
                 color: o.color,
                 opacity: o.opacity,
-                ...(o.box ? { background: "rgba(0,0,0,0.63)", padding: `${px * 0.12}px ${px * 0.25}px` } : { WebkitTextStroke: `${Math.max(1, px * 0.06)}px #000`, paintOrder: "stroke fill", textShadow: `0 ${px * 0.04}px ${px * 0.06}px rgba(0,0,0,0.5)` }),
+                ...(o.box
+                  ? { background: "rgba(0,0,0,0.63)", padding: `${px * 0.12}px ${px * 0.25}px` }
+                  : {
+                      WebkitTextStroke: `${Math.max(1, px * 0.06)}px #000`,
+                      paintOrder: "stroke fill",
+                      textShadow: `0 ${px * 0.04}px ${px * 0.06}px rgba(0,0,0,0.5)`,
+                    }),
               }}
               onPointerDown={(e) => onOverlayStart(o, "move", e)}
               onContextMenu={(e) => {
@@ -589,7 +736,13 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
             {o.video ? (
               <OverlayVideo src={o.url} loop={!!o.loop} offsetSec={o.offsetSec ?? 0} playing={playing && !still} onSize={noteSize} />
             ) : (
-              <img src={o.url} alt="" draggable={false} className="pointer-events-none h-full w-full object-contain" onLoad={(e) => noteSize(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />
+              <img
+                src={o.url}
+                alt=""
+                draggable={false}
+                className="pointer-events-none h-full w-full object-contain"
+                onLoad={(e) => noteSize(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+              />
             )}
             {handle}
           </div>,
@@ -598,16 +751,25 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
       {still && (
         <div className="absolute inset-0 z-[5] bg-black">
           <img src={still.url} alt="" className="h-full w-full object-cover" />
-          <span className="pointer-events-none absolute left-2 top-2 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{still.tag}</span>
+          <span className="pointer-events-none absolute left-2 top-2 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+            {still.tag}
+          </span>
         </div>
       )}
       {showSafeZones && !still && <SafeZones platform={platform} />}
-      {tag && !still && <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>}
+      {tag && !still && (
+        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>
+      )}
       {panning &&
         (() => {
           const pane = drag && typeof drag === "object" && "pan" in drag ? drag.pan : 0;
           const band = paneBands(framing, srcW, srcH)[pane];
-          return band && !(band[0] === 0 && band[1] === 1) ? <div className="pointer-events-none absolute inset-x-0 z-10 outline outline-2 -outline-offset-2 outline-acc" style={{ top: `${band[0] * 100}%`, height: `${(band[1] - band[0]) * 100}%` }} /> : null;
+          return band && !(band[0] === 0 && band[1] === 1) ? (
+            <div
+              className="pointer-events-none absolute inset-x-0 z-10 outline outline-2 -outline-offset-2 outline-acc"
+              style={{ top: `${band[0] * 100}%`, height: `${(band[1] - band[0]) * 100}%` }}
+            />
+          ) : null;
         })()}
       {drag === "caption" || drag === "hook" ? (
         <>
@@ -622,7 +784,17 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
           const node = (
             <div
               className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${editingHook ? "cursor-text" : draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" || editingHook ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
-              style={{ left: `${style.hookX * 100}%`, top: `${style.hookY * 100}%`, fontFamily: FONT, fontSize: hookPx, maxWidth: width * 0.88, width: "max-content", background: "#fff", color: "#000", padding: `${hookPx * 0.2}px ${hookPx * 0.3}px` }}
+              style={{
+                left: `${style.hookX * 100}%`,
+                top: `${style.hookY * 100}%`,
+                fontFamily: FONT,
+                fontSize: hookPx,
+                maxWidth: width * 0.88,
+                width: "max-content",
+                background: "#fff",
+                color: "#000",
+                padding: `${hookPx * 0.2}px ${hookPx * 0.3}px`,
+              }}
               onPointerDown={(e) => onPointerDown("hook", e)}
               onDoubleClick={() => onHookChange && setEditingHook(true)}
               onContextMenu={(e) => e.stopPropagation()}
@@ -662,7 +834,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
           className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "caption" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{
             left: `${style.captionX * 100}%`,
-            top: `${style.captionY * 100}%`,
+            top: `${(drag === "caption" ? style.captionY : captionY) * 100}%`,
             fontFamily: FONT,
             fontSize: capPx,
             maxWidth: width * 0.88,
@@ -670,7 +842,11 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
             color: "#fff",
             ...(style.captions === "box"
               ? { background: "rgba(0,0,0,0.63)", padding: `${capPx * 0.12}px ${capPx * 0.25}px` }
-              : { WebkitTextStroke: `${Math.max(1, capPx * 0.06)}px #000`, paintOrder: "stroke fill", textShadow: `0 ${capPx * 0.04}px ${capPx * 0.06}px rgba(0,0,0,0.5)` }),
+              : {
+                  WebkitTextStroke: `${Math.max(1, capPx * 0.06)}px #000`,
+                  paintOrder: "stroke fill",
+                  textShadow: `0 ${capPx * 0.04}px ${capPx * 0.06}px rgba(0,0,0,0.5)`,
+                }),
           }}
           onPointerDown={(e) => onPointerDown("caption", e)}
           title={draggable ? "Drag to move captions (hold Alt to skip centre snapping)" : undefined}
@@ -681,14 +857,18 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
             const isEm = em.has(emphasisKey(w.text));
             return (
               <span key={i}>
-                <span style={active ? { color: style.highlightColor, fontSize: "1.12em" } : isEm ? { color: style.emphasisColor, fontSize: "1.12em" } : undefined}>{t}</span>
+                <span
+                  style={active ? { color: style.highlightColor, fontSize: "1.12em" } : isEm ? { color: style.emphasisColor, fontSize: "1.12em" } : undefined}
+                >
+                  {t}
+                </span>
                 {i < line.length - 1 ? " " : ""}
               </span>
             );
           })}
         </div>
       )}
-    </div>
+    </div>,
   );
 }
 
@@ -721,7 +901,16 @@ function ready(src: HTMLVideoElement | HTMLImageElement | null): src is HTMLVide
   return src.complete && src.naturalWidth > 0;
 }
 
-function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVideoElement | HTMLImageElement | null, sw0: number, sh0: number, f: Framing, overlays: SourceOverlay[]) {
+function paint(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  src: HTMLVideoElement | HTMLImageElement | null,
+  sw0: number,
+  sh0: number,
+  f: Framing,
+  overlays: SourceOverlay[],
+) {
   ctx.filter = "none";
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);

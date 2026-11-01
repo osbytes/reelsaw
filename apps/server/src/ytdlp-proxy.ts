@@ -42,6 +42,10 @@ import {
   type CircuitBreakerPolicy,
 } from "cockatiel";
 import type { Logger } from "./log.js";
+import { count, gauge, histogram } from "./metrics.js";
+import { classifyYtdlpError } from "./ytdlp-errors.js";
+
+export { classifyYtdlpError, type YtdlpErrorKind } from "./ytdlp-errors.js";
 
 const SCHEMES = new Set(["http:", "https:", "socks4:", "socks4a:", "socks5:", "socks5h:"]);
 const NEVER_ABORT = new AbortController().signal;
@@ -192,23 +196,6 @@ function proxyArgs(url: string | null): string[] {
   return ["--proxy", applyProxySession(url)];
 }
 
-export type YtdlpErrorKind = "content" | "abort" | "proxy" | "other";
-
-/**
- * content = the video, not the path (private / unavailable / too big): do not try another proxy
- * and do not open this one's circuit. abort = the job was cancelled. proxy = the path failed
- * (bot check, 403, connection): trip the breaker and try the next. other = retry the next
- * without a reliability hit.
- */
-export function classifyYtdlpError(text: string): YtdlpErrorKind {
-  if (/\bAbortError\b|The operation was aborted|aborted by signal/i.test(text)) return "abort";
-  if (/this video is private|video unavailable|confirm your age|age-restricted|file is larger than max-filesize|requested format is not available/i.test(text)) return "content";
-  if (/sign in to confirm|not a bot|HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/i.test(text)) {
-    return "proxy";
-  }
-  return "other";
-}
-
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -255,12 +242,49 @@ export function createYtdlpProxyPool(
     breaker.onFailure((ev) => {
       if (ev.handled) remember(slot, false);
     });
+    breaker.onStateChange((state) =>
+      count(
+        "reelsaw.ytdlp.proxy.circuit.changes",
+        1,
+        "{change}",
+        { proxy: candidate.id, state: circuitOf(state) },
+        "yt-dlp proxy circuit transitions (open = cooling after consecutive faults)",
+      ),
+    );
     return slot;
   });
 
   const healthy = (s: Slot) => s.breaker.state === CircuitState.Closed || s.breaker.state === CircuitState.HalfOpen;
   const hasSlot = (s: Slot) => !s.bulkhead || s.bulkhead.executionSlots > 0;
   const rank = (a: Slot, b: Slot) => b.candidate.priority - a.candidate.priority || a.candidate.id.localeCompare(b.candidate.id);
+  /** attempts in progress per candidate, for the in-flight gauge (a bulkhead only counts capped candidates) */
+  const running = new Map<string, number>();
+  if (slots.length) registerProxyGauges(slots);
+
+  /** One yt-dlp process through one candidate: its wall time and how it ended, by proxy. */
+  async function attempt<T>(id: string, panic: boolean, work: () => Promise<T>): Promise<T> {
+    const t0 = performance.now();
+    let outcome: string = "ok";
+    running.set(id, (running.get(id) ?? 0) + 1);
+    try {
+      return await work();
+    } catch (err) {
+      outcome = isBulkheadRejectedError(err)
+        ? "busy"
+        : isBrokenCircuitError(err)
+          ? "circuit_open"
+          : isTaskCancelledError(err)
+            ? "abort"
+            : classifyYtdlpError(errorText(err));
+      throw err;
+    } finally {
+      running.set(id, (running.get(id) ?? 1) - 1);
+      const attrs = { proxy: id, outcome, panic };
+      count("reelsaw.ytdlp.attempts", 1, "{attempt}", attrs, "yt-dlp attempts per proxy candidate, by outcome (busy and circuit_open never started a process)");
+      if (outcome !== "busy" && outcome !== "circuit_open")
+        histogram("reelsaw.ytdlp.attempt.duration", (performance.now() - t0) / 1000, "s", attrs, "Wall time of one yt-dlp process through one proxy candidate");
+    }
+  }
 
   /** Operator ranking only. An open circuit is a fail-fast skip inside `execute`, not a re-rank. */
   function ordered(exclude: ReadonlySet<string>): Slot[] {
@@ -292,80 +316,131 @@ export function createYtdlpProxyPool(
       return { next: next?.candidate.id ?? null, candidates: slots.map(snapOf) };
     },
     async run(fn, signal) {
-      const exclude = new Set<string>();
-      let lastErr: unknown;
-      let usedFallback = false;
-      for (;;) {
-        signal?.throwIfAborted();
-        const walk = ordered(exclude);
-        if (!walk.length) {
-          const busy = slots.some((s) => !exclude.has(s.candidate.id) && !hasSlot(s));
-          if (busy) {
-            await sleep(slotWaitMs, signal);
-            continue;
-          }
-          if (lastErr !== undefined) throw lastErr;
-          throw new Error("YTDLP_PROXY: no candidate available");
-        }
-        let skippedBusy = false;
-        for (const slot of walk) {
-          signal?.throwIfAborted();
-          const id = slot.candidate.id;
-          const args = proxyArgs(slot.candidate.url);
-          try {
-            const value = await slot.breaker.execute(async (ctx) => {
-              if (slot.bulkhead) return slot.bulkhead.execute(() => fn({ id, args }, ctx.signal), ctx.signal);
-              return fn({ id, args }, ctx.signal);
-            }, signal);
-            if (usedFallback) log?.warn({ proxyId: id, skipped: [...exclude] }, "yt-dlp proxy fallback");
-            else log?.debug({ proxyId: id }, "yt-dlp proxy ok");
-            return { value, id };
-          } catch (err) {
-            if (isTaskCancelledError(err) || signal?.aborted) throw err;
-            if (isBulkheadRejectedError(err)) {
-              skippedBusy = true;
-              continue;
-            }
-            if (isBrokenCircuitError(err)) {
-              // still cooling: try the next-priority candidate rather than wait
-              continue;
-            }
-            lastErr = err;
-            const kind = classifyYtdlpError(errorText(err));
-            if (kind === "content" || kind === "abort") throw err;
-            exclude.add(id);
-            usedFallback = true;
-            const hasNext = slots.some((s) => !exclude.has(s.candidate.id));
-            log?.warn({ proxyId: id, kind }, hasNext ? "yt-dlp proxy failed, trying next" : "yt-dlp proxy failed");
-          }
-        }
-        if (skippedBusy) {
-          await sleep(slotWaitMs, signal);
-          continue;
-        }
-        // every remaining circuit is open and halfOpenAfter has not elapsed: last resort, bypass
-        // the breaker on the highest-priority candidate so a download is not stuck until cooldown
-        const panic = [...slots].filter((s) => !exclude.has(s.candidate.id)).sort(rank)[0];
-        if (panic && lastErr === undefined) {
-          const id = panic.candidate.id;
-          const args = proxyArgs(panic.candidate.url);
-          log?.warn({ proxyId: id }, "yt-dlp proxy all cooling, trying anyway");
-          try {
-            const value = await fn({ id, args }, signal ?? NEVER_ABORT);
-            return { value, id };
-          } catch (err) {
-            lastErr = err;
-            const kind = classifyYtdlpError(errorText(err));
-            if (kind === "content" || kind === "abort") throw err;
-            exclude.add(id);
-            continue;
-          }
-        }
-        if (lastErr !== undefined) throw lastErr;
-        throw new BrokenCircuitError();
+      const t0 = performance.now();
+      const state = { fallback: false };
+      let proxy = "none";
+      let outcome = "ok";
+      try {
+        const out = await walk(fn, signal, state);
+        proxy = out.id;
+        return out;
+      } catch (err) {
+        outcome = signal?.aborted ? "abort" : classifyYtdlpError(errorText(err));
+        throw err;
+      } finally {
+        histogram(
+          "reelsaw.ytdlp.download.duration",
+          (performance.now() - t0) / 1000,
+          "s",
+          { proxy, outcome, fallback: state.fallback },
+          "One yt-dlp download through the proxy pool, waits and fallbacks included; proxy is the candidate that served it",
+        );
       }
     },
   };
+
+  async function walk<T>(
+    fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
+    signal: AbortSignal | undefined,
+    state: { fallback: boolean },
+  ): Promise<{ value: T; id: string }> {
+    const exclude = new Set<string>();
+    let lastErr: unknown;
+    let usedFallback = false;
+    for (;;) {
+      signal?.throwIfAborted();
+      const walk = ordered(exclude);
+      if (!walk.length) {
+        const busy = slots.some((s) => !exclude.has(s.candidate.id) && !hasSlot(s));
+        if (busy) {
+          await sleep(slotWaitMs, signal);
+          continue;
+        }
+        if (lastErr !== undefined) throw lastErr;
+        throw new Error("YTDLP_PROXY: no candidate available");
+      }
+      let skippedBusy = false;
+      for (const slot of walk) {
+        signal?.throwIfAborted();
+        const id = slot.candidate.id;
+        const args = proxyArgs(slot.candidate.url);
+        try {
+          const value = await attempt(id, false, () =>
+            slot.breaker.execute(async (ctx) => {
+              if (slot.bulkhead) return slot.bulkhead.execute(() => fn({ id, args }, ctx.signal), ctx.signal);
+              return fn({ id, args }, ctx.signal);
+            }, signal),
+          );
+          if (usedFallback) log?.warn({ proxyId: id, skipped: [...exclude] }, "yt-dlp proxy fallback");
+          else log?.debug({ proxyId: id }, "yt-dlp proxy ok");
+          return { value, id };
+        } catch (err) {
+          if (isTaskCancelledError(err) || signal?.aborted) throw err;
+          if (isBulkheadRejectedError(err)) {
+            skippedBusy = true;
+            continue;
+          }
+          if (isBrokenCircuitError(err)) {
+            // still cooling: try the next-priority candidate rather than wait
+            continue;
+          }
+          lastErr = err;
+          const kind = classifyYtdlpError(errorText(err));
+          if (kind === "content" || kind === "abort") throw err;
+          exclude.add(id);
+          usedFallback = state.fallback = true;
+          const hasNext = slots.some((s) => !exclude.has(s.candidate.id));
+          log?.warn({ proxyId: id, kind }, hasNext ? "yt-dlp proxy failed, trying next" : "yt-dlp proxy failed");
+        }
+      }
+      if (skippedBusy) {
+        await sleep(slotWaitMs, signal);
+        continue;
+      }
+      // every remaining circuit is open and halfOpenAfter has not elapsed: last resort, bypass
+      // the breaker on the highest-priority candidate so a download is not stuck until cooldown
+      const panic = [...slots].filter((s) => !exclude.has(s.candidate.id)).sort(rank)[0];
+      if (panic && lastErr === undefined) {
+        const id = panic.candidate.id;
+        const args = proxyArgs(panic.candidate.url);
+        log?.warn({ proxyId: id }, "yt-dlp proxy all cooling, trying anyway");
+        try {
+          const value = await attempt(id, true, () => fn({ id, args }, signal ?? NEVER_ABORT));
+          return { value, id };
+        } catch (err) {
+          lastErr = err;
+          const kind = classifyYtdlpError(errorText(err));
+          if (kind === "content" || kind === "abort") throw err;
+          exclude.add(id);
+          state.fallback = true;
+          continue;
+        }
+      }
+      if (lastErr !== undefined) throw lastErr;
+      throw new BrokenCircuitError();
+    }
+  }
+
+  function registerProxyGauges(all: Slot[]) {
+    gauge(
+      "reelsaw.ytdlp.proxy.healthy",
+      "1",
+      () => all.map((s) => [healthy(s) ? 1 : 0, { proxy: s.candidate.id }]),
+      "1 while the candidate's circuit is closed or half-open, 0 while it cools",
+    );
+    gauge(
+      "reelsaw.ytdlp.proxy.in_flight",
+      "{download}",
+      () => all.map((s) => [running.get(s.candidate.id) ?? 0, { proxy: s.candidate.id }]),
+      "yt-dlp processes running through the candidate in this process",
+    );
+    gauge(
+      "reelsaw.ytdlp.proxy.success_rate",
+      "1",
+      () => all.filter((s) => s.results.length).map((s) => [s.results.filter(Boolean).length / s.results.length, { proxy: s.candidate.id }]),
+      `Successes over the candidate's last ${PROXY_RESULT_WINDOW} proxy results`,
+    );
+  }
 }
 
 function remember(slot: Slot, ok: boolean) {

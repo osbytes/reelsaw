@@ -47,15 +47,7 @@ if (kind === "signoff") {
     console.error("git user.name and user.email must be set for the DCO trailer");
     process.exit(1);
   }
-  const result = run("git", [
-    "interpret-trailers",
-    "--in-place",
-    "--if-exists",
-    "addIfDifferent",
-    "--trailer",
-    `Signed-off-by: ${who} <${addr}>`,
-    file,
-  ]);
+  const result = run("git", ["interpret-trailers", "--in-place", "--if-exists", "addIfDifferent", "--trailer", `Signed-off-by: ${who} <${addr}>`, file]);
   if (missing(result)) {
     console.error("git not installed");
     process.exit(1);

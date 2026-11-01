@@ -3,7 +3,17 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { otlpBase, parseOtlpHeaders, resolveOtlp, otelLogFromLine, spanMetricAttributes, traceSampleRate, applyServerSampler, publicFromResolved, injectOtelBoot } from "../src/otel-config.js";
+import {
+  otlpBase,
+  parseOtlpHeaders,
+  resolveOtlp,
+  otelLogFromLine,
+  spanMetricAttributes,
+  traceSampleRate,
+  applyServerSampler,
+  publicFromResolved,
+  injectOtelBoot,
+} from "../src/otel-config.js";
 import { scrubOutboundText } from "../src/report/redact.js";
 
 describe("otlpBase", () => {
@@ -149,21 +159,24 @@ describe("otelLogFromLine", () => {
 });
 
 describe("spanMetricAttributes", () => {
-  it("keeps scalar attributes and drops the rest", () => {
+  it("keeps bounded string and boolean attributes; drops ids, numbers and the rest", () => {
     assert.deepEqual(
       spanMetricAttributes("pipeline.render", false, {
         "reelsaw.project_id": "p1",
+        "reelsaw.clip_id": "c1",
+        jobId: "j1",
         "reelsaw.attempt": 2,
+        "process.args_count": 40,
         "process.command": "x".repeat(250),
+        cached: true,
         skipped: ["a"],
         empty: undefined,
       }),
       {
         span: "pipeline.render",
         status: "error",
-        "reelsaw.project_id": "p1",
-        "reelsaw.attempt": 2,
         "process.command": "x".repeat(200),
+        cached: true,
       },
     );
   });

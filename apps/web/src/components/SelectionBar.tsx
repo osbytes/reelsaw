@@ -8,7 +8,11 @@ import { X } from "lucide-react";
  */
 export function SelectionBar({ label, count, onClear, children }: { label: string; count: number; onClear: () => void; children: ReactNode }) {
   return (
-    <div role="region" aria-label={label} className="sticky bottom-3 z-10 mx-auto mt-2 flex w-fit max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-[14px] border border-line bg-panel px-2 py-1.5 shadow-pop relative">
+    <div
+      role="region"
+      aria-label={label}
+      className="sticky bottom-3 z-10 mx-auto mt-2 flex w-fit max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-[14px] border border-line bg-panel px-2 py-1.5 shadow-pop relative"
+    >
       <span className="shrink-0 px-1.5 text-[13px] font-semibold" aria-live="polite">
         <span aria-hidden className="mr-1.5 font-mono text-acc-text">
           ✓

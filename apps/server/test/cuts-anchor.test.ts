@@ -100,12 +100,20 @@ describe("a cut that cannot be confirmed", () => {
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cuts-anchor-"));
   const wav = path.join(dir, "tone.wav");
-  if (haveFfmpeg) execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=8", "-ar", "16000", "-ac", "1", wav]);
+  if (haveFfmpeg)
+    execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=8", "-ar", "16000", "-ac", "1", wav]);
 
   // the recogniser hears something unrelated, so the removed text can never be found
   const transcript = words("nothing like the expected words here at all");
   const run = (manual: boolean) =>
-    refineCuts({ ffmpegPath: ffmpeg, transcribe: async () => transcript }, wav, 0, 8, [{ start: 2, end: 3.6, ...(manual ? { manual: true } : {}) }], [...words("before", 0.8), ...words("uh sure thing yes", 2), ...words("after", 3.8)]);
+    refineCuts(
+      { ffmpegPath: ffmpeg, transcribe: async () => transcript },
+      wav,
+      0,
+      8,
+      [{ start: 2, end: 3.6, ...(manual ? { manual: true } : {}) }],
+      [...words("before", 0.8), ...words("uh sure thing yes", 2), ...words("after", 3.8)],
+    );
 
   it("a manual cut is applied at the user's bounds, unverified, with the reason", { skip: !haveFfmpeg }, async () => {
     const res = await run(true);

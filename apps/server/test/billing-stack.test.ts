@@ -10,18 +10,36 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { BASE, db, signUp } from "./helpers.js";
 
 const MOCK = process.env.STRIPE_MOCK_URL;
 const json = { "content-type": "application/json", origin: BASE };
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data as never, error: body.error };
 }
-const mock = async (path: string, body: unknown = {}) => (await fetch(`${MOCK}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json() as Promise<{ subscription?: string; delivered: Array<{ status: number; body: string }>; status?: number }>;
-type State = { plan: { name: string }; reason: string; subscription: { status: string; cancelAtPeriodEnd: boolean } | null; limits: Record<string, number>; usage: Record<string, number>; watermark: { on: boolean; source: string }; period: { source?: string } | null; canManage: boolean };
+const mock = async (path: string, body: unknown = {}) =>
+  (await fetch(`${MOCK}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json() as Promise<{
+    subscription?: string;
+    delivered: Array<{ status: number; body: string }>;
+    status?: number;
+  }>;
+type State = {
+  plan: { name: string };
+  reason: string;
+  subscription: { status: string; cancelAtPeriodEnd: boolean } | null;
+  limits: Record<string, number>;
+  usage: Record<string, number>;
+  watermark: { on: boolean; source: string };
+  period: { source?: string } | null;
+  canManage: boolean;
+};
 async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 20_000): Promise<T> {
   const t0 = Date.now();
   for (;;) {
@@ -43,7 +61,8 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     await pool.end();
   });
   const state = async () => (await trpc(user.cookie, "billing.get", undefined, "GET")).data as State;
-  const events = async (type: string) => Number((await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = $2`, [user.userId, type])).rows[0].n);
+  const events = async (type: string) =>
+    Number((await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = $2`, [user.userId, type])).rows[0].n);
 
   it("a new account is on Free with the watermark and the Free limits", async () => {
     const s = await state();
@@ -57,10 +76,21 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
   });
 
   it("the first video is free up to 60 minutes; the next ones count against the 20-minute month", async () => {
-    const mk = (title: string, sec: number) => pool.query(
-      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values (gen_random_uuid()::text, $1, $2, 'url', 'https://example.com/v.mp4', $3, 'done', '{}', now(), now())`,
-      [user.userId, title, sec],
-    );
+    // minutes come from source_usage (the ledger a purged project keeps), so each video is a project row and a usage row
+    let n = 0;
+    const mk = async (title: string, sec: number) => {
+      const id = randomUUID();
+      await pool.query(
+        `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', $4, 'done', '{}', now(), now())`,
+        [id, user.userId, title, sec],
+      );
+      await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() + ($4 || ' seconds')::interval)`, [
+        user.userId,
+        id,
+        sec,
+        String(n++),
+      ]);
+    };
     await mk("First, 45 min", 45 * 60);
     let s = await state();
     assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0, "the first video does not count");
@@ -72,6 +102,28 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(refused.error?.data.code, "TOO_MANY_REQUESTS");
     assert.match(refused.error!.message, /Monthly limit of 20 minutes of video reached \(25 used\); resets on .*Starter gives 100 minutes a month: http/);
     await pool.query(`delete from projects where user_id = $1`, [user.userId]);
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
+  });
+
+  // stack only: source_usage rows with no length (still downloading, or failed before the probe) never take the free first video
+  it("the first-video allowance goes to the earliest video whose length is known", async () => {
+    const mk = (title: string, sec: number | null, ageMin: number) => {
+      const id = `fv-${title}-${Date.now()}`;
+      return pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() - ($4 || ' minutes')::interval)`, [
+        user.userId,
+        id,
+        sec,
+        String(ageMin),
+      ]);
+    };
+    await mk("pending", null, 30);
+    let s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0);
+    await mk("first", 45 * 60, 20);
+    await mk("second", 15 * 60, 10);
+    s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 15, "the 45-minute video is the free one, not the earlier row without a length");
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
   });
 
   it("checkout returns the mock's page; completing it delivers events in reverse and twice, and the plan lands", async () => {
@@ -111,6 +163,16 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.match((r.data as { url: string }).url, /flow=subscription_update_confirm/);
     const same = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month" });
     assert.match(same.error?.message ?? "", /already on Creator/);
+  });
+
+  // stack + Stripe mock only: a lagging cache row must not lead to a second subscription
+  it("a stale cache row does not start a second Checkout: the existing subscription is resynced and the Portal offered", async () => {
+    await pool.query(`delete from billing_subscriptions where user_id = $1`, [user.userId]);
+    const r = await trpc(user.cookie, "billing.checkout", { plan: "pro", interval: "month" });
+    assert.equal(r.error, undefined, r.error?.message);
+    assert.equal((r.data as { kind: string }).kind, "portal");
+    const s = await until(state, (x) => x.subscription !== null);
+    assert.ok(s.subscription, "the row is back, rewritten from Stripe");
   });
 
   it("a plan change at Stripe reaches the row and writes billing.changed", async () => {
@@ -192,7 +254,10 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     const sessionId = /\/_mock\/checkout\/(cs_[a-z0-9]+)/.exec((r.data as { url: string }).url)![1];
     const done = await mock(`/_mock/complete/${sessionId}`);
     const victimSub = done.subscription!;
-    await until(async () => (await trpc(victim.cookie, "billing.get", undefined, "GET")).data as State, (x) => x.plan.name === "starter");
+    await until(
+      async () => (await trpc(victim.cookie, "billing.get", undefined, "GET")).data as State,
+      (x) => x.plan.name === "starter",
+    );
     await pool.query(`update "user" set role = 'admin' where id = $1`, [user.userId]);
     const removed = await trpc(user.cookie, "admin.users.remove", { id: victim.userId });
     assert.equal(removed.error, undefined, removed.error?.message);
@@ -200,7 +265,12 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     const late = await mock(`/_mock/cancel/${victimSub}`);
     assert.equal(late.delivered[0]!.status, 200);
     const ev = await until(
-      async () => (await pool.query(`select processed_at is not null as done, error from billing_events where subscription_id = $1 order by received_at desc limit 1`, [victimSub])).rows[0] as { done: boolean; error: string | null },
+      async () =>
+        (
+          await pool.query(`select processed_at is not null as done, error from billing_events where subscription_id = $1 order by received_at desc limit 1`, [
+            victimSub,
+          ])
+        ).rows[0] as { done: boolean; error: string | null },
       (x) => x.done,
     );
     assert.equal(ev.done, true);

@@ -98,7 +98,10 @@ const githubCommitSchema = z.object({
   }),
 });
 
-export type FetchLike = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{
+export type FetchLike = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+) => Promise<{
   ok: boolean;
   status: number;
   headers: { get(name: string): string | null };
@@ -282,12 +285,14 @@ export function levelsFor(counts: number[]): ActivityLevel[] {
   });
 }
 
-export function buildActivity(opts: {
-  until: string;
-  windowDays?: number;
-  commitDays: Map<string, number>;
-  releases: Release[];
-}): { weeks: ActivityWeek[]; months: ActivityMonth[]; commits: number; commitDays: number; releaseDays: number; since: string } {
+export function buildActivity(opts: { until: string; windowDays?: number; commitDays: Map<string, number>; releases: Release[] }): {
+  weeks: ActivityWeek[];
+  months: ActivityMonth[];
+  commits: number;
+  commitDays: number;
+  releaseDays: number;
+  since: string;
+} {
   const windowDays = opts.windowDays ?? RELEASES_WINDOW_DAYS;
   const until = opts.until;
   const since = addUtcDays(until, -(windowDays - 1));
@@ -362,7 +367,12 @@ function nextLink(header: string | null): string | null {
   return null;
 }
 
-async function getJson(doFetch: FetchLike, url: string, headers: Record<string, string>, signal: AbortSignal): Promise<{ body: unknown; next: string | null; status: number }> {
+async function getJson(
+  doFetch: FetchLike,
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<{ body: unknown; next: string | null; status: number }> {
   const res = await doFetch(url, { headers, signal });
   if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
   return { body: await res.json(), next: nextLink(res.headers.get("link")), status: res.status };

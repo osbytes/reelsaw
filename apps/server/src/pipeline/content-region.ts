@@ -104,7 +104,11 @@ export function frameVote(s: RegionSample): FrameVote | null {
     const boxes = textSide === "right" ? right : left;
     const span = Math.max(...boxes.map((b) => b.y2)) - Math.min(...boxes.map((b) => b.y1));
     const inner = textSide === "right" ? Math.min(...boxes.map((b) => b.x1)) : Math.max(...boxes.map((b) => b.x2));
-    const backed = !!(dividerOk && dividerSide === textSide && (textSide === "right" ? d!.x <= inner + 0.01 && d!.x >= inner - REGION.dividerNearText : d!.x >= inner - 0.01 && d!.x <= inner + REGION.dividerNearText));
+    const backed = !!(
+      dividerOk &&
+      dividerSide === textSide &&
+      (textSide === "right" ? d!.x <= inner + 0.01 && d!.x >= inner - REGION.dividerNearText : d!.x >= inner - 0.01 && d!.x <= inner + REGION.dividerNearText)
+    );
     if (backed && span >= REGION.minTextSpanWithDivider) return { side: textSide, edge: d!.x, evidence: "text+divider", span, lines: boxes.length };
     if (!backed && span >= REGION.minTextSpan) {
       // no edge to snap to: the region starts a little before its text
@@ -144,14 +148,19 @@ export function detectContentRegion(samples: RegionSample[]): ContentSignals & {
   const textBeside = { left: Number(beside("left").toFixed(2)), right: Number(beside("right").toFixed(2)) };
 
   const sides: ContentSide[] = ["right", "left"];
-  const best = sides
-    .map((side) => ({ side, vs: votes.filter((x) => x.v?.side === side) }))
-    .sort((a, b) => b.vs.length - a.vs.length)[0]!;
+  const best = sides.map((side) => ({ side, vs: votes.filter((x) => x.v?.side === side) })).sort((a, b) => b.vs.length - a.vs.length)[0]!;
   const share = best.vs.length / n;
   const dividers = withFace.map((s) => s.divider).filter((d): d is DividerProbe => !!d && d.s >= REGION.dividerMin);
   const dividerX = dividers.length ? median(dividers.map((d) => d.x)) : undefined;
   const dividerShare = dividers.length ? dividers.filter((d) => Math.abs(d.x - dividerX!) <= 0.03).length / n : 0;
-  const sig = { ...base, share: Number(share.toFixed(2)), side: best.side, textBeside, dividerShare: Number(dividerShare.toFixed(2)), ...(dividerX !== undefined ? { dividerX: Number(dividerX.toFixed(3)) } : {}) };
+  const sig = {
+    ...base,
+    share: Number(share.toFixed(2)),
+    side: best.side,
+    textBeside,
+    dividerShare: Number(dividerShare.toFixed(2)),
+    ...(dividerX !== undefined ? { dividerX: Number(dividerX.toFixed(3)) } : {}),
+  };
   if (share < REGION.minShare) return { ...sig, rejected: `content region in only ${Math.round(share * 100)}% of frames` };
 
   const edges = best.vs.map((x) => x.v!.edge);
@@ -172,7 +181,8 @@ export function detectContentRegion(samples: RegionSample[]): ContentSignals & {
   const x2 = best.side === "right" ? 1 : edge;
   const width = x2 - x1;
   if (width < REGION.minWidth) return { ...sig, evidence, textSpan, lines, rejected: `region only ${Math.round(width * 100)}% wide` };
-  if (best.side === "right" ? edge < faceQ + REGION.faceGap : edge > faceQ - REGION.faceGap) return { ...sig, evidence, textSpan, lines, rejected: "region overlaps the speaker" };
+  if (best.side === "right" ? edge < faceQ + REGION.faceGap : edge > faceQ - REGION.faceGap)
+    return { ...sig, evidence, textSpan, lines, rejected: "region overlaps the speaker" };
   const content: ContentRegion = { x1: Number(x1.toFixed(3)), y1: 0, x2: Number(x2.toFixed(3)), y2: 1 };
   return { ...sig, evidence, textSpan, lines, content };
 }
@@ -187,7 +197,8 @@ export function contentReason(c: ContentRegion, sig: Pick<ContentSignals, "evide
 export function voteTrace(s: RegionSample): Record<string, number | string | null> {
   const f = s.box;
   const v = frameVote(s);
-  const beside = (side: ContentSide) => (f ? (s.text ?? []).filter((b) => (side === "right" ? b.x1 >= f.x2 + REGION.margin : b.x2 <= f.x1 - REGION.margin)) : []);
+  const beside = (side: ContentSide) =>
+    f ? (s.text ?? []).filter((b) => (side === "right" ? b.x1 >= f.x2 + REGION.margin : b.x2 <= f.x1 - REGION.margin)) : [];
   const boxes = [...beside("left"), ...beside("right")];
   return {
     t: Number(s.t.toFixed(2)),

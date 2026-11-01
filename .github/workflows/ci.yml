@@ -1,5 +1,6 @@
 # CI on every pull request and on main: typecheck, build the web bundle and the server bundle,
-# run the tests that need no running stack, and make sure the PR carries a changeset.
+# run the tests that need no running stack, and make sure the PR carries a changeset. The tests
+# that need the compose stack are stack.yml.
 name: ci
 
 on:
@@ -9,6 +10,11 @@ on:
 
 permissions:
   contents: read
+
+# a new push to a PR cancels its running checks; pushes to main each run to completion
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -30,6 +36,8 @@ jobs:
           [ -n "$sh_yaml" ] && [ "$sh_yaml" = "$ps_yaml" ] || { echo "compose templates differ"; diff <(echo "$sh_yaml") <(echo "$ps_yaml"); exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      # Biome lint (biome.json); warnings show as annotations, errors fail the job
+      - run: pnpm exec biome ci
       # .env.example, docs/CONFIG.md and the CLI/suite tables are generated from the code (pnpm docs:gen)
       - run: pnpm docs:check
       - run: pnpm --filter @reelsaw/web build
@@ -72,6 +80,12 @@ jobs:
       # a PR that changes the app must say what changed (pnpm changeset); docs-only PRs add an empty one
       - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
         run: pnpm exec changeset status --since=origin/main
+      # a changeset that names only an ignored package (web, shared) bumps nothing, yet makes
+      # changesets/action open an empty Release PR on every push to main until it is retargeted
+      - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+        run: |
+          bad=$(grep -l '"@reelsaw/' .changeset/*.md | xargs -r grep -L '"@reelsaw/server"' || true)
+          [ -z "$bad" ] || { echo "changesets must name @reelsaw/server (web and shared are ignored): $bad"; exit 1; }
 
   # reelsaw.com (website/): its own pnpm root with its own lockfile, so it is checked on its own
   site:
@@ -92,23 +106,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
-
-  # TODO(stack tests): boot the compose stack, curl /api/health and run the stack tests (the test
-  # files that import test/helpers.ts). Not enabled because it has never run in CI; what has to be
-  # proven first is listed in docs/EVALS.md ("Stack tests in CI"). Sketch:
-  #
-  # stack:
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 40
-  #   steps:
-  #     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-  #     - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-  #     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-  #       with: { node-version: 24, cache: pnpm }
-  #     - run: pnpm install --frozen-lockfile
-  #     - name: throwaway .env (no real secrets)
-  #       run: printf 'BETTER_AUTH_SECRET=%s\nAPP_URL=http://localhost:3100\nPORT=3100\n' "$(openssl rand -base64 32)" > .env
-  #     - run: docker compose up -d --build --wait app   # Postgres is published on 127.0.0.1:5432
-  #     - run: curl -fsS http://localhost:3100/api/health
-  #     - run: pnpm --filter @reelsaw/server test
-  #       env: { REELSAW_URL: "http://localhost:3100" }

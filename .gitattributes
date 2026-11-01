@@ -1,0 +1,24 @@
+# Every text file is stored and checked out with LF, whatever the platform or core.autocrlf says, so a
+# file saved with CRLF on Windows is normalised when it is staged instead of showing as a whole-file diff.
+* text=auto eol=lf
+
+# binary: never normalised or diffed as text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.mp3 binary
+*.mp4 binary
+*.wav binary
+*.webm binary
+*.onnx binary
+*.zip binary
+
+# generated: collapsed in GitHub diffs
+pnpm-lock.yaml linguist-generated=true
+website/pnpm-lock.yaml linguist-generated=true
+apps/server/drizzle/meta/** linguist-generated=true

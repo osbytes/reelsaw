@@ -4,31 +4,34 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layers, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { DELETED_PATH, layerTemplateNameSchema, type TemplateLayer } from "@reelsaw/shared";
+import { DELETED_PATH, layerTemplateNameSchema, type TemplateBumpers, type TemplateLayer } from "@reelsaw/shared";
+import { templateSummary } from "../components/TemplatePicker";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { useHashParams } from "../lib/hash";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 
-/** One row of the list (live or removed), as `layerTemplates.list` returns it. */
+/** One row of the list (live or deleted), as `layerTemplates.list` returns it. */
 interface TemplateRow {
   id: string;
   name: string;
   layers: TemplateLayer[];
   layerCount: number;
+  bumpers: TemplateBumpers | null;
   updatedAt: string;
   deletedAt: string | null;
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-/** one column grid: name | layers | updated | actions */
-const GRID = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_6rem_8.5rem_8.5rem]";
+/** one column grid: name | what it holds (layers, intro / outro) | updated | actions */
+const GRID = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_10rem_8.5rem_8.5rem]";
 
 /**
  * Layer templates (docs/specs/layer-templates.md): sets of layers that fit any clip length. New template opens the
- * template editor; rows offer Edit / Rename / Duplicate / Remove; removed ones are restorable from Deleted.
+ * template editor; rows offer Edit / Rename / Duplicate / Delete; deleted ones are restorable from Deleted.
  * Deep link: `#template=<id>` highlights a row.
  */
 export function TemplatesPage() {
@@ -37,17 +40,19 @@ export function TemplatesPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const highlighted = useHashParams().get("template");
-  const list = useQuery(trpc.layerTemplates.list.queryOptions());
+  const list = useQuery(trpc.layerTemplates.list.queryOptions({ limit: 500 }));
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
   const create = useMutation(trpc.layerTemplates.create.mutationOptions());
   const update = useMutation(trpc.layerTemplates.update.mutationOptions({ onSuccess: () => invalidate() }));
-  const remove = useMutation(trpc.layerTemplates.remove.mutationOptions({ onSuccess: () => invalidate() }));
+  const remove = useMutation(trpc.layerTemplates.delete.mutationOptions({ onSuccess: () => invalidate() }));
+  const restoreWindow = useRestoreWindow("template");
   const notifyDeleted = useDeletedToast();
   const [renaming, setRenaming] = useState<TemplateRow | null>(null);
   const [draft, setDraft] = useState("");
   const [confirm, setConfirm] = useState<TemplateRow | null>(null);
 
-  const templates = list.data?.templates ?? [];
+  const templates = list.data?.items ?? [];
+  const totalTemplates = list.data?.total ?? templates.length;
   const deleted = list.data?.deleted ?? [];
   const highlight = (id: string) => nav({ pathname: loc.pathname, hash: `#template=${id}` }, { replace: true });
 
@@ -111,10 +116,12 @@ export function TemplatesPage() {
           </Link>
           {/* narrow screens fold the layer count and the time into a second line inside the name cell */}
           <span className="block truncate text-xs text-ink3 sm:hidden">
-            {plural(t.layerCount, "layer")} · updated {ago(t.updatedAt)}
+            {templateSummary(t)} · updated {ago(t.updatedAt)}
           </span>
         </span>
-        <span className="hidden text-right font-mono text-xs tabular-nums text-ink2 sm:block">{plural(t.layerCount, "layer")}</span>
+        <span className="hidden truncate text-right font-mono text-xs tabular-nums text-ink2 sm:block" title={templateSummary(t)}>
+          {templateSummary(t)}
+        </span>
         <span className="hidden text-xs text-ink3 sm:block">updated {ago(t.updatedAt)}</span>
         <span className="flex items-center justify-end gap-1.5">
           <Link to={`/templates/${t.id}`} className="btn-ghost w-[4.5rem] justify-center text-xs no-underline">
@@ -132,8 +139,8 @@ export function TemplatesPage() {
                 <DropdownMenu.Item className="menu-item" disabled={create.isPending} onSelect={() => duplicate(t)}>
                   Duplicate
                 </DropdownMenu.Item>
-                <DropdownMenu.Item className="menu-item text-err" onSelect={() => setConfirm(t)}>
-                  Remove…
+                <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm(t)}>
+                  Delete…
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -187,7 +194,8 @@ export function TemplatesPage() {
               <Layers className="h-6 w-6 text-ink3" aria-hidden />
               <b className="text-[15px]">No templates yet</b>
               <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">
-                A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a clip’s layers as a template from the clip editor.
+                A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save
+                a clip’s layers as a template from the clip editor.
               </p>
             </div>
           )}
@@ -197,15 +205,20 @@ export function TemplatesPage() {
               {templates.map((t) => row(t))}
             </ul>
           )}
+          {templates.length > 0 && (
+            <p className="pt-1 text-xs tabular-nums text-ink3">
+              Showing {templates.length.toLocaleString()} of {totalTemplates.toLocaleString()} templates
+            </p>
+          )}
         </section>
 
         {deleted.length > 0 && (
           <p className="text-xs text-ink3">
-            {plural(deleted.length, "removed template")} restorable from{" "}
+            {plural(deleted.length, "deleted template")} restorable from{" "}
             <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
               Deleted
-            </Link>{" "}
-            for 30 days.
+            </Link>
+            {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
           </p>
         )}
       </main>
@@ -232,9 +245,14 @@ export function TemplatesPage() {
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title="Remove this template?"
-        body={<>“{confirm?.name}” is removed from your templates and from your project defaults. Clips that already have its layers keep them. You can restore it from Deleted for 30 days.</>}
-        confirm="Remove"
+        title="Delete this template?"
+        body={
+          <>
+            “{confirm?.name}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them.{" "}
+            {restoreWindow.hint()}
+          </>
+        }
+        confirm="Delete"
         danger
         onConfirm={() => {
           const t = confirm;
@@ -244,7 +262,7 @@ export function TemplatesPage() {
             {
               onSuccess: (r) => {
                 if (r.clearedDefault) toast(`“${t.name}” is no longer the default for new projects`);
-                notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: "for 30 days" });
+                notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: restoreWindow.restorable });
               },
               onError: (err) => toast.error(err.message),
             },

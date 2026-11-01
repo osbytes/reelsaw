@@ -1,12 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  decideEmailVerifyGate,
-  hashEmailVerifyToken,
-  readVerifyJwt,
-  withLoginCallback,
-  emailVerifyIdentifier,
-} from "../src/email-verify.js";
+import { decideEmailVerifyGate, hashEmailVerifyToken, readVerifyJwt, withLoginCallback, emailVerifyIdentifier } from "../src/email-verify.js";
 
 function jwtPayload(claims: object): string {
   const b64 = Buffer.from(JSON.stringify(claims)).toString("base64url");
@@ -43,7 +37,13 @@ describe("decideEmailVerifyGate", () => {
   const hash = hashEmailVerifyToken("current");
 
   it("refuses an expired JWT and keeps the email for the resend form", () => {
-    const r = decideEmailVerifyGate({ jwt: { email: "ada@example.com", expired: true }, token: "x", emailVerified: false, currentHash: hash, currentExpired: false });
+    const r = decideEmailVerifyGate({
+      jwt: { email: "ada@example.com", expired: true },
+      token: "x",
+      emailVerified: false,
+      currentHash: hash,
+      currentExpired: false,
+    });
     assert.deepEqual(r, { ok: false, error: "TOKEN_EXPIRED", email: "ada@example.com" });
   });
 

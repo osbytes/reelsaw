@@ -11,8 +11,9 @@ import { ScrollArea } from "../components/scroll-area";
 import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
-const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library", template: "Template" };
+const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
 const GRID = "grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-x-3 sm:grid-cols-[2rem_5.5rem_minmax(0,1fr)_minmax(14rem,1.4fr)_2rem]";
 /**
  * Hidden until that row is hovered (or a coarse pointer, or keyboard focus). The full class
@@ -34,9 +35,9 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
  * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`foreverDate`).
  */
 function foreverLabel(purgeAt: string | null) {
-  if (!purgeAt) return "Kept until you delete it forever";
+  if (!purgeAt) return "kept until you delete it forever";
   const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
-  if (days <= 0) return "Deleted forever within the hour";
+  if (days <= 0) return "deleted forever within the hour";
   return days === 1 ? "deleted forever within a day" : `deleted forever in ${days} days`;
 }
 
@@ -58,6 +59,7 @@ type Row = {
   usedByClips?: number;
   usedByTemplates?: number;
   layerCount?: number;
+  forgetDecisions?: boolean;
 };
 
 function whyHeld(r: Row) {
@@ -70,7 +72,8 @@ function detailOf(r: Row) {
   const size = r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files";
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
   const held = whyHeld(r);
-  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt)].filter(Boolean).join(" · ");
+  const forget = r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined;
+  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt), forget].filter(Boolean).join(" · ");
 }
 
 /**
@@ -89,6 +92,7 @@ export function DeletedPage() {
   const purge = useMutation(trpc.deleted.purge.mutationOptions());
   const [sel, setSel] = useState<string[]>([]);
   const [pending, setPending] = useState<Row[] | null>(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
 
   const highlightedKind = (["project", "clip", "asset", "template"] as const).find((k) => hash.get(k));
   const highlightedId = highlightedKind ? hash.get(highlightedKind) : "";
@@ -124,7 +128,13 @@ export function DeletedPage() {
         onSuccess: (r) => {
           refresh();
           setSel([]);
-          toast(r.failed ? `Restored ${r.restored} · ${r.failed} couldn’t be restored${firstError(r.results)}` : rows.length === 1 ? `Restored “${rows[0]!.title}”` : `Restored ${rows.length} items`);
+          toast(
+            r.failed
+              ? `Restored ${r.restored} · ${r.failed} couldn’t be restored${firstError(r.results)}`
+              : rows.length === 1
+                ? `Restored “${rows[0]!.title}”`
+                : `Restored ${rows.length} items`,
+          );
         },
         onError: (err) => {
           const quota = quotaFromError(err);
@@ -148,7 +158,10 @@ export function DeletedPage() {
           <h1 className="text-[28px] font-bold tracking-tight">Deleted</h1>
           <p className="mt-1 min-h-5 text-sm text-ink2">
             Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
-            {data && data.keepDays > 0 ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})` : ""}.
+            {data && data.keepDays > 0
+              ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})`
+              : ""}
+            .
           </p>
         </div>
 
@@ -170,7 +183,9 @@ export function DeletedPage() {
           <div className="flex flex-col items-center gap-2 rounded-[16px] border border-dashed border-line2 px-5 py-10 text-center">
             <Trash2 className="h-6 w-6 text-ink3" aria-hidden />
             <b className="text-[15px]">Nothing waiting</b>
-            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.</p>
+            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">
+              Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.
+            </p>
           </div>
         )}
 
@@ -199,10 +214,22 @@ export function DeletedPage() {
                 const checked = sel.includes(k);
                 const heldWhy = whyHeld(r);
                 return (
-                  <li key={k} id={`deleted-${r.id}`} className={`group/row relative ${GRID} min-h-[3.5rem] rounded-[10px] px-3 py-2 ${on || checked ? "bg-acc-soft" : "hover:bg-sunk/60"}`}>
+                  <li
+                    key={k}
+                    id={`deleted-${r.id}`}
+                    className={`group/row relative ${GRID} min-h-[3.5rem] rounded-[10px] px-3 py-2 ${on || checked ? "bg-acc-soft" : "hover:bg-sunk/60"}`}
+                  >
                     <span className="h-8 w-8" aria-hidden />
-                    <label className={`absolute inset-y-0 left-0 z-[1] flex w-11 cursor-pointer items-center justify-center pl-3 ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}>
-                      <input type="checkbox" className="h-4 w-4 accent-[var(--acc)]" checked={checked} onChange={() => toggle(r)} aria-label={`Select ${r.title}`} />
+                    <label
+                      className={`absolute inset-y-0 left-0 z-[1] flex w-11 cursor-pointer items-center justify-center pl-3 ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--acc)]"
+                        checked={checked}
+                        onChange={() => toggle(r)}
+                        aria-label={`Select ${r.title}`}
+                      />
                     </label>
                     <span className="hidden font-semibold text-ink3 sm:block">{KIND_LABEL[r.kind]}</span>
                     <span className="min-w-0">
@@ -223,8 +250,13 @@ export function DeletedPage() {
                           <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => onRestore([r])}>
                             Restore
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item className="menu-item text-err" disabled={!r.canPurge || busy} title={heldWhy} onSelect={() => r.canPurge && setPending([r])}>
-                            Delete forever
+                          <DropdownMenu.Item
+                            className="menu-item-danger"
+                            disabled={!r.canPurge || busy}
+                            title={heldWhy}
+                            onSelect={() => r.canPurge && setPending([r])}
+                          >
+                            Delete forever…
                           </DropdownMenu.Item>
                         </DropdownMenu.Content>
                       </DropdownMenu.Portal>
@@ -250,12 +282,18 @@ export function DeletedPage() {
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
                       <DropdownMenu.Item
-                        className="menu-item text-err"
+                        className="menu-item-danger"
                         disabled={busy || held.length === selected.length}
-                        title={held.length === selected.length ? "None of the selected items can be deleted forever yet" : held.length ? `${plural(held.length, "item")} still in use will be skipped` : undefined}
+                        title={
+                          held.length === selected.length
+                            ? "None of the selected items can be deleted forever yet"
+                            : held.length
+                              ? `${plural(held.length, "item")} still in use will be skipped`
+                              : undefined
+                        }
                         onSelect={() => setPending(selected.filter((r) => r.canPurge))}
                       >
-                        Delete forever
+                        Delete forever…
                       </DropdownMenu.Item>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
@@ -267,13 +305,17 @@ export function DeletedPage() {
       </main>
       <ConfirmDialog
         open={!!pending}
-        onOpenChange={(o) => !o && setPending(null)}
+        onOpenChange={(o) => {
+          if (!o) setPending(null);
+          setForgetDecisions(false);
+        }}
         title={pending && pending.length > 1 ? `Delete ${pending.length} items forever?` : "Delete forever?"}
         body={
           pending && pending.length > 1 ? (
             <>
               {plural(pending.length, "item")} and their files are deleted permanently
-              {pending.reduce((n, r) => n + r.storedBytes, 0) ? ` (${formatBytes(pending.reduce((n, r) => n + r.storedBytes, 0))} freed)` : ""}. This cannot be undone.
+              {pending.reduce((n, r) => n + r.storedBytes, 0) ? ` (${formatBytes(pending.reduce((n, r) => n + r.storedBytes, 0))} freed)` : ""}. This cannot be
+              undone.
             </>
           ) : pending?.[0]?.kind === "project" ? (
             <>
@@ -300,19 +342,30 @@ export function DeletedPage() {
           const rows = pending;
           if (!rows?.length) return;
           purge.mutate(
-            { items: rows.map((r) => ({ kind: r.kind, id: r.id })) },
+            { items: rows.map((r) => ({ kind: r.kind, id: r.id })), forgetDecisions: forgetDecisions && rows.some((r) => r.kind === "project") },
             {
               onSuccess: (r) => {
                 setPending(null);
                 setSel([]);
                 refresh();
-                toast(r.failed ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}` : r.storedBytes ? `Deleted forever. ${formatBytes(r.storedBytes)} is free now.` : rows.length === 1 ? `Deleted “${rows[0]!.title}” forever` : `Deleted ${rows.length} items forever`);
+                toast(
+                  r.failed
+                    ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}`
+                    : r.storedBytes
+                      ? `Deleted forever · ${formatBytes(r.storedBytes)} freed`
+                      : rows.length === 1
+                        ? `Deleted “${rows[0]!.title}” forever`
+                        : `Deleted ${rows.length} items forever`,
+                );
               },
               onError: (err) => toast.error(err.message),
             },
           );
         }}
-      />
+      >
+        {/* projects deleted with "forget" already go with their decisions; offer it only for the others */}
+        {pending?.some((r) => r.kind === "project" && !r.forgetDecisions) && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
+      </ConfirmDialog>
     </ScrollArea>
   );
 }

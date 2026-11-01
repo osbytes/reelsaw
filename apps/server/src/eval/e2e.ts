@@ -31,7 +31,7 @@ import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 
 const argv = process.argv.slice(2);
 const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
-const valueOf = (name: string) => {
+const flagValue = (name: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[i + 1] : undefined;
 };
@@ -53,19 +53,19 @@ const dotenv = (() => {
   return out;
 })();
 
-const COMPOSE_PROJECT = valueOf("project") ?? "reelsaw-bench";
-const BASE = valueOf("base") ?? "http://localhost:3200";
-const DB_URL = valueOf("db") ?? `postgres://reelsaw:${dotenv.POSTGRES_PASSWORD ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
-const TIMEOUT_MIN = Number(valueOf("timeout-min") ?? 90);
+const COMPOSE_PROJECT = flagValue("project") ?? "reelsaw-bench";
+const BASE = flagValue("base") ?? "http://localhost:3200";
+const DB_URL = flagValue("db") ?? `postgres://reelsaw:${dotenv.POSTGRES_PASSWORD ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
+const TIMEOUT_MIN = Number(flagValue("timeout-min") ?? 90);
 const STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
 
 interface LlmLine {
-  stage?: string;
-  call?: string;
+  stage?: string | undefined;
+  call?: string | undefined;
   model: string;
-  provider?: string;
+  provider?: string | undefined;
   ms: number;
-  usage?: { input: number; output: number };
+  usage?: { input: number; output: number } | undefined;
   failed: boolean;
 }
 
@@ -90,7 +90,15 @@ interface RunResult {
   totalSec: number;
   models: Record<string, string>;
   clips: Array<{ index: number; title: string; hook: string; startSec: number; endSec: number; score: number; status: string; layout: string | null }>;
-  llm: { calls: number; failed: number; totalSec: number; p50Ms: number; inputTokens: number; outputTokens: number; byStage: Record<string, { calls: number; totalSec: number }> };
+  llm: {
+    calls: number;
+    failed: number;
+    totalSec: number;
+    p50Ms: number;
+    inputTokens: number;
+    outputTokens: number;
+    byStage: Record<string, { calls: number; totalSec: number }>;
+  };
   machine: { platform: string; arch: string; cpus: number; memGb: number; node: string };
 }
 
@@ -177,7 +185,10 @@ async function startProfile(profile: Profile, scratch: string, prevStt?: string)
     try {
       const res = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
-        if (clearAsr) await compose([file], "exec", "-T", "app", "sh", "-c", "rm -rf /data/cache/asr").catch((err: Error) => console.log(`  ⚠ could not clear the ASR cache: ${err.message.slice(0, 120)}`));
+        if (clearAsr)
+          await compose([file], "exec", "-T", "app", "sh", "-c", "rm -rf /data/cache/asr").catch((err: Error) =>
+            console.log(`  ⚠ could not clear the ASR cache: ${err.message.slice(0, 120)}`),
+          );
         else console.log(`  (same transcription model as the previous profile: ASR cache kept, transcribe will be served from it)`);
         return { env, sttCached: !clearAsr };
       }
@@ -201,7 +212,11 @@ async function signUp(): Promise<string> {
   const email = process.env.BENCH_EMAIL ?? `bench-${randomUUID().slice(0, 8)}@example.test`;
   const password = process.env.BENCH_PASSWORD ?? `pw-${randomUUID()}`;
   const headers = { "content-type": "application/json", origin: BASE };
-  const cookieOf = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const cookieOf = (res: Response) =>
+    res.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
   if (process.env.BENCH_EMAIL) {
     const res = await fetch(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers, body: JSON.stringify({ email, password }) });
     if (res.ok) return cookieOf(res);
@@ -212,7 +227,11 @@ async function signUp(): Promise<string> {
 }
 
 async function trpcMutation<T>(cookie: string, proc: string, input: unknown): Promise<T> {
-  const res = await fetch(`${BASE}/api/trpc/${proc}`, { method: "POST", headers: { "content-type": "application/json", cookie, origin: BASE }, body: JSON.stringify(input) });
+  const res = await fetch(`${BASE}/api/trpc/${proc}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie, origin: BASE },
+    body: JSON.stringify(input),
+  });
   const body = (await res.json()) as { result?: { data: T }; error?: { message: string } };
   if (!res.ok || body.error) throw new Error(`${proc}: ${res.status} ${body.error?.message ?? JSON.stringify(body).slice(0, 300)}`);
   return body.result!.data;
@@ -225,7 +244,17 @@ async function llmLines(projectId: string, since?: Date, until?: Date): Promise<
   for (const line of raw.split("\n")) {
     if (!line.includes(projectId) || !line.includes('"llm call')) continue;
     try {
-      const j = JSON.parse(line) as { time?: string; projectId?: string; msg?: string; stage?: string; call?: string; model?: string; provider?: string; ms?: number; usage?: { input: number; output: number } };
+      const j = JSON.parse(line) as {
+        time?: string;
+        projectId?: string;
+        msg?: string;
+        stage?: string;
+        call?: string;
+        model?: string;
+        provider?: string;
+        ms?: number;
+        usage?: { input: number; output: number };
+      };
       if (j.projectId !== projectId || !j.model || typeof j.ms !== "number") continue;
       if (j.time && ((since && new Date(j.time).getTime() < since.getTime()) || (until && new Date(j.time).getTime() > until.getTime() + 5000))) continue;
       out.push({ stage: j.stage, call: j.call, model: j.model, provider: j.provider, ms: j.ms, usage: j.usage, failed: j.msg === "llm call failed" });
@@ -255,8 +284,14 @@ async function waitForProject(pool: pg.Pool, projectId: string, opts: { since?: 
     if (row.status === "done" || row.status === "failed") {
       // a step re-run ends with the project back in "done": make sure that is a new finish, not the old one
       if (!opts.since) break;
-      const fin = await pool.query("select 1 from project_events where project_id = $1 and type in ('project.done','project.failed') and created_at >= $2 limit 1", [projectId, opts.since]);
-      const refineDone = await pool.query("select 1 from project_events where project_id = $1 and type = 'stage.completed' and payload->>'stage' = 'refine' and created_at >= $2 limit 1", [projectId, opts.since]);
+      const fin = await pool.query(
+        "select 1 from project_events where project_id = $1 and type in ('project.done','project.failed') and created_at >= $2 limit 1",
+        [projectId, opts.since],
+      );
+      const refineDone = await pool.query(
+        "select 1 from project_events where project_id = $1 and type = 'stage.completed' and payload->>'stage' = 'refine' and created_at >= $2 limit 1",
+        [projectId, opts.since],
+      );
       if (fin.rowCount || refineDone.rowCount) break;
     }
     await sleep(4000);
@@ -268,7 +303,12 @@ async function waitForProject(pool: pg.Pool, projectId: string, opts: { since?: 
 
 /** Seconds per stage from the project's events at or after `since` (all events when omitted). */
 async function stageSeconds(pool: pg.Pool, projectId: string, since: Date | undefined, fallbackStart: Date, fallbackEnd: Date, until: Date = fallbackEnd) {
-  const events = (await pool.query("select type, payload, created_at from project_events where project_id = $1 and ($2::timestamptz is null or created_at >= $2) and created_at <= $3 order by id", [projectId, since ?? null, new Date(until.getTime() + 5000)])).rows as Array<{ type: string; payload: Record<string, unknown>; created_at: Date }>;
+  const events = (
+    await pool.query(
+      "select type, payload, created_at from project_events where project_id = $1 and ($2::timestamptz is null or created_at >= $2) and created_at <= $3 order by id",
+      [projectId, since ?? null, new Date(until.getTime() + 5000)],
+    )
+  ).rows as Array<{ type: string; payload: Record<string, unknown>; created_at: Date }>;
   // runs.ts is the one reader of stage timings (payload durations, with timestamp fallbacks for old events)
   const runs = runsOf(events.map((e) => ({ type: e.type, payload: e.payload, createdAt: e.created_at })));
   const stages: RunResult["stages"] = {};
@@ -282,12 +322,32 @@ async function stageSeconds(pool: pg.Pool, projectId: string, since: Date | unde
   return { stages, totalSec };
 }
 
-async function collect(pool: pg.Pool, profile: Profile, env: Record<string, string>, run: number, step: RunResult["step"], projectId: string, row: ProjectRow | undefined, since: Date | undefined, startedAt: Date, finishedAt: Date): Promise<RunResult> {
+async function collect(
+  pool: pg.Pool,
+  profile: Profile,
+  env: Record<string, string>,
+  run: number,
+  step: RunResult["step"],
+  projectId: string,
+  row: ProjectRow | undefined,
+  since: Date | undefined,
+  startedAt: Date,
+  finishedAt: Date,
+): Promise<RunResult> {
   const { stages, totalSec } = await stageSeconds(pool, projectId, since, startedAt, finishedAt);
 
   const models: Record<string, string> = {};
-  for (const a of (await pool.query("select models from stage_artifacts where project_id = $1 and ($2::timestamptz is null or created_at >= $2) order by id", [projectId, since ?? null])).rows as Array<{ models: Record<string, string> }>) Object.assign(models, a.models);
-  const clips = ((await pool.query("select index, title, hook, start_sec, end_sec, score, status, layout from clips where project_id = $1 order by index", [projectId])).rows as Array<Record<string, unknown>>).map((c) => ({
+  for (const a of (
+    await pool.query("select models from stage_artifacts where project_id = $1 and ($2::timestamptz is null or created_at >= $2) order by id", [
+      projectId,
+      since ?? null,
+    ])
+  ).rows as Array<{ models: Record<string, string> }>)
+    Object.assign(models, a.models);
+  const clips = (
+    (await pool.query("select index, title, hook, start_sec, end_sec, score, status, layout from clips where project_id = $1 order by index", [projectId]))
+      .rows as Array<Record<string, unknown>>
+  ).map((c) => ({
     index: Number(c.index),
     title: String(c.title),
     hook: String(c.hook),
@@ -316,14 +376,33 @@ async function collect(pool: pg.Pool, profile: Profile, env: Record<string, stri
     models,
     clips,
     llm,
-    machine: { platform: `${os.platform()} ${os.release()}`, arch: os.arch(), cpus: os.cpus().length, memGb: Math.round(os.totalmem() / 2 ** 30), node: process.version },
+    machine: {
+      platform: `${os.platform()} ${os.release()}`,
+      arch: os.arch(),
+      cpus: os.cpus().length,
+      memGb: Math.round(os.totalmem() / 2 ** 30),
+      node: process.version,
+    },
   };
 }
 
 /** The whole pipeline from the URL under `profile`'s env. */
-async function runOnce(pool: pg.Pool, cookie: string, profile: Profile, env: Record<string, string>, run: number, source: string, maxClips: number | undefined, sttCached = false): Promise<RunResult> {
+async function runOnce(
+  pool: pg.Pool,
+  cookie: string,
+  profile: Profile,
+  env: Record<string, string>,
+  run: number,
+  source: string,
+  maxClips: number | undefined,
+  sttCached = false,
+): Promise<RunResult> {
   const startedAt = new Date();
-  const created = await trpcMutation<{ id: string }>(cookie, "projects.create", { sourceUrl: source, title: `bench ${profile.name} #${run}`, ...(maxClips ? { settings: { maxClips } } : {}) });
+  const created = await trpcMutation<{ id: string }>(cookie, "projects.create", {
+    sourceUrl: source,
+    title: `bench ${profile.name} #${run}`,
+    ...(maxClips ? { settings: { maxClips } } : {}),
+  });
   process.stdout.write(`  project ${created.id} … `);
   const row = await waitForProject(pool, created.id);
   const r = await collect(pool, profile, env, run, "full", created.id, row, undefined, startedAt, new Date());
@@ -331,7 +410,15 @@ async function runOnce(pool: pg.Pool, cookie: string, profile: Profile, env: Rec
 }
 
 /** One step re-run on the base project under `profile`'s env: refine (all steps) or analyze (re-pick + render). */
-async function runStep(pool: pg.Pool, cookie: string, profile: Profile, env: Record<string, string>, run: number, step: "refine" | "analyze", projectId: string): Promise<RunResult> {
+async function runStep(
+  pool: pg.Pool,
+  cookie: string,
+  profile: Profile,
+  env: Record<string, string>,
+  run: number,
+  step: "refine" | "analyze",
+  projectId: string,
+): Promise<RunResult> {
   const since = new Date();
   if (step === "refine") await trpcMutation(cookie, "projects.refine", { id: projectId });
   else await trpcMutation(cookie, "projects.reanalyze", { id: projectId });
@@ -345,7 +432,21 @@ const secs = (n: number | undefined) => (n === undefined ? "" : n >= 100 ? `${Ma
 const tokens = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(0)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 function summaryTable(results: RunResult[]): { head: string[]; rows: string[][] } {
-  const head = ["profile", "step", "run", "status", "total", ...STAGES, "clips", "llm calls", "llm total", "llm p50", "tokens in/out", "language", "transcription"];
+  const head = [
+    "profile",
+    "step",
+    "run",
+    "status",
+    "total",
+    ...STAGES,
+    "clips",
+    "llm calls",
+    "llm total",
+    "llm p50",
+    "tokens in/out",
+    "language",
+    "transcription",
+  ];
   const rows = results.map((r) => [
     r.profile,
     r.step ?? "full",
@@ -387,7 +488,14 @@ function markdown(results: RunResult[], source: string, profiles: Profile[], max
     "",
     "| profile | overrides |",
     "|---|---|",
-    ...profiles.map((p) => `| ${p.name} | ${Object.entries(p.env).map(([k, v]) => `\`${k}=${v}\``).join(" ") || "(none)"} |`),
+    ...profiles.map(
+      (p) =>
+        `| ${p.name} | ${
+          Object.entries(p.env)
+            .map(([k, v]) => `\`${k}=${v}\``)
+            .join(" ") || "(none)"
+        } |`,
+    ),
     "",
     "## Timings",
     "",
@@ -409,7 +517,10 @@ function markdown(results: RunResult[], source: string, profiles: Profile[], max
     if (!r.clips.length) out.push("(no clips)", "");
     else {
       out.push("| # | range | len | score | layout | status | title | hook |", "|---|---|---|---|---|---|---|---|");
-      for (const c of r.clips) out.push(`| ${c.index} | ${fmtTs(c.startSec)}–${fmtTs(c.endSec)} | ${(c.endSec - c.startSec).toFixed(0)}s | ${Math.round(c.score)} | ${c.layout ?? ""} | ${c.status} | ${esc(c.title)} | ${esc(c.hook)} |`);
+      for (const c of r.clips)
+        out.push(
+          `| ${c.index} | ${fmtTs(c.startSec)}–${fmtTs(c.endSec)} | ${(c.endSec - c.startSec).toFixed(0)}s | ${Math.round(c.score)} | ${c.layout ?? ""} | ${c.status} | ${esc(c.title)} | ${esc(c.hook)} |`,
+        );
       out.push("");
     }
   }
@@ -465,33 +576,49 @@ async function rescan(dir: string) {
 }
 
 async function main() {
-  if (valueOf("rescan")) return rescan(path.resolve(valueOf("rescan")!));
-  const source = valueOf("source");
+  if (flagValue("rescan")) return rescan(path.resolve(flagValue("rescan")!));
+  const source = flagValue("source");
   if (!source) throw new Error("--source <video url> is required");
-  const profiles = parseProfiles({ matrix: valueOf("matrix"), profiles: valueOf("profiles"), set: argv.flatMap((a, i) => (a === "--set" && argv[i + 1] ? [argv[i + 1]!] : [])) });
+  const profiles = parseProfiles({
+    matrix: flagValue("matrix"),
+    profiles: flagValue("profiles"),
+    set: argv.flatMap((a, i) => (a === "--set" && argv[i + 1] ? [argv[i + 1]!] : [])),
+  });
   if (!profiles.length) profiles.push({ name: "default", env: {} });
-  const repeat = Number(valueOf("repeat") ?? 1);
-  const maxClips = valueOf("max-clips") ? Number(valueOf("max-clips")) : undefined;
+  const repeat = Number(flagValue("repeat") ?? 1);
+  const maxClips = flagValue("max-clips") ? Number(flagValue("max-clips")) : undefined;
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-  const outDir = path.resolve(valueOf("out") ?? path.join(repoRoot, "eval", "bench", "results", `e2e-${stamp}`));
+  const outDir = path.resolve(flagValue("out") ?? path.join(repoRoot, "eval", "bench", "results", `e2e-${stamp}`));
   await fs.mkdir(outDir, { recursive: true });
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "reelsaw-bench-"));
 
-  const steps = (valueOf("steps") ?? "").split(",").map((s) => s.trim()).filter((s): s is "refine" | "analyze" => s === "refine" || s === "analyze");
-  if (valueOf("steps") && !steps.length) throw new Error(`--steps takes refine and/or analyze, got "${valueOf("steps")}"`);
-  const baseName = valueOf("base-profile") ?? profiles[0]!.name;
+  const steps = (flagValue("steps") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is "refine" | "analyze" => s === "refine" || s === "analyze");
+  if (flagValue("steps") && !steps.length) throw new Error(`--steps takes refine and/or analyze, got "${flagValue("steps")}"`);
+  const baseName = flagValue("base-profile") ?? profiles[0]!.name;
   const base = profiles.find((p) => p.name === baseName);
   if (steps.length && !base) throw new Error(`--base-profile ${baseName} is not among the selected profiles`);
 
-  console.log(`bench stack ${COMPOSE_PROJECT} at ${BASE}${has("gpu") ? " (--gpu: NVENC for the bench app)" : ""}; ${profiles.length} profile(s) × ${repeat} run(s)${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`);
+  console.log(
+    `bench stack ${COMPOSE_PROJECT} at ${BASE}${has("gpu") ? " (--gpu: NVENC for the bench app)" : ""}; ${profiles.length} profile(s) × ${repeat} run(s)${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`,
+  );
   const pool = new pg.Pool({ connectionString: DB_URL });
   const results: RunResult[] = [];
   const record = async (r: RunResult) => {
     results.push(r);
     await fs.writeFile(path.join(outDir, `${r.profile}-${r.step}-${r.run}.json`), JSON.stringify(r, null, 2));
-    console.log(`  ${r.step} ${secs(r.totalSec)} · ${STAGES.map((s) => `${s} ${secs(r.stages[s]) || "-"}`).join(" · ")} · clips ${r.clips.filter((c) => c.status === "done").length}/${r.clips.length} · llm ${r.llm.calls} calls ${secs(r.llm.totalSec)}`);
+    console.log(
+      `  ${r.step} ${secs(r.totalSec)} · ${STAGES.map((s) => `${s} ${secs(r.stages[s]) || "-"}`).join(" · ")} · clips ${r.clips.filter((c) => c.status === "done").length}/${r.clips.length} · llm ${r.llm.calls} calls ${secs(r.llm.totalSec)}`,
+    );
   };
-  const describe = (p: Profile) => `\n━━ ${p.name}: ${Object.entries(p.env).map(([k, v]) => `${k}=${v}`).join(" ") || "(no overrides)"}`;
+  const describe = (p: Profile) =>
+    `\n━━ ${p.name}: ${
+      Object.entries(p.env)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" ") || "(no overrides)"
+    }`;
   try {
     // one throwaway user for the whole run: sessions live in the DB, so the cookie survives container recreation
     let cookie: string | undefined;

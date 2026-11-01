@@ -313,15 +313,71 @@
     {
       "idx": 44,
       "version": "7",
-      "when": 1792971027035,
-      "tag": "0044_completion_notices",
+      "when": 1792975150952,
+      "tag": "0044_stage_seq",
       "breakpoints": true
     },
     {
       "idx": 45,
       "version": "7",
-      "when": 1792971060360,
-      "tag": "0045_email_prefs_and_milestones",
+      "when": 1793044906023,
+      "tag": "0045_disk_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793062849077,
+      "tag": "0046_reconcile-requeues",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793064000747,
+      "tag": "0047_job-steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793068572185,
+      "tag": "0048_api-key-permissions-backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793121941423,
+      "tag": "0049_decision_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793242803971,
+      "tag": "0050_layer_template_bumpers",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793475087994,
+      "tag": "0051_integrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793569253842,
+      "tag": "0052_worker_paused",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793574205306,
+      "tag": "0053_ready_email",
       "breakpoints": true
     }
   ]

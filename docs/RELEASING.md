@@ -24,8 +24,29 @@ versioned on their own.
   anything a user would call "new".
 - **major**: reserved for 1.0. Until then, breaking changes are minor and say so in `**Upgrade:**`.
 
-The database migrates forward at boot (`drizzle/`). A release whose migration cannot be reversed
-says so; otherwise downgrading one minor is supported by pinning `REELSAW_IMAGE`.
+The database migrates forward at boot (`drizzle/`), and so does pg-boss's own schema. Nothing
+migrates backward, so **a downgrade only works to a version whose migrations match the database**
+(no migration newer than that version's last one has been applied). Pinning `REELSAW_IMAGE` to an
+older tag after a release that added migrations leaves the old code on a schema it does not know;
+it may boot and misbehave, or refuse to. Where a release only added columns or tables, rolling back
+one patch or minor is usually safe, but it is not tested or supported. Where it dropped or renamed
+something (below), restore a backup instead. A release whose migration cannot be reversed says so
+in its `**Upgrade:**` line. **Take a `pg_dump` before every upgrade**:
+
+```bash
+docker compose exec -T db pg_dump -U reelsaw -Fc reelsaw > reelsaw-before-upgrade.dump
+# restore into a fresh database: docker compose exec -T db pg_restore -U reelsaw -d reelsaw --clean --if-exists < reelsaw-before-upgrade.dump
+```
+
+### Irreversible migrations
+
+Older code cannot run on a database that has had these applied (find the release that shipped one
+in `apps/server/CHANGELOG.md`):
+
+- `0023_clip_bumpers_drop_off`: drops `clips.bumpers_off` after folding it into `clips.bumpers`.
+- `0039_library`: renames `bumper_assets` to `assets` (and its indexes and constraint) and relaxes
+  `assets.user_id`; code before it looks for the old table name.
+- `0041_drop-asset-saves`: drops the `asset_saves` table and its data.
 
 ## Cutting a release
 
@@ -36,7 +57,8 @@ says so; otherwise downgrading one minor is supported by pinning `REELSAW_IMAGE`
    `docker build -t reelsaw:rc --target runtime .`, `sh scripts/check-image.sh reelsaw:rc`, boot
    `deploy/` in a scratch directory with only a `.env` pointing at `reelsaw:rc`, open the app.
 3. Merge. `version.yml` runs `pnpm release:tag`, which pushes `vX.Y.Z`. `release.yml` builds
-   amd64 + arm64, checks the image, publishes `ghcr.io/osbytes/reelsaw:X.Y.Z`, `:X.Y` and
+   amd64 + arm64 (layers cached in `ghcr.io/osbytes/reelsaw:buildcache`, shared by every tag and
+   read by CI's stack job), checks the image, publishes `ghcr.io/osbytes/reelsaw:X.Y.Z`, `:X.Y` and
    `:latest`, and attaches `reelsaw-X.Y.Z.zip` to the GitHub release. The release notes are the
    changelog section (`scripts/release-notes.mjs`; maintainers' "Thanks @…!" credits are dropped,
    outside contributors' stay).

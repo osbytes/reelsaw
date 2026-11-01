@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Config, Paths } from "../config.js";
 import type { Logger } from "../log.js";
@@ -21,17 +22,45 @@ export interface Storage {
   ensureLocal(key: string, localPath: string): Promise<string>;
   exists(key: string): Promise<boolean>;
   /** Either a local file path to stream, or a URL to redirect the client to. */
-  resolve(key: string, opts?: { downloadName?: string }): Promise<{ file: string } | { url: string }>;
+  resolve(key: string, opts?: { downloadName?: string | undefined }): Promise<{ file: string } | { url: string }>;
+  /**
+   * The object to stream back from this server (share links: no redirect). Local: the file path, for sendFile. S3: the
+   * GetObject body, with the incoming Range passed on and the status and headers to answer with.
+   */
+  openRead(key: string, range?: string | undefined): Promise<{ file: string } | ObjectRead>;
   delete(key: string): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
+  /** Up to `limit` objects under `prefix` (keys as passed to the other methods) with their last-modified time. A bounded listing, not a walk of the bucket. */
+  list(prefix: string, limit: number): Promise<Array<{ key: string; modifiedAt: Date }>>;
+}
+
+/** A streamed object: status 200, or 206 for a Range; headers carry Content-Length, Content-Range, ETag, Last-Modified. */
+export interface ObjectRead {
+  body: Readable;
+  status: 200 | 206;
+  headers: Record<string, string>;
 }
 
 /** Content types for the files this server streams (uploads, library assets, renders); anything else is an octet stream. */
 const MIME: Record<string, string> = {
-  ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
-  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
-  ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
-  ".json": "application/json", ".zip": "application/zip",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".flac": "audio/flac",
+  ".json": "application/json",
+  ".zip": "application/zip",
 };
 export function contentTypeFor(file: string) {
   return MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
@@ -43,8 +72,27 @@ async function linkOrCopy(from: string, to: string) {
   try {
     await fsp.link(from, to);
   } catch {
-    await fsp.copyFile(from, to);
+    // copy under a temp name so an interrupted copy is never mistaken for the finished file
+    const tmp = `${to}.${process.pid}.${randomUUID()}.part`;
+    try {
+      await fsp.copyFile(from, tmp);
+      await fsp.rename(tmp, to);
+    } catch (err) {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
   }
+}
+
+/** True for the errors S3 gives a missing object (HeadObject has no body, so only the status or name tells). */
+export function isS3NotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const name = "name" in err ? err.name : undefined;
+  if (name === "NotFound" || name === "NoSuchKey") return true;
+  if ("$metadata" in err && typeof err.$metadata === "object" && err.$metadata !== null && "httpStatusCode" in err.$metadata) {
+    return err.$metadata.httpStatusCode === 404;
+  }
+  return false;
 }
 
 function safeKey(key: string) {
@@ -77,7 +125,7 @@ class LocalStorage implements Storage {
     await linkOrCopy(localPath, dest);
   }
   async ensureLocal(key: string, localPath: string) {
-    if (await fileExists(localPath)) return localPath;
+    if (await fileExists(localPath)) return touched(localPath);
     const src = this.abs(key);
     if (!(await fileExists(src))) throw new Error(`storage object missing: ${key}`);
     await linkOrCopy(src, localPath);
@@ -89,11 +137,30 @@ class LocalStorage implements Storage {
   async resolve(key: string) {
     return { file: this.abs(key) };
   }
+  async openRead(key: string) {
+    return { file: this.abs(key) };
+  }
   async delete(key: string) {
     await fsp.rm(this.abs(key), { force: true });
   }
   async deletePrefix(prefix: string) {
     await fsp.rm(this.abs(prefix), { recursive: true, force: true });
+  }
+  async list(prefix: string, limit: number) {
+    const out: Array<{ key: string; modifiedAt: Date }> = [];
+    const walk = async (rel: string) => {
+      for (const e of await fsp.readdir(this.abs(rel), { withFileTypes: true }).catch(() => [])) {
+        if (out.length >= limit) return;
+        const child = `${rel.replace(/\/+$/, "")}/${e.name}`;
+        if (e.isDirectory()) await walk(child);
+        else {
+          const st = await fsp.stat(this.abs(child)).catch(() => null);
+          if (st) out.push({ key: child, modifiedAt: st.mtime });
+        }
+      }
+    };
+    await walk(prefix);
+    return out;
   }
 }
 
@@ -116,6 +183,16 @@ class S3Storage implements Storage {
     } catch (err) {
       throw new Error(`cannot access S3 bucket "${this.bucket}" at ${this.config.S3_ENDPOINT ?? "AWS"}: ${(err as Error).name}: ${(err as Error).message}`);
     }
+    // read-only credentials pass HeadBucket; fail at boot, not after a 2 GB download
+    const probe = this.k(`.reelsaw-check-${randomUUID()}`);
+    try {
+      await client.send(new sdk.PutObjectCommand({ Bucket: this.bucket, Key: probe, Body: "ok" }));
+      await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: probe }));
+    } catch (err) {
+      throw new Error(
+        `S3 bucket "${this.bucket}" is readable but not writable (put/delete of a probe object failed): ${(err as Error).name}: ${(err as Error).message}`,
+      );
+    }
   }
 
   private async s3() {
@@ -124,12 +201,11 @@ class S3Storage implements Storage {
     const { config } = this;
     const client = new sdk.S3Client({
       region: config.S3_REGION,
-      endpoint: config.S3_ENDPOINT,
+      ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
       forcePathStyle: config.S3_FORCE_PATH_STYLE,
-      credentials:
-        config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
-          ? { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY }
-          : undefined,
+      ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
+        ? { credentials: { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY } }
+        : {}),
     });
     this.client = client;
     this.sdk = sdk;
@@ -151,15 +227,33 @@ class S3Storage implements Storage {
     await upload.done();
   }
 
-  async ensureLocal(key: string, localPath: string) {
-    if (await fileExists(localPath)) return localPath;
+  /** Pulls in flight in this process, by destination: concurrent callers share one download. */
+  private pulls = new Map<string, Promise<string>>();
+
+  ensureLocal(key: string, localPath: string): Promise<string> {
+    const running = this.pulls.get(localPath);
+    if (running) return running;
+    const pull = this.pull(key, localPath).finally(() => this.pulls.delete(localPath));
+    this.pulls.set(localPath, pull);
+    return pull;
+  }
+
+  private async pull(key: string, localPath: string) {
+    if (await fileExists(localPath)) return touched(localPath);
     const { client, sdk } = await this.s3();
     const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
     if (!res.Body) throw new Error(`storage object missing: ${key}`);
     await fsp.mkdir(path.dirname(localPath), { recursive: true });
-    const tmp = `${localPath}.part`;
-    await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
-    await fsp.rename(tmp, localPath);
+    const tmp = `${localPath}.${process.pid}.${randomUUID()}.part`;
+    try {
+      await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
+      if (await fileExists(localPath))
+        await fsp.rm(tmp, { force: true }); // another process got there first
+      else await fsp.rename(tmp, localPath);
+    } catch (err) {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
     return localPath;
   }
 
@@ -168,8 +262,9 @@ class S3Storage implements Storage {
     try {
       await client.send(new sdk.HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isS3NotFound(err)) return false;
+      throw err;
     }
   }
 
@@ -188,6 +283,19 @@ class S3Storage implements Storage {
     return { url };
   }
 
+  async openRead(key: string, range?: string) {
+    const { client, sdk } = await this.s3();
+    const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key), ...(range ? { Range: range } : {}) }));
+    if (!res.Body) throw new Error(`storage object missing: ${key}`);
+    const headers: Record<string, string> = { "Accept-Ranges": "bytes" };
+    if (res.ContentLength !== undefined) headers["Content-Length"] = String(res.ContentLength);
+    if (res.ContentRange) headers["Content-Range"] = res.ContentRange;
+    if (res.ETag) headers.ETag = res.ETag;
+    if (res.LastModified) headers["Last-Modified"] = res.LastModified.toUTCString();
+    // the SDK's Node body is a Readable (sdkStreamMixin over IncomingMessage)
+    return { body: res.Body as Readable, status: res.ContentRange ? (206 as const) : (200 as const), headers };
+  }
+
   async delete(key: string) {
     const { client, sdk } = await this.s3();
     await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
@@ -204,6 +312,26 @@ class S3Storage implements Storage {
       if (keys.length) await client.send(new sdk.DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: keys } }));
       token = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (token);
+  }
+
+  async list(prefix: string, limit: number) {
+    const { client, sdk } = await this.s3();
+    const root = this.prefix ? `${this.prefix.replace(/\/+$/, "")}/` : "";
+    const out: Array<{ key: string; modifiedAt: Date }> = [];
+    let token: string | undefined;
+    do {
+      const page = await client.send(
+        new sdk.ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: this.k(prefix).replace(/\/?$/, "/"),
+          MaxKeys: Math.min(1000, limit - out.length),
+          ContinuationToken: token,
+        }),
+      );
+      for (const o of page.Contents ?? []) if (o.Key && o.LastModified) out.push({ key: o.Key.slice(root.length), modifiedAt: o.LastModified });
+      token = page.IsTruncated && out.length < limit ? page.NextContinuationToken : undefined;
+    } while (token);
+    return out;
   }
 }
 
@@ -232,17 +360,30 @@ export function withStorageLogging(inner: Storage, log: Logger): Storage {
     ensureLocal: (key, localPath) => timed("ensureLocal", key, () => inner.ensureLocal(key, localPath)),
     exists: (key) => inner.exists(key),
     resolve: (key, opts) => inner.resolve(key, opts),
+    openRead: (key, range) => timed("openRead", key, () => inner.openRead(key, range)),
     delete: (key) => timed("delete", key, () => inner.delete(key)),
     deletePrefix: (prefix) => timed("deletePrefix", prefix, () => inner.deletePrefix(prefix)),
+    list: (prefix, limit) => timed("list", prefix, () => inner.list(prefix, limit)),
   };
 }
 
+/** A cache hit bumps the file's mtime so the scratch sweep evicts by last use, not by first pull (storage/sweep.ts). */
+async function touched(file: string) {
+  const now = new Date();
+  await fsp.utimes(file, now, now).catch(() => {});
+  return file;
+}
+
 export function createStorage(config: Config, paths: Paths, log?: Logger): Storage {
-  const inner: Storage = config.STORAGE_DRIVER === "s3" ? new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "") : new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
+  const inner: Storage =
+    config.STORAGE_DRIVER === "s3"
+      ? new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "")
+      : new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
   return log ? withStorageLogging(inner, log) : inner;
 }
 
 // ---------- key helpers ----------
+export const ASR_CACHE_PREFIX = "cache/asr/";
 export const keys = {
   upload: (id: string, ext: string) => `uploads/${id}${ext}`,
   source: (projectId: string, ext: string) => `projects/${projectId}/source${ext}`,
@@ -258,5 +399,7 @@ export const keys = {
   assetNorm: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/norm.${variant}.mp4`,
   /** derived cache: an SVG rasterised once at the render width */
   assetRaster: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/raster.${variant}.png`,
+  /** a speech-to-text result (ai/asr.ts) shared across hosts when the store is S3; `sha` is the cache key */
+  asrCache: (sha: string) => `${ASR_CACHE_PREFIX}${sha}.json`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };
