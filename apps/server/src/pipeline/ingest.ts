@@ -8,7 +8,7 @@ import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { announcedDuration } from "../projects/peek.js";
-import { type StageContext, exists, sourceScratchMB } from "./common.js";
+import { type StageContext, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 
@@ -93,7 +93,10 @@ export async function ingest(ctx: StageContext) {
           },
         )
         .catch((err: Error) => {
-          throw new Error(describeDownloadFailure(err, stderrTail));
+          const message = describeDownloadFailure(err, stderrTail);
+          // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
+          if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
+          throw new Error(message);
         });
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       const jsonLine = stdout
@@ -258,6 +261,9 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
           : "the site blocked the download";
     return `Could not download: ${why}. Try uploading the file instead (New project → Upload).`;
   }
+  if (/HTTP Error (404|410)\b/i.test(text)) {
+    return "Could not download: the link no longer exists (the site answered page not found). Check the URL, or upload the file instead (New project → Upload).";
+  }
   if (/Unsupported URL|No video formats|Requested format is not available/i.test(text)) {
     return "Could not download: no usable video was found for this link. Try another URL, or upload the file instead (New project → Upload).";
   }
@@ -275,6 +281,14 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
     .trim()
     .slice(0, 300);
   return scrubStoredDownloadError(`Could not download: ${cleaned}`);
+}
+
+/**
+ * yt-dlp failures that retrying cannot change: the page is gone (404/410) or no extractor understands the URL.
+ * Proxy, rate-limit and bot-check failures (403, 429, 5xx) stay retryable.
+ */
+export function isPermanentDownloadFailure(text: string): boolean {
+  return /HTTP Error (404|410)\b|Unsupported URL/i.test(text);
 }
 
 /** Stored project errors are visible to every owner; never persist env keys in them. */
