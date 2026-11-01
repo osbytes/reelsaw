@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.30.2
+
+### Patch Changes
+
+- [#225](https://github.com/osbytes/reelsaw/pull/225) [`d6d3c44`](https://github.com/osbytes/reelsaw/commit/d6d3c4436c05492d9c2bf8763dc297c6a5249c4e) Thanks [@dependabot](https://github.com/apps/dependabot)! - Dependencies: Bump alpine from 3.20 to 3.24.
+
 ## 0.30.1
 
 ### Patch Changes
