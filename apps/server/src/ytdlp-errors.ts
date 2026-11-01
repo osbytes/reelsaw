@@ -23,8 +23,7 @@ const PROXY =
 /** yt-dlp's last `ERROR:` line, trimmed; undefined when there is none (it was killed, or this is not yt-dlp output). */
 export function fatalYtdlpLine(text: string): string | undefined {
   return text
-    .split(/\r?
-/)
+    .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => /^ERROR:/i.test(l))
     .at(-1);

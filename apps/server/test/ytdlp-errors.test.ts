@@ -21,10 +21,8 @@ describe("isPermanentDownloadFailure", () => {
   });
   it("keeps retryable what another attempt can change", () => {
     // a 404 named in a retry notice or warning, not the fatal line
-    assert.ok(!isPermanentDownloadFailure("[download] Got error: HTTP Error 404: Not Found. Retrying (1/10)...
-ERROR: timed out"));
-    assert.ok(!isPermanentDownloadFailure("WARNING: [generic] HTTP Error 404 on a fallback
-ERROR: Connection reset"));
+    assert.ok(!isPermanentDownloadFailure(`[download] Got error: HTTP Error 404: Not Found. Retrying (1/10)...\nERROR: timed out`));
+    assert.ok(!isPermanentDownloadFailure(`WARNING: [generic] HTTP Error 404 on a fallback\nERROR: Connection reset`));
     // the media URL (signed, expiring) answered 404
     assert.ok(!isPermanentDownloadFailure("ERROR: unable to download video data: HTTP Error 404: Not Found"));
     assert.ok(!isPermanentDownloadFailure("ERROR: [youtube] abc: Sign in to confirm you're not a bot"));
