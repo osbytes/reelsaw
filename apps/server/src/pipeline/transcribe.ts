@@ -5,7 +5,7 @@ import type { JSONObject } from "@ai-sdk/provider";
 import type { TranscriptFlag, Word } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
-import { type StageContext, StaleJobError, exists, lockCurrentStage, modelsUsed } from "./common.js";
+import { NonRetryableError, type StageContext, StaleJobError, exists, lockCurrentStage, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
 import { extractEntities, biasProviderOptions, applyFlags } from "./entities.js";
 import {
@@ -218,7 +218,8 @@ export async function transcribe(ctx: StageContext) {
   }
   if (dropped) ctx.log.info({ dropped, runs: loopRuns.length, flags: flags.length, samples: loopRuns.slice(0, 8) }, "collapsed ASR decoder-loop repeats");
   const words = applyFlags(rawWords, flags);
-  if (!words.length) throw new Error("Transcription returned no words. Is the audio silent?");
+  // every chunk is a saved step, so another attempt replays the same empty answer: fail the run now
+  if (!words.length) throw new NonRetryableError("Transcription returned no words. Is the audio silent?");
   const sentences = toSentences(words);
 
   await ctx.complete(
