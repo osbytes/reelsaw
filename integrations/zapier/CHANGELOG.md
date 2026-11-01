@@ -1,3 +1,7 @@
+## 1.1.2
+
+- Get Share Links: the Files field no longer shows "Video (MP4)" twice; leave it empty for the video.
+
 ## 1.1.1
 
 - Trigger descriptions start with "Triggers when" (Zapier's style check D021).
