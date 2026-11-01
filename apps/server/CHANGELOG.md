@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.30.4
+
+### Patch Changes
+
+- [#233](https://github.com/osbytes/reelsaw/pull/233) [`bab3db0`](https://github.com/osbytes/reelsaw/commit/bab3db0bde7ae197fc1677890f6a4383a95a3126) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The "Jobs paused" chip now reflects the workers that run jobs, read from their heartbeats, instead of the machine that served the page: on a split deploy (an API box plus worker boxes) it no longer shows paused because the API box is busy, nor misses a worker that is short of disk. The app checks it every 30 seconds instead of every 10. New metric `reelsaw.quota.minutes_precheck_skipped` counts links downloaded under a minutes limit before their length was known.
+
 ## 0.30.3
 
 ### Patch Changes
