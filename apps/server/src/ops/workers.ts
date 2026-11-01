@@ -14,6 +14,7 @@ import { inflightJobs, listeningQueues } from "../queue/inflight.js";
 import { LEASE_STALE_MS, releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
+import { pausedReason, type PausedReason } from "../resources.js";
 
 export const WORKER_HEARTBEAT_MS = 15_000;
 /** last_seen older than this → not live (three missed beats) */
@@ -201,6 +202,41 @@ export async function workerWithRoom(svc: Services, queue: QueueName, requiredMB
   return pickWorkerWithRoom(rows, new Date(), workerIdOf(svc.config), queue, requiredMB);
 }
 
+/**
+ * Pure: why heavy jobs are waiting across the fleet, from the last heartbeats. Work waits only when every live
+ * process that takes jobs is short (one with room picks the job up), so this is null unless all of them are; the
+ * reason is the first one's. Null too when no process takes jobs: that is a missing worker, not a paused one.
+ */
+export function fleetPausedReason(
+  rows: Array<{ lastSeenAt: Date; queues: string[] | null; paused: PausedReason | null }>,
+  now: Date,
+  staleMs = WORKER_STALE_MS,
+): PausedReason | null {
+  const takers = rows.filter((r) => now.getTime() - r.lastSeenAt.getTime() <= staleMs && (r.queues?.length ?? 0) > 0);
+  if (!takers.length || takers.some((r) => !r.paused)) return null;
+  return takers[0]?.paused ?? null;
+}
+
+/** How long `fleetPaused` reuses its answer: `system.status` is public and polled, so it must not be one query per call. */
+const FLEET_PAUSED_TTL_MS = 5_000;
+let fleetPausedCache: { at: number; value: PausedReason | null } | null = null;
+
+/**
+ * The jobs-paused reason the app shows (`system.status`). Read from the heartbeats rather than this process's own
+ * machine, because an HTTP-only process (RUN_WORKERS=false) runs no jobs and its CPU or disk says nothing about them.
+ */
+export async function fleetPaused(svc: Services): Promise<PausedReason | null> {
+  const now = Date.now();
+  if (fleetPausedCache && now - fleetPausedCache.at < FLEET_PAUSED_TTL_MS) return fleetPausedCache.value;
+  const rows = await svc.database.db
+    .select({ lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, paused: schema.workerInstances.paused })
+    .from(schema.workerInstances)
+    .where(gt(schema.workerInstances.lastSeenAt, new Date(now - WORKER_STALE_MS)));
+  const value = fleetPausedReason(rows, new Date(now));
+  fleetPausedCache = { at: now, value };
+  return value;
+}
+
 export async function beat(svc: Services): Promise<void> {
   const id = workerIdOf(svc.config);
   const hostname = os.hostname();
@@ -236,6 +272,7 @@ export async function beat(svc: Services): Promise<void> {
     renders,
     queues,
     processing: inflightJobs(),
+    paused: pausedReason(snap),
     updatedAt: now,
   };
   await svc.database.db

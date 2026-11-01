@@ -27,7 +27,8 @@ export interface HeaderAlert {
 }
 
 export function useHeaderAlerts(): HeaderAlert[] {
-  const paused = useSystemStatus(10_000).data?.paused;
+  // workers report what they are short of every 15 s (ops/workers.ts), so polling faster only repeats the same answer
+  const paused = useSystemStatus(30_000).data?.paused;
   const stale = useStaleChunkNudge();
   const dirty = useUnsaved();
   const alerts: HeaderAlert[] = [];
@@ -49,7 +50,7 @@ export function useHeaderAlerts(): HeaderAlert[] {
       glyph: "◷",
       short: "Paused",
       label: `Jobs paused · ${reason}`,
-      detail: "Heavy jobs wait until the machine has room",
+      detail: "Heavy jobs wait until a worker has room",
       tone: "warn",
       href: "/settings",
     });

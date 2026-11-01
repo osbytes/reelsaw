@@ -1,0 +1,1 @@
+ALTER TABLE "worker_instances" ADD COLUMN "paused" text;

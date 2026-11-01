@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { QuotaExceededError, recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
+import { QuotaExceededError, hasMinuteLimits, recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -9,7 +9,7 @@ import { QUEUES } from "../queue/boss.js";
 import { UnresolvableHostError, UnsafeUrlError, assertPublicHttpUrl } from "../lib/safe-url.js";
 import { announcedDuration } from "../projects/peek.js";
 import { type StageContext, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
-import { histogram, realtimeFactor } from "../metrics.js";
+import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 import { CommandError } from "../media.js";
 import { isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
@@ -55,7 +55,9 @@ export async function ingest(ctx: StageContext) {
         throw err;
       });
       // refuse an over-limit video before fetching it, when the site tells us its length up front
-      const announced = await announcedDurationOrNull(ctx, project.sourceUrl ?? "");
+      const { sec: announced, missing } = await announcedDurationOrNull(ctx, project.sourceUrl ?? "");
+      // no length up front: the limit is checked only on the file, after the whole download (worth knowing how often)
+      if (missing && (await hasMinuteLimits(svc.database.db, svc.settings.get(), project.userId, svc.entitlements))) countMinutesPrecheckSkipped(missing);
       if (announced) {
         const over = await svc.tx(async (u) => {
           await takeTxLock(u.db, txLock.quota(project.userId));
@@ -227,10 +229,14 @@ export async function ingest(ctx: StageContext) {
   void svc;
 }
 
-/** `announcedDuration` for the stage: null when the lookup fails, so only a cancelled stage stops here. */
-async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<number | null> {
+/**
+ * `announcedDuration` for the stage, and why it is missing (the site did not say, or the lookup failed): only a
+ * cancelled stage or a permanently dead link stops here.
+ */
+async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<{ sec: number | null; missing: "unannounced" | "failed" | null }> {
   try {
-    return await announcedDuration(ctx.svc.media, url, ctx.signal);
+    const sec = await announcedDuration(ctx.svc.media, url, ctx.signal);
+    return { sec: sec || null, missing: sec ? null : "unannounced" };
   } catch (err) {
     ctx.signal.throwIfAborted();
     // the lookup already walked every proxy: a permanent answer here would be the download's answer too
@@ -238,8 +244,13 @@ async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<
     const text = `${err instanceof Error ? err.message : String(err)}\n${stderr}`;
     if (err instanceof Error && isPermanentDownloadFailure(text)) throw new SourceUnavailableError(describeDownloadFailure(err, stderr));
     ctx.log.debug({ err }, "could not look up the video's length before downloading");
-    return null;
+    return { sec: null, missing: "failed" };
   }
+}
+
+/** A link with a minutes limit downloaded before its length was known: the binding check ran only on the file. */
+function countMinutesPrecheckSkipped(reason: "unannounced" | "failed") {
+  count("reelsaw.quota.minutes_precheck_skipped", 1, "{download}", { reason }, "Links downloaded under a minutes limit before their length was known");
 }
 
 /**

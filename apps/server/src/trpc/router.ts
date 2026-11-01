@@ -57,7 +57,7 @@ import {
 import { peekUrlMeta } from "../projects/peek.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
-import { listWorkers } from "../ops/workers.js";
+import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
@@ -424,8 +424,8 @@ const headRouter = router({
   /** Public: what the sign-in page and the top bar need before/without an approved account. */
   system: router({
     status: publicProcedure.query(async ({ ctx }) => {
-      const r = await ctx.svc.resources.snapshot();
-      const paused = !r.ok.memory ? "memory" : !r.ok.cpu ? "CPU" : !r.ok.disk ? "disk" : null;
+      // the processes that run jobs, from their heartbeats: an HTTP-only process's own machine says nothing about them
+      const paused = await fleetPaused(ctx.svc);
       const s = ctx.svc.settings.get();
       return {
         version: ctx.svc.config.REELSAW_VERSION,
