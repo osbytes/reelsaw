@@ -59,8 +59,7 @@ module.exports = {
         list: true,
         required: false,
         choices: KINDS,
-        default: "clip",
-        helpText: "Which files to link. Defaults to the video.",
+        helpText: "Which files to link. Leave empty for the video.",
       },
       {
         key: "ttlDays",
