@@ -1,7 +1,7 @@
 /** Worker registry: identity, live vs stale, sort order (no database). */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyWorkers, pickWorkerWithRoom, processRole, workerIdOf, WORKER_STALE_MS } from "../src/ops/workers.js";
+import { classifyWorkers, fleetPausedReason, pickWorkerWithRoom, processRole, workerIdOf, WORKER_STALE_MS } from "../src/ops/workers.js";
 import { DISK_QUEUES, gateDecision, listeningQueues } from "../src/queue/disk-gate.js";
 import { QUEUES } from "../src/queue/boss.js";
 import type { WorkerRenders, WorkerRole } from "../src/db/schema.js";
@@ -128,5 +128,54 @@ describe("disk gate", () => {
     const paused = listeningQueues(all, true);
     assert.ok(DISK_QUEUES.every((q) => !paused.includes(q)));
     assert.deepEqual(paused, [QUEUES.refineEntities, QUEUES.refineDisfluency]);
+  });
+});
+
+describe("fleetPausedReason", () => {
+  const now = new Date("2026-11-01T12:00:00Z");
+  const fresh = new Date(now.getTime() - 5_000);
+  const stale = new Date(now.getTime() - WORKER_STALE_MS - 1_000);
+  const jobs = [QUEUES.render];
+
+  it("is null when one process that takes jobs still has room", () => {
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: jobs, paused: "disk" },
+          { lastSeenAt: fresh, queues: jobs, paused: null },
+        ],
+        now,
+      ),
+      null,
+    );
+  });
+
+  it("names the reason when every live process that takes jobs is short", () => {
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: jobs, paused: "memory" },
+          { lastSeenAt: fresh, queues: jobs, paused: "CPU" },
+        ],
+        now,
+      ),
+      "memory",
+    );
+  });
+
+  it("ignores HTTP-only processes and stale rows", () => {
+    // the API box is busy but runs no jobs; the stale worker with room is gone
+    assert.equal(
+      fleetPausedReason(
+        [
+          { lastSeenAt: fresh, queues: [], paused: "CPU" },
+          { lastSeenAt: stale, queues: jobs, paused: null },
+          { lastSeenAt: fresh, queues: jobs, paused: "disk" },
+        ],
+        now,
+      ),
+      "disk",
+    );
+    assert.equal(fleetPausedReason([{ lastSeenAt: fresh, queues: [], paused: "CPU" }], now), null);
   });
 });

@@ -365,6 +365,13 @@
       "when": 1793475087994,
       "tag": "0051_integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793569253842,
+      "tag": "0052_worker_paused",
+      "breakpoints": true
     }
   ]
 }

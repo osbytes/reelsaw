@@ -31,6 +31,12 @@ export interface ResourceSnapshot {
   ok: { cpu: boolean; memory: boolean; disk: boolean };
 }
 
+/** What a process is short of, so heavy jobs wait on it (memory first, then CPU, then disk); null when it has room. */
+export type PausedReason = "memory" | "CPU" | "disk";
+export function pausedReason(s: Pick<ResourceSnapshot, "ok">): PausedReason | null {
+  return !s.ok.memory ? "memory" : !s.ok.cpu ? "CPU" : !s.ok.disk ? "disk" : null;
+}
+
 /** The GPU this process can see, found once at boot (nvidia-smi, /dev/nvidia*, /dev/dxg, or the Apple chip). */
 export interface GpuInfo {
   vendor: "nvidia" | "apple";

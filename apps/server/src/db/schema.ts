@@ -857,6 +857,8 @@ export const workerInstances = pgTable(
     renders: jsonb("renders").$type<WorkerRenders>().notNull(),
     queues: text("queues").array().notNull().default(sql`'{}'::text[]`),
     processing: jsonb("processing").$type<WorkerJob[]>().notNull().default(sql`'[]'::jsonb`),
+    /** what this process was short of at its last beat (resources.ts `pausedReason`): heavy jobs wait on it; null = room */
+    paused: text("paused").$type<"memory" | "CPU" | "disk">(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("worker_instances_last_seen_idx").on(t.lastSeenAt)],

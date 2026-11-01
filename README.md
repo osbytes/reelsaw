@@ -817,6 +817,7 @@ Metrics. Durations are seconds. Attributes are bounded sets (stage, proxy id, mo
 | `reelsaw.ytdlp.download.duration` | s | `proxy`, `outcome`, `fallback` | One link download through the pool, fallbacks and waits included |
 | `reelsaw.ytdlp.download.realtime_factor` | 1 | `proxy` | Download seconds per second of video, by the proxy that served it |
 | `reelsaw.ytdlp.download.throughput` | By/s | `proxy` | Source bytes per second, by proxy |
+| `reelsaw.quota.minutes_precheck_skipped` | {download} | `reason` (unannounced, failed) | Links downloaded under a minutes limit before their length was known, so the limit was checked only on the file |
 | `reelsaw.ytdlp.attempts` | {attempt} | `proxy`, `outcome` (ok, proxy, content, other, abort, busy, circuit_open), `panic` | Which candidate was tried and why it failed: `proxy` faults count against the exit, `content` against the video |
 | `reelsaw.ytdlp.attempt.duration` | s | `proxy`, `outcome` | Wall time of one yt-dlp process through one candidate |
 | `reelsaw.ytdlp.proxy.circuit.changes` | {change} | `proxy`, `state` | Circuit opens (cooling), half-opens and closes |
