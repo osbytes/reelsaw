@@ -440,7 +440,8 @@ Automation tools can call the same endpoint without an MCP client: it is statele
 JSON, so a `tools/call` POST is one HTTP request. [docs/n8n](docs/n8n/README.md) has ready-made n8n
 workflows that clip every new upload on a YouTube channel and, on the signed `project.done` webhook,
 queue each clip in Buffer (or upload it to YouTube Shorts), with a polling variant for an n8n that
-cannot receive webhooks, and [integrations/zapier](integrations/zapier/README.md)
+cannot receive webhooks, [docs/make](docs/make/README.md) builds the same pipeline from Make's own modules
+(MCP Client and Custom webhook), and [integrations/zapier](integrations/zapier/README.md)
 is the source of a Zapier app built on the same tools (instant triggers through `create_webhook`). To be told when clips are ready instead of
 waiting, add a webhook (`create_webhook`, or Settings → Webhooks) and verify each delivery with any
 Standard Webhooks library:

@@ -396,7 +396,7 @@ export const GUIDES: Guide[] = [
       },
       {
         q: "Can I use it with Make, Zapier or a script instead of n8n?",
-        a: "Yes. The workflows are plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly. For instant triggers, Zapier and Make can subscribe a catch hook with the create_webhook tool (delete_webhook unsubscribes); deliveries are signed with the Standard Webhooks scheme.",
+        a: "Yes. The workflows are plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly. For instant triggers, Zapier and Make can subscribe a catch hook with the create_webhook tool (delete_webhook unsubscribes); deliveries are signed with the Standard Webhooks scheme. The repository has a Make version of this pipeline (docs/make) built from Make's MCP Client and Custom webhook modules, and a Zapier app.",
       },
     ],
     sources: [
