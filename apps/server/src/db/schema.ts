@@ -183,7 +183,7 @@ export const apikey = pgTable(
   (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
 );
 
-/** Account-level audit trail: sign-ups, approvals, role changes, bans, model changes (admin page, email). */
+/** Account-level events: sign-ups, approvals, role changes, bans, model changes, a webhook turned off (admin page; handlers in event-handler-map.ts; payloads in account-events.ts). */
 export const ADMIN_EVENT_TYPES = [
   "user.signed_up",
   "user.approved",
@@ -195,6 +195,7 @@ export const ADMIN_EVENT_TYPES = [
   "user.unbanned",
   "user.removed",
   "user.password_set",
+  "webhook.disabled",
   "models.changed",
   "provider.changed",
   "settings.changed",

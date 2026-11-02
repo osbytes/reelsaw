@@ -10,7 +10,7 @@ import { lifecycleHarness } from "./lifecycle-harness.js";
 import { deliverCompletionNotice } from "../src/notify/completion.js";
 import { emailPreferences, setEmailPreferences } from "../src/notify/preferences.js";
 import { eventHandlerQueues } from "../src/event-handlers.js";
-import { projectEventHandlers } from "../src/project-event-handlers.js";
+import { eventHandlerMap } from "../src/event-handler-map.js";
 import type { Services } from "../src/services.js";
 import type { UnitOfWork } from "../src/uow.js";
 
@@ -20,7 +20,7 @@ const h = lifecycleHarness();
 const notReady = await h.ready();
 after(() => h.cleanup());
 // the app creates handler queues at boot (createQueue().start()); a fresh test database has none
-if (!notReady) for (const q of eventHandlerQueues(projectEventHandlers)) await h.svc.queue.boss.createQueue(q.name, { policy: q.policy });
+if (!notReady) for (const q of eventHandlerQueues(eventHandlerMap)) await h.svc.queue.boss.createQueue(q.name, { policy: q.policy });
 
 const sent: Array<{ to: string; subject: string; text?: string; key?: string; headers?: Record<string, string> }> = [];
 let failSend = false;

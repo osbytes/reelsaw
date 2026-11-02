@@ -1,7 +1,7 @@
 /**
  * Account administration: approve, change role, suspend, remove, set password. One function per
- * transition, each a unit of work that writes the user row and its admin event together and sends
- * mail after commit. tRPC (admin router) and the CLI call these; nothing else edits role/approval
+ * transition, each a unit of work that writes the user row and its account event (`u.emitAccount`)
+ * together; mail that follows is a handler on the event (notify/account.ts). tRPC (admin router) and the CLI call these; nothing else edits role/approval
  * columns or the credential hash.
  */
 import { and, eq, ne, sql } from "drizzle-orm";
@@ -12,7 +12,6 @@ import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError } from "@reelsaw/shared
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
-import { templates } from "./email.js";
 import { purgeProject } from "./projects/service.js";
 import type { UserRole } from "./db/schema.js";
 
@@ -40,9 +39,8 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     const user = await lockedUser(u, userId);
     if (user.approvedAt) return { ok: true, changed: false };
     await u.db.update(schema.user).set({ approvedAt: new Date(), updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.approved", actorId, userId, email: user.email, payload: {} });
+    await u.emitAccount("user.approved", { actorId, userId, email: user.email, payload: {} });
     audit(svc, u, "user.approved", actorId, userId);
-    u.afterCommit(() => svc.email.send({ to: user.email, ...templates.approved(svc.config.APP_URL) }));
     // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
     u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
     return { ok: true, changed: true };
@@ -58,7 +56,7 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
     if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0)
       throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.role_changed", actorId, userId, email: user.email, payload: { from: user.role, to: role } });
+    await u.emitAccount("user.role_changed", { actorId, userId, email: user.email, payload: { from: user.role, to: role } });
     audit(svc, u, "user.role_changed", actorId, userId);
     return { ok: true, changed: true };
   });
@@ -72,7 +70,7 @@ export async function banUser(svc: Services, actorId: string, userId: string, re
     await u.db.update(schema.user).set({ banned: true, banReason: reason, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     // their browser sessions end now; API keys fail at the next request (requester reads the row)
     await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.banned", actorId, userId, email: user.email, payload: { reason } });
+    await u.emitAccount("user.banned", { actorId, userId, email: user.email, payload: { reason } });
     audit(svc, u, "user.banned", actorId, userId);
     return { ok: true };
   });
@@ -82,7 +80,7 @@ export async function unbanUser(svc: Services, actorId: string, userId: string) 
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     await u.db.update(schema.user).set({ banned: false, banReason: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.unbanned", actorId, userId, email: user.email, payload: {} });
+    await u.emitAccount("user.unbanned", { actorId, userId, email: user.email, payload: {} });
     audit(svc, u, "user.unbanned", actorId, userId);
     return { ok: true };
   });
@@ -101,7 +99,7 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     for (const p of projects) await purgeProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
     await u.db.delete(schema.sourceUsage).where(eq(schema.sourceUsage.userId, userId)); // no FK: it outlives project purges, not the account
-    await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
+    await u.emitAccount("user.removed", { actorId, userId, email: user.email, payload: { projects: projects.length } });
     audit(svc, u, "user.removed", actorId, userId);
     // after commit, best effort: a failure is logged and the daily reconcile lists the orphan
     if (cancelAtStripe) u.afterCommit(cancelAtStripe);
@@ -120,7 +118,7 @@ export async function setUserWatermark(svc: Services, actorId: string | null, us
       .insert(schema.userSettings)
       .values({ userId, watermark })
       .onConflictDoUpdate({ target: schema.userSettings.userId, set: { watermark, updatedAt: new Date() } });
-    await u.db.insert(schema.adminEvents).values({ type: "user.watermark_changed", actorId, userId, email: user.email, payload: { watermark } });
+    await u.emitAccount("user.watermark_changed", { actorId, userId, email: user.email, payload: { watermark } });
     audit(svc, u, "user.watermark_changed", actorId, userId);
     return { ok: true, watermark };
   });
@@ -146,7 +144,7 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
         },
       })
       .returning({ limits: schema.userSettings.limits });
-    await u.db.insert(schema.adminEvents).values({ type: "user.limits_changed", actorId, userId, email: user.email, payload: { limits: row!.limits } });
+    await u.emitAccount("user.limits_changed", { actorId, userId, email: user.email, payload: { limits: row!.limits } });
     audit(svc, u, "user.limits_changed", actorId, userId);
     return { ok: true, overrides: row!.limits };
   });
@@ -200,7 +198,7 @@ export async function setUserPassword(
     else await u.db.insert(schema.account).values({ id: randomUUID(), accountId: userId, providerId: CREDENTIAL, userId, password: hash });
     await u.db.update(schema.user).set({ mustChangePassword: opts.mustChange, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await dropSessions(u, userId, opts.keepSessionId);
-    await u.db.insert(schema.adminEvents).values({ type: "user.password_set", actorId, userId, email: user.email, payload: { mustChange: opts.mustChange } });
+    await u.emitAccount("user.password_set", { actorId, userId, email: user.email, payload: { mustChange: opts.mustChange } });
     audit(svc, u, "user.password_set", actorId, userId);
     return { ok: true as const };
   });

@@ -13,8 +13,9 @@ import {
   type EventHandlerDeps,
   type ReadDb,
 } from "../src/event-handlers.js";
-import { projectEventHandlers } from "../src/project-event-handlers.js";
+import { eventHandlerMap } from "../src/event-handler-map.js";
 import { PROJECT_EVENT_TYPES } from "@reelsaw/shared";
+import { ACCOUNT_EVENT_TYPES } from "../src/account-events.js";
 import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
@@ -158,8 +159,13 @@ describe("event handlers", () => {
 
   it("lists every handler in one map, and a name twice on one event does not compile", () => {
     assert.deepEqual(
-      eventHandlerQueues(projectEventHandlers).map((q) => q.name),
-      ["event.project.done.readyEmail"],
+      eventHandlerQueues(eventHandlerMap).map((q) => q.name),
+      [
+        "event.project.done.readyEmail",
+        "event.user.signed_up.approvalRequestEmail",
+        "event.user.approved.approvedEmail",
+        "event.webhook.disabled.webhookDisabledEmail",
+      ],
     );
     // @ts-expect-error duplicate key in the one map
     // biome-ignore lint/suspicious/noDuplicateObjectKeys: the duplicate is what this test proves does not compile
@@ -169,9 +175,9 @@ describe("event handlers", () => {
   it("names a handler's settings EVENT_<EVENT>_<HANDLER>_<NAME>, and every such setting exists", () => {
     assert.equal(eventHandlerSetting("project.done", "readyEmail", "delayMinutes"), "EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES");
     assert.equal(eventHandlerSetting("clip.bumper_skipped", "notifyOwner", "DELAY_MINUTES"), "EVENT_CLIP_BUMPER_SKIPPED_NOTIFY_OWNER_DELAY_MINUTES");
-    const prefixes = eventHandlerQueues(projectEventHandlers).map((q) => eventHandlerSetting(q.type, q.handler, ""));
+    const prefixes = eventHandlerQueues(eventHandlerMap).map((q) => eventHandlerSetting(q.type, q.handler, ""));
     // EVENT_REPLAY_LIMIT and EVENT_RETENTION_DAYS are about the event log, not a handler: only EVENT_<an event type>_… counts
-    const typePrefixes = PROJECT_EVENT_TYPES.map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
+    const typePrefixes = [...PROJECT_EVENT_TYPES, ...ACCOUNT_EVENT_TYPES].map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
     const settings = Object.keys(envSchema.shape).filter((k) => typePrefixes.some((p) => k.startsWith(p)));
     assert.ok(settings.length > 0);
     for (const k of settings)
@@ -182,7 +188,7 @@ describe("event handlers", () => {
   });
 
   it("fills a handler's queue options from the defaults, overridden at the definition", () => {
-    const [q] = eventHandlerQueues(projectEventHandlers);
+    const [q] = eventHandlerQueues(eventHandlerMap);
     assert.deepEqual(q!.options, { ...EVENT_HANDLER_DEFAULTS, expireInSeconds: 120 });
   });
 

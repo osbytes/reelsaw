@@ -9,7 +9,6 @@ import { TRPCError } from "@trpc/server";
 import { Webhook } from "standardwebhooks";
 import { schema } from "../db/index.js";
 import type { WebhookDeliveryRow } from "../db/schema.js";
-import { templates } from "../email.js";
 import { bodyChunks, fetchPublic, TooManyRedirectsError, UnsafeUrlError, type FetchPublicOptions } from "../lib/safe-url.js";
 import { WEBHOOK_QUEUE } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -200,9 +199,14 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
         .where(eq(schema.webhookEndpoints.id, e.id));
       if (disabled) {
         await cancelPending(u.db, e.id);
+        // the account event commits with the turn-off; its handler mails the owner (notify/account.ts)
         const owner = await u.db.query.user.findFirst({ where: eq(schema.user.id, d.userId), columns: { email: true } });
-        const reason = disabled;
-        if (owner) u.afterCommit(() => svc.email.send({ to: owner.email, ...templates.webhookDisabled(svc.config.APP_URL, maskWebhookUrl(e.url), reason) }));
+        if (owner)
+          await u.emitAccount("webhook.disabled", {
+            userId: d.userId,
+            email: owner.email,
+            payload: { endpointId: e.id, url: maskWebhookUrl(e.url), reason: disabled },
+          });
       }
     }
     if (delay !== null && !disabled)

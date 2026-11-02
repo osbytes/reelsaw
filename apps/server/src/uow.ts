@@ -20,6 +20,7 @@ import { USER_RERUN_QUEUES, type Queue, type QueueName, type JobData } from "./q
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
 import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
+import type { AccountEventPayload, AccountEventType } from "./account-events.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -44,6 +45,15 @@ export interface UnitOfWork {
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
   emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<number>;
+  /**
+   * Record an account event (`admin_events`: an approval, a ban, a webhook turned off) and queue its
+   * handlers (event-handler-map.ts) with it. `email` is the account's address at the time, kept after
+   * the account is gone; `actorId` null means the system did it.
+   */
+  emitAccount<T extends AccountEventType>(
+    type: T,
+    row: { userId: string; email: string; actorId?: string | null; payload: AccountEventPayload<T> },
+  ): Promise<number>;
   /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
   enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
@@ -169,6 +179,11 @@ export function createUnitOfWork(
           if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, row!.id, projectId, type);
           return row!.id;
         },
+        async emitAccount(type, { userId, email, actorId = null, payload }) {
+          const [row] = await db.insert(schema.adminEvents).values({ type, userId, email, actorId, payload }).returning({ id: schema.adminEvents.id });
+          emitted.push({ id: row!.id, userId, type, payload });
+          return row!.id;
+        },
         async enqueue(q, data, opts) {
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
@@ -211,7 +226,7 @@ export function createUnitOfWork(
           const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfterSeconds: r.startAfter });
           // null: the handler coalesces and a job is already waiting for this key
           log.debug(
-            { handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId },
+            { handler: r.handler, event: r.data.event.type, ...subjectOf(r.data.event), key: r.data.key, jobId },
             jobId ? "event handler job queued" : "event handler job already queued",
           );
         }
@@ -226,6 +241,8 @@ export function createUnitOfWork(
     // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
     const who = requestedBy.getStore();
     for (const e of emitted) {
+      // account events are logged by their own modules (accounts.ts audit, webhooks/deliver.ts)
+      if (!("projectId" in e)) continue;
       const level = EVENT_LEVEL[e.type] ?? "debug";
       log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
       const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
@@ -262,4 +279,9 @@ export function createUnitOfWork(
       }
     }
   };
+}
+
+/** The project or account an event is about, for a log line. */
+function subjectOf(e: EmittedEvent): { projectId: string } | { userId: string } {
+  return "projectId" in e ? { projectId: e.projectId } : { userId: e.userId };
 }

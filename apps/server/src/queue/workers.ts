@@ -1,7 +1,7 @@
 import type { Services } from "../services.js";
 import { QUEUES, type ProjectJob, type RenderJob, type PrepareJob, type QueueName } from "./boss.js";
 import { eventHandlerQueues, parseEventHandlerJob } from "../event-handlers.js";
-import { projectEventHandlers } from "../project-event-handlers.js";
+import { eventHandlerMap } from "../event-handler-map.js";
 import { prepareClip } from "../pipeline/manual.js";
 import { withLlmContext } from "../ai/trace.js";
 import { ingest } from "../pipeline/ingest.js";
@@ -381,7 +381,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
   });
 
   // event handlers (event-handlers.ts): one queue each; the queue's policy is the concurrency it opted into
-  const handlerQueues = eventHandlerQueues(projectEventHandlers);
+  const handlerQueues = eventHandlerQueues(eventHandlerMap);
   for (const q of handlerQueues) {
     await boss.work(q.name, { pollingIntervalSeconds: q.options.pollingIntervalSeconds, localConcurrency: q.options.localConcurrency }, async (jobs) => {
       const job = jobs[0]!;
@@ -401,6 +401,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           key,
           svc,
           signal: job.signal,
+          idempotencyKey: `${q.name}:${event.id}`,
           again: (u, o) => u.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfterSeconds: o.delaySeconds } : {}) }),
         });
       } catch (err) {

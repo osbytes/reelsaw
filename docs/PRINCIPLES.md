@@ -41,27 +41,42 @@ project already hit the problem it prevents.
   uses `u.db`, `u.emit`, `u.enqueue` and `u.cancelLiveJobs`. Never update with `svc.database.db`
   and then call `svc.events.emit` or `svc.queue.enqueue` afterwards. A crash between them leaves
   an event for a change that didn't happen, or a "pending" clip with no job.
+- **A side effect that must happen because of a change is an event handler, never `afterCommit`.**
+  Mail, a call to another service, anything whose loss someone would notice: the change emits an
+  event in its unit of work (`u.emit` for a project, `u.emitAccount` for an account: a sign-up, an
+  approval, a webhook turned off), and a handler on that event does the work. The handler's job
+  commits with the event, so a crash or a provider outage after COMMIT delays the mail; it never
+  loses it, and pg-boss retries it. `u.afterCommit` is for best-effort work only: logs, telemetry,
+  deleting scratch or stored files that a sweep would also find. Mail a person is waiting on in the
+  request itself (password reset, email verification) is the one exception: they can ask again.
 - **Work that follows an event is a handler on it, not a call at the emit site.** Every handler is
-  listed in one map, `projectEventHandlers` in `project-event-handlers.ts` (event type → handler
+  listed in one map, `eventHandlerMap` in `event-handler-map.ts` (event type → handler
   name → handler), so what follows each event is visible in one place; the handler itself lives with
-  its module (`readyEmail` in `notify/completion.ts`). `event.payload` is inferred from the event's
-  zod schema (`projectEventSchemas` in @reelsaw/shared), which every emit site is type-checked
-  against; each payload names the resources it is about (the project always, plus its clips, assets,
-  layers, uploads or jobs). Each handler has its own pg-boss queue: `key` (select-only reads on the
-  emitting transaction; null skips) picks the job's key, and the unit of work writes the job on the
-  same connection just before COMMIT, so the event and every handler's job commit or roll back
-  together (a transactional outbox whose relay is pg-boss). `handle` runs after commit with retries,
-  idempotent per key. Concurrency is opt-in and enforced by the queue's policy, not by hand:
-  `coalesce` (a waiting job for the key absorbs new ones) and `oneAtATime` (one running job per key,
-  across processes). Don't hand-roll claims or leases for that. Queue and worker options default to
-  `EVENT_HANDLER_DEFAULTS` and are overridden on the handler (`queue: { … }`); a handler's settings
-  are named `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`).
+  its module (`readyEmail` in `notify/completion.ts`, the account mail in `notify/account.ts`).
+  `event.payload` is inferred from the event's zod schema, `projectEventSchemas` in @reelsaw/shared
+  or `accountEventSchemas` in `account-events.ts`, which every emit site is type-checked against;
+  a project event's payload names the resources it is about (the project always, plus its clips,
+  assets, layers, uploads or jobs), and an account event carries its `userId`. An account type a
+  handler reads gets a real schema, not the loose record the others start with. Each handler has its own pg-boss
+  queue: `key` (select-only reads on the emitting transaction; null skips) picks the job's key, and
+  the unit of work writes the job on the same connection just before COMMIT, so the event and every
+  handler's job commit or roll back together (a transactional outbox whose relay is pg-boss). Only
+  `u.emit` and `u.emitAccount` run handlers: an event row inserted any other way follows with
+  nothing. `handle` runs after commit with retries, idempotent per key; pass `idempotencyKey` to a
+  provider that dedups (Resend), so a retry after a send that went through is dropped. A handler
+  reads the account or project as it is when it runs (a removed account, a suspended one, a sign-up
+  already approved get nothing). Concurrency is opt-in and enforced by the queue's policy, not by
+  hand: `coalesce` (a waiting job for the key absorbs new ones) and `oneAtATime` (one running job per
+  key, across processes). Don't hand-roll claims or leases for that, and don't bring in a second
+  outbox: the relay is the pg-boss we already run, monitor and retry with. Queue and worker options
+  default to `EVENT_HANDLER_DEFAULTS` and are overridden on the handler (`queue: { … }`); a handler's
+  settings are named `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`).
 - **Standalone `svc.events.emit` is only for notifications** that describe no state change, such as
   progress ticks. It is a single atomic statement (insert + NOTIFY).
 - **NOTIFY happens inside the transaction**, so listeners are only woken once the data they will
   read has committed.
 - **Files and other non-database side effects run after commit** (`u.afterCommit(…)`), or are
-  written under a versioned name. A rollback must never leave rows pointing at deleted files, or
+  written under a versioned name (mail and other must-happen effects are event handlers, above). A rollback must never leave rows pointing at deleted files, or
   files overwritten under a live row.
 - **A stage ends with its hand-off.** `ctx.complete(extra, async (u) => …)` writes the stage's
   results, emits `stage.completed` and enqueues the next stage in one commit.

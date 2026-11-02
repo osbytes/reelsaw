@@ -277,7 +277,7 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 }
 
 /**
- * The ready note as a `project.done` handler (listed in project-event-handlers.ts), keyed by the
+ * The ready note as a `project.done` handler (listed in event-handler-map.ts), keyed by the
  * account: a completion joins a note still waiting, and one note per account is sent at a time.
  * Nothing when email is off.
  */

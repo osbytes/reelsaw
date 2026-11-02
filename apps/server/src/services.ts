@@ -19,7 +19,7 @@ import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
 import { isSelfHostedModel } from "./ai/self-hosted.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
-import { projectEventHandlers } from "./project-event-handlers.js";
+import { eventHandlerMap } from "./event-handler-map.js";
 import { eventHandlerQueues } from "./event-handlers.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
@@ -379,7 +379,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
       otel.enabled,
       log.child({ module: "queue" }),
       () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }),
-      eventHandlerQueues(projectEventHandlers),
+      eventHandlerQueues(eventHandlerMap),
     );
     await q.start();
     return q;
@@ -393,7 +393,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return e;
   });
 
-  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
+  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, () => svc.tx, telemetry));
 
   const svc: Services = {
     log,
@@ -435,7 +435,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     () => settings.get(),
     () => svc.entitlements,
     telemetry,
-    { handlers: projectEventHandlers, deps: () => svc },
+    { handlers: eventHandlerMap, deps: () => svc },
   );
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));
