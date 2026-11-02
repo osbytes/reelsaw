@@ -1,6 +1,6 @@
 /**
  * deliverCompletionNotice against Postgres: one note for what finished while the account was away,
- * recorded in completion_notices so a second run sends nothing, nothing for what they have seen,
+ * marked on each project (ready_mailed_through) so a second run sends nothing, nothing for what they have seen,
  * and a failed send records nothing (the retry sends the same batch with the same key).
  * Postgres only.  node --import tsx --test test/completion-delivery.test.ts
  */
@@ -43,16 +43,10 @@ async function account(lastActive: string | null): Promise<string> {
 }
 async function finished(userId: string, ago: string): Promise<string> {
   const p = await h.makeProject(userId, "done");
-  const e = await h.pool.query(
-    `insert into events (project_id, type, payload, created_at) values ($1, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}') returning id`,
-    [p],
+  await h.pool.query(
+    `insert into events (project_id, user_id, type, payload, created_at) values ($1, $2, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}')`,
+    [p, userId],
   );
-  // what finalizeProjectIfDone writes with the first finish
-  await h.pool.query(`insert into finished_projects (project_id, user_id, first_event_id) values ($1, $2, $3) on conflict do nothing`, [
-    p,
-    userId,
-    e.rows[0].id,
-  ]);
   return p;
 }
 
@@ -67,7 +61,7 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.equal(sent[0]!.to, `${u}@example.test`);
     assert.match(sent[0]!.key ?? "", /^ready-[0-9a-f]{40}$/);
     assert.match(sent[0]!.headers?.["List-Unsubscribe"] ?? "", /^<https:\/\/app\.example\.test\/api\/email\/unsubscribe\?u=/);
-    const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
+    const r = await h.pool.query(`select count(*)::int as n from projects where user_id = $1 and ready_mailed_through is not null`, [u]);
     assert.equal(r.rows[0].n, 2);
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 1);
@@ -80,7 +74,7 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     sent.length = 0;
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 0);
-    const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
+    const r = await h.pool.query(`select count(*)::int as n from projects where user_id = $1 and ready_mailed_through is not null`, [u]);
     assert.equal(r.rows[0].n, 0);
   });
 
@@ -119,6 +113,23 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.doesNotMatch(sent[1]!.text ?? "", /projects finished/);
   });
 
+  it("mails a re-render's finish after the project's first note: it is above the project's mark", async () => {
+    const u = await account(null);
+    const p = await finished(u, "30 minutes");
+    sent.length = 0;
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 1);
+    await h.pool.query(
+      `insert into events (project_id, user_id, type, payload) values ($1, $2, 'project.done', '{"clips":3,"failed":0,"runSeq":2,"runReason":"rerender"}')`,
+      [p, u],
+    );
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 2);
+    assert.match(sent[1]!.subject, /new render is ready/);
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 2);
+  });
+
   it("skips what finished before they were last here", async () => {
     const u = await account("5 minutes");
     await finished(u, "30 minutes");
@@ -153,7 +164,7 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     } finally {
       failSend = false;
     }
-    const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
+    const r = await h.pool.query(`select count(*)::int as n from projects where user_id = $1 and ready_mailed_through is not null`, [u]);
     assert.equal(r.rows[0].n, 0);
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 1);
@@ -162,7 +173,8 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
   it("records a batch cut short and queues its follow-up together, or neither", async () => {
     const u = await account(null);
     for (let i = 0; i < 41; i++) await finished(u, `${50 - i} minutes`);
-    const recorded = async () => (await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u])).rows[0].n;
+    const recorded = async () =>
+      (await h.pool.query(`select count(*)::int as n from projects where user_id = $1 and ready_mailed_through is not null`, [u])).rows[0].n;
     const followUps = async () =>
       (await h.pool.query(`select count(*)::int as n from pgboss.job where name = $1 and singleton_key = $2`, [QUEUE, u])).rows[0].n;
     const again = (u2: UnitOfWork) => u2.send(QUEUE, { key: u }, { singletonKey: u, startAfterSeconds: 3600 });

@@ -449,6 +449,11 @@ export const projects = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
     forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
+    /**
+     * The last `project.done` (events.id) the ready email covered (notify/completion.ts): a later finish, a
+     * re-render's, is above it and mailed; null until the first note.
+     */
+    readyMailedThrough: bigint("ready_mailed_through", { mode: "number" }),
     /** the creator's own key/value pairs (create_project `metadata`), never interpreted; echoed in every webhook for the project */
     metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
   },
@@ -645,44 +650,6 @@ export type EventRow = typeof events.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
-
-/**
- * A `project.done` the ready email has covered, so it is not mailed again. Written after the send (a
- * crash before it re-sends with the same idempotency key). Rows go when the event or the account does.
- */
-export const completionNotices = pgTable(
-  "completion_notices",
-  {
-    eventId: bigint("event_id", { mode: "number" })
-      .primaryKey()
-      .references(() => events.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [index("completion_notices_user_id_idx").on(t.userId)],
-);
-
-/**
- * One row per project that ever finished, written with its first `project.done` in that transaction
- * (lifecycle.ts `finalizeProjectIfDone`). The ready email's milestones count these (notify/completion.ts).
- * No foreign key to the project: deleting it forever, or the retention purge, removes its events but
- * must not lower the count, or "That's 10 projects finished" would be said again. Rows go with the account.
- */
-export const finishedProjects = pgTable(
-  "finished_projects",
-  {
-    projectId: text("project_id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    /** the first project.done; a batch whose mailed events include it is this project's first finish */
-    firstEventId: bigint("first_event_id", { mode: "number" }).notNull(),
-    firstDoneAt: timestamp("first_done_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [index("finished_projects_user_id_idx").on(t.userId)],
-);
 
 /**
  * An account's choice for one topic of optional mail (notify/preferences.ts). No row = the topic's

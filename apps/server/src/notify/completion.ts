@@ -14,8 +14,12 @@
  * nothing is sent to an account that turned the note off (notify/preferences.ts; every note carries a
  * one-click unsubscribe, RFC 8058).
  *
- * `completion_notices` records which events were mailed. A crash after a successful send and before
- * that record sends the same batch again with the same idempotency key (`completionIdempotencyKey`):
+ * `projects.ready_mailed_through` marks the last `project.done` each project's note covered; a later
+ * finish (a re-render's) is above it and mailed. Milestones count the account's finished projects from
+ * the events themselves: a project's events outlive "Delete forever" and retention never prunes
+ * `project.done`, so the count does not go down and re-announce one (forgetting what Reelsaw learned
+ * does lower it: that is the owner's choice). A crash after a successful send and before the mark
+ * sends the same batch again with the same idempotency key (`completionIdempotencyKey`):
  * Resend drops the repeat within its 24-hour window; SMTP gets the same Message-ID, which some inboxes
  * collapse and others show twice (SMTP has no dedup of its own).
  */
@@ -150,10 +154,12 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
         gt(schema.events.createdAt, cutoff),
         // compared in SQL: both sides keep Postgres's microseconds, which a JS Date would cut to milliseconds
         sql`${schema.events.createdAt} > coalesce((select u.last_active_at from "user" u where u.id = ${userId}), '-infinity')`,
-        sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.events.id})`,
+        // not mailed yet: above the project's mark
+        sql`${schema.events.id} > coalesce(${schema.projects.readyMailedThrough}, 0)`,
       ),
     )
-    .orderBy(asc(schema.events.createdAt))
+    // by id, the order the mark moves in: a page cut short never marks past an event it left out
+    .orderBy(asc(schema.events.id))
     .limit(FETCH_LIMIT);
 
   const truncated = rows.length > FETCH_LIMIT - 1;
@@ -194,22 +200,20 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     byProject.set(c.projectId, list);
   }
 
-  // Milestones count the finished_projects ledger, not events: deleting a project forever (or the
-  // retention purge) removes its events, and a count that went down would announce the same milestone twice.
-  // A project is new in this batch when its first finish is one of the events being mailed.
-  const F = schema.finishedProjects;
-  const [counts] = await db
-    .select({
-      finished: sql<number>`count(*)::int`,
-      firstTime: sql<number>`(count(*) filter (where ${inArray(
-        F.firstEventId,
-        mine.map((e) => e.eventId),
-      )}))::int`,
-    })
-    .from(F)
-    .where(eq(F.userId, userId));
-  const finished = counts?.finished ?? 0;
-  const milestone = milestoneCrossed(finished - (counts?.firstTime ?? 0), finished);
+  // Milestones: the account's projects that ever finished, from their events (which outlive a purge; retention
+  // keeps project.done). A project finishes for the first time in this batch when its first project.done is
+  // one of the events being mailed.
+  // a Postgres array literal: drizzle would spread a JS array into a row
+  const mailedIds = `{${mine.map((e) => e.eventId).join(",")}}`;
+  const { rows: countRows } = await db.execute<{ finished: number; first_time: number }>(sql`
+    select count(*)::int as finished, (count(*) filter (where f.first_id = any(${mailedIds}::bigint[])))::int as first_time
+    from (
+      select min(id) as first_id from events
+      where user_id = ${userId} and type = 'project.done' and project_id is not null
+      group by project_id
+    ) f`);
+  const finished = countRows[0]?.finished ?? 0;
+  const milestone = milestoneCrossed(finished - (countRows[0]?.first_time ?? 0), finished);
 
   const shown = projects.slice(0, SHOW);
   const mailProjects = shown.map((p) => {
@@ -253,14 +257,15 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     log.error({ err, events: sent.length }, "completion notice not sent");
     throw err;
   }
-  // The record and the follow-up for a page cut short commit together: the follow-up exists exactly
-  // when this batch is recorded as mailed, so neither a failed record nor a crash leaves a second run
-  // re-sending it (the idempotency key only dedups on Resend).
+  // The marks and the follow-up for a page cut short commit together: the follow-up exists exactly
+  // when this batch is marked as mailed, so neither a failed mark nor a crash leaves a second run
+  // re-sending it (the idempotency key only dedups on Resend). A mark only moves forward.
   const followUp = await svc.tx(async (u) => {
-    await u.db
-      .insert(schema.completionNotices)
-      .values(sent.map((eventId) => ({ eventId, userId })))
-      .onConflictDoNothing();
+    for (const p of projects)
+      await u.db
+        .update(schema.projects)
+        .set({ readyMailedThrough: sql`greatest(coalesce(${schema.projects.readyMailedThrough}, 0), ${Math.max(...p.eventIds)})` })
+        .where(eq(schema.projects.id, p.id));
     return truncated && again ? again(u) : null;
   });
   log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");

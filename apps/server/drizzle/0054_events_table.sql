@@ -9,7 +9,6 @@ ALTER TABLE "events" DROP CONSTRAINT "project_events_project_id_projects_id_fk";
 ALTER TABLE "events" ALTER COLUMN "project_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "events" ADD COLUMN "user_id" text;--> statement-breakpoint
 ALTER TABLE "events" ADD COLUMN "actor_id" text;--> statement-breakpoint
-ALTER TABLE "completion_notices" RENAME CONSTRAINT "completion_notices_event_id_project_events_id_fk" TO "completion_notices_event_id_events_id_fk";--> statement-breakpoint
 -- a project event's account is its project's owner
 UPDATE "events" e SET "user_id" = p."user_id" FROM "projects" p WHERE p."id" = e."project_id";--> statement-breakpoint
 CREATE INDEX "events_user_id_idx" ON "events" USING btree ("user_id","id");--> statement-breakpoint
