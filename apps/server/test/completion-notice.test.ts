@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { messageIdDomain, templates, type Email } from "../src/email.js";
-import { collapseProjects, completionIdempotencyKey, readyEmail, greetingName, milestoneCrossed, type DoneNotice } from "../src/notify/completion.js";
+import { collapseProjects, completionIdempotencyKey, readyEmail, milestoneCrossed, type DoneNotice } from "../src/notify/completion.js";
 import {
   EVENT_HANDLER_DEFAULTS,
   defineEventHandlers,
@@ -19,6 +19,7 @@ import { EVENT_TYPES } from "../src/event-types.js";
 import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
+import { finiteNumber, firstName, truncate } from "@reelsaw/shared";
 
 const log = {
   debug() {},
@@ -60,16 +61,35 @@ describe("milestones", () => {
   });
 });
 
-describe("greeting", () => {
-  it("uses the first word of a name and skips an address", () => {
-    assert.equal(greetingName("Ada Lovelace"), "Ada");
-    assert.equal(greetingName("  Ada  "), "Ada");
-    assert.equal(greetingName("ada@example.com"), null);
-    assert.equal(greetingName("  "), null);
+describe("general text helpers (@reelsaw/shared)", () => {
+  it("firstName uses the first word of an account's name and skips an address or a blank", () => {
+    assert.equal(firstName({ name: "Ada Lovelace" }), "Ada");
+    assert.equal(firstName({ name: "  Ada  ", email: "ada@example.com" }), "Ada");
+    assert.equal(firstName({ name: "ada@example.com" }), null);
+    assert.equal(firstName({ name: "  " }), null);
+    assert.equal(firstName({}), null);
+  });
+
+  it("truncate trims and cuts to the limit with an ellipsis; finiteNumber falls back", () => {
+    assert.equal(truncate("  short  ", 80), "short");
+    assert.equal(truncate("abcdefghij", 5), "abcd…");
+    assert.equal(truncate("abcdefghij", 5).length, 5);
+    assert.equal(finiteNumber(3), 3);
+    assert.equal(finiteNumber("3"), 0);
+    assert.equal(finiteNumber(Number.NaN, 7), 7);
   });
 });
 
 describe("clips ready template", () => {
+  it("counts every project in the note, listed or not, in the subject and preheader", () => {
+    const listed = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, title: `P${i}`, clips: 2, failed: 0, rerender: true, highlights: [], more: 0 }));
+    const mail = templates.clipsReady("https://app.example.com", { greeting: null, projects: listed, hidden: 33, milestone: null });
+    assert.equal(mail.subject, "41 projects are ready");
+    assert.match(mail.text, /And 33 more/);
+    // the 33 not listed may not be re-renders, so the note does not say they all are
+    assert.doesNotMatch(mail.text, /New renders/);
+  });
+
   const base = { greeting: "Ada", hidden: 0, milestone: null as number | null };
 
   it("names the project, the clips and a link, and greets", () => {
@@ -97,7 +117,8 @@ describe("clips ready template", () => {
       projects: [{ id: "p1", title: `<SCRIPT>`, clips: 1, failed: 0, rerender: false, highlights: [], more: 0 }],
     });
     assert.equal(mail.subject, "Your first clips are ready");
-    assert.match(mail.text, /first project you've finished/);
+    // one listed and two more: three projects, so the plural
+    assert.match(mail.text, /first projects you've finished/);
     // any case: no tag survives, only its escaped text
     assert.equal(mail.html.toLowerCase().includes("<script"), false);
     assert.ok(mail.html.includes("&lt;SCRIPT&gt;"));

@@ -302,9 +302,10 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
     },
   ) => {
     const base = appUrl.replace(/\/$/, "");
-    const n = opts.projects.length;
+    // every project in the note, listed or counted in "And N more"
+    const n = opts.projects.length + opts.hidden;
     const clips = opts.projects.reduce((sum, p) => sum + p.clips, 0);
-    const allRerender = n > 0 && opts.projects.every((p) => p.rerender);
+    const allRerender = n > 0 && opts.hidden === 0 && opts.projects.every((p) => p.rerender);
     const first = opts.milestone === 1;
     const subject = first
       ? "Your first clips are ready"
@@ -314,7 +315,8 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
           ? "Your clips are ready"
           : `${n} projects are ready`;
     const one = opts.projects[0];
-    const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : `${n} projects, ${clipCount(clips)}`;
+    // the clip count covers the listed projects only, so a note with more says how many projects instead
+    const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : opts.hidden > 0 ? `${n} projects` : `${n} projects, ${clipCount(clips)}`;
     const intro =
       n === 1
         ? allRerender

@@ -116,10 +116,14 @@ describe("abuse guards", () => {
     const { drizzle } = await import("drizzle-orm/node-postgres");
     const { schema } = await import("../src/db/index.js");
     const d = drizzle(pool, { schema });
+    const { createUnitOfWork } = await import("../src/uow.js");
+    const { createLogger } = await import("../src/log.js");
+    const quiet = createLogger({ LOG_LEVEL: "fatal", LOG_FORMAT: "json" });
+    // a real unit of work: the flag pass records user.flagged with u.emit (no handler follows it, so no queue is touched)
     const fake = {
       database: { db: d } as never,
-      log: { child: () => ({ info() {}, warn() {} }) } as never,
-      tx: async (fn: (u: { db: typeof d }) => Promise<void>) => fn({ db: d }),
+      log: quiet,
+      tx: createUnitOfWork(pool, {} as never, quiet),
     };
     const r = await flagAccounts(fake as never);
     assert.ok(r.flagged >= 3, `flagged ${r.flagged}`);

@@ -179,6 +179,14 @@ project already hit the problem it prevents.
   the platform); a canonical, maintained library does it. Only then write it, and put it where the
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
+- **A general helper gets a general name in a shared place, never a local one.** Cutting text
+  with an ellipsis, reading a number out of a payload, a person's first name: none of these is
+  about the module that first needs it. Write it once in `packages/shared` (or the app's `lib/`)
+  under the name of what it does (`truncate`, `finiteNumber`, `firstName`), taking the smallest
+  shape that works (`{ name }`, not a user row), and call it from there. A module-private
+  `clipLabel` or `greetingName` that wraps a general operation is the same helper written again,
+  under a name nobody will search for. Equally, don't wrap two lines in a helper with one caller
+  (`whenMailOn`, a lookup used once): inline it.
 
 #### Logging
 

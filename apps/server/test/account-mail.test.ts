@@ -56,7 +56,7 @@ async function jobs(type: EventType, userId: string) {
 async function run(type: EventType, data: unknown) {
   const q = handlerOf(type);
   const { event, key } = parseEventHandlerJob(type, data);
-  await q.def.handle({ event, key, svc, signal: new AbortController().signal, again: async () => null });
+  await q.def.handle({ event, key, svc, signal: new AbortController().signal });
 }
 
 const made: string[] = [];

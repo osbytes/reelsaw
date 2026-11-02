@@ -25,8 +25,8 @@
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { finiteNumber, firstName, truncate } from "@reelsaw/shared";
 import type { EventHandler } from "../event-handlers.js";
-import type { UnitOfWork } from "../uow.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { templates } from "../email.js";
@@ -36,10 +36,7 @@ import { unsubscribeUrl, wantsEmail } from "./preferences.js";
 export const MILESTONES = [1, 10, 25, 50, 100] as const;
 
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-/** One more than one note covers, so a full page schedules a follow-up for the rest. */
-const FETCH_LIMIT = 41;
-/** A batch cut short at FETCH_LIMIT sends the rest this long after. */
-const FOLLOW_UP_SEC = 60;
+/** Projects listed in full; the rest of a big batch is one "And N more on your projects page" line, in the same note. */
 const SHOW = 8;
 const HIGHLIGHTS = 3;
 
@@ -63,14 +60,6 @@ export function milestoneCrossed(before: number, after: number): number | null {
   const hit = MILESTONES.filter((m) => before < m && m <= after);
   if (hit.includes(1)) return 1;
   return hit.length ? hit[hit.length - 1]! : null;
-}
-
-/** First word of a display name, for "Hi Ada". An address or a blank is no greeting. */
-export function greetingName(name: string): string | null {
-  const n = name.trim();
-  if (!n || n.includes("@")) return null;
-  const first = n.split(/\s+/)[0] ?? "";
-  return first.length > 0 && first.length <= 40 ? first : null;
 }
 
 export interface CollapsedProject {
@@ -100,21 +89,12 @@ export function collapseProjects(events: DoneNotice[]): CollapsedProject[] {
   return [...byId.values()];
 }
 
-function num(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-function clipLabel(hook: string, title: string): string {
-  const raw = hook.trim() || title.trim();
-  if (!raw) return "";
-  return raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
-}
-
 /**
- * Send the ready note for everything this account finished after they were last here. Idempotent;
- * the handler's queue runs one at a time per account. `again` queues the rest of a batch cut short.
+ * Send the ready note for everything this account finished after they were last here: one note,
+ * however many finished (the first SHOW listed, the rest counted). Idempotent; the handler's queue
+ * runs one at a time per account.
  */
-export async function deliverCompletionNotice(svc: Services, userId: string, again?: (u: UnitOfWork) => Promise<string | null>): Promise<void> {
+export async function deliverCompletionNotice(svc: Services, userId: string): Promise<void> {
   const log = svc.log.child({ module: "notify", userId });
   if (!svc.email.enabled) {
     log.debug({ reason: "email off" }, "completion notice skipped");
@@ -158,20 +138,16 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
         sql`${schema.events.id} > coalesce(${schema.projects.readyMailedThrough}, 0)`,
       ),
     )
-    // by id, the order the mark moves in: a page cut short never marks past an event it left out
-    .orderBy(asc(schema.events.id))
-    .limit(FETCH_LIMIT);
+    .orderBy(asc(schema.events.id));
 
-  const truncated = rows.length > FETCH_LIMIT - 1;
-  const page = truncated ? rows.slice(0, FETCH_LIMIT - 1) : rows;
   // the query above is the one definition of "unseen": inside the lookback, after the last activity, not yet mailed
-  const mine: DoneNotice[] = page.map((r) => ({
+  const mine: DoneNotice[] = rows.map((r) => ({
     eventId: Number(r.eventId),
     projectId: r.projectId,
     title: r.title,
     at: r.at.getTime(),
-    clips: num(r.payload.clips),
-    failed: num(r.payload.failed),
+    clips: finiteNumber(r.payload.clips),
+    failed: finiteNumber(r.payload.failed),
     rerender: r.payload.runReason === "rerender",
   }));
   if (!mine.length) {
@@ -180,6 +156,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   }
 
   const projects = collapseProjects(mine);
+  const shown = projects.slice(0, SHOW);
   const clipRows = await db
     .select({ projectId: schema.clips.projectId, title: schema.clips.title, hook: schema.clips.hook, status: schema.clips.status })
     .from(schema.clips)
@@ -187,7 +164,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
       and(
         inArray(
           schema.clips.projectId,
-          projects.map((p) => p.id),
+          shown.map((p) => p.id),
         ),
         isNull(schema.clips.deletedAt),
       ),
@@ -215,12 +192,11 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   const finished = countRows[0]?.finished ?? 0;
   const milestone = milestoneCrossed(finished - (countRows[0]?.first_time ?? 0), finished);
 
-  const shown = projects.slice(0, SHOW);
   const mailProjects = shown.map((p) => {
     const names: string[] = [];
     for (const c of byProject.get(p.id) ?? []) {
       if (c.status !== "done") continue;
-      const label = clipLabel(c.hook, c.title);
+      const label = truncate(c.hook || c.title, 80);
       if (label && !names.includes(label)) names.push(label);
     }
     return {
@@ -244,7 +220,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
       {
         to: user.email,
         ...templates.clipsReady(svc.config.APP_URL, {
-          greeting: greetingName(user.name),
+          greeting: firstName(user),
           projects: mailProjects,
           hidden: projects.length - shown.length,
           milestone,
@@ -257,19 +233,13 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     log.error({ err, events: sent.length }, "completion notice not sent");
     throw err;
   }
-  // The marks and the follow-up for a page cut short commit together: the follow-up exists exactly
-  // when this batch is marked as mailed, so neither a failed mark nor a crash leaves a second run
-  // re-sending it (the idempotency key only dedups on Resend). A mark only moves forward.
-  const followUp = await svc.tx(async (u) => {
-    for (const p of projects)
-      await u.db
-        .update(schema.projects)
-        .set({ readyMailedThrough: sql`greatest(coalesce(${schema.projects.readyMailedThrough}, 0), ${Math.max(...p.eventIds)})` })
-        .where(eq(schema.projects.id, p.id));
-    return truncated && again ? again(u) : null;
-  });
+  // Every project in the note, listed or counted, is marked mailed in one statement (a mark only moves forward).
+  const marks = projects.map((p) => ({ id: p.id, through: Math.max(...p.eventIds) }));
+  await db.execute(sql`
+    update projects p set ready_mailed_through = greatest(coalesce(p.ready_mailed_through, 0), m.through)
+    from jsonb_to_recordset(${JSON.stringify(marks)}::jsonb) as m(id text, through bigint)
+    where p.id = m.id`);
   log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
-  if (truncated) log.warn({ queued: !!followUp, held: FETCH_LIMIT - 1 }, "completion notice truncated");
 }
 
 /**
@@ -297,5 +267,5 @@ export const readyEmail: EventHandler<"project.done"> = {
   oneAtATime: true,
   // a send takes seconds (Resend times out at 15 s): a run stuck for 2 min is failed and retried
   queue: { expireInSeconds: 120 },
-  handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, (u) => again(u, { delaySeconds: FOLLOW_UP_SEC })),
+  handle: ({ key, svc }) => deliverCompletionNotice(svc, key),
 };

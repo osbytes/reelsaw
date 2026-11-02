@@ -47,7 +47,6 @@ import { EVENT_TYPES, eventSchemas, type EventPayload, type EventType } from "./
 import type { QueuePolicy } from "pg-boss";
 import type { Db } from "./db/index.js";
 import type { Services } from "./services.js";
-import type { UnitOfWork } from "./uow.js";
 
 /** An event as its handlers see it; with no `T`, any event. */
 export interface EmittedEvent<T extends EventType = EventType> {
@@ -75,18 +74,8 @@ export interface EventHandler<T extends EventType> {
   oneAtATime?: boolean;
   /** Queue and worker settings; anything left out comes from EVENT_HANDLER_DEFAULTS. */
   queue?: Partial<EventHandlerQueueOptions>;
-  /**
-   * The work, after commit. `event` is the one whose job this is (a coalesced job runs once for several).
-   * `again` queues another run for the same key (a batch cut short) on a unit of work, so it commits
-   * with whatever the handler records about this run.
-   */
-  handle: (ctx: {
-    event: EmittedEvent<T>;
-    key: string;
-    svc: Services;
-    signal: AbortSignal;
-    again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null>;
-  }) => Promise<void>;
+  /** The work, after commit. `event` is the one whose job this is (a coalesced job runs once for several). */
+  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal }) => Promise<void>;
 }
 
 /** event type → handler name → handler */

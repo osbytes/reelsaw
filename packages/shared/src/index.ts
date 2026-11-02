@@ -1029,6 +1029,27 @@ export const clipCandidateSchema = z.object({
 });
 export type ClipCandidate = z.infer<typeof clipCandidateSchema>;
 
+// ---------- Text and values ----------
+
+/** `s` trimmed, cut to at most `max` characters with an ellipsis when it was longer. */
+export function truncate(s: string, max: number): string {
+  const t = s.trim();
+  return t.length > max ? `${t.slice(0, Math.max(0, max - 1)).trimEnd()}…` : t;
+}
+
+/** `v` when it is a finite number (a JSON payload field, a query cell), else `fallback`. */
+export function finiteNumber(v: unknown, fallback = 0): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/** A person's first name from anything account-shaped, for "Hi Ada": null for a blank name, or one that is an address. */
+export function firstName(person: { name?: string | null }): string | null {
+  const n = person.name?.trim() ?? "";
+  if (!n || n.includes("@")) return null;
+  const first = n.split(/\s+/)[0] ?? "";
+  return first.length <= 40 ? first : null;
+}
+
 // ---------- Email ----------
 
 /**

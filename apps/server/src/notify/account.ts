@@ -15,33 +15,25 @@
 import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { templates } from "../email.js";
-import type { EventHandler, EventHandlerDeps } from "../event-handlers.js";
-import type { Services } from "../services.js";
-
-const whenMailOn = (deps: EventHandlerDeps, key: string) => (deps.email.enabled ? key : null);
-
-/** The account as it is now, if it may still be mailed. */
-async function mailable(svc: Services, userId: string) {
-  const user = await svc.database.db.query.user.findFirst({
-    where: eq(schema.user.id, userId),
-    columns: { email: true, name: true, banned: true, approvedAt: true },
-  });
-  return user && !user.banned ? user : null;
-}
+import type { EventHandler } from "../event-handlers.js";
 
 /** `user.approved` → "Your Reelsaw account is ready" to the account; once per account. */
 export const approvedEmail: EventHandler<"user.approved"> = {
-  key: ({ event, deps }) => whenMailOn(deps, `approved:${event.payload.userId}`),
+  key: ({ event, deps }) => (deps.email.enabled ? `approved:${event.payload.userId}` : null),
   handle: async ({ event, key, svc }) => {
-    const user = await mailable(svc, event.payload.userId);
-    if (!user?.approvedAt) return;
+    const user = await svc.database.db.query.user.findFirst({
+      where: eq(schema.user.id, event.payload.userId),
+      columns: { email: true, banned: true, approvedAt: true },
+    });
+    // removed, suspended, or no longer approved: nothing to say
+    if (!user || user.banned || !user.approvedAt) return;
     await svc.email.send({ to: user.email, ...templates.approved(svc.config.APP_URL) }, { strict: true, idempotencyKey: key });
   },
 };
 
 /** `user.signed_up` waiting for approval → "<name> is waiting for approval" to every admin; once per sign-up and admin. */
 export const approvalRequestEmail: EventHandler<"user.signed_up"> = {
-  key: ({ event, deps }) => (event.payload.approved ? null : whenMailOn(deps, `approval-request:${event.payload.userId}`)),
+  key: ({ event, deps }) => (deps.email.enabled && !event.payload.approved ? `approval-request:${event.payload.userId}` : null),
   handle: async ({ event, key, svc }) => {
     const user = await svc.database.db.query.user.findFirst({
       where: eq(schema.user.id, event.payload.userId),
@@ -61,10 +53,11 @@ export const approvalRequestEmail: EventHandler<"user.signed_up"> = {
 
 /** `webhook.disabled` → "A Reelsaw webhook was turned off" to the endpoint's owner; once per endpoint and turn-off. */
 export const webhookDisabledEmail: EventHandler<"webhook.disabled"> = {
-  key: ({ event, deps }) => whenMailOn(deps, `webhook-disabled:${event.payload.endpointId}:${event.payload.disabledAt}`),
+  key: ({ event, deps }) => (deps.email.enabled ? `webhook-disabled:${event.payload.endpointId}:${event.payload.disabledAt}` : null),
   handle: async ({ event, key, svc }) => {
-    const user = await mailable(svc, event.payload.userId);
-    if (!user) return;
+    const user = await svc.database.db.query.user.findFirst({ where: eq(schema.user.id, event.payload.userId), columns: { email: true, banned: true } });
+    // removed or suspended: nothing to say
+    if (!user || user.banned) return;
     await svc.email.send(
       { to: user.email, ...templates.webhookDisabled(svc.config.APP_URL, event.payload.url, event.payload.reason) },
       { strict: true, idempotencyKey: key },

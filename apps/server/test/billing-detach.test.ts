@@ -83,7 +83,7 @@ async function jobOf(u: string) {
 async function run(data: unknown) {
   const [q] = eventHandlerQueues(eeEventHandlerMap);
   const { event, key } = parseEventHandlerJob("billing.detached", data);
-  await q!.def.handle({ event, key, svc, signal: new AbortController().signal, again: async () => null });
+  await q!.def.handle({ event, key, svc, signal: new AbortController().signal });
 }
 
 describe("removing a hosted account", { skip: notReady ?? false }, () => {

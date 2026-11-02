@@ -223,7 +223,6 @@ export async function flagAccounts(
       await t.db.update(schema.user).set({ flags: next, updatedAt: new Date() }).where(eq(schema.user.id, u.id));
       await t.emit("user.flagged", { userId: u.id, email: u.email, flags: next, was: u.flags ?? [] }, { actorId: null });
     });
-    log[next.length ? "warn" : "info"]({ userId: u.id, flags: next, was: u.flags ?? [] }, next.length ? "account flagged" : "account flags cleared");
     if (next.length) svc.telemetry?.capture("user.flagged", u.id, { flags: next });
   }
   log.info({ checked: recent.length, flagged, changed }, "abuse flags recomputed");
