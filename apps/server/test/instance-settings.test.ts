@@ -6,7 +6,7 @@ import type { Config } from "../src/config.js";
 import type { Db } from "../src/db/index.js";
 import type { Logger } from "../src/log.js";
 
-/** Just enough of drizzle for instance-settings.ts: one row keyed by `key`, plus the admin events it writes. */
+/** Just enough of drizzle for instance-settings.ts: one row keyed by `key`, plus the events it writes. */
 function fakeDb() {
   const rows = new Map<string, { key: string; value: Record<string, unknown>; updatedBy: string | null; updatedAt: Date }>();
   const events: Array<{ type: string; payload: Record<string, unknown> }> = [];

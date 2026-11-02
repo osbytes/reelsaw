@@ -45,7 +45,7 @@ export function withClientIp(req: Request, trust: Pick<Config, "TRUST_PROXY" | "
 
 /**
  * `tx` is the services' unit of work, read when a sign-up happens (it is built after auth): the sign-up's
- * account event goes through it so the admins' "waiting for approval" mail commits with it (notify/account.ts).
+ * event goes through it so the admins' "waiting for approval" mail commits with it (notify/account.ts).
  */
 export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, tx: () => RunInTx, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
@@ -172,7 +172,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             if (first) firstCandidates.add(user.email);
             return { data: { ...user, ...guard, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
           },
-          // Better Auth owns the user insert, so this account event cannot share its transaction. It is a
+          // Better Auth owns the user insert, so this event cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
           // and the gate read the user row). Its handler mails the admins when the sign-up waits for
           // approval (notify/account.ts). Admin actions in accounts.ts commit row + event together.
@@ -191,7 +191,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             }
             const signedUp = u;
             await tx()((w) =>
-              w.emitAccount("user.signed_up", {
+              w.emitEvent("user.signed_up", {
                 userId: signedUp.id,
                 email: signedUp.email,
                 payload: { role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode() },

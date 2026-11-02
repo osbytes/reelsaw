@@ -170,7 +170,7 @@ export function createModelSettings(
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.adminEvents).values({
+        await tx.insert(schema.events).values({
           type: "models.changed",
           actorId: actor.id,
           userId: actor.id,

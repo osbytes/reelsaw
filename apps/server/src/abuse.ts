@@ -178,7 +178,7 @@ export const FLAG_HELP: Record<AbuseFlag, string> = {
 
 /**
  * Recompute the flags of recent accounts (hourly). Idempotent: the computed set replaces the stored one, and an
- * admin event is written only when it changed. Looks at accounts created in the last 30 days, in one grouped
+ * event is written only when it changed. Looks at accounts created in the last 30 days, in one grouped
  * query per rule, so the cost does not grow with the whole user table.
  */
 export async function flagAccounts(
@@ -222,7 +222,7 @@ export async function flagAccounts(
     await svc.tx(async (t) => {
       await t.db.update(schema.user).set({ flags: next, updatedAt: new Date() }).where(eq(schema.user.id, u.id));
       await t.db
-        .insert(schema.adminEvents)
+        .insert(schema.events)
         .values({ type: "user.flagged", actorId: null, userId: u.id, email: u.email, payload: { flags: next, was: u.flags ?? [] } });
     });
     log[next.length ? "warn" : "info"]({ userId: u.id, flags: next, was: u.flags ?? [] }, next.length ? "account flagged" : "account flags cleared");

@@ -1,21 +1,20 @@
 /**
- * Account events: the `admin_events` rows (sign-ups, approvals, bans, billing, a webhook turned off),
- * the account-level counterpart of a project's `project_events`. Written with `u.emitAccount` in a unit
- * of work, so the handlers that follow an event (event-handler-map.ts) commit with it, exactly as
- * `u.emit` does for project events.
+ * Events (the `events` table): the shared outbox for anything that is not a project's own history,
+ * which stays in `project_events` (`u.emit`). An account signed up or was approved, a webhook was
+ * turned off, a subscription was detached. Written with `u.emitEvent` in a unit of work, so the handlers
+ * that follow an event (event-handler-map.ts) commit with it, exactly as for project events.
  *
  * Each type has a zod schema here. Types that handlers read are spelled out; the rest stay a loose
  * record until a handler needs them (the admin page only lists them), and are tightened then.
  */
 import { z } from "zod";
-import { ADMIN_EVENT_TYPES, type AdminEventType } from "./db/schema.js";
+import { EVENT_TYPES, type EventType } from "./db/schema.js";
 
-export const ACCOUNT_EVENT_TYPES = ADMIN_EVENT_TYPES;
-export type AccountEventType = AdminEventType;
+export { EVENT_TYPES, type EventType };
 
 const untyped = z.record(z.string(), z.unknown());
 
-export const accountEventSchemas = {
+export const eventSchemas = {
   "user.signed_up": z.object({ role: z.string(), approved: z.boolean(), mode: z.string() }),
   "user.approved": z.object({}),
   "user.role_changed": untyped,
@@ -38,10 +37,12 @@ export const accountEventSchemas = {
   "billing.canceled": untyped,
   "billing.complimentary": untyped,
   "billing.unknown_price": untyped,
-} satisfies Record<AccountEventType, z.ZodType>;
+  /** what to cancel at Stripe; null when there is nothing (ee/billing/service.ts detachUser) */
+  "billing.detached": z.object({ subscriptionId: z.string().nullable(), customerId: z.string().nullable(), removedAt: z.string() }),
+} satisfies Record<EventType, z.ZodType>;
 
-export type AccountEventPayload<T extends AccountEventType> = z.infer<(typeof accountEventSchemas)[T]>;
+export type EventPayload<T extends EventType> = z.infer<(typeof eventSchemas)[T]>;
 
-export function isAccountEventType(t: string): t is AccountEventType {
-  return ACCOUNT_EVENT_TYPES.some((x) => x === t);
+export function isEventType(t: string): t is EventType {
+  return EVENT_TYPES.some((x) => x === t);
 }

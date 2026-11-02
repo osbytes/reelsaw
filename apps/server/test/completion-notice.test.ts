@@ -14,8 +14,9 @@ import {
   type ReadDb,
 } from "../src/event-handlers.js";
 import { eventHandlerMap } from "../src/event-handler-map.js";
+import { eeEventHandlerMap } from "../src/ee/event-handlers.js";
 import { PROJECT_EVENT_TYPES } from "@reelsaw/shared";
-import { ACCOUNT_EVENT_TYPES } from "../src/account-events.js";
+import { EVENT_TYPES } from "../src/event-types.js";
 import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
@@ -172,12 +173,22 @@ describe("event handlers", () => {
     defineEventHandlers({ "project.done": { x: { handle }, x: { handle } } });
   });
 
+  it("serves the enterprise map after the open one, and refuses a handler name defined in both", () => {
+    assert.deepEqual(
+      eventHandlerQueues(eventHandlerMap, eeEventHandlerMap)
+        .map((q) => q.name)
+        .slice(-1),
+      ["event.billing.detached.cancelAtStripe"],
+    );
+    assert.throws(() => eventHandlerQueues(eventHandlerMap, defineEventHandlers({ "project.done": { readyEmail: { handle } } })), /defined twice/);
+  });
+
   it("names a handler's settings EVENT_<EVENT>_<HANDLER>_<NAME>, and every such setting exists", () => {
     assert.equal(eventHandlerSetting("project.done", "readyEmail", "delayMinutes"), "EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES");
     assert.equal(eventHandlerSetting("clip.bumper_skipped", "notifyOwner", "DELAY_MINUTES"), "EVENT_CLIP_BUMPER_SKIPPED_NOTIFY_OWNER_DELAY_MINUTES");
     const prefixes = eventHandlerQueues(eventHandlerMap).map((q) => eventHandlerSetting(q.type, q.handler, ""));
     // EVENT_REPLAY_LIMIT and EVENT_RETENTION_DAYS are about the event log, not a handler: only EVENT_<an event type>_… counts
-    const typePrefixes = [...PROJECT_EVENT_TYPES, ...ACCOUNT_EVENT_TYPES].map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
+    const typePrefixes = [...PROJECT_EVENT_TYPES, ...EVENT_TYPES].map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
     const settings = Object.keys(envSchema.shape).filter((k) => typePrefixes.some((p) => k.startsWith(p)));
     assert.ok(settings.length > 0);
     for (const k of settings)
@@ -212,7 +223,7 @@ describe("event handlers", () => {
         y: { key: async ({ event: e }) => `clips-${e.payload.clips}`, delaySeconds: () => 30, handle },
       },
     });
-    const jobs = await eventHandlerJobs(handlers, [event, { ...event, id: 2 }], db, deps(true));
+    const jobs = await eventHandlerJobs([handlers], [event, { ...event, id: 2 }], db, deps(true));
     assert.deepEqual(
       jobs.map((j) => [j.queue, j.data.key, j.startAfter ?? 0]),
       [

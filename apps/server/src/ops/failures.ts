@@ -302,7 +302,7 @@ export async function retryFailures(
       log.warn({ err, kind: item.kind, id: item.id }, "retry failure skipped");
     }
   }
-  await svc.database.db.insert(schema.adminEvents).values({
+  await svc.database.db.insert(schema.events).values({
     type: "failures.retried",
     actorId: actor?.id ?? null,
     userId: actor?.id ?? "operator",

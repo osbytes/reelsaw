@@ -1,5 +1,5 @@
 /**
- * Mail that follows an account event (notify/account.ts) against Postgres: the event and its handler's
+ * Mail that follows an event (notify/account.ts) against Postgres: the event and its handler's
  * job commit together or not at all, and the handler mails the account as it is when the job runs.
  * Postgres only.  node --import tsx --test test/account-mail.test.ts
  */
@@ -7,7 +7,7 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { approveUser } from "../src/accounts.js";
-import { eventHandlerQueue, eventHandlerQueues, parseEventHandlerJob, type EventType } from "../src/event-handlers.js";
+import { eventHandlerQueue, eventHandlerQueues, parseEventHandlerJob, type AnyEventType } from "../src/event-handlers.js";
 import { eventHandlerMap } from "../src/event-handler-map.js";
 import { createLogger } from "../src/log.js";
 import { createUnitOfWork } from "../src/uow.js";
@@ -31,18 +31,18 @@ const svc = {
   config: { ...h.svc.config, APP_URL: "https://app.example.test" },
 } as unknown as Services;
 svc.tx = createUnitOfWork(h.pool, h.svc.queue, createLogger({ LOG_LEVEL: "fatal", LOG_FORMAT: "json" }), undefined, undefined, undefined, {
-  handlers: eventHandlerMap,
+  handlers: [eventHandlerMap],
   deps: () => svc,
 });
 
-const handlerOf = (type: EventType) => {
+const handlerOf = (type: AnyEventType) => {
   const [q] = eventHandlerQueues(eventHandlerMap).filter((x) => x.type === type);
   assert.ok(q, `a handler on ${type}`);
   return q;
 };
 
 /** The jobs queued for this account's `type` events, parked an hour out so a running app's worker leaves them alone. */
-async function jobs(type: EventType, userId: string) {
+async function jobs(type: AnyEventType, userId: string) {
   const q = handlerOf(type);
   const r = await h.pool.query(
     `update pgboss.job set start_after = now() + interval '1 hour' where name = $1 and data->'event'->>'userId' = $2 returning id, data`,
@@ -52,7 +52,7 @@ async function jobs(type: EventType, userId: string) {
 }
 
 /** Run a queued job the way the worker does. */
-async function run(type: EventType, data: unknown) {
+async function run(type: AnyEventType, data: unknown) {
   const q = handlerOf(type);
   const { event, key } = parseEventHandlerJob(type, data);
   await q.def.handle({ event, key, svc, signal: new AbortController().signal, idempotencyKey: `${q.name}:${event.id}`, again: async () => null });
@@ -89,7 +89,7 @@ describe("account mail", { skip: notReady ?? false }, () => {
     const u = await account();
     await assert.rejects(
       svc.tx(async (w) => {
-        await w.emitAccount("webhook.disabled", {
+        await w.emitEvent("webhook.disabled", {
           userId: u,
           email: `${u}@example.test`,
           payload: { endpointId: "e1", url: "https://hooks.example.test/…", reason: "gone" },
@@ -98,14 +98,14 @@ describe("account mail", { skip: notReady ?? false }, () => {
       }),
       /abort/,
     );
-    assert.equal((await h.pool.query(`select count(*)::int as n from admin_events where user_id = $1`, [u])).rows[0].n, 0);
+    assert.equal((await h.pool.query(`select count(*)::int as n from events where user_id = $1`, [u])).rows[0].n, 0);
     assert.deepEqual(await jobs("webhook.disabled", u), []);
   });
 
   it("webhook turned off: the owner is mailed the endpoint and why, and a suspended owner is not", async () => {
     const u = await account();
     await svc.tx((w) =>
-      w.emitAccount("webhook.disabled", {
+      w.emitEvent("webhook.disabled", {
         userId: u,
         email: `${u}@example.test`,
         payload: { endpointId: "e1", url: "https://hooks.example.test/…", reason: "Turned off after 3 days of failed deliveries." },
@@ -129,7 +129,7 @@ describe("account mail", { skip: notReady ?? false }, () => {
     const open = await account();
     const waiting = await account({ approved: false });
     const signUp = (u: string, approved: boolean) =>
-      svc.tx((w) => w.emitAccount("user.signed_up", { userId: u, email: `${u}@example.test`, payload: { role: "user", approved, mode: "approval" } }));
+      svc.tx((w) => w.emitEvent("user.signed_up", { userId: u, email: `${u}@example.test`, payload: { role: "user", approved, mode: "approval" } }));
     await signUp(open, true);
     await signUp(waiting, false);
     assert.deepEqual(await jobs("user.signed_up", open), []);

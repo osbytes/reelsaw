@@ -38,7 +38,7 @@ const map = defineEventHandlers({
     testOnce: { key: ({ event }) => `${event.projectId}|once`, coalesce: true, oneAtATime: true, delaySeconds: () => 3600, handle },
   },
 });
-const tx = createUnitOfWork(h.pool, h.svc.queue, h.svc.log, undefined, undefined, undefined, { handlers: map, deps: () => h.svc });
+const tx = createUnitOfWork(h.pool, h.svc.queue, h.svc.log, undefined, undefined, undefined, { handlers: [map], deps: () => h.svc });
 const done = { clips: 1, failed: 0, runSeq: 1, runReason: "created" };
 
 async function jobs(queue: string, key: string): Promise<Array<{ state: string }>> {

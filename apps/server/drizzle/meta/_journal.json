@@ -379,6 +379,13 @@
       "when": 1793574205306,
       "tag": "0053_ready_email",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793632960667,
+      "tag": "0054_events_table",
+      "breakpoints": true
     }
   ]
 }

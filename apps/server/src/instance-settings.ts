@@ -282,7 +282,7 @@ export interface InstanceSettings {
   /** The settings in force now; cheap, read it at the point of use (never cache the result at boot). */
   get(): RuntimeSettings;
   state(): SettingsState;
-  /** Validate, store, write the admin event, apply. Throws SettingsError with a sentence. */
+  /** Validate, store, write the event, apply. Throws SettingsError with a sentence. */
   set(patch: SettingsPatch, actor: Actor): Promise<SettingsState>;
   /** Called after the effective settings changed (from a set here or in another process). */
   subscribe(fn: (s: RuntimeSettings) => void): () => void;
@@ -478,7 +478,7 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.adminEvents).values({ type: "settings.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { changed } });
+        await tx.insert(schema.events).values({ type: "settings.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { changed } });
       });
       log.info({ keys: Object.keys(changed), by: actor.email }, "instance settings changed");
       lastSeen = "";

@@ -183,8 +183,13 @@ export const apikey = pgTable(
   (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
 );
 
-/** Account-level events: sign-ups, approvals, role changes, bans, model changes, a webhook turned off (admin page; handlers in event-handler-map.ts; payloads in account-events.ts). */
-export const ADMIN_EVENT_TYPES = [
+/**
+ * Events: what happened to an account or the instance (sign-ups, approvals, bans, model and settings
+ * changes, a webhook turned off, billing), the shared counterpart of a project's `project_events`.
+ * Written with `u.emitEvent`, which queues the handlers that follow each one (event-handler-map.ts);
+ * payload schemas in event-types.ts. The admin page lists them; pruned after ADMIN_EVENT_RETENTION_DAYS.
+ */
+export const EVENT_TYPES = [
   "user.signed_up",
   "user.approved",
   "user.role_changed",
@@ -207,13 +212,15 @@ export const ADMIN_EVENT_TYPES = [
   "billing.canceled",
   "billing.complimentary",
   "billing.unknown_price",
+  /** an account with a Stripe customer or live subscription was removed; ee/ cancels it at Stripe */
+  "billing.detached",
 ] as const;
-export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
-export const adminEvents = pgTable(
-  "admin_events",
+export type EventType = (typeof EVENT_TYPES)[number];
+export const events = pgTable(
+  "events",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    type: text("type").$type<AdminEventType>().notNull(),
+    type: text("type").$type<EventType>().notNull(),
     /** who did it; null = the system (sign-up, auto-approval) */
     actorId: text("actor_id"),
     /** the account it concerns; kept after the user row is deleted */
@@ -222,9 +229,9 @@ export const adminEvents = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("admin_events_user_id_idx").on(t.userId, t.id)],
+  (t) => [index("events_user_id_idx").on(t.userId, t.id)],
 );
-export type AdminEventRow = typeof adminEvents.$inferSelect;
+export type EventRow = typeof events.$inferSelect;
 
 /** One row per language-model call, for usage per user (tokens, latency). Written by the LLM middleware. */
 export const llmUsage = pgTable(

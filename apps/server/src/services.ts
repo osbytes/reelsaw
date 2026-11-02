@@ -20,7 +20,7 @@ import { createQueue, type Queue } from "./queue/boss.js";
 import { isSelfHostedModel } from "./ai/self-hosted.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
 import { eventHandlerMap } from "./event-handler-map.js";
-import { eventHandlerQueues } from "./event-handlers.js";
+import { eventHandlerQueues, type EventHandlerMap } from "./event-handlers.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
 import { sql } from "drizzle-orm";
@@ -90,6 +90,8 @@ export interface Services {
   telemetry: Telemetry;
   /** the enterprise edition (billing), loaded only with REELSAW_EE=true (ee/index.ts); null self-hosted */
   ee: EE | null;
+  /** every event handler map in force: the open one, then ee/event-handlers.ts with REELSAW_EE (event-handlers.ts) */
+  eventHandlers: readonly EventHandlerMap[];
   /** what each account's plan grants (quotas, watermark); null = no plans on this instance */
   entitlements: Entitlements | null;
 }
@@ -372,6 +374,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return e;
   });
 
+  // the open handler map, plus the enterprise edition's with REELSAW_EE: loaded here, before the queue creates
+  // their queues and the unit of work writes their jobs (a self-hosted boot never imports ee/)
+  const eventHandlers: readonly EventHandlerMap[] = config.REELSAW_EE
+    ? [eventHandlerMap, (await import("./ee/event-handlers.js")).eeEventHandlerMap]
+    : [eventHandlerMap];
+
   const queue = await step("job queue (pg-boss)", async () => {
     const q = createQueue(
       config,
@@ -379,7 +387,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
       otel.enabled,
       log.child({ module: "queue" }),
       () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }),
-      eventHandlerQueues(eventHandlerMap),
+      eventHandlerQueues(...eventHandlers),
     );
     await q.start();
     return q;
@@ -425,6 +433,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     vad,
     aligner,
     ee: null,
+    eventHandlers,
     entitlements: null,
   };
   // jobs that commit with the event that triggers them (event-handlers.ts)
@@ -435,7 +444,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     () => settings.get(),
     () => svc.entitlements,
     telemetry,
-    { handlers: eventHandlerMap, deps: () => svc },
+    { handlers: eventHandlers, deps: () => svc },
   );
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));

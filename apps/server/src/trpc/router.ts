@@ -950,7 +950,7 @@ const restRouter = router({
     /**
      * Instance settings (instance-settings.ts): sign-up policy, captcha, quotas, retention, … The environment is
      * the default; what is set here overrides it for every process within seconds. `set` validates the result as a
-     * whole and writes a `settings.changed` admin event. The same code serves the CLI and the MCP tools.
+     * whole and writes a `settings.changed` event. The same code serves the CLI and the MCP tools.
      */
     settings: router({
       get: adminProcedure.query(({ ctx }) => ctx.svc.settings.state()),
@@ -1133,7 +1133,7 @@ const restRouter = router({
       return { days, users: await usageByUser(ctx.svc.database.db, days) };
     }),
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
-      const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
+      const rows = await ctx.svc.database.db.query.events.findMany({ orderBy: desc(schema.events.id), limit: input?.limit ?? 100 });
       return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
     }),
     /**

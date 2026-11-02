@@ -1,5 +1,5 @@
 /**
- * Mail that follows an account event (account-events.ts), as event handlers listed in
+ * Mail that follows an event (event-types.ts), as event handlers listed in
  * event-handler-map.ts: each job commits with the event that asks for it and retries until the
  * provider takes the mail, so a crash or a provider outage right after the change cannot lose it
  * (an `afterCommit` send could). Nothing is queued when the instance sends no mail.

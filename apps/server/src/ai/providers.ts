@@ -207,7 +207,7 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
         } else {
           await tx.delete(schema.providerSettings).where(eq(schema.providerSettings.provider, provider));
         }
-        await tx.insert(schema.adminEvents).values({
+        await tx.insert(schema.events).values({
           type: "provider.changed",
           actorId: actor.id,
           userId: actor.id,

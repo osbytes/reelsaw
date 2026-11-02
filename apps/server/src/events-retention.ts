@@ -1,5 +1,5 @@
 /**
- * History pruning: project_events, llm_usage, stt_usage, admin_events, user_decisions, media_links and webhook_deliveries older than their retention are deleted
+ * History pruning: project_events, llm_usage, stt_usage, events, user_decisions, media_links and webhook_deliveries older than their retention are deleted
  * in batches by id (keyset), from the reconciler, at most once a day per table.
  *
  * `planPruneBatch` is the pure part: given one page of rows in id order it says which ids to delete
@@ -57,7 +57,7 @@ const TABLES = {
   events: { table: "project_events", typed: true, days: (c: RuntimeSettings) => c.EVENT_RETENTION_DAYS },
   llm: { table: "llm_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
   stt: { table: "stt_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
-  admin: { table: "admin_events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
+  admin: { table: "events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
   decisions: { table: "user_decisions", typed: false, byTime: true, days: (c: RuntimeSettings) => c.DECISION_RETENTION_DAYS },
   // share links are pruned by when they stopped working (revoked, or expired), not when they were made
   mediaLinks: {

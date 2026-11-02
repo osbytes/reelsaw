@@ -199,10 +199,10 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
         .where(eq(schema.webhookEndpoints.id, e.id));
       if (disabled) {
         await cancelPending(u.db, e.id);
-        // the account event commits with the turn-off; its handler mails the owner (notify/account.ts)
+        // the event commits with the turn-off; its handler mails the owner (notify/account.ts)
         const owner = await u.db.query.user.findFirst({ where: eq(schema.user.id, d.userId), columns: { email: true } });
         if (owner)
-          await u.emitAccount("webhook.disabled", {
+          await u.emitEvent("webhook.disabled", {
             userId: d.userId,
             email: owner.email,
             payload: { endpointId: e.id, url: maskWebhookUrl(e.url), reason: disabled },

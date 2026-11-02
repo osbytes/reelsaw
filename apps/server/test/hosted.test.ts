@@ -63,7 +63,7 @@ describe("hosted", () => {
     // back to the instance default; the event is recorded with the change
     const clear = await trpc(admin.cookie, "admin.users.setLimits", { id: user.userId, limits: { MAX_PROJECTS_PER_USER: null } });
     assert.deepEqual(clear.data, { ok: true, overrides: {} });
-    const ev = await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = 'user.limits_changed'`, [user.userId]);
+    const ev = await pool.query(`select count(*)::int as n from events where user_id = $1 and type = 'user.limits_changed'`, [user.userId]);
     assert.equal(ev.rows[0].n, 2);
     assert.equal((await trpc(user.cookie, "admin.users.setLimits", { id: user.userId, limits: {} })).error?.data.code, "FORBIDDEN");
   });
@@ -89,7 +89,7 @@ describe("hosted", () => {
     };
     assert.equal(cleared.watermark.override, null);
     assert.notEqual(cleared.watermark.source, "override");
-    const ev = await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = 'user.watermark_changed'`, [user.userId]);
+    const ev = await pool.query(`select count(*)::int as n from events where user_id = $1 and type = 'user.watermark_changed'`, [user.userId]);
     assert.equal(ev.rows[0].n, 3);
     assert.equal((await trpc(user.cookie, "admin.users.setWatermark", { id: user.userId, watermark: false })).error?.data.code, "FORBIDDEN");
     const r = cli(["limits", user.email, "--watermark", "never"]);

@@ -129,7 +129,7 @@ describe("abuse guards", () => {
     const ours = list.items.filter((x) => x.signupIp === ip);
     assert.equal(ours.length, 3);
     for (const x of ours) assert.ok(x.flags.includes("shared_ip"), x.flags.join(","));
-    const ev = await pool.query(`select count(*)::int as n from admin_events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
+    const ev = await pool.query(`select count(*)::int as n from events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
     assert.equal(ev.rows[0].n, 3);
   });
 });
