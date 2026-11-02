@@ -29,7 +29,7 @@ export const TERMS: LegalSection[] = [
     heading: "Plans, payment and changes",
     paragraphs: [
       "The Free plan costs nothing and has the limits shown on the pricing page. Paid plans renew monthly or yearly until cancelled. Payment is handled by Stripe; where Stripe acts as merchant of record (Managed Payments), your receipt and the charge on your statement name Link, and Stripe handles tax, refunds and payment disputes under its own terms.",
-      "You can change or cancel a plan at any time from Settings → Billing. A cancellation takes effect at the end of the paid period; a plan change is prorated. If a payment fails, the plan stays for a grace period, then the account returns to Free with its limits; your projects are kept.",
+      "You can change or cancel a plan at any time from Settings → Plan and billing. A cancellation takes effect at the end of the paid period; a plan change is prorated. If a payment fails, the plan stays for a grace period, then the account returns to Free with its limits; your projects are kept.",
       "We may change prices or plan limits with at least 30 days' notice by email; a change applies from your next renewal.",
     ],
   },

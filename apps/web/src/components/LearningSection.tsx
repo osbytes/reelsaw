@@ -20,7 +20,7 @@ export function LearningSection() {
   const enabled = setLearning.isPending ? setLearning.variables.enabled : (d?.enabled ?? false);
 
   return (
-    <section id="learning" className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
+    <section id="learning" className="flex scroll-mt-4 flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <div>
         <h2 className="text-[15px] font-bold">Learning</h2>
         <p className="mt-1 text-[13px] text-ink2">

@@ -29,4 +29,16 @@ describe("foldCounts", () => {
     );
     assert.equal(queueLabel(QUEUES.refineDisfluency), "fillers");
   });
+
+  it("drops pg-boss's own queues and keeps the earliest eligible wait across waiting and retrying", () => {
+    const rows = foldCounts([
+      { name: "__pgboss__send-it", state: "created", n: 1, oldest: new Date("2026-01-01T00:00:00Z") },
+      { name: QUEUES.render, state: "created", n: 2, oldest: new Date("2026-01-01T00:05:00Z") },
+      { name: QUEUES.render, state: "retry", n: 1, oldest: new Date("2026-01-01T00:02:00Z") },
+      { name: QUEUES.render, state: "active", n: 1, oldest: new Date("2025-12-31T00:00:00Z") },
+    ]);
+    assert.ok(!rows.some((r) => r.queue.startsWith("__pgboss")));
+    assert.equal(rows.find((r) => r.queue === QUEUES.render)!.oldestWaitingAt, "2026-01-01T00:02:00.000Z");
+    assert.equal(rows.find((r) => r.queue === QUEUES.ingest)!.oldestWaitingAt, null);
+  });
 });

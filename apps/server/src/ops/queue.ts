@@ -5,7 +5,7 @@
  */
 import { inArray, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
-import { QUEUES } from "../queue/boss.js";
+import { QUEUES, WEBHOOK_QUEUE } from "../queue/boss.js";
 import type { Services } from "../services.js";
 
 export const QUEUE_ORDER = Object.values(QUEUES);
@@ -20,7 +20,12 @@ const QUEUE_LABEL: Record<string, string> = {
   [QUEUES.analyze]: "analyze",
   [QUEUES.render]: "render",
   [QUEUES.prepare]: "prepare",
+  [WEBHOOK_QUEUE]: "webhooks",
+  "billing.reconcile": "billing sync",
 };
+
+/** pg-boss's own bookkeeping queues (`__pgboss__send-it`, …): not work anyone queued, so not shown. */
+const isInternal = (name: string) => name.startsWith("__pgboss");
 
 export function queueLabel(name: string): string {
   return QUEUE_LABEL[name] ?? name.split(".").pop() ?? name;
@@ -33,6 +38,8 @@ export interface QueueDepth {
   running: number;
   retrying: number;
   failed: number;
+  /** when the longest-waiting job that may start now became eligible (start_after has passed); null when none waits */
+  oldestWaitingAt: string | null;
 }
 
 export interface ActiveJob {
@@ -45,6 +52,8 @@ export interface ActiveJob {
   attempt: number;
   startedAt: string | null;
   createdAt: string;
+  /** a retrying job's previous attempt failed with this (pg-boss keeps it in `output`) */
+  lastError?: string | undefined;
 }
 
 export interface QueueSummary {
@@ -54,19 +63,24 @@ export interface QueueSummary {
   error?: string;
 }
 
-export function foldCounts(rows: Array<{ name: string; state: string; n: number }>): QueueDepth[] {
+export function foldCounts(rows: Array<{ name: string; state: string; n: number; oldest?: Date | null }>): QueueDepth[] {
   const by = new Map<string, QueueDepth>();
   const ensure = (queue: string) => {
     let row = by.get(queue);
     if (!row) {
-      row = { queue, label: queueLabel(queue), waiting: 0, running: 0, retrying: 0, failed: 0 };
+      row = { queue, label: queueLabel(queue), waiting: 0, running: 0, retrying: 0, failed: 0, oldestWaitingAt: null };
       by.set(queue, row);
     }
     return row;
   };
   for (const q of QUEUE_ORDER) ensure(q);
   for (const r of rows) {
+    if (isInternal(r.name)) continue;
     const row = ensure(r.name);
+    if (r.oldest && (r.state === "created" || r.state === "retry")) {
+      const at = r.oldest.toISOString();
+      if (!row.oldestWaitingAt || at < row.oldestWaitingAt) row.oldestWaitingAt = at;
+    }
     if (r.state === "created") row.waiting += r.n;
     else if (r.state === "active") row.running += r.n;
     else if (r.state === "retry") row.retrying += r.n;
@@ -77,7 +91,7 @@ export function foldCounts(rows: Array<{ name: string; state: string; n: number 
   return [...QUEUE_ORDER, ...extra].map((k) => by.get(k)!);
 }
 
-type CountRow = { name: string; state: string; n: number };
+type CountRow = { name: string; state: string; n: number; oldest: Date | null };
 type ActiveRow = {
   name: string;
   state: string;
@@ -86,17 +100,21 @@ type ActiveRow = {
   clipId: string | null;
   startedOn: Date | null;
   createdOn: Date;
+  lastError: string | null;
 };
 
 export async function summarizeQueue(svc: Services): Promise<QueueSummary> {
   const db = svc.database.db;
   try {
-    const counts = await db.execute<CountRow>(sql`select name, state, count(*)::int as n from pgboss.job group by 1, 2 order by 1, 2`);
+    const counts = await db.execute<CountRow>(sql`
+      select name, state, count(*)::int as n, min(start_after) filter (where start_after <= now()) as oldest
+      from pgboss.job group by 1, 2 order by 1, 2`);
     const active = await db.execute<ActiveRow>(sql`
       select name, state, retry_count as retries, data->>'projectId' as "projectId", data->>'clipId' as "clipId",
-             started_on as "startedOn", created_on as "createdOn"
+             started_on as "startedOn", created_on as "createdOn",
+             case when state = 'retry' then output->>'message' end as "lastError"
       from pgboss.job
-      where state in ('created','retry','active')
+      where state in ('created','retry','active') and left(name, 8) <> '__pgboss'
       order by started_on desc nulls last, created_on
       limit ${ACTIVE_LIMIT + 1}`);
     const rows = active.rows.slice(0, ACTIVE_LIMIT);
@@ -117,6 +135,7 @@ export async function summarizeQueue(svc: Services): Promise<QueueSummary> {
         attempt: r.retries + 1,
         startedAt: r.startedOn?.toISOString() ?? null,
         createdAt: r.createdOn.toISOString(),
+        ...(r.lastError ? { lastError: r.lastError.slice(0, 500) } : {}),
       })),
       truncated: active.rows.length > ACTIVE_LIMIT,
     };

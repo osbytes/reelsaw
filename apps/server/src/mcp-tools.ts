@@ -747,7 +747,7 @@ export const TOOLS = {
   list_workers: {
     title: "List workers",
     description:
-      "Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = free space jobs in flight have claimed on its volume), GPU, render slots, the queues it listens on, and its jobs. A worker short of disk with nothing left to evict drops the media queues from `queues` until its disk recovers; other workers take them. Returns { items, live, stale }; stale = no check-in for 45 seconds. Hosted non-admins are refused.",
+      "Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. A worker out of disk drops the media queues from `queues` until it recovers. `paused` = what it was short of (memory, CPU, disk), null when it has room. Returns { items, live, stale }; stale = no check-in for 45 seconds. Hosted non-admins are refused.",
     annotations: { readOnlyHint: true },
   },
   get_failure: {
@@ -763,7 +763,7 @@ export const TOOLS = {
   get_queue: {
     title: "Queue summary",
     description:
-      "Admins only: waiting, running and retrying job counts per pipeline stage, plus the jobs currently in flight (project title, attempt, started). Returns { queues, active, truncated, error? }. Failed work is list_failures, not this. Hosted non-admins are refused.",
+      "Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). Returns { queues, active, truncated, error? }. Failed work is list_failures, not this. Hosted non-admins are refused.",
     annotations: { readOnlyHint: true },
   },
   list_failures: {

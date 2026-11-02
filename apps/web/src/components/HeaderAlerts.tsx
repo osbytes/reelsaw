@@ -6,7 +6,7 @@
  */
 import { Link } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { useSystemStatus } from "../lib/account";
+import { useMe, useSystemStatus } from "../lib/account";
 import { refreshForNewVersion, useStaleChunkNudge } from "../lib/stale-chunk";
 import { useUnsaved } from "../lib/unsaved";
 
@@ -29,6 +29,7 @@ export interface HeaderAlert {
 export function useHeaderAlerts(): HeaderAlert[] {
   // workers report what they are short of every 15 s (ops/workers.ts), so polling faster only repeats the same answer
   const paused = useSystemStatus(30_000).data?.paused;
+  const isAdmin = useMe().data?.role === "admin";
   const stale = useStaleChunkNudge();
   const dirty = useUnsaved();
   const alerts: HeaderAlert[] = [];
@@ -52,7 +53,8 @@ export function useHeaderAlerts(): HeaderAlert[] {
       label: `Jobs paused · ${reason}`,
       detail: "Heavy jobs wait until a worker has room",
       tone: "warn",
-      href: "/settings",
+      // admins land on the workers that are short; everyone else has nothing to change, so it stays a note
+      ...(isAdmin ? { href: "/settings/system#workers" } : {}),
     });
   }
   return alerts;
