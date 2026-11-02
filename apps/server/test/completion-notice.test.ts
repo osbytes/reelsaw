@@ -15,7 +15,6 @@ import {
 } from "../src/event-handlers.js";
 import { eventHandlerMap } from "../src/event-handler-map.js";
 import { eeEventHandlerMap } from "../src/ee/event-handlers.js";
-import { PROJECT_EVENT_TYPES } from "@reelsaw/shared";
 import { EVENT_TYPES } from "../src/event-types.js";
 import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
@@ -152,7 +151,7 @@ describe("ready email idempotency", () => {
 });
 
 describe("event handlers", () => {
-  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: { projectId: "p1", clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
+  const event = { id: 1, type: "project.done" as const, payload: { projectId: "p1", clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
   const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
   const settings = { get: () => ({ EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: 5 }) } as unknown as InstanceSettings;
   const deps = (enabled: boolean) => ({ email: { enabled } as Email, settings }) as EventHandlerDeps;
@@ -188,7 +187,7 @@ describe("event handlers", () => {
     assert.equal(eventHandlerSetting("clip.bumper_skipped", "notifyOwner", "DELAY_MINUTES"), "EVENT_CLIP_BUMPER_SKIPPED_NOTIFY_OWNER_DELAY_MINUTES");
     const prefixes = eventHandlerQueues(eventHandlerMap).map((q) => eventHandlerSetting(q.type, q.handler, ""));
     // EVENT_REPLAY_LIMIT and EVENT_RETENTION_DAYS are about the event log, not a handler: only EVENT_<an event type>_… counts
-    const typePrefixes = [...PROJECT_EVENT_TYPES, ...EVENT_TYPES].map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
+    const typePrefixes = EVENT_TYPES.map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
     const settings = Object.keys(envSchema.shape).filter((k) => typePrefixes.some((p) => k.startsWith(p)));
     assert.ok(settings.length > 0);
     for (const k of settings)

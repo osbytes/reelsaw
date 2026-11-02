@@ -131,7 +131,7 @@ describe("hosted", () => {
     const p = (await trpc(user.cookie, "projects.get", { id: projectId }, "GET")).data as { sourceVideoUrl: string | null; sourceExpiredAt: string | null };
     assert.equal(p.sourceVideoUrl, null);
     assert.ok(p.sourceExpiredAt);
-    const ev = await pool.query(`select type from project_events where project_id = $1 and type = 'source.expired'`, [projectId]);
+    const ev = await pool.query(`select type from events where project_id = $1 and type = 'source.expired'`, [projectId]);
     assert.equal(ev.rows.length, 1);
   });
 

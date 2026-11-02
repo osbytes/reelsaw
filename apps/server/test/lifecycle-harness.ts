@@ -96,7 +96,7 @@ export function lifecycleHarness() {
     return id;
   }
   async function eventCount(projectId: string, type: string): Promise<number> {
-    const r = await pool.query(`select count(*)::int as n from project_events where project_id = $1 and type = $2`, [projectId, type]);
+    const r = await pool.query(`select count(*)::int as n from events where project_id = $1 and type = $2`, [projectId, type]);
     return r.rows[0].n;
   }
   async function jobsFor(keys: string[]): Promise<Array<{ name: string; state: string; singleton_key: string }>> {

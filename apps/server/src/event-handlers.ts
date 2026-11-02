@@ -2,33 +2,36 @@
  * Event handlers: the work that follows an event, run after the event commits, with the job that runs
  * it committed atomically with the event (a transactional outbox whose relay is pg-boss).
  *
- * Two kinds of event have handlers: project events (`u.emit`, `project_events`, schemas in
- * @reelsaw/shared) and events (`u.emitEvent`, the shared `events` table, schemas in event-types.ts).
- * Every handler of either is listed in one map, `eventHandlerMap` (event-handler-map.ts), event type →
- * handler name → handler, so all events and what follows them are visible in one place. The handlers
- * themselves live with their modules:
+ * Every event goes through one emit, `u.emit(type, payload)`, into one table, `events` (event-types.ts
+ * has every type's schema). Every handler is listed in one map, `eventHandlerMap`
+ * (event-handler-map.ts), event type → handler name → handler, so all events and what follows them are
+ * visible in one place; the enterprise edition adds `eeEventHandlerMap` (ee/event-handlers.ts). The
+ * handlers themselves live with their modules:
  *
  *   // notify/completion.ts
  *   export const readyEmail: EventHandler<"project.done"> = {
- *     key: async ({ event, db }) => ownerOf(db, event.projectId),
+ *     key: async ({ event, db }) => ownerOf(db, event.payload.projectId),
  *     delaySeconds: ({ settings }) => settings.get().EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES * 60,
  *     coalesce: true,
  *     oneAtATime: true,
  *     handle: ({ key, svc }) => deliverCompletionNotice(svc, key),
  *   };
  *   // event-handler-map.ts
- *   export const eventHandlerMap = defineEventHandlers({ "project.done": { readyEmail }, "webhook.disabled": { ownerEmail } });
+ *   export const eventHandlerMap = defineEventHandlers({ "project.done": { readyEmail }, "webhook.disabled": { webhookDisabledEmail } });
  *
- * `event.payload` is inferred from the event's zod schema and parsed again when the job runs; a
- * project event carries `projectId`, an event `userId` (the account it concerns). A name listed twice on one event is a
- * duplicate key in the one object literal, which does not compile. A handler's settings follow
- * `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`), e.g. EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES.
+ * `event.payload` is inferred from the event's zod schema and parsed again when the job runs; it names
+ * what the event is about (`projectId` on a project event, `userId` on an account event). A name
+ * listed twice on one event is a duplicate key in the one object literal, which does not compile. A
+ * handler's settings follow `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`), e.g.
+ * EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES.
  *
  * Each handler has its own queue, `event.<type>.<name>`. When an event is emitted in a unit of work,
  * `key` (reads only, on the emitting transaction) picks the job's key, or null to skip; the unit of
  * work writes the job on the same connection just before COMMIT, so the event and every handler's job
  * commit together or not at all. `handle` runs in the worker after commit, with pg-boss's retries, so
- * it must be idempotent per key (`idempotencyKey` is there for a provider that dedups, such as Resend).
+ * it must be idempotent per key. A key handed to a provider that dedups (Resend, Stripe) names the thing
+ * the side effect is about (this account's approval, this subscription's cancel), never the event row
+ * or the job: two events about the same thing must collapse to one effect.
  *
  * Concurrency is opt-in, per key, enforced by the queue's pg-boss policy rather than by the handler:
  * - `coalesce`: a job already waiting for the key absorbs the new one (debounce with `delaySeconds`).
@@ -36,10 +39,9 @@
  * Both together are pg-boss's `stately` (one waiting and one running per key).
  *
  * A `key` that throws rolls the emitting transition back: the job is part of the state change, so keep
- * it to a lookup. Only `u.emit` and `u.emitEvent` run handlers; a row inserted any other way (an
- * issue-report import copying history, report/import.ts) runs nothing.
+ * it to a lookup. Only `u.emit` runs handlers; a row written any other way (`eventRow` outside a unit
+ * of work, an issue-report import copying history in report/import.ts) runs nothing.
  */
-import { PROJECT_EVENT_TYPES, projectEventSchemas, type ProjectEventPayload, type ProjectEventType } from "@reelsaw/shared";
 import { z } from "zod";
 import { EVENT_TYPES, eventSchemas, type EventPayload, type EventType } from "./event-types.js";
 import type { QueuePolicy } from "pg-boss";
@@ -47,34 +49,12 @@ import type { Db } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
 
-export type AnyEventType = ProjectEventType | EventType;
-
-export function isProjectEventType(t: string): t is ProjectEventType {
-  return PROJECT_EVENT_TYPES.some((x) => x === t);
-}
-
-/** A project event as its handlers see it: about one project. */
-export interface ProjectEmitted<T extends ProjectEventType = ProjectEventType> {
+/** An event as its handlers see it; with no `T`, any event. */
+export interface EmittedEvent<T extends EventType = EventType> {
   id: number;
-  projectId: string;
-  type: T;
-  payload: ProjectEventPayload<T>;
-}
-
-/** An event from the `events` table as its handlers see it: about one account. */
-export interface EventEmitted<T extends EventType = EventType> {
-  id: number;
-  userId: string;
   type: T;
   payload: EventPayload<T>;
 }
-
-/** The event a handler of `T` gets; with no `T`, any event. */
-export type EmittedEvent<T extends AnyEventType = AnyEventType> = [T] extends [ProjectEventType]
-  ? ProjectEmitted<T>
-  : [T] extends [EventType]
-    ? EventEmitted<T>
-    : ProjectEmitted | EventEmitted;
 
 /** Reads on the emitting transaction. No writes: the job is the only side effect. */
 export type ReadDb = Pick<Db, "select">;
@@ -82,7 +62,7 @@ export type ReadDb = Pick<Db, "select">;
 /** What `key` and `delaySeconds` may consult besides the database. */
 export type EventHandlerDeps = Pick<Services, "email" | "settings">;
 
-export interface EventHandler<T extends AnyEventType> {
+export interface EventHandler<T extends EventType> {
   /** The job's key, or null to skip this event. Default: the event id (one job per event). */
   key?: (ctx: { event: EmittedEvent<T>; db: ReadDb; deps: EventHandlerDeps }) => string | null | Promise<string | null>;
   /** Wait this long after the event before running. */
@@ -103,14 +83,12 @@ export interface EventHandler<T extends AnyEventType> {
     key: string;
     svc: Services;
     signal: AbortSignal;
-    /** `event.<type>.<name>:<event id>`: the same on every retry of this job, for a provider that dedups */
-    idempotencyKey: string;
     again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null>;
   }) => Promise<void>;
 }
 
 /** event type → handler name → handler */
-export type EventHandlerMap = { readonly [T in AnyEventType]?: Readonly<Record<string, EventHandler<T>>> };
+export type EventHandlerMap = { readonly [T in EventType]?: Readonly<Record<string, EventHandler<T>>> };
 
 /** Type the handler map; each handler's `event.payload` is inferred from its event key. */
 export function defineEventHandlers<const M extends EventHandlerMap>(map: M): M {
@@ -118,7 +96,7 @@ export function defineEventHandlers<const M extends EventHandlerMap>(map: M): M 
 }
 
 /** The pg-boss policy that gives a handler the concurrency it opted into. */
-export function policyOf(h: Pick<EventHandler<AnyEventType>, "coalesce" | "oneAtATime">): QueuePolicy {
+export function policyOf(h: Pick<EventHandler<EventType>, "coalesce" | "oneAtATime">): QueuePolicy {
   if (h.coalesce && h.oneAtATime) return "stately";
   if (h.coalesce) return "short";
   if (h.oneAtATime) return "singleton";
@@ -151,10 +129,10 @@ export const EVENT_HANDLER_DEFAULTS: EventHandlerQueueOptions = {
   localConcurrency: 2,
 };
 
-export const eventHandlerQueue = (type: AnyEventType, name: string) => `event.${type}.${name}`;
+export const eventHandlerQueue = (type: EventType, name: string) => `event.${type}.${name}`;
 
 /** `EVENT_<EVENT>_<HANDLER>_<NAME>`: project.done + readyEmail + DELAY_MINUTES → EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES */
-export function eventHandlerSetting(type: AnyEventType, handler: string, name: string): string {
+export function eventHandlerSetting(type: EventType, handler: string, name: string): string {
   const part = (x: string) =>
     x
       .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -165,9 +143,9 @@ export function eventHandlerSetting(type: AnyEventType, handler: string, name: s
 
 export interface EventHandlerQueue {
   name: string;
-  type: AnyEventType;
+  type: EventType;
   handler: string;
-  def: EventHandler<AnyEventType>;
+  def: EventHandler<EventType>;
   policy: QueuePolicy;
   options: EventHandlerQueueOptions;
 }
@@ -182,7 +160,7 @@ export function eventHandlerQueues(...maps: readonly EventHandlerMap[]): EventHa
   for (const map of maps) {
     // the cast widens each handler to every event type; defineEventHandlers keyed it by its own event, and the
     // worker only hands it jobs from that event's queue (parseEventHandlerJob checks the type)
-    for (const [type, handlers] of Object.entries(map) as Array<[AnyEventType, Record<string, EventHandler<AnyEventType>> | undefined]>) {
+    for (const [type, handlers] of Object.entries(map) as Array<[EventType, Record<string, EventHandler<EventType>> | undefined]>) {
       for (const [name, def] of Object.entries(handlers ?? {})) {
         const queue = eventHandlerQueue(type, name);
         if (out.some((q) => q.name === queue)) throw new Error(`event handler ${name} on ${type} is defined twice`);
@@ -201,26 +179,14 @@ export interface EventHandlerJobData {
 
 const jobDataSchema = z.object({
   key: z.string(),
-  event: z.object({
-    id: z.coerce.number(),
-    type: z.enum([...PROJECT_EVENT_TYPES, ...EVENT_TYPES]),
-    projectId: z.string().optional(),
-    userId: z.string().optional(),
-    payload: z.unknown(),
-  }),
+  event: z.object({ id: z.coerce.number(), type: z.enum(EVENT_TYPES), payload: z.unknown() }),
 });
 
 /** The job's event, checked against its schema: the row was written by us, but jobs outlive deploys. */
-export function parseEventHandlerJob(type: AnyEventType, data: unknown): EventHandlerJobData {
+export function parseEventHandlerJob(type: EventType, data: unknown): EventHandlerJobData {
   const d = jobDataSchema.parse(data);
   if (d.event.type !== type) throw new Error(`a ${d.event.type} job on the ${type} handler queue`);
-  const { id, projectId, userId, payload } = d.event;
-  if (isProjectEventType(type)) {
-    if (projectId === undefined) throw new Error(`a ${type} job without its project`);
-    return { key: d.key, event: { id, projectId, type, payload: projectEventSchemas[type].parse(payload) } };
-  }
-  if (userId === undefined) throw new Error(`a ${type} job without its account`);
-  return { key: d.key, event: { id, userId, type, payload: eventSchemas[type].parse(payload) } };
+  return { key: d.key, event: { id: d.event.id, type, payload: eventSchemas[type].parse(d.event.payload) } };
 }
 
 /**
@@ -237,7 +203,7 @@ export async function eventHandlerJobs(
   for (const event of events) {
     for (const map of maps) {
       // same widening as eventHandlerQueues: the handlers under event.type are only given events of that type
-      const forType = (map[event.type] ?? {}) as Record<string, EventHandler<AnyEventType>>;
+      const forType = (map[event.type] ?? {}) as Record<string, EventHandler<EventType>>;
       for (const [name, def] of Object.entries(forType)) {
         const key = def.key ? await def.key({ event, db, deps }) : String(event.id);
         if (key === null) continue;

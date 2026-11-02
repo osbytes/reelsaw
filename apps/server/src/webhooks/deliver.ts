@@ -202,11 +202,11 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
         // the event commits with the turn-off; its handler mails the owner (notify/account.ts)
         const owner = await u.db.query.user.findFirst({ where: eq(schema.user.id, d.userId), columns: { email: true } });
         if (owner)
-          await u.emitEvent("webhook.disabled", {
-            userId: d.userId,
-            email: owner.email,
-            payload: { endpointId: e.id, url: maskWebhookUrl(e.url), reason: disabled },
-          });
+          await u.emit(
+            "webhook.disabled",
+            { userId: d.userId, email: owner.email, endpointId: e.id, url: maskWebhookUrl(e.url), reason: disabled, disabledAt: now.toISOString() },
+            { actorId: null },
+          );
       }
     }
     if (delay !== null && !disabled)

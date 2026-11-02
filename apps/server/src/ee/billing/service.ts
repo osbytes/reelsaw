@@ -422,13 +422,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd ||
         cur.periodEnd?.getTime() !== next.periodEnd?.getTime() ||
         cur.stripeSubscriptionId !== next.stripeSubscriptionId;
-      const base = { actorId: null, userId, email: account.email };
+      const base = { userId, email: account.email };
       const ids = { subscriptionId, plan: next.plan, interval: next.interval, status: next.status };
       const audit = async (
         type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.canceled",
         payload: Record<string, unknown>,
       ) => {
-        await u.db.insert(schema.events).values({ ...base, type, payload });
+        await u.emit(type, { ...base, ...payload }, { actorId: null });
         u.afterCommit(() => {
           svc.telemetry.capture(type, userId, { plan: next!.plan, interval: next!.interval, status: next!.status });
           // the plan in force as a person property, so every event segments by plan (Free once a cancellation ends it)
@@ -445,7 +445,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       // a price no plan matches puts the account on Free without anyone being told: say so once per price
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
-        await u.db.insert(schema.events).values({ ...base, type: "billing.unknown_price", payload: { ...ids, priceId: next.priceId, message } });
+        await u.emit("billing.unknown_price", { ...base, ...ids, priceId: next.priceId, message }, { actorId: null });
         u.afterCommit(() => slog.error({ err: new Error(message), userId, priceId: next!.priceId }, "subscription price unknown"));
       }
       await markProcessed(u, subscriptionId, readAt);
@@ -681,9 +681,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         };
         await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       } else if (cur) await u.db.delete(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId));
-      await u.db
-        .insert(schema.events)
-        .values({ type: "billing.complimentary", actorId, userId, email: user.email, payload: { plan, from: cur?.plan ?? null } });
+      await u.emit("billing.complimentary", { userId, email: user.email, plan, from: cur?.plan ?? null }, { actorId });
       u.afterCommit(() => log.info({ userId, plan, actorId }, "complimentary plan set"));
       return { ok: true, plan };
     });
@@ -704,19 +702,16 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const subscriptionId = row?.stripeSubscriptionId && isLive(row.status) ? row.stripeSubscriptionId : null;
     const customerId = customer?.stripeCustomerId ?? null;
     if (!subscriptionId && !customerId) return;
-    await u.emitEvent("billing.detached", { userId, email, payload: { subscriptionId, customerId, removedAt: new Date().toISOString() } });
+    await u.emit("billing.detached", { userId, email, subscriptionId, customerId, removedAt: new Date().toISOString() });
   }
 
   /**
    * `billing.detached`'s handler: cancel the subscription and clear the customer's link to the account.
-   * Idempotent: an already-canceled or missing subscription is done, and each call carries the job's key,
-   * so a retry after Stripe took the call is answered from Stripe's idempotency cache.
+   * Idempotent: an already-canceled or missing subscription is done, and each call's idempotency key names
+   * what it changes (`cancel:<subscription>`, `detach:<customer>`), so a retry, or a second event about the
+   * same removal, is answered from Stripe's idempotency cache instead of acting twice.
    */
-  async function cancelDetached(
-    d: { subscriptionId: string | null; customerId: string | null; removedAt: string },
-    idempotencyKey: string,
-    userId: string,
-  ): Promise<void> {
+  async function cancelDetached(d: { userId: string; subscriptionId: string | null; customerId: string | null; removedAt: string }): Promise<void> {
     const missing = (err: unknown) => err instanceof Stripe.errors.StripeError && err.code === "resource_missing";
     if (d.subscriptionId) {
       const sub = await stripe.subscriptions.retrieve(d.subscriptionId).catch((err: unknown) => {
@@ -724,15 +719,15 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         throw err;
       });
       if (sub && sub.status !== "canceled")
-        await stripe.subscriptions.cancel(d.subscriptionId, { prorate: false }, { idempotencyKey: `${idempotencyKey}:cancel` });
+        await stripe.subscriptions.cancel(d.subscriptionId, { prorate: false }, { idempotencyKey: `cancel:${d.subscriptionId}` });
     }
     if (d.customerId)
       await stripe.customers
-        .update(d.customerId, { metadata: { userId: "", removedAt: d.removedAt } }, { idempotencyKey: `${idempotencyKey}:customer` })
+        .update(d.customerId, { metadata: { userId: "", removedAt: d.removedAt } }, { idempotencyKey: `detach:${d.customerId}` })
         .catch((err: unknown) => {
           if (!missing(err)) throw err;
         });
-    log.info({ userId, subscriptionId: d.subscriptionId }, "account removed; subscription canceled at Stripe");
+    log.info({ userId: d.userId, subscriptionId: d.subscriptionId }, "account removed; subscription canceled at Stripe");
   }
 
   /** `reelsaw billing <user>`: the row, the customer, and Stripe's view side by side. */

@@ -1,5 +1,5 @@
 /**
- * History pruning: project_events, llm_usage, stt_usage, events, user_decisions, media_links and webhook_deliveries older than their retention are deleted
+ * History pruning: events (a project's and the rest, each with its own retention), llm_usage, stt_usage, user_decisions, media_links and webhook_deliveries older than their retention are deleted
  * in batches by id (keyset), from the reconciler, at most once a day per table.
  *
  * `planPruneBatch` is the pure part: given one page of rows in id order it says which ids to delete
@@ -54,10 +54,11 @@ export function planPruneBatch(rows: PruneRow[], cursor: number, cutoff: Date, s
 }
 
 const TABLES = {
-  events: { table: "project_events", typed: true, days: (c: RuntimeSettings) => c.EVENT_RETENTION_DAYS },
+  // one table, two rules: a project's history (its run skeleton kept), and account events (the admin log)
+  events: { table: "events", typed: true, where: "project_id is not null", days: (c: RuntimeSettings) => c.EVENT_RETENTION_DAYS },
   llm: { table: "llm_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
   stt: { table: "stt_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
-  admin: { table: "events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
+  admin: { table: "events", typed: false, where: "project_id is null", days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
   decisions: { table: "user_decisions", typed: false, byTime: true, days: (c: RuntimeSettings) => c.DECISION_RETENTION_DAYS },
   // share links are pruned by when they stopped working (revoked, or expired), not when they were made
   mediaLinks: {
@@ -98,7 +99,7 @@ async function pruneTable(
   for (;;) {
     if (expired(deadline)) return { deleted, cursor, done: false };
     const page = await pool.query<{ id: string; type?: string; created_at: Date }>(
-      `select id, ${typed ? "type," : ""} created_at from ${table} where id > $1 order by id limit ${PRUNE_BATCH}`,
+      `select id, ${typed ? "type," : ""} created_at from ${table} where id > $1 ${"where" in TABLES[which] ? `and ${TABLES[which].where}` : ""} order by id limit ${PRUNE_BATCH}`,
       [cursor],
     );
     const rows = page.rows.map((r) => ({ id: Number(r.id), type: r.type, createdAt: r.created_at }));

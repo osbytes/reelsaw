@@ -94,7 +94,7 @@ export async function buildBody(svc: Services, d: WebhookDeliveryRow): Promise<s
     });
   }
   const [event, project] = await Promise.all([
-    db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.id, d.eventId) }),
+    db.query.events.findFirst({ where: eq(schema.events.id, d.eventId) }),
     db.query.projects.findFirst({ where: eq(schema.projects.id, d.projectId) }),
   ]);
   const payload = event?.payload ?? {};

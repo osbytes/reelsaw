@@ -53,7 +53,7 @@ describe("webhook outbox", { skip: notReady ?? false }, () => {
     await endpoint(owner, ["clip.failed"]);
     await endpoint(owner, ["project.done"], false);
     await endpoint(other, ["project.done"]);
-    const eventId = await h.tx((u) => u.emit(projectId, "project.done", { clips: 0, failed: 0 }));
+    const eventId = await h.tx((u) => u.emit("project.done", { projectId: projectId, clips: 0, failed: 0 }));
     const rows = (await h.pool.query(`select endpoint_id, status, type from webhook_deliveries where event_id = $1`, [eventId])).rows;
     assert.deepEqual(rows, [{ endpoint_id: done, status: "pending", type: "project.done" }]);
     const jobs = await deliveryJobs(eventId);
@@ -67,7 +67,7 @@ describe("webhook outbox", { skip: notReady ?? false }, () => {
     let deliveryIds: number[] = [];
     await assert.rejects(
       h.tx(async (u) => {
-        eventId = await u.emit(projectId, "clip.failed", { clipId: "c-x", error: "x" });
+        eventId = await u.emit("clip.failed", { projectId: projectId, clipId: "c-x", error: "x" });
         const inside = (await u.db.execute<{ id: string }>(sql`select id from webhook_deliveries where event_id = ${eventId}`)).rows;
         assert.ok(inside.length >= 1, "written inside the unit");
         deliveryIds = inside.map((r) => Number(r.id));
@@ -85,7 +85,7 @@ describe("webhook outbox", { skip: notReady ?? false }, () => {
   });
 
   it("events that are not subscribable write nothing", async () => {
-    const eventId = await h.tx((u) => u.emit(projectId, "project.updated", { changed: ["title"] }));
+    const eventId = await h.tx((u) => u.emit("project.updated", { projectId: projectId, changed: ["title"] }));
     assert.equal((await h.pool.query(`select 1 from webhook_deliveries where event_id = $1`, [eventId])).rowCount, 0);
   });
 });

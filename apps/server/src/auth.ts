@@ -191,11 +191,11 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             }
             const signedUp = u;
             await tx()((w) =>
-              w.emitEvent("user.signed_up", {
-                userId: signedUp.id,
-                email: signedUp.email,
-                payload: { role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode() },
-              }),
+              w.emit(
+                "user.signed_up",
+                { userId: signedUp.id, email: signedUp.email, role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode() },
+                { actorId: signedUp.id },
+              ),
             );
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
             // id and role only: no email or name goes to PostHog

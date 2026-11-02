@@ -30,7 +30,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
         await u.db
           .insert(schema.clips)
           .values({ id: clipId, projectId, index: 0, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
-        await u.emit(projectId, "clip.done", { clipId });
+        await u.emit("clip.done", { projectId: projectId, clipId });
         const jobId = await u.enqueue(QUEUES.render, { projectId, clipId, gen: 1 });
         assert.ok(jobId, "the job was created inside the unit");
         throw new Error("boom");
@@ -49,7 +49,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
       await u.db
         .insert(schema.clips)
         .values({ id: clipId, projectId, index: 1, title: "t", hook: "h", startSec: 0, endSec: 1, score: 1, reasoning: "r", hashtags: [] });
-      await u.emit(projectId, "clip.done", { clipId });
+      await u.emit("clip.done", { projectId: projectId, clipId });
       await u.enqueue(QUEUES.render, { projectId, clipId, gen: 1 });
     });
     assert.equal((await h.pool.query(`select 1 from clips where id = $1`, [clipId])).rowCount, 1);
@@ -76,7 +76,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
   it("afterCommit sees the committed data, and a throwing callback does not fail the unit", async () => {
     let seen = 0;
     const r = await h.tx(async (u) => {
-      await u.emit(projectId, "clip.done", { marker: "after" });
+      await u.emit("clip.done", { projectId: projectId, marker: "after" });
       u.afterCommit(async () => {
         seen = await h.eventCount(projectId, "clip.done");
       });
@@ -105,7 +105,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
       // rolled back: no notification, ever
       await assert.rejects(
         h.tx(async (u) => {
-          await u.emit(projectId, "clip.done", {});
+          await u.emit("clip.done", { projectId: projectId });
           throw new Error("boom");
         }),
       );
@@ -117,7 +117,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
       const gate = new Promise<void>((r) => (release = r));
       let emitted = 0;
       const open = h.tx(async (u) => {
-        emitted = await u.emit(projectId, "clip.done", {});
+        emitted = await u.emit("clip.done", { projectId: projectId });
         await gate;
       });
       await sleep(300);
@@ -127,7 +127,7 @@ describe("unit of work", { skip: notReady ?? false }, () => {
       for (const end = Date.now() + 3000; Date.now() < end && !got.length; ) await sleep(25);
       assert.equal(got.length, 1);
       assert.equal(got[0]!.id, emitted);
-      const row = await h.pool.query(`select 1 from project_events where id = $1`, [got[0]!.id]);
+      const row = await h.pool.query(`select 1 from events where id = $1`, [got[0]!.id]);
       assert.equal(row.rowCount, 1, "the event row is readable when the notification fires");
     } finally {
       await listener.end();

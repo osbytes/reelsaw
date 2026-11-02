@@ -13,6 +13,7 @@ import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import type { Logger } from "../log.js";
 import { createSecretBox } from "./crypto.js";
+import { eventRow } from "../event-types.js";
 
 export interface ProviderCredentials {
   apiKey?: string;
@@ -207,17 +208,20 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
         } else {
           await tx.delete(schema.providerSettings).where(eq(schema.providerSettings.provider, provider));
         }
-        await tx.insert(schema.events).values({
-          type: "provider.changed",
-          actorId: actor.id,
-          userId: actor.id,
-          email: actor.email,
-          payload: {
-            provider,
-            key: patch.apiKey === undefined ? "kept" : patch.apiKey ? "set" : "cleared",
-            baseUrl: patch.baseUrl === undefined ? "kept" : (baseUrl ?? "cleared"),
-          },
-        });
+        // no unit of work here, so no handler runs (none follows a provider change)
+        await tx.insert(schema.events).values(
+          eventRow(
+            "provider.changed",
+            {
+              userId: actor.id,
+              email: actor.email,
+              provider,
+              key: patch.apiKey === undefined ? "kept" : patch.apiKey ? "set" : "cleared",
+              baseUrl: patch.baseUrl === undefined ? "kept" : (baseUrl ?? "cleared"),
+            },
+            actor.id,
+          ),
+        );
       });
       lastSeen = "";
       await load();

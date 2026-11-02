@@ -116,7 +116,11 @@ describe("createInstanceSettings", () => {
     assert.equal(st.source.HEALTH_DETAILS, "env");
     assert.equal(st.updatedBy, actor.email);
     assert.equal(events.length, 1);
-    assert.deepEqual(events[0]!.payload, { changed: { SIGNUP_MODE: { from: "open", to: "approval" }, MAX_UPLOAD_MB: { from: 4096, to: 2048 } } });
+    assert.deepEqual(events[0]!.payload, {
+      userId: actor.id,
+      email: actor.email,
+      changed: { SIGNUP_MODE: { from: "open", to: "approval" }, MAX_UPLOAD_MB: { from: 4096, to: 2048 } },
+    });
 
     // the environment's own value is not an override
     st = await s.set({ MAX_UPLOAD_MB: 4096 }, actor);

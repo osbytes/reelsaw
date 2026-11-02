@@ -44,7 +44,7 @@ async function account(lastActive: string | null): Promise<string> {
 async function finished(userId: string, ago: string): Promise<string> {
   const p = await h.makeProject(userId, "done");
   const e = await h.pool.query(
-    `insert into project_events (project_id, type, payload, created_at) values ($1, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}') returning id`,
+    `insert into events (project_id, type, payload, created_at) values ($1, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}') returning id`,
     [p],
   );
   // what finalizeProjectIfDone writes with the first finish
@@ -136,7 +136,7 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     const v = await account(null);
     await finished(v, "10 minutes");
     await h.pool.query(
-      `update "user" u set last_active_at = e.created_at from project_events e join projects p on p.id = e.project_id where u.id = $1 and p.user_id = $1`,
+      `update "user" u set last_active_at = e.created_at from events e join projects p on p.id = e.project_id where u.id = $1 and p.user_id = $1`,
       [v],
     );
     await deliverCompletionNotice(svc, v);

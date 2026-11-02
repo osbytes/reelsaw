@@ -9,7 +9,7 @@
  * - MCP calls: an agent acting for the account is the account at work.
  *
  * Writes are coalesced to one every couple of seconds per account per process (`lru-cache` ttl), and
- * use the database clock (`now()`), the same clock that stamps `project_events.created_at`, so a skewed
+ * use the database clock (`now()`), the same clock that stamps `events.created_at`, so a skewed
  * app host cannot make a completion look seen or unseen. A failure never fails the request.
  */
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";

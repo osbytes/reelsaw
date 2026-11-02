@@ -144,7 +144,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
     await u.enqueue(queue, { projectId: p.id });
   }
-  await u.emit(p.id, "stage.started", { stage: queue, retried: true });
+  await u.emit("stage.started", { projectId: p.id, stage: queue, retried: true });
   return { ok: true, queue };
 }
 
@@ -185,8 +185,8 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
     })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
-  if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, cancelled: true, ...facts });
-  await u.emit(projectId, "project.deleted", { days: days(svc), stopped: working });
+  if (facts) await u.emit("project.failed", { projectId: projectId, stage: before.stage ?? "ingest", error: stopped, cancelled: true, ...facts });
+  await u.emit("project.deleted", { projectId: projectId, days: days(svc), stopped: working });
   return true;
 }
 
@@ -225,7 +225,7 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
       .update(schema.projects)
       .set({ deletedAt: null, forgetDecisionsOnPurge: false, updatedAt: new Date() })
       .where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
-    await u.emit(projectId, "project.restored", {});
+    await u.emit("project.restored", { projectId: projectId });
     return { ok: true, changed: true, status: p.status };
   });
 }
@@ -316,7 +316,7 @@ async function markClipDeleted(svc: Services, u: UnitOfWork, c: typeof schema.cl
       updatedAt: new Date(),
     })
     .where(eq(schema.clips.id, c.id));
-  await u.emit(c.projectId, "clip.deleted", { clipId: c.id, index: c.index, title: c.title, days: days(svc) });
+  await u.emit("clip.deleted", { projectId: c.projectId, clipId: c.id, index: c.index, title: c.title, days: days(svc) });
   return true;
 }
 
@@ -396,7 +396,7 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
       .from(schema.clips)
       .where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-    await u.emit(c.projectId, "clip.restored", { clipId, index: next, title: c.title });
+    await u.emit("clip.restored", { projectId: c.projectId, clipId, index: next, title: c.title });
     if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
     return { ok: true, changed: true, clipId, status: c.status, needsRerender: c.status !== "done" };
   });
@@ -486,7 +486,8 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
           ),
         );
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
-    await u.emit(p.id, "stage.started", {
+    await u.emit("stage.started", {
+      projectId: p.id,
       stage: "analyze",
       status: "analyzing",
       repick: true,
@@ -590,7 +591,7 @@ export async function updateProject(
           updatedAt: new Date(),
         })
         .where(eq(schema.projects.id, p.id));
-      await u.emit(p.id, "project.updated", { changed });
+      await u.emit("project.updated", { projectId: p.id, changed });
     }
     const followUps = [
       needsReanalyze && "reanalyze_project picks clips with the new selection settings",
@@ -669,7 +670,7 @@ export async function applyProjectFraming(
       .update(schema.projects)
       .set({ settings: sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`, updatedAt: new Date() })
       .where(eq(schema.projects.id, p.id));
-    await u.emit(p.id, "project.updated", { changed: ["reframe", "reframeAdjust"], framingCleared: cleared });
+    await u.emit("project.updated", { projectId: p.id, changed: ["reframe", "reframeAdjust"], framingCleared: cleared });
     u.afterCommit(() =>
       svc.log.child({ module: "projects", projectId: p.id }).info({ reframe: input.reframe, adjust, cleared, rerendered }, "framing applied to the project"),
     );
@@ -707,9 +708,9 @@ export const gone = (svc: Services, what: string) => `No such ${what}. Deleted i
 // ── purge ──────────────────────────────────────────────────────────────────
 
 /**
- * Remove a project for good in the caller's unit of work: jobs cancelled, the row (and its clips, transcript, events)
- * deleted, files after commit. Its decisions go too when `forgetDecisions` or the project was deleted with that
- * choice; returns how many were forgotten.
+ * Remove a project for good in the caller's unit of work: jobs cancelled, the row (and its clips, transcript)
+ * deleted, files after commit. Its events and decisions outlive it (what Reelsaw learned from it), and go too
+ * when `forgetDecisions` or the project was deleted with that choice; returns how many decisions were forgotten.
  */
 export async function purgeProject(
   svc: Services,
@@ -890,7 +891,7 @@ export async function createProject(svc: Services, userId: string, input: Create
     if (!row) throw new Error("the project row was not returned");
     await recordProjectCreated(u.db, userId, id, row.createdAt);
     await syncProjectRefs(u.db, row); // the defaults' intro/outro
-    await u.emit(id, "project.created", { title, sourceType: row.sourceType });
+    await u.emit("project.created", { projectId: id, title, sourceType: row.sourceType });
     await startRun(u, id, { reason: "created", status: "queued" });
     await u.enqueue(QUEUES.ingest, { projectId: id });
     return row;

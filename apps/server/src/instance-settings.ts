@@ -20,6 +20,7 @@ import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { Logger } from "./log.js";
 import { createSecretBox } from "./ai/crypto.js";
+import { eventRow } from "./event-types.js";
 
 export const SETTING_GROUPS = [
   ["access", "Access"],
@@ -478,7 +479,8 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.events).values({ type: "settings.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { changed } });
+        // no unit of work here, so no handler runs (none follows a settings change)
+        await tx.insert(schema.events).values(eventRow("settings.changed", { userId: actor.id, email: actor.email, changed }, actor.id));
       });
       log.info({ keys: Object.keys(changed), by: actor.email }, "instance settings changed");
       lastSeen = "";

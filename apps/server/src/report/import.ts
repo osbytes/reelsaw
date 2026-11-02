@@ -526,8 +526,8 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       if (clipRows.length) await u.db.insert(schema.clips).values(clipRows as never);
       if (events.length)
         await u.db
-          .insert(schema.projectEvents)
-          .values(events.map((e) => ({ projectId, type: e.type as never, payload: remap(e.payload), createdAt: new Date(e.createdAt) })));
+          .insert(schema.events)
+          .values(events.map((e) => ({ projectId, userId: owner.id, type: e.type as never, payload: remap(e.payload), createdAt: new Date(e.createdAt) })));
       if (artifacts.length)
         await u.db
           .insert(schema.stageArtifacts)

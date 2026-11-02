@@ -111,7 +111,7 @@ describe("lock order of API mutations against render completions", () => {
         .update(schema.clips)
         .set({ status: "done", updatedAt: new Date() })
         .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, 2)));
-      await u.emit(projectId, "clip.done", { clipId, index });
+      await u.emit("clip.done", { projectId: projectId, clipId, index });
       await sleep(40); // hold the clip lock while the mutation runs: the window in which a project-first order deadlocks
       await finalizeProjectIfDone(svc, u, projectId);
     });
@@ -133,7 +133,7 @@ describe("lock order of API mutations against render completions", () => {
         const results = await Promise.allSettled([call(id), ...completions]);
         const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected").map((r) => String(r.reason));
         assert.deepEqual(failed, [], `round ${round}`);
-        const done = await pool.query(`select count(*)::int n from project_events where project_id = $1 and type = 'project.done'`, [id]);
+        const done = await pool.query(`select count(*)::int n from events where project_id = $1 and type = 'project.done'`, [id]);
         assert.ok(done.rows[0].n <= 1, `round ${round}: at most one project.done`);
       }
       assert.equal(retries, 0, "no transaction was aborted for a deadlock");

@@ -216,7 +216,7 @@ export const envSchema = z.object({
    * hardlinks scratch and store, so there is nothing to evict there.
    */
   SCRATCH_CACHE_HOURS: z.coerce.number().int().min(0).default(24),
-  // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
+  // history pruning (0 = keep forever). A project's events always keep its run skeleton (created / run.started / done).
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
   ADMIN_EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),

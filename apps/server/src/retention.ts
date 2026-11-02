@@ -53,7 +53,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
               )
               .returning({ id: schema.projects.id });
             if (!cur) return;
-            await u.emit(p.id, "source.expired", { days: config.SOURCE_RETENTION_DAYS });
+            await u.emit("source.expired", { projectId: p.id, days: config.SOURCE_RETENTION_DAYS });
             u.afterCommit(async () => {
               await svc.storage.delete(p.sourceKey).catch((err) => log.warn({ err, projectId: p.id }, "source delete failed"));
               await removeScratchSource(svc, p.id); // the local store hardlinks it: without this no disk is freed
@@ -103,7 +103,8 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
               clips++;
               expired.push(c.id);
             }
-            if (expired.length) await u.emit(projectId, "clips.expired", { clips: expired.length, clipIds: expired, days: config.CLIP_RETENTION_DAYS });
+            if (expired.length)
+              await u.emit("clips.expired", { projectId: projectId, clips: expired.length, clipIds: expired, days: config.CLIP_RETENTION_DAYS });
           });
         }
       },

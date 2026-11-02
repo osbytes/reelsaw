@@ -31,7 +31,7 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
       clipIds.map((clipId) =>
         h.tx(async (u) => {
           await u.db.update(schema.clips).set({ status: outcome }).where(eq(schema.clips.id, clipId));
-          await u.emit(projectId, outcome === "done" ? "clip.done" : "clip.failed", { clipId });
+          await u.emit(outcome === "done" ? "clip.done" : "clip.failed", { projectId: projectId, clipId });
           if (!released) {
             if (++arrived === clipIds.length) {
               released = true;
@@ -67,7 +67,7 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
     assert.equal(await h.eventCount(projectId, "project.done"), 1);
     // the milestone ledger (notify/completion.ts) gets one row, pointing at that project.done
     const ledger = await h.pool.query(
-      `select f.first_event_id::text as e, (select id::text from project_events where project_id = $1 and type = 'project.done') as done from finished_projects f where f.project_id = $1`,
+      `select f.first_event_id::text as e, (select id::text from events where project_id = $1 and type = 'project.done') as done from finished_projects f where f.project_id = $1`,
       [projectId],
     );
     assert.equal(ledger.rows.length, 1);

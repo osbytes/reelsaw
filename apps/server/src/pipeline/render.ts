@@ -297,7 +297,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .set({ status: "rendering", error: null, updatedAt: new Date() })
       .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, gen)))
       .returning({ id: schema.clips.id });
-    if (r.length) await u.emit(projectId, "clip.rendering", { clipId });
+    if (r.length) await u.emit("clip.rendering", { projectId: projectId, clipId });
     return r.length > 0;
   });
   if (!started) {
@@ -604,7 +604,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end], verified: c.verified, manual: c.manual ?? false }, "disfluency cut");
   for (const c of cutResult.cuts.filter((x) => !x.verified && x.manual)) {
     await svc.events
-      .emit(projectId, "clip.cut_unverified", { clipId, at: Number((c.start + clip.startSec).toFixed(2)), reason: (c.reason ?? "").slice(0, 1500) })
+      .emit("clip.cut_unverified", { projectId: projectId, clipId, at: Number((c.start + clip.startSec).toFixed(2)), reason: (c.reason ?? "").slice(0, 1500) })
       .catch(() => {});
   }
   // long pauses: shortened with jump cuts (VAD on the clip audio), merged with the disfluency cuts
@@ -920,7 +920,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       log.warn({ err }, "render with overlays failed; rendering without");
       overlayItems.skipped.push("the render with the overlays failed");
       await svc.events
-        .emit(projectId, "clip.overlay_skipped", {
+        .emit("clip.overlay_skipped", {
+          projectId: projectId,
           clipId,
           layerIds: [...overlayItems.items.map((o) => o.id), ...music.map((m) => m.id)],
           assetIds: [...overlayItems.items.map((o) => o.assetId), ...music.map((m) => m.assetId)],
@@ -936,7 +937,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         log.warn({ err: err2 }, "render with intro/outro failed; rendering without");
         bumpers.skipped.push("the render with the intro and outro failed");
         await svc.events
-          .emit(projectId, "clip.bumper_skipped", {
+          .emit("clip.bumper_skipped", {
+            projectId: projectId,
             clipId,
             slot: "both",
             assetIds: bumperIds(bumpers),
@@ -951,7 +953,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       log.warn({ err }, "render with intro/outro failed; rendering without");
       bumpers.skipped.push("the render with the intro and outro failed");
       await svc.events
-        .emit(projectId, "clip.bumper_skipped", {
+        .emit("clip.bumper_skipped", {
+          projectId: projectId,
           clipId,
           slot: "both",
           assetIds: bumperIds(bumpers),
@@ -1059,7 +1062,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .update(schema.clips)
       .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, captions, updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
-    await u.emit(projectId, "clip.done", { clipId, index: clip.index, renderSec: Math.round((Date.now() - renderStarted) / 1000) });
+    await u.emit("clip.done", { projectId: projectId, clipId, index: clip.index, renderSec: Math.round((Date.now() - renderStarted) / 1000) });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
     for (const k of [cur.outputKey, cur.thumbnailKey]) {
@@ -1111,7 +1114,8 @@ async function loadBumpers(
       out.skipped.push(`${slot}: ${reason}`);
       log.warn({ slot, assetId: id, err: error }, "bumper skipped");
       await svc.events
-        .emit(projectId, "clip.bumper_skipped", {
+        .emit("clip.bumper_skipped", {
+          projectId: projectId,
           clipId,
           slot,
           assetIds: [id],
@@ -1192,7 +1196,8 @@ async function loadOverlays(
       out.skipped.push(`${o.id}: ${reason}`);
       log.warn({ overlayId: o.id, assetId: o.assetId, err: error }, "overlay skipped");
       await svc.events
-        .emit(projectId, "clip.overlay_skipped", {
+        .emit("clip.overlay_skipped", {
+          projectId: projectId,
           clipId,
           layerIds: [o.id],
           assetIds: [o.assetId],
@@ -1316,7 +1321,8 @@ async function loadMusic(
     const skip = async (reason: string, error?: unknown) => {
       log.warn({ trackId: audio.id, assetId: audio.assetId, err: error }, "music skipped");
       await svc.events
-        .emit(projectId, "clip.overlay_skipped", {
+        .emit("clip.overlay_skipped", {
+          projectId: projectId,
           clipId,
           layerIds: [audio.id],
           assetIds: [audio.assetId],
@@ -1522,7 +1528,7 @@ export async function markClipFailed(
       .update(schema.clips)
       .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
-    await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000), errorKind: errorKind(err) });
+    await u.emit("clip.failed", { projectId: projectId, clipId, error: message.slice(0, 1000), errorKind: errorKind(err) });
     await finalizeInTx(svc, u, projectId);
   });
 }

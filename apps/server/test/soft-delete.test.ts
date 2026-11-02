@@ -68,7 +68,7 @@ describe("soft delete", () => {
     assert.equal(deleted.get(clip.edited), false);
     assert.equal(deleted.get(clip.manual), false);
     assert.equal(deleted.get(clip.framed), false);
-    const ev = await pool.query(`select payload from project_events where project_id = $1 and type = 'stage.started' order by id desc limit 1`, [projectId]);
+    const ev = await pool.query(`select payload from events where project_id = $1 and type = 'stage.started' order by id desc limit 1`, [projectId]);
     assert.equal(ev.rows[0].payload.kept, 3);
     // the replaced clip is out of the project's clips, listed as restorable, and comes back
     const p = (await trpc(owner.cookie, "projects.get", { id: projectId }, "GET")).data as {
@@ -99,7 +99,7 @@ describe("soft delete", () => {
     assert.equal((r.data as { changed: boolean }).changed, true, JSON.stringify(r.error));
     assert.ok((await listed()).includes(projectId));
     const types = (
-      await pool.query(`select type from project_events where project_id = $1 and type in ('project.deleted', 'project.restored') order by id`, [projectId])
+      await pool.query(`select type from events where project_id = $1 and type in ('project.deleted', 'project.restored') order by id`, [projectId])
     ).rows.map((e) => e.type);
     assert.deepEqual(types, ["project.deleted", "project.restored"]);
   });

@@ -442,7 +442,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   hour from a cursor in `instance_settings` (`sweep_state`; `reelsaw storage` shows it and the last run time). A
   manual `reelsaw storage sweep` has no budget. Retention and the bumper purge walk `(updated_at|deleted_at, id)`
   in batches of 200 for up to 30 s per tick. History pruning (`prune_state`) deletes 5,000 rows per statement for up
-  to 60 s per tick, once a day per table; the first run on a big `project_events` table takes several ticks. Progress
+  to 60 s per tick, once a day per table; the first run on a big `events` table takes several ticks. Progress
   ticks are persisted at most once per 10 s per stage and deleted when the stage completes or fails
   (`reelsaw status <id>` shows event counts).
 - **Live job lookups use `singleton_key`** (project id for stage jobs, clip id for render/prepare), which the

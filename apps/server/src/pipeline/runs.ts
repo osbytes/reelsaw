@@ -152,15 +152,15 @@ export async function loadRunLogs(db: Db, projectIds: string[]): Promise<Map<str
   if (!projectIds.length) return out;
   const rows = await db
     .select({
-      projectId: schema.projectEvents.projectId,
-      type: schema.projectEvents.type,
-      payload: schema.projectEvents.payload,
-      createdAt: schema.projectEvents.createdAt,
+      projectId: schema.events.projectId,
+      type: schema.events.type,
+      payload: schema.events.payload,
+      createdAt: schema.events.createdAt,
     })
-    .from(schema.projectEvents)
-    .where(and(inArray(schema.projectEvents.projectId, projectIds), inArray(schema.projectEvents.type, [...RUN_EVENT_TYPES])))
-    .orderBy(asc(schema.projectEvents.id));
-  for (const r of rows) out.get(r.projectId)?.push(r);
+    .from(schema.events)
+    .where(and(inArray(schema.events.projectId, projectIds), inArray(schema.events.type, [...RUN_EVENT_TYPES])))
+    .orderBy(asc(schema.events.id));
+  for (const r of rows) if (r.projectId) out.get(r.projectId)?.push(r);
   return out;
 }
 

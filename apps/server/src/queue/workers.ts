@@ -286,7 +286,8 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         );
         if (prev)
           await svc.events
-            .emit(projectId, "clip.retrying", {
+            .emit("clip.retrying", {
+              projectId: projectId,
               clipId,
               step: "prepare",
               attempt: job.retryCount + 1,
@@ -339,7 +340,8 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         );
         if (prev)
           await svc.events
-            .emit(projectId, "clip.retrying", {
+            .emit("clip.retrying", {
+              projectId: projectId,
               clipId,
               step: "render",
               attempt: job.retryCount + 1,
@@ -400,7 +402,6 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           key,
           svc,
           signal: job.signal,
-          idempotencyKey: `${q.name}:${event.id}`,
           again: (u, o) => u.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfterSeconds: o.delaySeconds } : {}) }),
         });
       } catch (err) {

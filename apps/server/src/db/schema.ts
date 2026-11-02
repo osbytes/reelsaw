@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { EventType } from "../event-types.js";
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import type {
   EmailPrefSource,
@@ -10,7 +11,6 @@ import type {
   ClipStatus,
   Word,
   TranscriptSegment,
-  ProjectEventType,
   ReframeMode,
   TranscriptFlag,
   RefineStatus,
@@ -182,56 +182,6 @@ export const apikey = pgTable(
   },
   (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
 );
-
-/**
- * Events: what happened to an account or the instance (sign-ups, approvals, bans, model and settings
- * changes, a webhook turned off, billing), the shared counterpart of a project's `project_events`.
- * Written with `u.emitEvent`, which queues the handlers that follow each one (event-handler-map.ts);
- * payload schemas in event-types.ts. The admin page lists them; pruned after ADMIN_EVENT_RETENTION_DAYS.
- */
-export const EVENT_TYPES = [
-  "user.signed_up",
-  "user.approved",
-  "user.role_changed",
-  "user.limits_changed",
-  "user.watermark_changed",
-  "user.flagged",
-  "user.banned",
-  "user.unbanned",
-  "user.removed",
-  "user.password_set",
-  "webhook.disabled",
-  "models.changed",
-  "provider.changed",
-  "settings.changed",
-  "failures.retried",
-  // billing (ee/): written by the subscription sync, never by a webhook handler directly
-  "billing.subscribed",
-  "billing.changed",
-  "billing.payment_failed",
-  "billing.canceled",
-  "billing.complimentary",
-  "billing.unknown_price",
-  /** an account with a Stripe customer or live subscription was removed; ee/ cancels it at Stripe */
-  "billing.detached",
-] as const;
-export type EventType = (typeof EVENT_TYPES)[number];
-export const events = pgTable(
-  "events",
-  {
-    id: bigserial("id", { mode: "number" }).primaryKey(),
-    type: text("type").$type<EventType>().notNull(),
-    /** who did it; null = the system (sign-up, auto-approval) */
-    actorId: text("actor_id"),
-    /** the account it concerns; kept after the user row is deleted */
-    userId: text("user_id").notNull(),
-    email: text("email").notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [index("events_user_id_idx").on(t.userId, t.id)],
-);
-export type EventRow = typeof events.$inferSelect;
 
 /** One row per language-model call, for usage per user (tokens, latency). Written by the LLM middleware. */
 export const llmUsage = pgTable(
@@ -663,24 +613,38 @@ export const clips = pgTable(
   ],
 );
 
-export const projectEvents = pgTable(
-  "project_events",
+/**
+ * Every event, in one table, through one emit (`u.emit`, uow.ts; types and payload schemas in
+ * event-types.ts): a project's history (`project_id` set: the activity feed, the live stream, webhooks)
+ * and what happens to an account or the instance (`project_id` null: the admin log). The handlers that
+ * follow an event (event-handler-map.ts) commit with it.
+ *
+ * No foreign keys: a project's events outlive "Delete forever", like its decisions (user_decisions), and
+ * are forgotten with them when the owner asks (projects/service.ts) or the account is removed; an
+ * account event outlives the account. Pruned by retention (events-retention.ts), a project's run
+ * skeleton kept.
+ */
+export const events = pgTable(
+  "events",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    type: text("type").$type<ProjectEventType>().notNull(),
+    type: text("type").$type<EventType>().notNull(),
+    /** the project it is about (from the payload's projectId) */
+    projectId: text("project_id"),
+    /** the account it is about: an account event's payload userId, or the project's owner */
+    userId: text("user_id"),
+    /** who did it, when a person did (the request's account, or the admin acting); null = the system */
+    actorId: text("actor_id"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("project_events_project_id_idx").on(t.projectId, t.id)],
+  (t) => [index("events_project_id_idx").on(t.projectId, t.id), index("events_user_id_idx").on(t.userId, t.id)],
 );
+export type EventRow = typeof events.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
-export type ProjectEventRow = typeof projectEvents.$inferSelect;
 
 /**
  * A `project.done` the ready email has covered, so it is not mailed again. Written after the send (a
@@ -691,7 +655,7 @@ export const completionNotices = pgTable(
   {
     eventId: bigint("event_id", { mode: "number" })
       .primaryKey()
-      .references(() => projectEvents.id, { onDelete: "cascade" }),
+      .references(() => events.id, { onDelete: "cascade" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -1056,7 +1020,7 @@ export const webhookDeliveries = pgTable(
       .notNull()
       .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
-    /** project_events.id; no FK: events are pruned and projects purged. null for webhook.test */
+    /** events.id; no FK: events are pruned. null for webhook.test */
     eventId: bigint("event_id", { mode: "number" }),
     projectId: text("project_id"),
     type: text("type").notNull(),

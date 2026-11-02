@@ -71,12 +71,12 @@ describe("issue reports", () => {
       `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, 0, 'Clip', 'Hook', 0, 1, 80, 'why', '[]', 'done')`,
       [clipId, projectId],
     );
-    await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'stage.failed', $2)`, [
+    await pool.query(`insert into events (project_id, type, payload) values ($1, 'stage.failed', $2)`, [
       projectId,
       JSON.stringify({ stage: "render", error: `upstream said ${planted.header}; key=${planted.apiKey}`, planted }),
     ]);
     // a stuck project with an event: stuckInfo reads its time from a raw row (once broke every instance report)
-    await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'stage.started', '{"stage":"render"}')`, [stuckProjectId]);
+    await pool.query(`insert into events (project_id, type, payload) values ($1, 'stage.started', '{"stage":"render"}')`, [stuckProjectId]);
     await pool.query(`insert into stage_artifacts (project_id, stage, kind, models, data) values ($1, 'analyze', 'candidates', $2, $3)`, [
       projectId,
       JSON.stringify({ language: "test:model" }),

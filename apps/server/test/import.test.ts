@@ -62,7 +62,7 @@ describe("import-report", () => {
       `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, layout_segments, edited_at) values ($1, $2, 0, 'Clip one', 'Hook', 0.5, 2.2, 77, 'because', '["a","b"]', 'done', $3, now())`,
       [clipId, projectId, JSON.stringify([{ start: 0.5, end: 2.2, layout: "fit", reason: "test", clipId }])],
     );
-    await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'clip.done', $2)`, [projectId, JSON.stringify({ clipId })]);
+    await pool.query(`insert into events (project_id, type, payload) values ($1, 'clip.done', $2)`, [projectId, JSON.stringify({ clipId })]);
     await pool.query(
       `insert into stage_artifacts (project_id, stage, kind, models, data) values ($1, 'analyze', 'candidates', '{"language":"test:model"}', $2)`,
       [projectId, JSON.stringify({ candidates: [{ clipId, outcome: "chosen" }] })],
@@ -121,7 +121,7 @@ describe("import-report", () => {
     assert.equal(c.layout_segments[0].clipId, c.id, "references to the old clip id follow the new one");
     assert.ok(c.edited_at instanceof Date, "edited_at comes back as a date");
     assert.equal(c.status, "failed", "no render in the zip: never left queued");
-    const ev = (await pool.query(`select payload from project_events where project_id = $1 order by id`, [id])).rows;
+    const ev = (await pool.query(`select payload from events where project_id = $1 order by id`, [id])).rows;
     assert.equal(ev.length, 1);
     assert.equal(ev[0].payload.clipId, c.id);
     const art = (await pool.query(`select * from stage_artifacts where project_id = $1`, [id])).rows;

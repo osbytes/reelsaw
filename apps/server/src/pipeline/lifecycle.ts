@@ -114,7 +114,7 @@ export async function requestPrepare(_svc: Services, u: UnitOfWork, projectId: s
   const mode = o.mode ?? prepareModeOf(clip);
   if (restart || !(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode });
   if (o.reason) await startRun(u, projectId, { reason: o.reason, status: "rendering", stage: "render" });
-  if (flipped) await u.emit(projectId, "stage.started", { stage: "prepare", clipId, mode });
+  if (flipped) await u.emit("stage.started", { projectId: projectId, stage: "prepare", clipId, mode });
   return true;
 }
 
@@ -183,7 +183,7 @@ export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOpti
     .where(and(eq(t.id, projectId), isNull(t.deletedAt), idle))
     .returning({ seq: t.runSeq });
   if (row) {
-    await u.emit(projectId, "run.started", { seq: row.seq, reason: o.reason });
+    await u.emit("run.started", { projectId: projectId, seq: row.seq, reason: o.reason });
     return row.seq;
   }
   if (o.continueActive)
@@ -225,10 +225,9 @@ export async function lockProjectClips(u: UnitOfWork, projectId: string): Promis
  * Marks a project done (or failed) once every clip is terminal. The project row is locked, so when
  * two clips finish at once exactly one transaction sees "all terminal" and emits project.done.
  *
- * The lock is `for no key update`, not `for update`: `u.emit` (the caller's `clip.done`) inserts a
- * project_events row, whose foreign key takes `for key share` on the project. Two completions both hold
- * key share by the time they get here, and `for update` conflicts with it, so each waited for the other
- * to let go (deadlock). `for no key update` still serializes finalizers (it conflicts with itself) and
+ * The lock is `for no key update`, not `for update`: a row that references the project (a clip, a stage
+ * artifact; events used to) takes `for key share` on it, and `for update` conflicts with that, so two
+ * completions that both held key share each waited for the other to let go (deadlock). `for no key update` still serializes finalizers (it conflicts with itself) and
  * still blocks the project row update in startRun, but never conflicts with key share. Lock order is
  * clip, then project.
  */
@@ -254,13 +253,13 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
       .update(schema.projects)
       .set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", errorKind: "AllClipsFailed", ...facts });
+    await u.emit("project.failed", { projectId: projectId, stage: "render", error: "Every clip failed to render", errorKind: "AllClipsFailed", ...facts });
     return;
   }
   // no live clips left (the last one was deleted while rendering) finishes as done with nothing, rather than stranding the status
   const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  const eventId = await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });
+  const eventId = await u.emit("project.done", { projectId: projectId, clips: doneCount, failed: clips.length - doneCount, ...facts });
   // the first finish only (a re-render finishes again); survives the project's purge, for milestones
   await u.db.insert(schema.finishedProjects).values({ projectId, userId: project.userId, firstEventId: eventId }).onConflictDoNothing();
   u.afterCommit(() => cleanupWorkdir(svc, projectId));

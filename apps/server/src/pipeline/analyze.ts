@@ -672,7 +672,7 @@ export async function analyze(ctx: StageContext) {
       if (placed.length) await u.db.insert(schema.clips).values(placed);
       if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
       await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
-      for (const r of placed) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
+      for (const r of placed) await u.emit("clip.created", { projectId: projectId, clipId: r.id, index: r.index, title: r.title });
       await u.db
         .update(schema.projects)
         .set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() })
@@ -700,7 +700,7 @@ async function convergeOnExistingClips(svc: Services, u: UnitOfWork, projectId: 
     .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
     .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
     .returning({ id: schema.projects.id });
-  if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
+  if (moved) await u.emit("stage.started", { projectId: projectId, stage: "render", status: "rendering", resumed: true });
   // every clip already done (a Retry that only fetched an expired source again): nothing is queued to finish the project
   await finalizeProjectIfDone(svc, u, projectId);
 }

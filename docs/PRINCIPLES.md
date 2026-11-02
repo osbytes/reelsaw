@@ -49,15 +49,30 @@ project already hit the problem it prevents.
   telemetry, deleting scratch or stored files that a sweep would also find. Mail a person is waiting
   on in the request itself (password reset, email verification) is the one exception: they can ask
   again.
-- **Events are the shared outbox.** A project's own history is `u.emit(projectId, type, payload)`
-  (`project_events`, schemas in `projectEventSchemas` in @reelsaw/shared, payloads naming the
-  resources they are about: the project always, plus its clips, assets, layers, uploads or jobs).
-  Everything else is `u.emitEvent(type, { userId, email, actorId, payload })` (the `events` table,
-  schemas in `eventSchemas` in `event-types.ts`): a sign-up, an approval, a ban, a settings change, a
-  webhook turned off, a subscription detached. Any module emits there; don't add another event table
-  or a module's own outbox. Every emit site is type-checked against the event's schema; a type a
-  handler reads gets a real schema, not the loose record the others start with. Only `u.emit` and
-  `u.emitEvent` run handlers: an event row inserted any other way follows with nothing.
+- **One events table, one emit.** Every event is `u.emit(type, payload, meta?)` into `events`, a
+  project's history and everything else alike; event-types.ts lists every type and its zod schema
+  (the project ones from `projectEventSchemas` in @reelsaw/shared, which the web reads too). The
+  payload names what the event is about, and the row's subject columns come from it: `project_id`
+  from `projectId` (a project event: the activity feed, live stream and webhooks read these),
+  `user_id` from an account event's `userId` or the project's owner, `actor_id` from the request's
+  account (or `meta.actorId`; null is the system). Don't add another event table, a second emit or
+  a module's own outbox. An event that is about a project and an account is one event with both,
+  not two. Only `u.emit` runs handlers: a row written with `eventRow` outside a unit of work (instance
+  settings, model changes) or copied in (report import) follows with nothing. Events have no foreign
+  keys: a project's events outlive "Delete forever", like its decisions, and are forgotten with them
+  when the owner asks (`forgetDecisions`) or the account is removed; an account's own events outlive
+  the account as the record. A type a handler reads gets a real schema, not the loose object the
+  others start with.
+- **An idempotency key names what the effect is about, not the event or the job that caused it.**
+  Before choosing one (a handler's job key, a key handed to Resend or Stripe, a webhook id), work out
+  every way the effect can be asked for: retries of one job, a transition that ran twice, two events
+  about the same thing (a sibling `clip.done` after a re-run, a second `billing.detached` for one
+  removal). Key the effect by the thing those share: `approved:<account>`, `cancel:<subscription>`,
+  `webhook-disabled:<endpoint>:<when it was turned off>`. Keyed by the event id, siblings each act.
+  Keep the occurrence in the key when the same thing can rightly happen again (an endpoint turned
+  off, turned back on, and off again is two mails). A webhook's `webhook-id` (`evt_<event id>`) is a
+  message id, stable across retries of one delivery as Standard Webhooks requires; where a receiver
+  must collapse siblings, the payload names the occurrence (`clipId`, `runSeq`) for it to key on.
 - **Work that follows an event is a handler on it, not a call at the emit site.** Every handler is
   listed in one map, `eventHandlerMap` in `event-handler-map.ts` (event type → handler
   name → handler), so what follows each event is visible in one place; the handler itself lives with
@@ -68,8 +83,8 @@ project already hit the problem it prevents.
   reads on the emitting transaction; null skips) picks the job's key, and the unit of work writes
   the job on the same connection just before COMMIT, so the event and every handler's job commit or
   roll back together (a transactional outbox whose relay is pg-boss). `handle` runs after commit
-  with retries, idempotent per key; pass `idempotencyKey` to a provider that dedups (Resend,
-  Stripe), so a retry after a call that went through is dropped. A handler reads the account or
+  with retries, idempotent per key; a provider that dedups (Resend, Stripe) gets a key naming
+  what the call does (above), so a retry or a sibling event after a call that went through is dropped. A handler reads the account or
   project as it is when it runs (a removed account, a suspended one, a sign-up already approved get
   nothing). Concurrency is opt-in and enforced by the queue's policy, not by hand: `coalesce` (a
   waiting job for the key absorbs new ones) and `oneAtATime` (one running job per key, across
@@ -103,9 +118,10 @@ project already hit the problem it prevents.
   atomic update rather than a lock.
   - A transaction that re-renders or deletes several clips locks them first (`lockProjectClips`, id
     order) and only then touches the project row.
-  - Inserting a `project_events` row (`u.emit`) takes `for key share` on the project. A project lock
-    taken after an emit must therefore be `for no key update`, never `for update`, or two
-    transactions that both emitted deadlock when they upgrade (`finalizeProjectIfDone`).
+  - Inserting a row that references the project (a clip, a stage artifact) takes `for key share` on
+    it. A project lock taken after such an insert must therefore be `for no key update`, never
+    `for update`, or two transactions that both inserted deadlock when they upgrade
+    (`finalizeProjectIfDone`).
   - `svc.tx` re-runs a unit that Postgres aborted for a deadlock or serialization failure (up to 3
     attempts), so units must keep their side effects in the unit (`emit`, `enqueue`, `afterCommit`).
 - **Work carries a version; stale work exits.** Each render request bumps `clips.render_gen`. A

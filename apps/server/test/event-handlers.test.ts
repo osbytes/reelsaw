@@ -22,8 +22,8 @@ const map = defineEventHandlers({
   "project.done": {
     testWrites: {
       async key({ event, db }) {
-        const [p] = await db.select({ title: schema.projects.title }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
-        return `${event.projectId}|${p?.title}`;
+        const [p] = await db.select({ title: schema.projects.title }).from(schema.projects).where(eq(schema.projects.id, event.payload.projectId));
+        return `${event.payload.projectId}|${p?.title}`;
       },
       handle,
     },
@@ -35,7 +35,7 @@ const map = defineEventHandlers({
       },
       handle,
     },
-    testOnce: { key: ({ event }) => `${event.projectId}|once`, coalesce: true, oneAtATime: true, delaySeconds: () => 3600, handle },
+    testOnce: { key: ({ event }) => `${event.payload.projectId}|once`, coalesce: true, oneAtATime: true, delaySeconds: () => 3600, handle },
   },
 });
 const tx = createUnitOfWork(h.pool, h.svc.queue, h.svc.log, undefined, undefined, undefined, { handlers: [map], deps: () => h.svc });
@@ -59,13 +59,13 @@ describe("event handlers", { skip: notReady ?? false }, () => {
   it("writes the job with the event, keyed after the transition's own writes", async () => {
     const p = await h.makeProject(await h.makeUser(), "rendering");
     await tx(async (u) => {
-      await u.emit(p, "project.done", done);
+      await u.emit("project.done", { projectId: p, ...done });
       await u.db.update(schema.projects).set({ title: "renamed later" }).where(eq(schema.projects.id, p));
     });
     assert.equal(await h.eventCount(p, "project.done"), 1);
     assert.equal((await jobs("testWrites", `${p}|renamed later`)).length, 1);
     // the payload names its project (filled in by emit), in the row and in the job
-    const row = await h.pool.query(`select payload->>'projectId' as id from project_events where project_id = $1`, [p]);
+    const row = await h.pool.query(`select payload->>'projectId' as id from events where project_id = $1`, [p]);
     assert.equal(row.rows[0].id, p);
     const job = await h.pool.query(
       `select data->'event'->'payload'->>'projectId' as id from pgboss.job where name = 'event.project.done.testWrites' and singleton_key = $1`,
@@ -78,7 +78,7 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     const p = await h.makeProject(await h.makeUser(), "rendering");
     await assert.rejects(
       tx(async (u) => {
-        await u.emit(p, "project.done", done);
+        await u.emit("project.done", { projectId: p, ...done });
         throw new Error("transition failed");
       }),
     );
@@ -95,7 +95,7 @@ describe("event handlers", { skip: notReady ?? false }, () => {
       const p = await h.makeProject(await h.makeUser(), "rendering");
       await assert.rejects(
         tx(async (u) => {
-          await u.emit(p, "project.done", done);
+          await u.emit("project.done", { projectId: p, ...done });
           await u.db.execute(sql`insert into test_outbox_defer (id, ref) values (1, 999)`);
         }),
       );
@@ -112,7 +112,7 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     try {
       await assert.rejects(
         tx(async (u) => {
-          await u.emit(p, "project.done", done);
+          await u.emit("project.done", { projectId: p, ...done });
         }),
         /handler failed/,
       );
@@ -126,7 +126,7 @@ describe("event handlers", { skip: notReady ?? false }, () => {
   it("coalesce + oneAtATime keeps one waiting and one running job per key", async () => {
     const p = await h.makeProject(await h.makeUser(), "rendering");
     const key = `${p}|once`;
-    const emit = () => tx(async (u) => void (await u.emit(p, "project.done", done)));
+    const emit = () => tx(async (u) => void (await u.emit("project.done", { projectId: p, ...done })));
     await emit();
     await emit(); // joins the waiting job
     assert.deepEqual(

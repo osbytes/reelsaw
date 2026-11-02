@@ -134,26 +134,26 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   const cutoff = new Date(Date.now() - LOOKBACK_MS);
   const rows = await db
     .select({
-      eventId: schema.projectEvents.id,
-      at: schema.projectEvents.createdAt,
-      payload: schema.projectEvents.payload,
+      eventId: schema.events.id,
+      at: schema.events.createdAt,
+      payload: schema.events.payload,
       projectId: schema.projects.id,
       title: schema.projects.title,
     })
-    .from(schema.projectEvents)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.projectEvents.projectId))
+    .from(schema.events)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.events.projectId))
     .where(
       and(
         eq(schema.projects.userId, userId),
         isNull(schema.projects.deletedAt),
-        eq(schema.projectEvents.type, "project.done"),
-        gt(schema.projectEvents.createdAt, cutoff),
+        eq(schema.events.type, "project.done"),
+        gt(schema.events.createdAt, cutoff),
         // compared in SQL: both sides keep Postgres's microseconds, which a JS Date would cut to milliseconds
-        sql`${schema.projectEvents.createdAt} > coalesce((select u.last_active_at from "user" u where u.id = ${userId}), '-infinity')`,
-        sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id})`,
+        sql`${schema.events.createdAt} > coalesce((select u.last_active_at from "user" u where u.id = ${userId}), '-infinity')`,
+        sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.events.id})`,
       ),
     )
-    .orderBy(asc(schema.projectEvents.createdAt))
+    .orderBy(asc(schema.events.createdAt))
     .limit(FETCH_LIMIT);
 
   const truncated = rows.length > FETCH_LIMIT - 1;
@@ -194,7 +194,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     byProject.set(c.projectId, list);
   }
 
-  // Milestones count the finished_projects ledger, not project_events: deleting a project forever (or the
+  // Milestones count the finished_projects ledger, not events: deleting a project forever (or the
   // retention purge) removes its events, and a count that went down would announce the same milestone twice.
   // A project is new in this batch when its first finish is one of the events being mailed.
   const F = schema.finishedProjects;
@@ -284,7 +284,7 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 export const readyEmail: EventHandler<"project.done"> = {
   async key({ event, db, deps }) {
     if (!deps.email.enabled) return null;
-    const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
+    const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.payload.projectId));
     return project?.userId ?? null;
   },
   delaySeconds: (deps) => deps.settings.get().EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES * 60,

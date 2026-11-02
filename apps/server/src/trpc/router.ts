@@ -374,7 +374,7 @@ async function saveFlags(
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
   const rerendered = rerender && changed ? await rerenderOverlapping(svc, u, p, [{ start: f.start, end: f.end }]) : 0;
-  await u.emit(p.id, "stage.started", { stage: "review", changed: changed ? 1 : 0, rerendered });
+  await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed ? 1 : 0, rerendered });
   return rerendered;
 }
 
@@ -1133,8 +1133,17 @@ const restRouter = router({
       return { days, users: await usageByUser(ctx.svc.database.db, days) };
     }),
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
-      const rows = await ctx.svc.database.db.query.events.findMany({ orderBy: desc(schema.events.id), limit: input?.limit ?? 100 });
-      return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
+      // account events only (no project); by time, since rows copied in from the old admin_events have newer ids
+      const rows = await ctx.svc.database.db.query.events.findMany({
+        where: isNull(schema.events.projectId),
+        orderBy: [desc(schema.events.createdAt), desc(schema.events.id)],
+        limit: input?.limit ?? 100,
+      });
+      return rows.map(({ projectId: _p, ...e }) => ({
+        ...e,
+        email: typeof e.payload.email === "string" ? e.payload.email : null,
+        createdAt: e.createdAt.toISOString(),
+      }));
     }),
     /**
      * Provider keys and base URLs, entered by an admin and stored encrypted (ai/providers.ts). A key
@@ -1453,16 +1462,10 @@ const restRouter = router({
       for (const [step, status] of Object.entries(t?.refine ?? {})) {
         if (status !== "failed") continue;
         const [ev] = await db
-          .select({ error: sql<string | null>`${schema.projectEvents.payload}->>'error'` })
-          .from(schema.projectEvents)
-          .where(
-            and(
-              eq(schema.projectEvents.projectId, p.id),
-              eq(schema.projectEvents.type, "stage.failed"),
-              sql`${schema.projectEvents.payload}->>'step' = ${step}`,
-            ),
-          )
-          .orderBy(desc(schema.projectEvents.id))
+          .select({ error: sql<string | null>`${schema.events.payload}->>'error'` })
+          .from(schema.events)
+          .where(and(eq(schema.events.projectId, p.id), eq(schema.events.type, "stage.failed"), sql`${schema.events.payload}->>'step' = ${step}`))
+          .orderBy(desc(schema.events.id))
           .limit(1);
         refineFailed.push({ step, error: ev?.error ?? "The step gave up after its retries." });
       }
@@ -1701,7 +1704,7 @@ const restRouter = router({
           const segments = toSentences(words);
           await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
           const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
-          await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+          await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed.length, rerendered });
           // rejecting your own fix is deleting it: one fix.delete, like deleteFlag
           await recordDecisions(svc, db, p, () =>
             fixDecisions(

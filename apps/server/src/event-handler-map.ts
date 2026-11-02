@@ -1,6 +1,6 @@
 /**
  * Every event handler, in one place: event type → handler name → handler (event-handlers.ts).
- * Project events (`u.emit`) and events (`u.emitEvent`, the `events` table) alike. The handlers live with their
+ * Every event comes through `u.emit` into the `events` table, a project's or not. The handlers live with their
  * modules; this map is the only list of what follows each event.
  */
 import { defineEventHandlers } from "./event-handlers.js";

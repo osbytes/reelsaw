@@ -74,7 +74,7 @@ async function hosted(sub: string | null, cus: string | null): Promise<string> {
 
 async function jobOf(u: string) {
   const r = await h.pool.query(
-    `update pgboss.job set start_after = now() + interval '1 hour' where name = $1 and data->'event'->>'userId' = $2 returning data`,
+    `update pgboss.job set start_after = now() + interval '1 hour' where name = $1 and data->'event'->'payload'->>'userId' = $2 returning data`,
     [QUEUE, u],
   );
   return r.rows;
@@ -83,7 +83,7 @@ async function jobOf(u: string) {
 async function run(data: unknown) {
   const [q] = eventHandlerQueues(eeEventHandlerMap);
   const { event, key } = parseEventHandlerJob("billing.detached", data);
-  await q!.def.handle({ event, key, svc, signal: new AbortController().signal, idempotencyKey: `${QUEUE}:${event.id}`, again: async () => null });
+  await q!.def.handle({ event, key, svc, signal: new AbortController().signal, again: async () => null });
 }
 
 describe("removing a hosted account", { skip: notReady ?? false }, () => {
@@ -103,14 +103,14 @@ describe("removing a hosted account", { skip: notReady ?? false }, () => {
     const cancel = calls.filter((c) => c.method === "DELETE");
     assert.equal(cancel.length, 1);
     assert.equal(cancel[0]!.path.split("?")[0], `/v1/subscriptions/sub_${tag}`);
-    assert.equal(cancel[0]!.key, `${QUEUE}:${job.data.event.id}:cancel`);
+    assert.equal(cancel[0]!.key, `cancel:sub_${tag}`);
     assert.ok(calls.some((c) => c.method === "POST" && c.path.startsWith(`/v1/customers/cus_${tag}`)));
 
     // a retry after it went through cancels nothing twice
     calls.length = 0;
     await run(job.data);
     assert.equal(calls.filter((c) => c.method === "DELETE").length, 0);
-    await h.pool.query(`delete from pgboss.job where name = $1 and data->'event'->>'userId' = $2`, [QUEUE, u]);
+    await h.pool.query(`delete from pgboss.job where name = $1 and data->'event'->'payload'->>'userId' = $2`, [QUEUE, u]);
   });
 
   it("emits nothing for an account Stripe never knew", async () => {

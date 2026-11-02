@@ -80,7 +80,7 @@ describe("render completions in parallel", () => {
         .update(schema.clips)
         .set({ status: "done", outputKey: `k/${clipId}`, updatedAt: new Date() })
         .where(eq(schema.clips.id, clipId));
-      await u.emit(projectId, "clip.done", { clipId, index });
+      await u.emit("clip.done", { projectId: projectId, clipId, index });
       await finalizeProjectIfDone(svc, u, projectId);
     });
 
@@ -94,7 +94,7 @@ describe("render completions in parallel", () => {
         [],
         `round ${round}`,
       );
-      const events = await pool.query(`select type from project_events where project_id = $1 and type in ('project.done', 'clip.done')`, [id]);
+      const events = await pool.query(`select type from events where project_id = $1 and type in ('project.done', 'clip.done')`, [id]);
       assert.equal(events.rows.filter((e) => e.type === "clip.done").length, 9);
       assert.equal(events.rows.filter((e) => e.type === "project.done").length, 1, `round ${round}`);
       const p = await pool.query("select status from projects where id = $1", [id]);
@@ -119,7 +119,7 @@ describe("render completions in parallel", () => {
       results.filter((r) => r.status === "rejected"),
       [],
     );
-    const done = await pool.query(`select count(*)::int n from project_events where project_id = $1 and type = 'project.done'`, [id]);
+    const done = await pool.query(`select count(*)::int n from events where project_id = $1 and type = 'project.done'`, [id]);
     assert.ok(done.rows[0].n <= 1);
   });
 

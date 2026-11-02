@@ -1364,7 +1364,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (p.error) console.log(`  error: ${p.error}`);
     if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(
-      `select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`,
+      `select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from events where project_id = $1`,
       [id],
     );
     console.log(
@@ -1417,9 +1417,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 
   async events(svc) {
-    const rows = await svc.database.db.query.projectEvents.findMany({
-      where: eq(schema.projectEvents.projectId, pos[0]!),
-      orderBy: desc(schema.projectEvents.id),
+    const rows = await svc.database.db.query.events.findMany({
+      where: eq(schema.events.projectId, pos[0]!),
+      orderBy: desc(schema.events.id),
       limit: Number(pos[1] ?? 30),
     });
     for (const e of rows.reverse()) console.log(`${e.createdAt.toISOString().slice(11, 19)} ${e.type.padEnd(16)} ${JSON.stringify(e.payload).slice(0, 200)}`);
@@ -1751,7 +1751,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!projects.length) return console.log("nothing in progress");
     const ago = (d?: Date | null) => (d ? `${Math.round((Date.now() - d.getTime()) / 60_000)}m` : "-");
     for (const p of projects) {
-      const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
+      const last = await db.query.events.findFirst({ where: eq(schema.events.projectId, p.id), orderBy: desc(schema.events.id) });
       const jobs = await svc.database.pool.query<{
         name: string;
         state: string;

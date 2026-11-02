@@ -213,7 +213,8 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .onConflictDoUpdate({ target: schema.transcripts.projectId, set: values });
     if (idle && (await startRun(u, projectId, { reason: "refine", status: "refining", stage: "refine" })) === null)
       throw new TRPCError({ code: "CONFLICT", message: "The project started working again. Try once more when it is done." });
-    await u.emit(projectId, "transcript.imported", {
+    await u.emit("transcript.imported", {
+      projectId: projectId,
       ...(input.uploadId ? { uploadId: input.uploadId } : {}),
       format: parsed.format,
       cues: parsed.cues.length,

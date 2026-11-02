@@ -68,7 +68,7 @@ deliberately: a new type means a new row here and in the README.
 }
 ```
 
-- `id` is `evt_<project_events.id>`. It is stable across retries and is also the `webhook-id`
+- `id` is `evt_<events.id>`. It is stable across retries and is also the `webhook-id`
   header, so receivers dedupe on it.
 - `apiVersion` is bumped only for a breaking change to the shape. Adding a field is not breaking.
 - `metadata` is optional: what the project's creator passed to `create_project` (see Open
@@ -103,7 +103,7 @@ webhook_deliveries
   id              bigserial pk
   endpoint_id     text not null → webhook_endpoints.id on delete cascade
   user_id         text not null            (for ownership checks and per-user listing, no join)
-  event_id        bigint                   (project_events.id; no FK: events are pruned and projects purged)
+  event_id        bigint                   (events.id; no FK: events are pruned)
   project_id      text                     (no FK, for filtering the log)
   type            text not null
   status          text not null            (pending | sending | delivered | failed | cancelled)

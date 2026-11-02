@@ -14,6 +14,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import type { Logger } from "../log.js";
+import { eventRow } from "../event-types.js";
 
 export interface ModelIds {
   language: string;
@@ -170,13 +171,12 @@ export function createModelSettings(
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.events).values({
-          type: "models.changed",
-          actorId: actor.id,
-          userId: actor.id,
-          email: actor.email,
-          payload: { from, to: resolveModels(env, next, envAlignSet), override: next },
-        });
+        // no unit of work here, so no handler runs (none follows a model change)
+        await tx
+          .insert(schema.events)
+          .values(
+            eventRow("models.changed", { userId: actor.id, email: actor.email, from, to: resolveModels(env, next, envAlignSet), override: next }, actor.id),
+          );
       });
       lastStored = "";
       return load();

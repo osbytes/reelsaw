@@ -302,7 +302,7 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   });
   let stalled = 0;
   for (const p of active) {
-    const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
+    const last = await db.query.events.findFirst({ where: eq(schema.events.projectId, p.id), orderBy: desc(schema.events.id) });
     if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
     // the newest saved step of this run of the stage (stages built on ctx.step); its updated_at moves only when a part finishes
     const [step] = p.stage
@@ -359,7 +359,8 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       info,
       noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job",
     );
-    await svc.events.emit(p.id, "job.stalled", {
+    await svc.events.emit("job.stalled", {
+      projectId: p.id,
       status: p.status,
       idleMinutes: info.idleMinutes,
       lastEvent: last.type,
