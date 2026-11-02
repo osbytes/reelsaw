@@ -682,7 +682,6 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       } else if (cur) await u.db.delete(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId));
       await u.emit("billing.complimentary", { userId, email: user.email, plan, from: cur?.plan ?? null }, { actorId });
-      u.afterCommit(() => log.info({ userId, plan, actorId }, "complimentary plan set"));
       return { ok: true, plan };
     });
   }

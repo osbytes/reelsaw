@@ -10,6 +10,8 @@ import { purgeProject } from "../src/projects/service.js";
 import { forgetDecisions } from "../src/decisions/service.js";
 import { removeUser } from "../src/accounts.js";
 import type { Services } from "../src/services.js";
+import { createLogger } from "../src/log.js";
+import { createUnitOfWork } from "../src/uow.js";
 
 const h = lifecycleHarness();
 const notReady = await h.ready();
@@ -25,6 +27,24 @@ describe("events across a project's and an account's life", { skip: notReady ?? 
     await svc.tx((w) => w.emit("project.updated", { projectId: p, changed: ["title"] }, { actorId: "admin-1" }));
     const r = await h.pool.query(`select user_id, actor_id from events where project_id = $1`, [p]);
     assert.deepEqual(r.rows, [{ user_id: u, actor_id: "admin-1" }]);
+  });
+
+  it("logs each committed event once, with who did it and without the account's address; a rolled-back one not at all", async () => {
+    const lines: Array<Record<string, unknown>> = [];
+    const dest = { write: (l: string) => void lines.push(JSON.parse(l)) };
+    const tx = createUnitOfWork(h.pool, h.svc.queue, createLogger({ LOG_LEVEL: "info", LOG_FORMAT: "json" }, {}, dest));
+    const u = await h.makeUser();
+    await tx((w) => w.emit("user.banned", { userId: u, email: `${u}@example.test`, reason: "spam" }, { actorId: "admin-1" }));
+    await tx(async (w) => {
+      await w.emit("user.unbanned", { userId: u, email: `${u}@example.test` });
+      throw new Error("abort");
+    }).catch(() => {});
+    const logged = lines.filter((l) => l.msg === "account event" && l.userId === u);
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0]!.event, "user.banned");
+    assert.equal(logged[0]!.actorId, "admin-1");
+    assert.equal(logged[0]!.reason, "spam");
+    assert.ok(!JSON.stringify(logged[0]).includes("@example.test"));
   });
 
   it("keeps a deleted-forever project's events until the owner forgets them", async () => {

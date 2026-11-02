@@ -151,7 +151,7 @@ describe("ready email idempotency", () => {
 });
 
 describe("event handlers", () => {
-  const event = { id: 1, type: "project.done" as const, payload: { projectId: "p1", clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
+  const event = { id: 1, type: "project.done" as const, actorId: null, payload: { projectId: "p1", clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
   const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
   const settings = { get: () => ({ EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: 5 }) } as unknown as InstanceSettings;
   const deps = (enabled: boolean) => ({ email: { enabled } as Email, settings }) as EventHandlerDeps;

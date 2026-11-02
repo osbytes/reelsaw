@@ -55,8 +55,11 @@ project already hit the problem it prevents.
   payload names what the event is about, and the row's subject columns come from it: `project_id`
   from `projectId` (a project event: the activity feed, live stream and webhooks read these),
   `user_id` from an account event's `userId` or the project's owner, `actor_id` from the request's
-  account (or `meta.actorId`; null is the system). Don't add another event table, a second emit or
-  a module's own outbox. An event that is about a project and an account is one event with both,
+  account (or `meta.actorId`; null is the system). `u.emit` writes on the unit's own transaction (the
+  connection behind `u.db`), so the event commits or rolls back with the rows beside it. After commit
+  the unit of work logs every event once, with its ids and actor (an account's address left out): an
+  emit site doesn't log or "audit" the same fact again. Don't add another event table, a second emit
+  or a module's own outbox. An event that is about a project and an account is one event with both,
   not two. Only `u.emit` runs handlers: a row written with `eventRow` outside a unit of work (instance
   settings, model changes) or copied in (report import) follows with nothing. Events have no foreign
   keys: a project's events outlive "Delete forever", like its decisions, and are forgotten with them

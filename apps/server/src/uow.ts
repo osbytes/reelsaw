@@ -43,7 +43,9 @@ export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
   /**
-   * The one way to record an event (event-types.ts has every type): written to `events`, its handlers'
+   * The one way to record an event (event-types.ts has every type). It writes on this unit's transaction,
+   * the same connection as `db`, so the event commits or rolls back with the rows written beside it; there
+   * is no database to pass. Written to `events`, its handlers'
    * jobs queued (event-handler-map.ts), and for a project event the NOTIFY for live streams and the
    * webhook deliveries, all taking effect at commit. The payload names what it is about (`projectId`,
    * or an account event's `userId`). `actorId` defaults to the account whose request this is; pass it
@@ -64,7 +66,7 @@ export interface UnitOfWork {
 
 export type RunInTx = <T>(fn: (u: UnitOfWork) => Promise<T>) => Promise<T>;
 
-/** Events that are state transitions: logged at the level a person reading the log should care about. */
+/** Events logged above their default (debug for a project's, info for an account's): the level a person reading the log should care about. */
 const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "project.created": "info",
   "run.started": "info",
@@ -86,6 +88,12 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "clip.overlay_skipped": "warn",
   "clip.cut_unverified": "warn",
   "job.stalled": "warn",
+  // account events default to info
+  "user.flagged": "warn",
+  "user.banned": "warn",
+  "webhook.disabled": "warn",
+  "billing.payment_failed": "warn",
+  "billing.unknown_price": "warn",
 };
 
 /** The scalar fields of an event payload (counts, durations, reasons), trimmed: enough to read the log without the event feed. */
@@ -170,7 +178,7 @@ export function createUnitOfWork(
             .values(eventRow(type, payload, actorId))
             .returning({ id: schema.events.id });
           const id = row!.id;
-          emitted.push({ id, type, payload });
+          emitted.push({ id, type, actorId, payload });
           if (isProjectEventType(type)) {
             const { projectId } = eventSubject(payload);
             if (!projectId) throw new Error(`${type} without its projectId`);
@@ -234,14 +242,20 @@ export function createUnitOfWork(
     } finally {
       client.release();
     }
-    // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
+    // committed: every event is also a log line carrying its ids and who did it, so a log alone tells the
+    // story. This is the one place events are logged: an emit site does not log the same fact again.
     const who = requestedBy.getStore();
     for (const e of emitted) {
-      // account events are logged by their own modules (accounts.ts audit, webhooks/deliver.ts)
-      const { projectId } = eventSubject(e.payload);
-      if (!projectId) continue;
+      const { projectId, userId } = eventSubject(e.payload);
+      const actor = e.actorId ? { actorId: e.actorId } : {};
+      if (!projectId) {
+        // the account's address stays out of the log: the event row has it
+        const fields = Object.fromEntries(Object.entries(e.payload).filter(([k]) => k !== "email" && k !== "userId"));
+        log[EVENT_LEVEL[e.type] ?? "info"]({ userId, ...actor, event: e.type, ...eventFields(fields) }, "account event");
+        continue;
+      }
       const level = EVENT_LEVEL[e.type] ?? "debug";
-      log[level]({ projectId, event: e.type, ...eventFields(e.payload) }, "project event");
+      log[level]({ projectId, ...actor, event: e.type, ...eventFields(e.payload) }, "project event");
       const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
       if (telemetry && product) {
         // the owner is the distinct id (an admin acting on someone's project is not them); the surface is the request's

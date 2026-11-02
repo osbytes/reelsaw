@@ -53,6 +53,8 @@ import type { UnitOfWork } from "./uow.js";
 export interface EmittedEvent<T extends EventType = EventType> {
   id: number;
   type: T;
+  /** who did it, when a person did; null = the system */
+  actorId: string | null;
   payload: EventPayload<T>;
 }
 
@@ -179,14 +181,14 @@ export interface EventHandlerJobData {
 
 const jobDataSchema = z.object({
   key: z.string(),
-  event: z.object({ id: z.coerce.number(), type: z.enum(EVENT_TYPES), payload: z.unknown() }),
+  event: z.object({ id: z.coerce.number(), type: z.enum(EVENT_TYPES), actorId: z.string().nullable().default(null), payload: z.unknown() }),
 });
 
 /** The job's event, checked against its schema: the row was written by us, but jobs outlive deploys. */
 export function parseEventHandlerJob(type: EventType, data: unknown): EventHandlerJobData {
   const d = jobDataSchema.parse(data);
   if (d.event.type !== type) throw new Error(`a ${d.event.type} job on the ${type} handler queue`);
-  return { key: d.key, event: { id: d.event.id, type, payload: eventSchemas[type].parse(d.event.payload) } };
+  return { key: d.key, event: { id: d.event.id, type, actorId: d.event.actorId, payload: eventSchemas[type].parse(d.event.payload) } };
 }
 
 /**

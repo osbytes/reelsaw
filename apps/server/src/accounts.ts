@@ -15,11 +15,6 @@ import type { UnitOfWork } from "./uow.js";
 import { purgeProject } from "./projects/service.js";
 import type { UserRole } from "./db/schema.js";
 
-/** The event is the record; this is the same fact in the log, written once the change has committed. */
-function audit(svc: Services, u: UnitOfWork, action: string, actorId: string | null, userId: string) {
-  u.afterCommit(() => svc.log.child({ module: "accounts", userId }).info({ action, actorId }, "admin action"));
-}
-
 async function lockedUser(u: UnitOfWork, id: string) {
   const [row] = await u.db.select().from(schema.user).where(eq(schema.user.id, id)).for("update");
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
@@ -40,7 +35,6 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     if (user.approvedAt) return { ok: true, changed: false };
     await u.db.update(schema.user).set({ approvedAt: new Date(), updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.emit("user.approved", { userId, email: user.email }, { actorId });
-    audit(svc, u, "user.approved", actorId, userId);
     // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
     u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
     return { ok: true, changed: true };
@@ -57,7 +51,6 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
       throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.emit("user.role_changed", { userId, email: user.email, from: user.role, to: role }, { actorId });
-    audit(svc, u, "user.role_changed", actorId, userId);
     return { ok: true, changed: true };
   });
 }
@@ -71,7 +64,6 @@ export async function banUser(svc: Services, actorId: string, userId: string, re
     // their browser sessions end now; API keys fail at the next request (requester reads the row)
     await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
     await u.emit("user.banned", { userId, email: user.email, reason }, { actorId });
-    audit(svc, u, "user.banned", actorId, userId);
     return { ok: true };
   });
 }
@@ -81,7 +73,6 @@ export async function unbanUser(svc: Services, actorId: string, userId: string) 
     const user = await lockedUser(u, userId);
     await u.db.update(schema.user).set({ banned: false, banReason: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.emit("user.unbanned", { userId, email: user.email }, { actorId });
-    audit(svc, u, "user.unbanned", actorId, userId);
     return { ok: true };
   });
 }
@@ -103,7 +94,6 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     // its projects' history outlives a purge (like its decisions), not the account; its account events stay as the record
     await u.db.delete(schema.events).where(and(eq(schema.events.userId, userId), isNotNull(schema.events.projectId)));
     await u.emit("user.removed", { userId, email: user.email, projects: projects.length }, { actorId });
-    audit(svc, u, "user.removed", actorId, userId);
     return { ok: true, projects: projects.length };
   });
 }
@@ -120,7 +110,6 @@ export async function setUserWatermark(svc: Services, actorId: string | null, us
       .values({ userId, watermark })
       .onConflictDoUpdate({ target: schema.userSettings.userId, set: { watermark, updatedAt: new Date() } });
     await u.emit("user.watermark_changed", { userId, email: user.email, watermark }, { actorId });
-    audit(svc, u, "user.watermark_changed", actorId, userId);
     return { ok: true, watermark };
   });
 }
@@ -146,7 +135,6 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
       })
       .returning({ limits: schema.userSettings.limits });
     await u.emit("user.limits_changed", { userId, email: user.email, limits: row!.limits }, { actorId });
-    audit(svc, u, "user.limits_changed", actorId, userId);
     return { ok: true, overrides: row!.limits };
   });
 }
@@ -200,7 +188,6 @@ export async function setUserPassword(
     await u.db.update(schema.user).set({ mustChangePassword: opts.mustChange, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await dropSessions(u, userId, opts.keepSessionId);
     await u.emit("user.password_set", { userId, email: user.email, mustChange: opts.mustChange }, { actorId });
-    audit(svc, u, "user.password_set", actorId, userId);
     return { ok: true as const };
   });
 }

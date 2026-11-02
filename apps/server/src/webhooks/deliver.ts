@@ -215,7 +215,6 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
   });
   // the receiver is the user's, not the operator's: a warning, never an error report
   log.warn({ ...ids, code: r.code, reason: r.error, nextAttemptInSec: disabled ? null : delay }, "webhook attempt failed");
-  if (disabled) log.warn({ ...ids, reason: disabled }, "webhook disabled");
   return row ?? null;
 }
 
