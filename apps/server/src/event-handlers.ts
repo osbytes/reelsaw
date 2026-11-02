@@ -37,7 +37,8 @@
  * it to a lookup. Only `u.emit` runs handlers; events copied in by an issue-report import
  * (report/import.ts) are history, not transitions, and run nothing.
  */
-import { projectEventSchemas, type ProjectEventPayload, type ProjectEventType } from "@reelsaw/shared";
+import { PROJECT_EVENT_TYPES, projectEventSchemas, type ProjectEventPayload, type ProjectEventType } from "@reelsaw/shared";
+import { z } from "zod";
 import type { QueuePolicy } from "pg-boss";
 import type { Db } from "./db/index.js";
 import type { Services } from "./services.js";
@@ -147,6 +148,8 @@ export interface EventHandlerQueue {
 /** One queue per handler, for the queue to create and the worker to serve. */
 export function eventHandlerQueues(map: EventHandlerMap): EventHandlerQueue[] {
   const out: EventHandlerQueue[] = [];
+  // the cast widens each handler to every event type; defineEventHandlers keyed it by its own event, and the
+  // worker only hands it jobs from that event's queue (parseEventHandlerJob checks the type)
   for (const [type, handlers] of Object.entries(map) as Array<[ProjectEventType, Record<string, EventHandler<ProjectEventType>> | undefined]>) {
     for (const [name, def] of Object.entries(handlers ?? {}))
       out.push({ name: eventHandlerQueue(type, name), type, handler: name, def, policy: policyOf(def), options: { ...EVENT_HANDLER_DEFAULTS, ...def.queue } });
@@ -160,12 +163,16 @@ export interface EventHandlerJobData {
   key: string;
 }
 
+const jobDataSchema = z.object({
+  key: z.string(),
+  event: z.object({ id: z.coerce.number(), projectId: z.string(), type: z.enum(PROJECT_EVENT_TYPES), payload: z.unknown() }),
+});
+
 /** The job's event, checked against its schema: the row was written by us, but jobs outlive deploys. */
 export function parseEventHandlerJob(type: ProjectEventType, data: unknown): EventHandlerJobData {
-  const d = data as Partial<EventHandlerJobData> | null;
-  if (!d || typeof d.key !== "string" || !d.event || d.event.type !== type) throw new Error(`malformed ${type} handler job`);
-  const payload = projectEventSchemas[type].parse(d.event.payload) as ProjectEventPayload<ProjectEventType>;
-  return { key: d.key, event: { id: Number(d.event.id), projectId: String(d.event.projectId), type, payload } };
+  const d = jobDataSchema.parse(data);
+  if (d.event.type !== type) throw new Error(`a ${d.event.type} job on the ${type} handler queue`);
+  return { key: d.key, event: { id: d.event.id, projectId: d.event.projectId, type, payload: projectEventSchemas[type].parse(d.event.payload) } };
 }
 
 /**
@@ -180,6 +187,7 @@ export async function eventHandlerJobs(
 ): Promise<Array<{ queue: string; handler: string; data: EventHandlerJobData; startAfter?: number }>> {
   const out: Array<{ queue: string; handler: string; data: EventHandlerJobData; startAfter?: number }> = [];
   for (const event of events) {
+    // same widening as eventHandlerQueues: the handlers under event.type are only given events of that type
     const forType = (map[event.type] ?? {}) as Record<string, EventHandler<ProjectEventType>>;
     for (const [name, def] of Object.entries(forType)) {
       const key = def.key ? await def.key({ event, db, deps }) : String(event.id);

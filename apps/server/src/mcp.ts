@@ -723,12 +723,7 @@ export function createMcpServer(
 
   server.registerTool("billing_portal_url", TOOLS.billing_portal_url, () => run(() => api.billing.portal()));
 
-  server.registerTool("get_email_preferences", TOOLS.get_email_preferences, () =>
-    run(async () => {
-      const me = await api.me.get();
-      return { emailEnabled: me.emailEnabled, emailPreferences: me.emailPreferences };
-    }),
-  );
+  server.registerTool("get_email_preferences", TOOLS.get_email_preferences, () => run(() => api.me.emailPreferences()));
   server.registerTool("set_email_preferences", TOOLS.set_email_preferences, (input) => run(() => api.me.updateEmailPreferences(input)));
 
   return server;

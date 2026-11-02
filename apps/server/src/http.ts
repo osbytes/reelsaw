@@ -41,7 +41,6 @@ import { runHealthChecks } from "./health.js";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
-import { touchLastActive } from "./presence.js";
 import { setEmailPreferences, UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "./notify/preferences.js";
 import { escapeHtml, layout } from "./email.js";
 
@@ -97,10 +96,7 @@ export function createApp(svc: Services) {
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
     const who = await activeRequester(auth, db, c.req.raw.headers);
-    if (who) {
-      c.set("userId", who.user.id);
-      touchLastActive(svc.database.db, svc.log, who.user.id);
-    }
+    if (who) c.set("userId", who.user.id);
     return who;
   };
   // No page of this app is meant to be framed (the OAuth consent screen least of all), no response
@@ -170,9 +166,16 @@ export function createApp(svc: Services) {
           p(`Or change it under <a href="${settings}">Settings → Account</a>.`),
       );
     }
-    const exists = await db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { id: true } });
-    if (exists) await setEmailPreferences(svc, userId, { [topic]: false }, "unsubscribe_link");
-    c.get("log").info({ userId, topic }, "email unsubscribed");
+    const gone = await setEmailPreferences(svc, userId, { [topic]: false }, "unsubscribe_link").then(
+      () => false,
+      (err: unknown) => {
+        if (err instanceof TRPCError && err.code === "NOT_FOUND") return true;
+        throw err;
+      },
+    );
+    // a deleted account gets no more mail anyway; the page says the same either way
+    if (gone) c.get("log").info({ userId, topic }, "unsubscribe for a deleted account");
+    else c.get("log").info({ userId, topic }, "email unsubscribed");
     return page(200, "You're unsubscribed", p(`You will no longer get ${stopped}. Turn it back on under <a href="${settings}">Settings → Account</a>.`));
   });
   // OAuth dynamic client registration is open to anyone (claude.ai registers itself); cap it per address so the client table cannot be flooded

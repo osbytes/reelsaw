@@ -98,6 +98,10 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.deepEqual(back.rows, [{ enabled: true, source: "mcp" }]);
   });
 
+  it("refuses a preference for an account that no longer exists, as not found", async () => {
+    await assert.rejects(setEmailPreferences(h.svc, "no-such-account", { ready: false }, "unsubscribe_link"), { code: "NOT_FOUND" });
+  });
+
   it("announces the 10th project once, even after an earlier project is deleted forever", async () => {
     const u = await account("1 hour");
     const old: string[] = [];
@@ -120,6 +124,22 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     await finished(u, "30 minutes");
     sent.length = 0;
     await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 0);
+  });
+
+  it("skips what finished before the lookback, and counts a stamp at the same instant as seen", async () => {
+    const u = await account(null);
+    await finished(u, "8 days");
+    sent.length = 0;
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 0);
+    const v = await account(null);
+    await finished(v, "10 minutes");
+    await h.pool.query(
+      `update "user" u set last_active_at = e.created_at from project_events e join projects p on p.id = e.project_id where u.id = $1 and p.user_id = $1`,
+      [v],
+    );
+    await deliverCompletionNotice(svc, v);
     assert.equal(sent.length, 0);
   });
 

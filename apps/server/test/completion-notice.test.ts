@@ -1,15 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { messageIdDomain, templates, type Email } from "../src/email.js";
-import {
-  collapseProjects,
-  completionIdempotencyKey,
-  readyEmail,
-  greetingName,
-  milestoneCrossed,
-  selectUnseen,
-  type DoneNotice,
-} from "../src/notify/completion.js";
+import { collapseProjects, completionIdempotencyKey, readyEmail, greetingName, milestoneCrossed, type DoneNotice } from "../src/notify/completion.js";
 import {
   EVENT_HANDLER_DEFAULTS,
   defineEventHandlers,
@@ -41,29 +33,6 @@ function done(p: Partial<DoneNotice> & Pick<DoneNotice, "eventId" | "projectId" 
 describe("ready email selection", () => {
   const now = Date.parse("2026-10-25T18:00:00Z");
   const hour = 60 * 60 * 1000;
-
-  it("keeps completions strictly after the last activity, inside the lookback", () => {
-    const events = [
-      done({ eventId: 1, projectId: "a", at: now - 2 * hour }),
-      done({ eventId: 2, projectId: "b", at: now - 30 * 60 * 1000 }),
-      done({ eventId: 3, projectId: "c", at: now - 8 * 24 * hour }),
-    ];
-    const unseen = selectUnseen(events, now - hour, now);
-    assert.deepEqual(
-      unseen.map((e) => e.projectId),
-      ["b"],
-    );
-  });
-
-  it("includes everything in the window when the account has never been stamped", () => {
-    const events = [done({ eventId: 1, projectId: "a", at: now - hour })];
-    assert.equal(selectUnseen(events, null, now).length, 1);
-  });
-
-  it("treats an activity stamp at the same instant as having seen it", () => {
-    const at = now - hour;
-    assert.equal(selectUnseen([done({ eventId: 1, projectId: "a", at })], at, now).length, 0);
-  });
 
   it("collapses several runs of one project onto the latest, and keeps every event id", () => {
     const rows = collapseProjects([

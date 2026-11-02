@@ -386,7 +386,15 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
     await boss.work(q.name, { pollingIntervalSeconds: q.options.pollingIntervalSeconds, localConcurrency: q.options.localConcurrency }, async (jobs) => {
       const job = jobs[0]!;
       const log = svc.log.child({ module: "events", handler: q.handler, event: q.type, jobId: job.id });
-      const { event, key } = parseEventHandlerJob(q.type, job.data);
+      let parsed: ReturnType<typeof parseEventHandlerJob>;
+      try {
+        parsed = parseEventHandlerJob(q.type, job.data);
+      } catch (err) {
+        // a job that does not match its event's schema (written before a deploy changed it) can never succeed: drop it, don't retry it
+        log.error({ err }, "event handler job malformed; dropped");
+        return;
+      }
+      const { event, key } = parsed;
       try {
         await q.def.handle({
           event,

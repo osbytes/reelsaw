@@ -10,7 +10,7 @@
  * concurrency (pg-boss `stately`): a completion while a job is still waiting joins it (the job reads
  * every unseen `project.done` when it runs, so the late one is included), and at most one job per
  * account runs at once, so two runs never mail the same batch side by side. The send is skipped for
- * anything at or before `user.last_active_at` (presence.ts). Nothing is queued when email is off, and
+ * anything at or before `user.last_active_at` (presence.ts: a web tab in front and in use, or MCP). Nothing is queued when email is off, and
  * nothing is sent to an account that turned the note off (notify/preferences.ts; every note carries a
  * one-click unsubscribe, RFC 8058).
  *
@@ -48,12 +48,6 @@ export interface DoneNotice {
   clips: number;
   failed: number;
   rerender: boolean;
-}
-
-/** Completions strictly after the account was last active, and not older than the lookback. */
-export function selectUnseen(events: DoneNotice[], lastActiveMs: number | null, nowMs: number, lookbackMs = LOOKBACK_MS): DoneNotice[] {
-  const cutoff = nowMs - lookbackMs;
-  return events.filter((e) => e.at > cutoff && (lastActiveMs === null || e.at > lastActiveMs));
 }
 
 /**
@@ -125,7 +119,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   const db = svc.database.db;
   const user = await db.query.user.findFirst({
     where: eq(schema.user.id, userId),
-    columns: { id: true, email: true, name: true, banned: true, approvedAt: true, lastActiveAt: true },
+    columns: { id: true, email: true, name: true, banned: true, approvedAt: true },
   });
   if (!user || user.banned || !user.approvedAt || !user.email) {
     log.debug({ reason: !user ? "gone" : user.banned ? "suspended" : !user.approvedAt ? "pending" : "no email" }, "completion notice skipped");
@@ -137,7 +131,6 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     return;
   }
 
-  const lastActiveAt = user.lastActiveAt;
   const cutoff = new Date(Date.now() - LOOKBACK_MS);
   const rows = await db
     .select({
@@ -155,7 +148,8 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
         isNull(schema.projects.deletedAt),
         eq(schema.projectEvents.type, "project.done"),
         gt(schema.projectEvents.createdAt, cutoff),
-        lastActiveAt ? gt(schema.projectEvents.createdAt, lastActiveAt) : sql`true`,
+        // compared in SQL: both sides keep Postgres's microseconds, which a JS Date would cut to milliseconds
+        sql`${schema.projectEvents.createdAt} > coalesce((select u.last_active_at from "user" u where u.id = ${userId}), '-infinity')`,
         sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id})`,
       ),
     )
@@ -164,7 +158,8 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
 
   const truncated = rows.length > FETCH_LIMIT - 1;
   const page = truncated ? rows.slice(0, FETCH_LIMIT - 1) : rows;
-  const notices: DoneNotice[] = page.map((r) => ({
+  // the query above is the one definition of "unseen": inside the lookback, after the last activity, not yet mailed
+  const mine: DoneNotice[] = page.map((r) => ({
     eventId: Number(r.eventId),
     projectId: r.projectId,
     title: r.title,
@@ -173,7 +168,6 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     failed: num(r.payload.failed),
     rerender: r.payload.runReason === "rerender",
   }));
-  const mine = selectUnseen(notices, lastActiveAt?.getTime() ?? null, Date.now());
   if (!mine.length) {
     log.debug({ reason: "nothing unseen" }, "completion notice skipped");
     return;

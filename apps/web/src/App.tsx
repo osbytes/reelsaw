@@ -30,6 +30,7 @@ const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ de
 import { Skeleton, SkeletonRegion } from "./components/ui";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
+import { usePresence } from "./lib/presence";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { reloadIfNewBuild } from "./lib/stale-chunk";
@@ -258,6 +259,8 @@ function AppSkeleton() {
 function Protected({ children, bare, admin }: { children: React.ReactNode; bare?: boolean; admin?: boolean }) {
   const { data, isPending } = useSession();
   const me = useMe(!!data);
+  // a visible tab in use marks the account present, so what finishes now is not mailed as "while you were away"
+  usePresence(!!data && !!me.data && !me.data.blocked);
   if (isPending || (data && me.isPending)) return <AppSkeleton />;
   if (!data) {
     const error = new URLSearchParams(window.location.search).get("error");

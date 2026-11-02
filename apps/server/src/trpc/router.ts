@@ -489,6 +489,16 @@ const headRouter = router({
         emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
       };
     }),
+    /** Optional mail by topic, and whether this instance sends mail at all. MCP `get_email_preferences`. */
+    emailPreferences: signedInProcedure.query(async ({ ctx }) => ({
+      emailEnabled: ctx.svc.email.enabled,
+      emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
+    })),
+    /** The web tab is visible and the person used it in the last couple of minutes (presence.ts): completions until now count as seen. */
+    presence: signedInProcedure.mutation(({ ctx }) => {
+      touchLastActive(ctx.svc.database.db, ctx.svc.log, ctx.user.id);
+      return { ok: true as const };
+    }),
     /** Turn optional mail on or off (Settings → Account). Same service as MCP `set_email_preferences` and the unsubscribe link. */
     updateEmailPreferences: signedInProcedure
       .input(emailPreferencesPatchSchema)
@@ -1582,49 +1592,36 @@ const restRouter = router({
     events: protectedProcedure.input(z.object({ id: z.string(), lastEventId: z.string().nullish() })).subscription(async function* ({ ctx, input, signal }) {
       const { svc } = ctx;
       await ownedProject(svc.database.db, ctx.user.id, input.id);
-      // while this stream is open they are here; a done event moves the stamp even inside the coalesce window
-      const isDone = (e: { type: string }) => e.type === "project.done" || e.type === "clip.done";
-      const seen = () => touchLastActive(svc.database.db, svc.log, ctx.user.id, { force: true });
-      const beat = setInterval(() => touchLastActive(svc.database.db, svc.log, ctx.user.id), 30_000);
-      const stopBeat = () => clearInterval(beat);
-      signal?.addEventListener("abort", stopBeat, { once: true });
-      try {
-        const after = Number(input.lastEventId ?? 0) || 0;
-        const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
-        const { headId, total } = await svc.events.stats(input.id);
-        const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
-        // the replay can hold many done events; one forced stamp covers them all
-        if (history.events.some(isDone)) seen();
-        for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
-        const marker: EventsReplayed = {
-          type: "events.replayed",
-          shown: history.events.length,
-          total,
-          oldestId: history.events[0]?.id ?? null,
-          hasMore: history.hasMore,
-        };
-        let lastId = Math.max(headId, after);
-        yield tracked(String(lastId), marker);
-        // from here on everything newer than the head, in pages: list() returns at most 500 rows
-        const flush = async function* () {
-          for (;;) {
-            const page = await svc.events.list(input.id, lastId, 500);
-            if (page.some(isDone)) seen();
-            for (const e of page) {
-              lastId = e.id;
-              yield tracked(String(e.id), e satisfies ProjectEvent);
-            }
-            if (page.length < 500) return;
+      const after = Number(input.lastEventId ?? 0) || 0;
+      const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
+      const { headId, total } = await svc.events.stats(input.id);
+      const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
+      for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
+      const marker: EventsReplayed = {
+        type: "events.replayed",
+        shown: history.events.length,
+        total,
+        oldestId: history.events[0]?.id ?? null,
+        hasMore: history.hasMore,
+      };
+      let lastId = Math.max(headId, after);
+      yield tracked(String(lastId), marker);
+      // from here on everything newer than the head, in pages: list() returns at most 500 rows
+      const flush = async function* () {
+        for (;;) {
+          const page = await svc.events.list(input.id, lastId, 500);
+          for (const e of page) {
+            lastId = e.id;
+            yield tracked(String(e.id), e satisfies ProjectEvent);
           }
-        };
-        yield* flush();
-        for await (const notice of live) {
-          // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
-          if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
-          else if (notice.id > lastId) yield* flush();
+          if (page.length < 500) return;
         }
-      } finally {
-        stopBeat();
+      };
+      yield* flush();
+      for await (const notice of live) {
+        // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
+        if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
+        else if (notice.id > lastId) yield* flush();
       }
     }),
 

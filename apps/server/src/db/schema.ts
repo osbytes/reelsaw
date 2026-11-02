@@ -60,7 +60,7 @@ export const user = pgTable(
     flags: jsonb("flags").$type<string[]>().notNull().default([]),
     /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
-    /** last authenticated request, coalesced (presence.ts). Null until the first one after this column existed. */
+    /** last seen in the web app (visible tab with recent input) or over MCP, coalesced (presence.ts). Null until then. */
     lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")

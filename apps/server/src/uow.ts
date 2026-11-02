@@ -157,10 +157,12 @@ export function createUnitOfWork(
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, ...[rest = {} as never]) {
+        async emit(projectId, type, ...args) {
           // every payload names its project (projectEventSchemas)
-          const payload = { ...rest, projectId };
+          const payload = { ...args[0], projectId };
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
+          // ProjectEventPayloadArg<T> is the event's schema less projectId, which is added back above; TypeScript
+          // cannot see Omit<P, "projectId"> & { projectId } as P for a generic T, so this one cast stays
           emitted.push({ id: row!.id, projectId, type, payload } as unknown as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
