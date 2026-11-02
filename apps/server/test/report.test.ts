@@ -27,6 +27,7 @@ describe("issue reports", () => {
   const clipId = randomUUID();
   const otherProjectId = randomUUID();
   const stuckProjectId = randomUUID();
+  const stuckClipId = randomUUID();
 
   before(async () => {
     owner = await signUp();
@@ -77,6 +78,16 @@ describe("issue reports", () => {
     ]);
     // a stuck project with an event: stuckInfo reads its time from a raw row (once broke every instance report)
     await pool.query(`insert into events (project_id, type, payload) values ($1, 'stage.started', '{"stage":"render"}')`, [stuckProjectId]);
+    // and what a project mid-render has, a clip still rendering with its live job (parked a day out, so no worker takes
+    // it): without them the stack's reconciler finishes a "rendering" project with no clips as done, and it is not stuck
+    await pool.query(
+      `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, 0, 'Clip', 'Hook', 0, 1, 80, 'why', '[]', 'rendering')`,
+      [stuckClipId, stuckProjectId],
+    );
+    await pool.query(`insert into pgboss.job (name, data, singleton_key, start_after) values ('clip.render', $1, $2, now() + interval '1 day')`, [
+      JSON.stringify({ projectId: stuckProjectId, clipId: stuckClipId, gen: 0 }),
+      stuckClipId,
+    ]);
     await pool.query(`insert into stage_artifacts (project_id, stage, kind, models, data) values ($1, 'analyze', 'candidates', $2, $3)`, [
       projectId,
       JSON.stringify({ language: "test:model" }),
@@ -85,6 +96,7 @@ describe("issue reports", () => {
   });
 
   after(async () => {
+    await pool.query(`delete from pgboss.job where name = 'clip.render' and singleton_key = $1`, [stuckClipId]);
     await pool.query(`delete from "user" where id = any($1)`, [[owner?.userId, other?.userId, admin?.userId].filter(Boolean)]);
     await pool.end();
   });
