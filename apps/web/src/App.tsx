@@ -2,12 +2,12 @@ import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2, Users } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2, Users, CreditCard, Server, Code2 } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
-import { useTheme } from "./lib/theme";
+import { setTheme, useTheme } from "./lib/theme";
 import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { ResetPasswordPage } from "./pages/ResetPassword";
@@ -27,7 +27,7 @@ import { HeaderAlerts } from "./components/HeaderAlerts";
 import { PendingPage } from "./pages/Pending";
 import { MustChangePasswordPage } from "./pages/MustChangePassword";
 const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
-import { Skeleton, SkeletonRegion } from "./components/ui";
+import { Segmented, Skeleton, SkeletonRegion } from "./components/ui";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
@@ -77,25 +77,30 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   );
 }
 
-/** Account menu: settings (with the update hint for admins), report, sign out. Theme, Report and an admin's Users live here on a 390 px bar so the header keeps nav + search. */
+/**
+ * Account menu, grouped: you (settings, billing, deleted), the instance (admins), the theme, help, sign out.
+ * The bar keeps only nav, search and this menu, so theme and Report live here at every width (Report is also `!`).
+ */
 function Avatar() {
   const { data } = useSession();
   const me = useMe();
   const navigate = useNavigate();
-  const [theme, toggleTheme] = useTheme();
+  const [theme] = useTheme();
   const u = data?.user;
   if (!u) return null;
+  const isAdmin = me.data?.role === "admin";
   const initials = (u.name || u.email)
     .split(/[\s@.]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((s) => s[0]!.toUpperCase())
     .join("");
+  const sep = <DropdownMenu.Separator className="my-1.5 h-px bg-line" />;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
-          className="relative grid h-[30px] w-[30px] place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text"
+          className="relative grid h-[30px] w-[30px] shrink-0 place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text"
           title={u.email}
           aria-label="Account"
         >
@@ -104,36 +109,77 @@ function Avatar() {
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={8} className="menu">
-          <DropdownMenu.Label className="px-2.5 py-1.5 text-xs text-ink3">{u.email}</DropdownMenu.Label>
+        <DropdownMenu.Content align="end" sideOffset={8} className="menu w-64">
+          <DropdownMenu.Label className="flex items-center gap-2.5 px-2.5 py-2">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text">{initials}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-semibold text-ink">{u.name || u.email}</span>
+              <span className="block truncate text-xs text-ink3">
+                {u.email}
+                {isAdmin ? " · admin" : ""}
+              </span>
+            </span>
+          </DropdownMenu.Label>
+          {sep}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
             <SettingsIcon className="h-4 w-4" /> Settings
-            <UpdateMenuHint />
           </DropdownMenu.Item>
-          {me.data?.role === "admin" && (
-            <DropdownMenu.Item className="menu-item sm:hidden" onSelect={() => navigate("/admin/users")}>
-              <Users className="h-4 w-4" /> Users
+          {me.data?.ee?.billing && (
+            <DropdownMenu.Item className="menu-item" onSelect={() => navigate(BILLING_PATH)}>
+              <CreditCard className="h-4 w-4" /> Plan and billing
             </DropdownMenu.Item>
           )}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate(DELETED_PATH)}>
             <Trash2 className="h-4 w-4" /> Deleted
           </DropdownMenu.Item>
-          <DropdownMenu.Item className="menu-item" asChild>
-            <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">
-              <Sparkles className="h-4 w-4" /> What's new
-            </a>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="menu-item sm:hidden" onSelect={toggleTheme}>
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />} {theme === "dark" ? "Light theme" : "Dark theme"}
-          </DropdownMenu.Item>
+          {isAdmin && (
+            <>
+              {sep}
+              <DropdownMenu.Label className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wide text-ink3 uppercase">Instance</DropdownMenu.Label>
+              <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings/system")}>
+                <Server className="h-4 w-4" /> System
+                <UpdateMenuHint />
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/admin/users")}>
+                <Users className="h-4 w-4" /> Users
+                <PendingUsersHint />
+              </DropdownMenu.Item>
+            </>
+          )}
+          {sep}
+          <div className="flex items-center justify-between gap-2 px-2.5 py-1">
+            <span className="text-[13px] text-ink2">Theme</span>
+            <Segmented
+              size="sm"
+              ariaLabel="Theme"
+              value={theme}
+              onChange={setTheme}
+              options={[
+                { value: "light", label: <Sun className="h-3.5 w-3.5" aria-label="Light" />, title: "Light theme" },
+                { value: "dark", label: <Moon className="h-3.5 w-3.5" aria-label="Dark" />, title: "Dark theme" },
+              ]}
+            />
+          </div>
+          {sep}
           <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
             <LifeBuoy className="h-4 w-4" /> Report an issue…
+            <span className="menu-hint">
+              <span className="kbd">!</span>
+            </span>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" asChild>
+            <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">
+              <Sparkles className="h-4 w-4" /> What&apos;s new
+              <ExternalLink className="menu-hint h-3.5 w-auto" aria-hidden />
+            </a>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" asChild>
             <a href={REPO_URL} target="_blank" rel="noreferrer">
-              <ExternalLink className="h-4 w-4" /> Source on GitHub
+              <Code2 className="h-4 w-4" /> Source on GitHub
+              <ExternalLink className="menu-hint h-3.5 w-auto" aria-hidden />
             </a>
           </DropdownMenu.Item>
+          {sep}
           <DropdownMenu.Item className="menu-item" onSelect={() => signOut().then(() => window.location.assign("/login"))}>
             <LogOut className="h-4 w-4" /> Sign out
           </DropdownMenu.Item>
@@ -143,19 +189,33 @@ function Avatar() {
   );
 }
 
+/** Accounts waiting for approval (admins); the Users nav badge and the menu share this one query. */
+function usePendingUsers() {
+  const me = useMe();
+  const trpc = useTRPC();
+  return useQuery({ ...trpc.admin.users.pendingCount.queryOptions(), enabled: me.data?.role === "admin", refetchInterval: 30_000 }).data ?? 0;
+}
+
+function PendingUsersHint() {
+  const n = usePendingUsers();
+  return n ? (
+    <span className="ml-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+      {n}
+    </span>
+  ) : null;
+}
+
 /** Admins only: link to user management, with the number waiting for approval. Below sm it is in the account menu instead. */
 function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const me = useMe();
-  const trpc = useTRPC();
-  const isAdmin = me.data?.role === "admin";
-  const pending = useQuery({ ...trpc.admin.users.pendingCount.queryOptions(), enabled: isAdmin, refetchInterval: 30_000 });
-  if (!isAdmin) return null;
+  const pending = usePendingUsers();
+  if (me.data?.role !== "admin") return null;
   return (
     <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
       Users
-      {pending.data ? (
+      {pending ? (
         <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
-          {pending.data}
+          {pending}
         </span>
       ) : null}
     </NavLink>
@@ -201,10 +261,6 @@ export function TopBar() {
       <div className="flex-1" />
       <HeaderAlerts />
       <SearchButton />
-      <button className="btn-ghost hidden h-[34px] w-[34px] px-0 sm:grid" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
-        <LifeBuoy className="h-4 w-4" />
-      </button>
-      <ThemeToggle className="hidden sm:inline-flex" />
       <Avatar />
     </header>
   );

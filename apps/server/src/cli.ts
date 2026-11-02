@@ -1191,7 +1191,16 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const failed = await listFailures(svc, { limit: 50 });
     if (args.includes("--json")) return void console.log(JSON.stringify({ ...q, failures: failed }, null, 2));
     if (q.error) console.log(`queue tables: ${q.error}`);
-    table(q.queues.map((r) => ({ stage: r.label, waiting: r.waiting, running: r.running, retrying: r.retrying, failed: r.failed })));
+    table(
+      q.queues.map((r) => ({
+        stage: r.label,
+        waiting: r.waiting,
+        running: r.running,
+        retrying: r.retrying,
+        failed: r.failed,
+        "waiting since": r.oldestWaitingAt ?? "",
+      })),
+    );
     if (q.active.length) {
       console.log(q.truncated ? `\nin flight (showing ${q.active.length}; more exist)` : "\nin flight");
       table(
@@ -1201,6 +1210,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
           project: j.title ?? j.projectId?.slice(0, 8) ?? "—",
           attempt: j.attempt,
           since: j.startedAt ?? j.createdAt,
+          "last error": j.lastError?.slice(0, 80) ?? "",
         })),
       );
     } else console.log("\nnothing in flight");

@@ -83,6 +83,8 @@ export interface WorkerView {
   renders: WorkerRenders;
   queues: string[];
   processing: Array<WorkerJob & { title?: string }>;
+  /** what it was short of at its last beat (heavy jobs wait on it); null = room, or it takes no jobs */
+  paused: PausedReason | null;
   live: boolean;
   lastSeenAgoSec: number;
   thisProcess: boolean;
@@ -108,6 +110,7 @@ export function classifyWorkers(
     renders: WorkerRenders;
     queues: string[] | null;
     processing: WorkerJob[] | null;
+    paused?: PausedReason | null;
   }>,
   now: Date,
   selfId: string,
@@ -134,6 +137,7 @@ export function classifyWorkers(
       renders: r.renders,
       queues: r.queues ?? [],
       processing: r.processing ?? [],
+      paused: r.paused ?? null,
       live: now.getTime() - r.lastSeenAt.getTime() <= staleMs,
       lastSeenAgoSec: ago,
       thisProcess: r.id === selfId,

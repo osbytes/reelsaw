@@ -1,6 +1,7 @@
 /**
- * Settings → System → Queue: live job depth, what is in flight, and failed work with Retry.
- * Admins only (admin.queue.summary / admin.failures.*).
+ * Settings → System → Queue: only the stages that have work, how long the oldest job has waited, what each
+ * job in flight is doing (and why a retry failed), and failed work with Retry. Idle is one line, not a table
+ * of dashes. Admins only (admin.queue.summary / admin.failures.*).
  */
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,12 +10,15 @@ import { Search } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
-import { ago } from "../lib/time";
+import { ago, elapsed } from "../lib/time";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
+import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
 
 const PAGE = 50;
+/** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
+const FILTER_FROM = 6;
 
 const STAGES = [
   { value: "", label: "Any stage" },
@@ -95,6 +99,7 @@ export function QueueSection() {
   const filtered = !!(filter.q || filter.stage || filter.since);
 
   const queue = useQuery({ ...trpc.admin.queue.summary.queryOptions(), refetchInterval: 5000 });
+  const workers = useQuery({ ...trpc.admin.workers.list.queryOptions(), refetchInterval: 5000 });
   const failures = useInfiniteQuery(
     trpc.admin.failures.list.infiniteQueryOptions(
       { ...filter, limit: PAGE },
@@ -150,86 +155,163 @@ export function QueueSection() {
   const d = queue.data;
   const waiting = d?.queues.reduce((n, r) => n + r.waiting + r.retrying, 0) ?? 0;
   const running = d?.queues.reduce((n, r) => n + r.running, 0) ?? 0;
+  const busy = d?.queues.filter((r) => r.waiting + r.running + r.retrying > 0) ?? [];
+  // a stage nobody listens on never drains: say so instead of letting it look slow (only once the heartbeats are in)
+  const listened = workers.data ? new Set(workers.data.items.filter((w) => w.live).flatMap((w) => w.queues)) : null;
+  const stageNote = (r: (typeof busy)[number]) => {
+    if (listened && r.waiting + r.retrying > 0 && isPipelineQueue(r.queue) && !listened.has(r.queue))
+      return { text: "✕ No worker takes this stage", tone: "text-err" };
+    if (!r.running && r.oldestWaitingAt && Date.now() - new Date(r.oldestWaitingAt).getTime() > LONG_WAIT_MS)
+      return { text: "◷ Waiting, nothing running", tone: "text-warn" };
+    if (r.retrying) return { text: `↻ ${r.retrying} retrying`, tone: "text-warn" };
+    return null;
+  };
+  const filtersShown = filtered || total >= FILTER_FROM;
 
   return (
     <section id="queue" className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-[15px] font-bold">Queue</h2>
-        <span className="min-h-4 text-xs text-ink3">{d ? `${running} running · ${waiting} waiting` : queue.error ? queue.error.message : ""}</span>
+        <span className="min-h-4 text-xs text-ink3">
+          {d ? (running || waiting ? `${running} running · ${waiting} waiting` : "idle") : queue.error ? queue.error.message : ""}
+        </span>
       </div>
       <p className="text-[13px] text-ink2">
-        Jobs waiting and running on this instance, and failed work you can retry after a platform fix (disk full, model down, encoder missing). Retry uses the
-        same path as the owner&apos;s Retry button.
+        Jobs on this instance by stage, and failed work to retry after a platform fix (disk full, model down, encoder missing). Retry is the owner&apos;s Retry
+        button.
       </p>
 
       {!d && !queue.error ? (
         <SkeletonRegion label="Loading queue…" className="flex flex-col gap-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-6 w-full" />
+          {Array.from({ length: 2 }, (_, i) => (
+            <Skeleton key={i} className="h-7 w-full" />
           ))}
         </SkeletonRegion>
       ) : d?.error ? (
         <p className="text-[13px] text-ink3">Queue tables are not ready yet.</p>
+      ) : d && !busy.length ? (
+        <p className="flex h-9 items-center gap-2 rounded-[10px] bg-sunk px-3 text-[13px] text-ink2">
+          <span className="font-mono text-ink3">○</span> Idle: nothing waiting or running.
+        </p>
       ) : d ? (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-left text-xs text-ink3">
-              <th className="py-1 font-medium">Stage</th>
-              <th className="py-1 text-right font-medium">Waiting</th>
-              <th className="py-1 text-right font-medium">Running</th>
-              <th className="py-1 text-right font-medium">Retrying</th>
-            </tr>
-          </thead>
-          <tbody>
-            {d.queues.map((r) => (
-              <tr key={r.queue} className="border-t border-line/60">
-                <td className="py-1.5">{r.label}</td>
-                <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.waiting || "—"}</td>
-                <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.running || "—"}</td>
-                <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.retrying || "—"}</td>
+        <ScrollArea>
+          <table className="w-full min-w-[30rem] table-fixed text-[13px]">
+            <caption className="sr-only">Stages with work waiting or running</caption>
+            <colgroup>
+              <col className="w-[7rem]" />
+              <col className="w-[4.5rem]" />
+              <col className="w-[4.5rem]" />
+              <col className="w-[7rem]" />
+              <col />
+            </colgroup>
+            <thead>
+              <tr className="text-left text-xs text-ink3">
+                <th scope="col" className="py-1 font-medium">
+                  Stage
+                </th>
+                <th scope="col" className="py-1 text-right font-medium">
+                  Running
+                </th>
+                <th scope="col" className="py-1 text-right font-medium">
+                  Waiting
+                </th>
+                <th scope="col" className="py-1 text-right font-medium">
+                  Longest wait
+                </th>
+                <th scope="col" className="py-1 pl-4 font-medium">
+                  <span className="sr-only">Note</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {busy.map((r) => {
+                const note = stageNote(r);
+                return (
+                  <tr key={r.queue} className="border-t border-line/60">
+                    <td className="truncate py-1.5">{r.label}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.running || "—"}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.waiting + r.retrying || "—"}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.oldestWaitingAt ? elapsed(r.oldestWaitingAt) : "—"}</td>
+                    <td className={`truncate py-1.5 pl-4 text-xs font-semibold ${note?.tone ?? ""}`}>{note?.text}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </ScrollArea>
       ) : null}
 
       {d && d.active.length > 0 && (
         <div>
-          <h3 className="text-[13px] font-bold">In flight{d.truncated ? " (showing 50)" : ""}</h3>
-          <table className="mt-1 w-full text-[13px]">
-            <thead>
-              <tr className="text-left text-xs text-ink3">
-                <th className="py-1 font-medium">Project</th>
-                <th className="py-1 font-medium">Stage</th>
-                <th className="py-1 font-medium">State</th>
-                <th className="py-1 text-right font-medium">Attempt</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.active.map((j, i) => (
-                <tr key={`${j.queue}:${j.projectId}:${j.clipId}:${i}`} className="border-t border-line/60">
-                  <td className="max-w-[14rem] truncate py-1.5">
-                    {j.projectId ? (
-                      <Link to={`/p/${j.projectId}`} className="text-ink no-underline hover:underline">
-                        {j.title ?? j.projectId.slice(0, 8)}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="py-1.5">{j.label}</td>
-                  <td className="py-1.5 text-xs text-ink2">{j.state === "created" ? "waiting" : j.state === "retry" ? "retrying" : "running"}</td>
-                  <td className="py-1.5 text-right font-mono text-xs tabular-nums">{j.attempt}</td>
+          <h3 className="text-[13px] font-bold">Jobs{d.truncated ? " (showing 50)" : ""}</h3>
+          <ScrollArea className="max-h-[min(22rem,45dvh)]">
+            <table className="mt-1 w-full min-w-[30rem] table-fixed text-[13px]">
+              <caption className="sr-only">Jobs waiting, running or retrying, running first</caption>
+              <colgroup>
+                <col />
+                <col className="w-[6.5rem]" />
+                <col className="w-[40%]" />
+                <col className="w-[5.5rem]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-xs text-ink3">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Project
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Stage
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    State
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                    For
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {d.active.map((j, i) => {
+                  const state =
+                    j.state === "active"
+                      ? { glyph: "◔", word: "Running", tone: "text-acc-text" }
+                      : j.state === "retry"
+                        ? { glyph: "↻", word: "Retrying", tone: "text-warn" }
+                        : { glyph: "○", word: "Waiting", tone: "text-ink3" };
+                  return (
+                    <tr key={`${j.queue}:${j.projectId}:${j.clipId}:${i}`} className="border-t border-line/60">
+                      <td className="truncate py-1.5">
+                        {j.projectId ? (
+                          <Link to={j.clipId ? `/p/${j.projectId}#clip=${j.clipId}` : `/p/${j.projectId}`} className="text-ink no-underline hover:underline">
+                            {j.title ?? j.projectId.slice(0, 8)}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="truncate py-1.5">{j.label}</td>
+                      <td className="truncate py-1.5 text-xs" title={j.lastError}>
+                        <span className={`font-semibold ${state.tone}`}>
+                          <span className="font-mono">{state.glyph}</span> {state.word}
+                        </span>
+                        {j.attempt > 1 ? <span className="text-ink3"> · try {j.attempt}</span> : null}
+                        {j.lastError ? <span className="text-ink2"> · {j.lastError}</span> : null}
+                      </td>
+                      <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink2">{elapsed(j.startedAt ?? j.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </ScrollArea>
         </div>
       )}
 
       <div className="flex flex-col gap-3 border-t border-line/60 pt-4">
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[13px] font-bold">Failed work</h3>
+          <h3 className="text-[13px] font-bold">
+            Failed work
+            {failures.data && total ? <span className="ml-1.5 font-normal text-ink3">{`${total}${truncated ? "+" : ""}`}</span> : null}
+          </h3>
           <div className="flex min-h-8 min-w-[10.5rem] items-center justify-end">
             {filtered && items.length > 0 ? (
               <button type="button" className="btn-ghost h-8 text-xs" disabled={retry.isPending} onClick={() => setConfirmBulk(true)}>
@@ -238,7 +320,7 @@ export function QueueSection() {
             ) : null}
           </div>
         </div>
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <div className={`min-w-0 flex-col gap-2 sm:flex-row sm:items-center ${filtersShown ? "flex" : "hidden"}`}>
           <label className="flex h-9 min-w-0 w-full flex-1 items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 focus-within:border-acc">
             <Search className="h-4 w-4 shrink-0 text-ink3" aria-hidden />
             <input
@@ -261,7 +343,7 @@ export function QueueSection() {
                 ? `Showing ${items.length} of ${total}${truncated ? "+" : ""}`
                 : filtered
                   ? "No failed work matches this filter"
-                  : "No failed projects or clips."
+                  : "✓ No failed projects or clips."
               : failures.error
                 ? failures.error.message
                 : ""}
@@ -288,23 +370,19 @@ export function QueueSection() {
         ) : items.length > 0 ? (
           <>
             <ScrollArea className="max-h-[min(28rem,55dvh)]">
-              <table className="w-full table-fixed text-[13px]">
+              <table className="w-full min-w-[34rem] table-fixed text-[13px]">
                 <caption className="sr-only">Failed projects and clips, newest first</caption>
                 <colgroup>
-                  <col />
-                  <col className="hidden w-[9rem] sm:table-column" />
+                  <col className="w-[38%]" />
                   <col className="w-[5.5rem]" />
                   <col />
-                  <col className="w-[6.5rem]" />
+                  <col className="w-[5.5rem]" />
                   <col className="w-[4.5rem]" />
                 </colgroup>
                 <thead>
                   <tr className="text-left text-xs text-ink3">
                     <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
                       Item
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] hidden bg-panel py-1 font-medium sm:table-cell">
-                      Owner
                     </th>
                     <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
                       Stage
@@ -331,15 +409,12 @@ export function QueueSection() {
                         >
                           {row.title}
                         </button>
-                        <div className="truncate text-[11px] text-ink3">
-                          {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"}
+                        <div className="truncate text-[11px] text-ink3" title={row.ownerEmail}>
+                          {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
                         </div>
                       </td>
-                      <td className="hidden truncate py-1.5 text-xs text-ink2 sm:table-cell" title={row.ownerEmail}>
-                        {row.ownerEmail}
-                      </td>
                       <td className="truncate py-1.5">{row.stage}</td>
-                      <td className="truncate py-1.5 text-xs text-ink2">
+                      <td className="truncate py-1.5 pr-2 text-xs text-ink2">
                         <button
                           type="button"
                           className="block w-full truncate text-left hover:underline"
