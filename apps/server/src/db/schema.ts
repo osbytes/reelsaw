@@ -205,8 +205,9 @@ export const llmUsage = pgTable(
 );
 
 /**
- * One row per project that used minutes: written at create, duration filled at ingest. Survives project
- * delete and purge so monthly minutes, first-video-free and admin usage cannot be reset by deleting.
+ * One row per project that used minutes: written at create, duration filled at ingest, first finish recorded
+ * once. Survives project delete, purge and "forget what Reelsaw learned" so monthly minutes, first-video-free,
+ * admin usage and the ready email's milestones cannot be reset by deleting or forgetting.
  * Not pruned by time: first-video-free reads the account's earliest row, so a retention cut would hand out a
  * second free video (and a cut shorter than a billing period would undercount minutes). One small row per
  * project ever created; the rows go with the account (`removeUser`).
@@ -222,6 +223,8 @@ export const sourceUsage = pgTable(
     durationSec: real("duration_sec"),
     /** when the project was created (the window minutes and hourly creates count in) */
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    /** the project's first project.done (events.id), set once; the ready email's "That's 10 projects" counts these */
+    firstDoneEventId: bigint("first_done_event_id", { mode: "number" }),
   },
   (t) => [uniqueIndex("source_usage_project_idx").on(t.projectId), index("source_usage_user_id_idx").on(t.userId, t.createdAt)],
 );

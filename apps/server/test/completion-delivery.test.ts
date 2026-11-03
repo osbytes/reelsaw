@@ -8,6 +8,7 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { deliverCompletionNotice } from "../src/notify/completion.js";
+import { forgetDecisions } from "../src/decisions/service.js";
 import { emailPreferences, setEmailPreferences } from "../src/notify/preferences.js";
 import { eventHandlerQueues } from "../src/event-handlers.js";
 import { eventHandlerMap } from "../src/event-handler-map.js";
@@ -40,10 +41,16 @@ async function account(lastActive: string | null): Promise<string> {
 }
 async function finished(userId: string, ago: string): Promise<string> {
   const p = await h.makeProject(userId, "done");
-  await h.pool.query(
-    `insert into events (project_id, user_id, type, payload, created_at) values ($1, $2, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}')`,
+  const e = await h.pool.query(
+    `insert into events (project_id, user_id, type, payload, created_at) values ($1, $2, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}') returning id`,
     [p, userId],
   );
+  // what createProject and finalizeProjectIfDone write to the usage ledger
+  await h.pool.query(`insert into source_usage (user_id, project_id, created_at, first_done_event_id) values ($1, $2, now() - interval '${ago}', $3)`, [
+    userId,
+    p,
+    e.rows[0].id,
+  ]);
   return p;
 }
 
@@ -93,7 +100,7 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     await assert.rejects(setEmailPreferences(h.svc, "no-such-account", { ready: false }, "unsubscribe_link"), { code: "NOT_FOUND" });
   });
 
-  it("announces the 10th project once, even after an earlier project is deleted forever", async () => {
+  it("announces the 10th project once, even after earlier projects are deleted forever and their history forgotten", async () => {
     const u = await account("1 hour");
     const old: string[] = [];
     for (let i = 0; i < 9; i++) old.push(await finished(u, `${2 + i} hours`)); // seen: before they were last here
@@ -102,8 +109,11 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 1);
     assert.match(sent[0]!.text ?? "", /That's 10 projects finished/);
-    // a purge drops the project and its events; the ledger keeps the count at 10, so the 11th is no milestone
-    await h.pool.query(`delete from projects where id = $1`, [old[0]]);
+    // a purge drops the project, forgetting drops its events and decisions; the ledger keeps the count at 10,
+    // so the 11th is no milestone
+    await h.pool.query(`delete from projects where id = any($1)`, [old.slice(0, 3)]);
+    await h.svc.tx((w) => forgetDecisions(w.db, u));
+    assert.equal((await h.pool.query(`select count(*)::int as n from events where project_id = any($1)`, [old.slice(0, 3)])).rows[0].n, 0);
     await finished(u, "5 minutes");
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 2);

@@ -11,6 +11,7 @@ import { QUEUES } from "../queue/boss.js";
 import { cleanupWorkdir, runFacts } from "./common.js";
 import type { PipelineStage, ProjectStatus, RunReason } from "@reelsaw/shared";
 import { removeScratchClip } from "../storage/sweep.js";
+import { recordProjectFinished } from "../quota.js";
 
 /** False once the project is deleted: no run starts and no job is queued for it (restore it, then Retry). */
 async function projectIsLive(u: UnitOfWork, projectId: string): Promise<boolean> {
@@ -255,7 +256,9 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   // no live clips left (the last one was deleted while rendering) finishes as done with nothing, rather than stranding the status
   const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  await u.emit("project.done", { projectId: projectId, clips: doneCount, failed: clips.length - doneCount, ...facts });
+  const eventId = await u.emit("project.done", { projectId: projectId, clips: doneCount, failed: clips.length - doneCount, ...facts });
+  // the usage ledger counts each project's first finish, for the ready email's milestones (quota.ts)
+  await recordProjectFinished(u.db, projectId, eventId);
   u.afterCommit(() => cleanupWorkdir(svc, projectId));
 }
 

@@ -179,6 +179,13 @@ project already hit the problem it prevents.
   the platform); a canonical, maintained library does it. Only then write it, and put it where the
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
+- **A count that must not go down lives in a ledger, never in history a user can delete or forget.**
+  Quota usage, first-video-free and the ready email's milestones count rows of `source_usage`, which
+  survives deleting a project, purging it and "forget what Reelsaw learned", and goes only with the
+  account. Events and decisions are history: a user may delete or forget them, so anything derived
+  from them (a total, "the 10th project") may drop, and must not be what a limit or a
+  once-only announcement reads. A new such count adds a column to that ledger, set once, rather
+  than counting events.
 - **A general helper gets a general name in a shared place, never a local one.** Cutting text
   with an ellipsis, reading a number out of a payload, a person's first name: none of these is
   about the module that first needs it. Write it once in `packages/shared` (or the app's `lib/`)

@@ -15,10 +15,9 @@
  * one-click unsubscribe, RFC 8058).
  *
  * `projects.ready_mailed_through` marks the last `project.done` each project's note covered; a later
- * finish (a re-render's) is above it and mailed. Milestones count the account's finished projects from
- * the events themselves: a project's events outlive "Delete forever" and retention never prunes
- * `project.done`, so the count does not go down and re-announce one (forgetting what Reelsaw learned
- * does lower it: that is the owner's choice). A crash after a successful send and before the mark
+ * finish (a re-render's) is above it and mailed. Milestones count the account's finished projects in
+ * the usage ledger (`source_usage.first_done_event_id`), which deleting, purging and forgetting what
+ * Reelsaw learned never touch, so a count never goes down and re-announces one. A crash after a successful send and before the mark
  * sends the same batch again with the same idempotency key (`completionIdempotencyKey`):
  * Resend drops the repeat within its 24-hour window; SMTP gets the same Message-ID, which some inboxes
  * collapse and others show twice (SMTP has no dedup of its own).
@@ -177,18 +176,13 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     byProject.set(c.projectId, list);
   }
 
-  // Milestones: the account's projects that ever finished, from their events (which outlive a purge; retention
-  // keeps project.done). A project finishes for the first time in this batch when its first project.done is
-  // one of the events being mailed.
+  // Milestones: the account's projects that ever finished, from the usage ledger (never lowered by deleting or
+  // forgetting). A project finishes for the first time in this batch when its first project.done is mailed now.
   // a Postgres array literal: drizzle would spread a JS array into a row
   const mailedIds = `{${mine.map((e) => e.eventId).join(",")}}`;
   const { rows: countRows } = await db.execute<{ finished: number; first_time: number }>(sql`
-    select count(*)::int as finished, (count(*) filter (where f.first_id = any(${mailedIds}::bigint[])))::int as first_time
-    from (
-      select min(id) as first_id from events
-      where user_id = ${userId} and type = 'project.done' and project_id is not null
-      group by project_id
-    ) f`);
+    select count(*)::int as finished, (count(*) filter (where first_done_event_id = any(${mailedIds}::bigint[])))::int as first_time
+    from source_usage where user_id = ${userId} and first_done_event_id is not null`);
   const finished = countRows[0]?.finished ?? 0;
   const milestone = milestoneCrossed(finished - (countRows[0]?.first_time ?? 0), finished);
 

@@ -401,6 +401,14 @@ export async function recordProjectCreated(db: Db, userId: string, projectId: st
   await db.insert(schema.sourceUsage).values({ userId, projectId, createdAt }).onConflictDoNothing();
 }
 
+/** The project's first finish, once (a re-render finishes again and changes nothing). Kept through purge and forgetting. */
+export async function recordProjectFinished(db: Db, projectId: string, eventId: number) {
+  await db
+    .update(schema.sourceUsage)
+    .set({ firstDoneEventId: eventId })
+    .where(and(eq(schema.sourceUsage.projectId, projectId), isNull(schema.sourceUsage.firstDoneEventId)));
+}
+
 /** Fill duration after ingest; the row already exists from create. */
 export async function recordSourceDuration(db: Db, projectId: string, durationSec: number) {
   await db.update(schema.sourceUsage).set({ durationSec }).where(eq(schema.sourceUsage.projectId, projectId));
