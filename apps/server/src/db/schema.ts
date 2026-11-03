@@ -643,7 +643,12 @@ export const events = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("events_project_id_idx").on(t.projectId, t.id), index("events_user_id_idx").on(t.userId, t.id)],
+  (t) => [
+    index("events_project_id_idx").on(t.projectId, t.id),
+    index("events_user_id_idx").on(t.userId, t.id),
+    // account events (the admin log, their retention): a few rows among a project history that is most of the table
+    index("events_account_idx").on(t.id).where(sql`project_id is null`),
+  ],
 );
 export type EventRow = typeof events.$inferSelect;
 

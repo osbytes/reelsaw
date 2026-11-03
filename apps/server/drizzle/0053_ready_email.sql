@@ -9,4 +9,8 @@ CREATE TABLE "email_topic_prefs" (
 --> statement-breakpoint
 ALTER TABLE "projects" ADD COLUMN "ready_mailed_through" bigint;--> statement-breakpoint
 ALTER TABLE "user" ADD COLUMN "last_active_at" timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "email_topic_prefs" ADD CONSTRAINT "email_topic_prefs_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "email_topic_prefs" ADD CONSTRAINT "email_topic_prefs_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- what already finished is not news: the first ready note after the upgrade covers only finishes after it
+UPDATE "projects" p SET "ready_mailed_through" = d."last_done"
+FROM (SELECT "project_id", max("id") AS "last_done" FROM "project_events" WHERE "type" = 'project.done' GROUP BY "project_id") d
+WHERE d."project_id" = p."id";

@@ -1585,6 +1585,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "events_account_idx": {
+          "name": "events_account_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {},
+          "where": "project_id is null"
         }
       },
       "foreignKeys": {},

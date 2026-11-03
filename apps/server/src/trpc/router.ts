@@ -1133,10 +1133,11 @@ const restRouter = router({
       return { days, users: await usageByUser(ctx.svc.database.db, days) };
     }),
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
-      // account events only (no project); by time, since rows copied in from the old admin_events have newer ids
+      // account events only (no project), newest first by id on events_account_idx: the rows moved in from admin_events
+      // were copied in their old order after every project event, so among account events id order is time order
       const rows = await ctx.svc.database.db.query.events.findMany({
         where: isNull(schema.events.projectId),
-        orderBy: [desc(schema.events.createdAt), desc(schema.events.id)],
+        orderBy: desc(schema.events.id),
         limit: input?.limit ?? 100,
       });
       return rows.map(({ projectId: _p, ...e }) => ({

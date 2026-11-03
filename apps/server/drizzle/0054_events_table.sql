@@ -16,4 +16,23 @@ CREATE INDEX "events_user_id_idx" ON "events" USING btree ("user_id","id");--> s
 INSERT INTO "events" ("type", "user_id", "actor_id", "payload", "created_at")
 SELECT "type", "user_id", "actor_id", "payload" || jsonb_build_object('userId', "user_id", 'email', "email"), "created_at"
 FROM "admin_events" ORDER BY "id";--> statement-breakpoint
-DROP TABLE "admin_events";
+DROP TABLE "admin_events";--> statement-breakpoint
+CREATE INDEX "events_account_idx" ON "events" USING btree ("id") WHERE project_id is null;--> statement-breakpoint
+-- For processes still on the previous version while an upgrade rolls out (a worker on another machine, a
+-- container not yet restarted): the old table names stay readable and writable as views over events, so their
+-- jobs neither fail nor lose an event. project_events is a simple view, which Postgres updates in place;
+-- admin_events maps its email column into the payload. Drop both once every process runs this version.
+CREATE VIEW "project_events" AS SELECT "id", "project_id", "type", "payload", "created_at" FROM "events" WHERE "project_id" IS NOT NULL;--> statement-breakpoint
+CREATE VIEW "admin_events" AS
+SELECT "id", "type", "actor_id", "user_id", coalesce("payload"->>'email', '') AS "email", "payload" - 'userId' - 'email' AS "payload", "created_at"
+FROM "events" WHERE "project_id" IS NULL;--> statement-breakpoint
+CREATE FUNCTION "admin_events_insert"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO "events" ("type", "user_id", "actor_id", "payload", "created_at")
+  VALUES (NEW."type", NEW."user_id", NEW."actor_id",
+          coalesce(NEW."payload", '{}'::jsonb) || jsonb_build_object('userId', NEW."user_id", 'email', NEW."email"),
+          coalesce(NEW."created_at", now()))
+  RETURNING "id" INTO NEW."id";
+  RETURN NEW;
+END $$;--> statement-breakpoint
+CREATE TRIGGER "admin_events_insert" INSTEAD OF INSERT ON "admin_events" FOR EACH ROW EXECUTE FUNCTION "admin_events_insert"();
