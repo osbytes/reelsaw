@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.32.0
+
+### Minor Changes
+
+- [#170](https://github.com/osbytes/reelsaw/pull/170) [`6ed6437`](https://github.com/osbytes/reelsaw/commit/6ed6437cb7658e14bc4b38c7fb632d9f01ffdf80) Thanks [@dillonstreator](https://github.com/dillonstreator)! - When email is on, a finished project schedules one note. Further projects that finish while it is waiting join the same email, and it is sent only if you have not come back. A first project, and later the 10th, 25th, 50th and 100th, get a line of their own.
+  
+  Every note carries a one-click unsubscribe (`List-Unsubscribe`, RFC 8058) and a footer link; the note can also be turned off under Settings → Account, with the `get_email_preferences` / `set_email_preferences` MCP tools, or with `reelsaw email-prefs <email> --ready-email off`.
+
 ## 0.31.0
 
 ### Minor Changes
