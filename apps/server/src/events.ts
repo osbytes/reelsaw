@@ -3,7 +3,9 @@ import pg from "pg";
 import { and, count, desc, eq, gt, lt, lte, max, ne } from "drizzle-orm";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEvent, ProjectEventType } from "@reelsaw/shared";
+import type { ProjectEvent, ProjectEventPayload, ProjectEventType } from "@reelsaw/shared";
+import type { EventRow } from "./db/schema.js";
+import { isProjectEventType } from "./event-types.js";
 import type { Logger } from "./log.js";
 
 export const EVENTS_CHANNEL = "reelsaw_events";
@@ -18,7 +20,7 @@ export interface EventNotice {
 }
 
 /**
- * NOTIFY payload of a progress tick. Ticks are ephemeral: nothing is written to project_events (the
+ * NOTIFY payload of a progress tick. Ticks are ephemeral: nothing is written to events (the
  * projects row keeps the latest value for reloads), so the payload travels inline. Postgres limits a
  * payload to 8000 bytes; we stay under PROGRESS_NOTICE_MAX.
  */
@@ -88,7 +90,7 @@ export function progressEvent(n: ProgressNotice, now = new Date()): ProjectEvent
  * Postgres NOTIFY wakes every API process holding a LISTEN connection.
  */
 export interface EventBus {
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<ProjectEvent>;
+  emit<T extends ProjectEventType>(type: T, payload: ProjectEventPayload<T>): Promise<ProjectEvent>;
   list(projectId: string, afterId?: number, limit?: number): Promise<ProjectEvent[]>;
   /**
    * The log without progress ticks (those are live-only), newest `limit` rows in ascending order.
@@ -190,10 +192,14 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
   const bus: EventBus = {
     // Standalone event (progress, notices): insert + NOTIFY in ONE statement, so it is atomic.
     // Events tied to a state change go through the unit of work (svc.tx) instead.
-    async emit(projectId, type, payload = {}) {
+    async emit(type, payload) {
+      const { projectId } = payload; // every payload names its project (projectEventSchemas)
       // NOTIFY payloads are limited to 8000 bytes: send ids only, listeners fetch rows.
       const res = await pool.query<{ id: number; created_at: Date }>(
-        `WITH e AS (INSERT INTO project_events (project_id, type, payload) VALUES ($1, $2, $3) RETURNING id, created_at)
+        `WITH e AS (
+           INSERT INTO events (project_id, user_id, type, payload)
+           VALUES ($1, (select user_id from projects where id = $1), $2, $3) RETURNING id, created_at
+         )
          SELECT e.id, e.created_at, pg_notify($4, json_build_object('id', e.id, 'projectId', $1::text)::text) FROM e`,
         [projectId, type, JSON.stringify(payload), CHANNEL],
       );
@@ -201,18 +207,18 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
       return { id: Number(row.id), projectId, type, payload, createdAt: new Date(row.created_at).toISOString() };
     },
     async list(projectId, afterId = 0, limit = 500) {
-      const rows = await db.query.projectEvents.findMany({
+      const rows = await db.query.events.findMany({
         where: (t, { and, eq, gt }) => and(eq(t.projectId, projectId), gt(t.id, afterId)),
         orderBy: (t, { asc }) => asc(t.id),
         limit,
       });
-      return rows.map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() }));
+      return rows.flatMap(asProjectEvent);
     },
     async progress(projectId, tick) {
       await pool.query("SELECT pg_notify($1, $2)", [CHANNEL, encodeProgressNotice({ projectId, ...tick })]);
     },
     async history(projectId, { limit, after, before, upTo }) {
-      const t = schema.projectEvents;
+      const t = schema.events;
       const rows = await db
         .select()
         .from(t)
@@ -229,15 +235,12 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
         .limit(limit + 1);
       const hasMore = rows.length > limit;
       return {
-        events: rows
-          .slice(0, limit)
-          .reverse()
-          .map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() })),
+        events: rows.slice(0, limit).reverse().flatMap(asProjectEvent),
         hasMore,
       };
     },
     async stats(projectId) {
-      const t = schema.projectEvents;
+      const t = schema.events;
       const [head] = await db
         .select({ v: max(t.id) })
         .from(t)
@@ -269,4 +272,10 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
     },
   };
   return bus;
+}
+
+/** A row of a project's history as the feed and the live stream send it; rows with no project are not one. */
+export function asProjectEvent(r: Pick<EventRow, "id" | "projectId" | "type" | "payload" | "createdAt">): ProjectEvent[] {
+  if (!r.projectId || !isProjectEventType(r.type)) return [];
+  return [{ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() }];
 }

@@ -305,7 +305,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       await syncClipsRefs(u.db, projectId, [
         { id: clipId, bumpers: bumpers !== undefined ? bumpers : cur.bumpers, layers: layers ?? cur.layers, overlays: cur.overlays, audio: cur.audio },
       ]);
-    await u.emit(projectId, "clip.created", { clipId, index: cur.index, title: patch.title ?? cur.title });
+    await u.emit("clip.created", { projectId: projectId, clipId, index: cur.index, title: patch.title ?? cur.title });
   });
   void db;
 }

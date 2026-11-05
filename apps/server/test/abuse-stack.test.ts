@@ -116,10 +116,14 @@ describe("abuse guards", () => {
     const { drizzle } = await import("drizzle-orm/node-postgres");
     const { schema } = await import("../src/db/index.js");
     const d = drizzle(pool, { schema });
+    const { createUnitOfWork } = await import("../src/uow.js");
+    const { createLogger } = await import("../src/log.js");
+    const quiet = createLogger({ LOG_LEVEL: "fatal", LOG_FORMAT: "json" });
+    // a real unit of work: the flag pass records user.flagged with u.emit (no handler follows it, so no queue is touched)
     const fake = {
       database: { db: d } as never,
-      log: { child: () => ({ info() {}, warn() {} }) } as never,
-      tx: async (fn: (u: { db: typeof d }) => Promise<void>) => fn({ db: d }),
+      log: quiet,
+      tx: createUnitOfWork(pool, {} as never, quiet),
     };
     const r = await flagAccounts(fake as never);
     assert.ok(r.flagged >= 3, `flagged ${r.flagged}`);
@@ -129,7 +133,7 @@ describe("abuse guards", () => {
     const ours = list.items.filter((x) => x.signupIp === ip);
     assert.equal(ours.length, 3);
     for (const x of ours) assert.ok(x.flags.includes("shared_ip"), x.flags.join(","));
-    const ev = await pool.query(`select count(*)::int as n from admin_events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
+    const ev = await pool.query(`select count(*)::int as n from events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
     assert.equal(ev.rows[0].n, 3);
   });
 });

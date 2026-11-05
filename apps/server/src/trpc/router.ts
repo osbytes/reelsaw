@@ -19,7 +19,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   createProject,
@@ -138,6 +138,8 @@ import { assetVisibleTo } from "../library/visible.js";
 import { PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
+import { touchLastActive } from "../presence.js";
+import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
@@ -372,7 +374,7 @@ async function saveFlags(
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
   const rerendered = rerender && changed ? await rerenderOverlapping(svc, u, p, [{ start: f.start, end: f.end }]) : 0;
-  await u.emit(p.id, "stage.started", { stage: "review", changed: changed ? 1 : 0, rerendered });
+  await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed ? 1 : 0, rerendered });
   return rerendered;
 }
 
@@ -482,8 +484,25 @@ const headRouter = router({
         report: reportCapabilities(ctx.svc, ctx.user),
         /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
+        /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
+        emailEnabled: ctx.svc.email.enabled,
+        emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
       };
     }),
+    /** Optional mail by topic, and whether this instance sends mail at all. MCP `get_email_preferences`. */
+    emailPreferences: signedInProcedure.query(async ({ ctx }) => ({
+      emailEnabled: ctx.svc.email.enabled,
+      emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
+    })),
+    /** The web tab is visible and the person used it in the last couple of minutes (presence.ts): completions until now count as seen. */
+    presence: signedInProcedure.mutation(({ ctx }) => {
+      touchLastActive(ctx.svc.database.db, ctx.svc.log, ctx.user.id);
+      return { ok: true as const };
+    }),
+    /** Turn optional mail on or off (Settings → Account). Same service as MCP `set_email_preferences` and the unsubscribe link. */
+    updateEmailPreferences: signedInProcedure
+      .input(emailPreferencesPatchSchema)
+      .mutation(({ ctx, input }) => setEmailPreferences(ctx.svc, ctx.user.id, input, "settings")),
     /**
      * After `reelsaw set-password --must-change`: pick a new password without the current one.
      * The session is the proof they knew the temporary password. Other devices stay signed out.
@@ -931,7 +950,7 @@ const restRouter = router({
     /**
      * Instance settings (instance-settings.ts): sign-up policy, captcha, quotas, retention, … The environment is
      * the default; what is set here overrides it for every process within seconds. `set` validates the result as a
-     * whole and writes a `settings.changed` admin event. The same code serves the CLI and the MCP tools.
+     * whole and writes a `settings.changed` event. The same code serves the CLI and the MCP tools.
      */
     settings: router({
       get: adminProcedure.query(({ ctx }) => ctx.svc.settings.state()),
@@ -995,6 +1014,7 @@ const restRouter = router({
                   flags: U.flags,
                   signupIp: U.signupIp,
                   mustChangePassword: U.mustChangePassword,
+                  lastActiveAt: U.lastActiveAt,
                   createdAt: U.createdAt,
                   approved,
                   ts: sql<string>`${U.createdAt}::text`,
@@ -1024,8 +1044,11 @@ const restRouter = router({
           const usageOf = new Map(usage.map((u) => [u.id, u]));
           const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
           return {
-            items: items.map(({ approved: _a, ts: _t, ...r }) => {
-              const last = lastOf.get(r.id);
+            items: items.map(({ approved: _a, ts: _t, lastActiveAt, ...r }) => {
+              const sessionLast = lastOf.get(r.id);
+              const stamped = lastActiveAt?.getTime() ?? 0;
+              const sessionMs = sessionLast ? new Date(sessionLast).getTime() : 0;
+              const lastMs = Math.max(stamped, sessionMs);
               const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
               return {
                 ...r,
@@ -1036,7 +1059,7 @@ const restRouter = router({
                 plan: ctx.svc.ee ? (plans.get(r.id)?.plan ?? "free") : null,
                 approvedAt: r.approvedAt?.toISOString() ?? null,
                 createdAt: r.createdAt.toISOString(),
-                lastActive: last ? new Date(last).toISOString() : null,
+                lastActive: lastMs ? new Date(lastMs).toISOString() : null,
               };
             }),
             nextCursor,
@@ -1110,8 +1133,18 @@ const restRouter = router({
       return { days, users: await usageByUser(ctx.svc.database.db, days) };
     }),
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
-      const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
-      return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
+      // account events only (no project), newest first by id on events_account_idx: the rows moved in from admin_events
+      // were copied in their old order after every project event, so among account events id order is time order
+      const rows = await ctx.svc.database.db.query.events.findMany({
+        where: isNull(schema.events.projectId),
+        orderBy: desc(schema.events.id),
+        limit: input?.limit ?? 100,
+      });
+      return rows.map(({ projectId: _p, ...e }) => ({
+        ...e,
+        email: typeof e.payload.email === "string" ? e.payload.email : null,
+        createdAt: e.createdAt.toISOString(),
+      }));
     }),
     /**
      * Provider keys and base URLs, entered by an admin and stored encrypted (ai/providers.ts). A key
@@ -1430,16 +1463,10 @@ const restRouter = router({
       for (const [step, status] of Object.entries(t?.refine ?? {})) {
         if (status !== "failed") continue;
         const [ev] = await db
-          .select({ error: sql<string | null>`${schema.projectEvents.payload}->>'error'` })
-          .from(schema.projectEvents)
-          .where(
-            and(
-              eq(schema.projectEvents.projectId, p.id),
-              eq(schema.projectEvents.type, "stage.failed"),
-              sql`${schema.projectEvents.payload}->>'step' = ${step}`,
-            ),
-          )
-          .orderBy(desc(schema.projectEvents.id))
+          .select({ error: sql<string | null>`${schema.events.payload}->>'error'` })
+          .from(schema.events)
+          .where(and(eq(schema.events.projectId, p.id), eq(schema.events.type, "stage.failed"), sql`${schema.events.payload}->>'step' = ${step}`))
+          .orderBy(desc(schema.events.id))
           .limit(1);
         refineFailed.push({ step, error: ev?.error ?? "The step gave up after its retries." });
       }
@@ -1678,7 +1705,7 @@ const restRouter = router({
           const segments = toSentences(words);
           await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
           const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
-          await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+          await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed.length, rerendered });
           // rejecting your own fix is deleting it: one fix.delete, like deleteFlag
           await recordDecisions(svc, db, p, () =>
             fixDecisions(

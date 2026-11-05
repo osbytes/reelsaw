@@ -9,7 +9,7 @@ import type { Logger } from "../src/log.js";
 
 const env = { language: "openai:gpt-4o-mini", transcription: "openai:whisper-1", align: "openai:whisper-1" };
 
-/** Just enough of drizzle for models.ts: one row keyed by `key`, plus the admin events it writes. */
+/** Just enough of drizzle for models.ts: one row keyed by `key`, plus the events it writes. */
 function fakeDb() {
   const rows = new Map<string, { key: string; value: Record<string, unknown>; updatedBy: string | null; updatedAt: Date }>();
   const events: unknown[] = [];
@@ -72,7 +72,7 @@ describe("supportsWordTimestamps", () => {
 });
 
 describe("createModelSettings", () => {
-  it("saves a verified override, applies it at once, records an admin event, and clears back to the environment", async () => {
+  it("saves a verified override, applies it at once, records an event, and clears back to the environment", async () => {
     const { db, rows, events } = fakeDb();
     const verified: string[] = [];
     const ms = createModelSettings(config, log, async (_k, id) => void verified.push(id), { pollMs: 0 });

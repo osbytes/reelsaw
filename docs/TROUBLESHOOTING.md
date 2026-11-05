@@ -130,6 +130,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
+| `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
@@ -441,7 +442,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   hour from a cursor in `instance_settings` (`sweep_state`; `reelsaw storage` shows it and the last run time). A
   manual `reelsaw storage sweep` has no budget. Retention and the bumper purge walk `(updated_at|deleted_at, id)`
   in batches of 200 for up to 30 s per tick. History pruning (`prune_state`) deletes 5,000 rows per statement for up
-  to 60 s per tick, once a day per table; the first run on a big `project_events` table takes several ticks. Progress
+  to 60 s per tick, once a day per table; the first run on a big `events` table takes several ticks. Progress
   ticks are persisted at most once per 10 s per stage and deleted when the stage completes or fails
   (`reelsaw status <id>` shows event counts).
 - **Live job lookups use `singleton_key`** (project id for stage jobs, clip id for render/prepare), which the

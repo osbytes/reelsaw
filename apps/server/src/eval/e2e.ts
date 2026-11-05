@@ -7,7 +7,7 @@
  *
  * Per profile: recreate the bench app container with the profile's env on top of the repo .env, wait
  * for /api/health, sign up a throwaway user, create a project from the source URL, poll until done or
- * failed, then read stage timings from project_events, the clips, what models ran (stage_artifacts)
+ * failed, then read stage timings from the events, the clips, what models ran (stage_artifacts)
  * and every LLM call (LLM_TRACE=logs lines in the container's LOG_FILE). Writes one JSON per run and a
  * summary.{md,json}. Nothing here touches the main stack: own project name, image, volumes, ports.
  *
@@ -284,12 +284,12 @@ async function waitForProject(pool: pg.Pool, projectId: string, opts: { since?: 
     if (row.status === "done" || row.status === "failed") {
       // a step re-run ends with the project back in "done": make sure that is a new finish, not the old one
       if (!opts.since) break;
-      const fin = await pool.query(
-        "select 1 from project_events where project_id = $1 and type in ('project.done','project.failed') and created_at >= $2 limit 1",
-        [projectId, opts.since],
-      );
+      const fin = await pool.query("select 1 from events where project_id = $1 and type in ('project.done','project.failed') and created_at >= $2 limit 1", [
+        projectId,
+        opts.since,
+      ]);
       const refineDone = await pool.query(
-        "select 1 from project_events where project_id = $1 and type = 'stage.completed' and payload->>'stage' = 'refine' and created_at >= $2 limit 1",
+        "select 1 from events where project_id = $1 and type = 'stage.completed' and payload->>'stage' = 'refine' and created_at >= $2 limit 1",
         [projectId, opts.since],
       );
       if (fin.rowCount || refineDone.rowCount) break;
@@ -305,7 +305,7 @@ async function waitForProject(pool: pg.Pool, projectId: string, opts: { since?: 
 async function stageSeconds(pool: pg.Pool, projectId: string, since: Date | undefined, fallbackStart: Date, fallbackEnd: Date, until: Date = fallbackEnd) {
   const events = (
     await pool.query(
-      "select type, payload, created_at from project_events where project_id = $1 and ($2::timestamptz is null or created_at >= $2) and created_at <= $3 order by id",
+      "select type, payload, created_at from events where project_id = $1 and ($2::timestamptz is null or created_at >= $2) and created_at <= $3 order by id",
       [projectId, since ?? null, new Date(until.getTime() + 5000)],
     )
   ).rows as Array<{ type: string; payload: Record<string, unknown>; created_at: Date }>;

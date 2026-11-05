@@ -8,6 +8,7 @@ import { ApiKeysSection } from "../components/ApiKeys";
 import { ShareLinksSection } from "../components/ShareLinks";
 import { WebhooksSection } from "../components/Webhooks";
 import { AccountSection } from "../components/AccountSection";
+import { EmailSection } from "../components/EmailSection";
 import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { LearningSection } from "../components/LearningSection";
@@ -41,9 +42,11 @@ function gb(mb: number) {
 type Section = readonly [id: string, label: string];
 
 /** Your account's sections, in page order (/settings; /settings/billing lands on #billing). */
-function accountSections(hasBilling: boolean): Section[] {
+function accountSections(hasBilling: boolean, hasEmail: boolean): Section[] {
   return [
     ["profile", "Profile"],
+    // only when this instance sends mail; #email is the link in the ready email's footer
+    ...(hasEmail ? ([["email", "Email"]] as const) : []),
     ...(hasBilling ? ([["billing", "Plan and billing"]] as const) : []),
     ["defaults", "Project defaults"],
     ["learning", "Learning"],
@@ -82,7 +85,8 @@ export function SettingsPage() {
   const isAdmin = me.data?.role === "admin";
   const hasBilling = !!me.data?.ee?.billing;
   const system = loc.pathname.endsWith("/system") && isAdmin;
-  const sections = system ? SYSTEM_SECTIONS : accountSections(hasBilling);
+  const hasEmail = !!me.data?.emailEnabled;
+  const sections = system ? SYSTEM_SECTIONS : accountSections(hasBilling, hasEmail);
   const ids = sections.map(([id]) => id);
   const active = useActiveSection(ids, loc.pathname === BILLING_PATH ? "billing" : undefined);
   const tab = ({ isActive }: { isActive: boolean }) =>
@@ -132,7 +136,7 @@ export function SettingsPage() {
 
         <div className="flex flex-col gap-4 md:grid md:grid-cols-[12rem_minmax(0,1fr)] md:gap-6">
           <SideNav sections={sections} active={active} users={system} />
-          <div className="flex min-w-0 flex-col gap-6">{system ? <SystemTab /> : <AccountTab hasBilling={hasBilling} />}</div>
+          <div className="flex min-w-0 flex-col gap-6">{system ? <SystemTab /> : <AccountTab hasBilling={hasBilling} hasEmail={hasEmail} />}</div>
         </div>
       </main>
     </ScrollArea>
@@ -253,11 +257,11 @@ function jumpTo(id: string, smooth = true) {
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
-function AccountTab({ hasBilling }: { hasBilling: boolean }) {
+function AccountTab({ hasBilling, hasEmail }: { hasBilling: boolean; hasEmail: boolean }) {
   const loc = useLocation();
   // the billing anchor exists before its lazy chunk does (the fallback holds its place), so a landing can scroll at once
   useLandOnSection(
-    accountSections(hasBilling).map(([id]) => id),
+    accountSections(hasBilling, hasEmail).map(([id]) => id),
     true,
     loc.pathname === BILLING_PATH ? "billing" : undefined,
   );
@@ -266,6 +270,7 @@ function AccountTab({ hasBilling }: { hasBilling: boolean }) {
       <div id="profile" className="scroll-mt-4">
         <AccountSection />
       </div>
+      {hasEmail && <EmailSection />}
       {hasBilling && (
         <div id="billing" className="flex scroll-mt-4 flex-col gap-6">
           <Suspense
@@ -404,7 +409,7 @@ function SystemTab() {
       <InstanceSettingsGroup
         id="operations"
         title="Operations"
-        intro="Watchdog, update checks and what the health endpoint tells anonymous callers."
+        intro="Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers."
         fields={OPERATIONS_FIELDS}
       />
       <InstanceSettingsGroup

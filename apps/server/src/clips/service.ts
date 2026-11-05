@@ -262,7 +262,7 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     if (!inserted) throw new Error("the clip row was not returned");
     // born "preparing": the prepare job and the run start go through the one prepare path
     await requestPrepare(svc, u, p.id, inserted.id, { mode: input.mode, reason: "clip_added" });
-    await u.emit(p.id, "clip.created", { clipId: inserted.id, index, title: inserted.title });
+    await u.emit("clip.created", { projectId: p.id, clipId: inserted.id, index, title: inserted.title });
     if (byOwner(actor, p)) {
       await recordDecisions(svc, u.db, p, async () => {
         const [text] = await rangeTexts(u.db, p.id, [inserted]);

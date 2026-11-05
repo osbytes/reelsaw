@@ -45,7 +45,7 @@ describe("accounts", () => {
 
   after(async () => {
     await pool.query(`delete from "user" where id = any($1)`, [[admin.userId, user.userId, pending.userId, victim.userId]]);
-    await pool.query(`delete from admin_events where user_id = any($1)`, [[admin.userId, user.userId, pending.userId, victim.userId]]);
+    await pool.query(`delete from events where user_id = any($1)`, [[admin.userId, user.userId, pending.userId, victim.userId]]);
     await pool.end();
   });
 
@@ -88,7 +88,7 @@ describe("accounts", () => {
     assert.deepEqual(r.data, { ok: true, changed: true });
     const list2 = await trpc(pending.cookie, "projects.list", undefined, "GET");
     assert.equal(list2.status, 200);
-    const ev = await pool.query(`select type from admin_events where user_id = $1 order by id`, [pending.userId]);
+    const ev = await pool.query(`select type from events where user_id = $1 order by id`, [pending.userId]);
     assert.deepEqual(
       ev.rows.map((e) => e.type),
       ["user.signed_up", "user.approved"],
@@ -155,7 +155,7 @@ describe("accounts", () => {
     const again = await trpc(locked.cookie, "me.completePasswordChange", { password: `again-${randomUUID()}` });
     assert.equal(again.error?.data.code, "BAD_REQUEST");
     await pool.query(`delete from "user" where id = $1`, [locked.userId]);
-    await pool.query(`delete from admin_events where user_id = $1`, [locked.userId]);
+    await pool.query(`delete from events where user_id = $1`, [locked.userId]);
   });
 
   it("changes roles and removes an account with its projects", async () => {

@@ -79,7 +79,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 **Hosting and accounts**
 
-- **Accounts, approval and quotas** – the first account is the admin; `SIGNUP_MODE=open|approval|closed` decides who gets in, and admins approve, suspend, promote and remove people on the **Users** page, with usage per account (projects, source minutes, clips, model calls and tokens, stored bytes). Optional per-user quotas, retention of old files, captcha on sign-in, email (approval notices, password reset, verification) and terms/privacy links. Everyone has their own **Project defaults** (vocabulary, instructions, language, clip length, pauses, caption style, intro and outro) and API keys.
+- **Accounts, approval and quotas** – the first account is the admin; `SIGNUP_MODE=open|approval|closed` decides who gets in, and admins approve, suspend, promote and remove people on the **Users** page, with usage per account (projects, source minutes, clips, model calls and tokens, stored bytes). Optional per-user quotas, retention of old files, captcha on sign-in, email (approval notices, password reset, verification, and a note when clips finish if you've stepped away) and terms/privacy links. Everyone has their own **Project defaults** (vocabulary, instructions, language, clip length, pauses, caption style, intro and outro) and API keys.
 - **Models and providers at runtime** – admins switch the language, transcription and alignment models under Settings → System → Models without a restart: pick a provider, enter its key or server URL there (stored encrypted, never shown again), and choose from live model lists; local Ollama and Speaches models download with a progress bar. Keys and models are tested when saved.
 
 **Operations**
@@ -296,11 +296,21 @@ it). To promote an account from the shell: `docker compose exec app reelsaw make
 you@example.com`.
 
 Email (`EMAIL_DRIVER=smtp|resend`, `EMAIL_FROM`, `SMTP_URL` or `RESEND_API_KEY`) turns on approval
-notices, password reset and, with `REQUIRE_EMAIL_VERIFICATION=true`, verification before the
-first sign-in. Confirmation and reset links work for 24 hours and only once; an expired link lands
-on a page that sends a new one. Sign-in has **Forgot password?** when email is on; choosing a new
-password signs out other devices. Without email everything else works; approvals are handled on
-the Users page.
+notices, password reset, the ready note and, with `REQUIRE_EMAIL_VERIFICATION=true`, verification
+before the first sign-in. Confirmation and reset links work for 24 hours and only once; an expired
+link lands on a page that sends a new one. Sign-in has **Forgot password?** when email is on;
+choosing a new password signs out other devices. Without email everything else works; approvals
+are handled on the Users page.
+
+The ready note is one email when projects finish and you have not come back to see them. The first
+project to finish schedules it (`EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES`, default 20, Settings → System →
+Operations); another project that finishes while it is waiting joins the same note instead of
+sending its own. Opening the app, or an API or MCP call, counts as being here, so clips you stayed to
+watch are left out of the note. The first project, and later the 10th, 25th, 50th and 100th,
+get a line of their own. Nothing is sent when email is off. Each note has a one-click unsubscribe
+(the `List-Unsubscribe` header mail apps show, and a link in the footer); people can also turn it
+off under Settings → Account, with `set_email_preferences` over MCP, or an operator with
+`reelsaw email-prefs <email> --ready off`. Optional mail is split into topics (today `ready`), each with its own switch and its own unsubscribe link, so later kinds of mail can be turned off one at a time.
 
 ## Hosting for many people
 
@@ -525,6 +535,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
+| `get_email_preferences` | Which optional emails you get, by topic. |
+| `set_email_preferences` | Turn topics of optional email on or off; omitted topics stay as they are. |
 | `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
 | `list_transcript_flags` | The fixes Reelsaw made or suggests in a project's transcript: misheard names, fillers and repetitions to cut, and your own cuts and corrections. |
@@ -631,6 +643,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
+| `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
@@ -645,7 +658,7 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | --- | --- |
 | Models (language, transcription, alignment) | `.env` (`AI_MODEL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPT_ALIGN_MODEL`) then the admin's runtime override (Settings → System → Models, stored in `instance_settings`). A stage already running keeps the model it started with. |
 | Provider keys and URLs | `.env` then the encrypted keys admins enter in Settings. |
-| Instance settings (sign-up mode, email verification, captcha, legal links, quotas, upload limits, refine-stage gates, retention, stall watchdog, update check, health details) | `.env` then the admin's runtime override (Settings → System, `reelsaw settings`, `set_instance_settings`; stored in `instance_settings`, applied by every process within seconds). An override whose precondition goes away (email verification without an email driver) is ignored and shown as such. |
+| Instance settings (sign-up mode, email verification, captcha, legal links, quotas, upload limits, refine-stage gates, retention, stall watchdog, ready-email delay, update check, health details) | `.env` then the admin's runtime override (Settings → System, `reelsaw settings`, `set_instance_settings`; stored in `instance_settings`, applied by every process within seconds). An override whose precondition goes away (email verification without an email driver) is ignored and shown as such. |
 | Refine gates (`TRANSCRIPT_CORRECTION`, `DISFLUENCY_REMOVAL`, `DISFLUENCY_LLM`, `REFINE_SCENES` = the on-screen text scan; shot cuts are always detected) | `.env` then the instance setting (Settings → System → Pipeline). `TRANSCRIPT_CORRECTION` and `REFINE_SCENES` default **on**, the disfluency gates **off**. That value is a **ceiling**: when off, every project skips the step. When on, each project's `refineEntities` / `refineDisfluency` / `disfluencyLlm` / `refineScenes` (and the user's Project defaults) decides: name fixes and the text scan run unless turned off, filler removal only when turned on. |
 | Other stage knobs (`TRANSCRIPT_BIAS`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
 | A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |

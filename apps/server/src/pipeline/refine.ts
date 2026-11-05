@@ -82,7 +82,7 @@ export async function enqueueRefine(
     throw new StaleJobError(projectId, seq);
   }
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
-  await u.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
+  await u.emit("stage.started", { projectId: projectId, stage: "refine", status: "refining", steps: toRun });
   for (const s of toRun) await u.enqueue(REFINE_QUEUE[s], { projectId });
   if (!toRun.length) await finishIfComplete(svc, projectId, u);
   return true;
@@ -144,7 +144,8 @@ export async function mergeRefine(
     if (result.status === "failed" && result.error !== undefined) {
       // a step that gave up: its stage.failed commits with the "failed" status it announces
       const durationSec = await stageElapsed(tx, projectId, "refine");
-      await u.emit(projectId, "stage.failed", {
+      await u.emit("stage.failed", {
+        projectId: projectId,
         stage: "refine",
         step,
         error: result.error.slice(0, 500),
@@ -195,9 +196,17 @@ export async function mergeRefine(
       })
       .where(eq(schema.transcripts.projectId, projectId));
     const finished = REFINE_STEPS.filter((s) => refine[s] === "done" || refine[s] === "failed").length;
-    await u.emit(projectId, "stage.progress", { stage: "refine", progress: finished / REFINE_STEPS.length, message: `${step} ${result.status}`, step, refine });
+    await u.emit("stage.progress", {
+      projectId: projectId,
+      stage: "refine",
+      progress: finished / REFINE_STEPS.length,
+      message: `${step} ${result.status}`,
+      step,
+      refine,
+    });
     if (result.skipped)
-      await u.emit(projectId, "stage.progress", {
+      await u.emit("stage.progress", {
+        projectId: projectId,
         stage: "refine",
         step,
         skipped: { status: "skipped", reason: result.skipped },
@@ -222,7 +231,7 @@ export async function finishIfComplete(svc: Services, projectId: string, u?: Uni
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.status, "refining")))
     .returning({ id: schema.projects.id });
   if (!moved.length) return;
-  await u.emit(projectId, "stage.completed", { stage: "refine", ...(durationSec !== undefined ? { durationSec } : {}), refine: t.refine });
+  await u.emit("stage.completed", { projectId: projectId, stage: "refine", ...(durationSec !== undefined ? { durationSec } : {}), refine: t.refine });
   await u.enqueue(QUEUES.analyze, { projectId });
 }
 
@@ -233,7 +242,7 @@ async function markRunning(ctx: StageContext, step: RefineStep) {
       .update(schema.transcripts)
       .set({ refine: sql`coalesce(${schema.transcripts.refine}, '{}'::jsonb) || ${JSON.stringify({ [step]: "running" })}::jsonb` })
       .where(eq(schema.transcripts.projectId, ctx.projectId));
-    await u.emit(ctx.projectId, "stage.progress", { stage: "refine", step, message: `${step} running` });
+    await u.emit("stage.progress", { projectId: ctx.projectId, stage: "refine", step, message: `${step} running` });
   });
 }
 

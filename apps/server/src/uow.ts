@@ -14,11 +14,12 @@ import type pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RERUN_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
+import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
+import { eventRow, eventSubject, isProjectEventType, type EventPayload, type EventType } from "./event-types.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -41,8 +42,16 @@ export type Surface = "web" | "api" | "mcp" | "cli";
 export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
-  /** persist an event and NOTIFY listeners; both take effect at commit */
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
+  /**
+   * The one way to record an event (event-types.ts has every type). It writes on this unit's transaction,
+   * the same connection as `db`, so the event commits or rolls back with the rows written beside it; there
+   * is no database to pass. Written to `events`, its handlers'
+   * jobs queued (event-handler-map.ts), and for a project event the NOTIFY for live streams and the
+   * webhook deliveries, all taking effect at commit. The payload names what it is about (`projectId`,
+   * or an account event's `userId`). `actorId` defaults to the account whose request this is; pass it
+   * when someone else acted (an admin), or null for the system.
+   */
+  emit<T extends EventType>(type: T, payload: EventPayload<T>, meta?: { actorId?: string | null }): Promise<number>;
   /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
   enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
@@ -57,7 +66,7 @@ export interface UnitOfWork {
 
 export type RunInTx = <T>(fn: (u: UnitOfWork) => Promise<T>) => Promise<T>;
 
-/** Events that are state transitions: logged at the level a person reading the log should care about. */
+/** Events logged above their default (debug for a project's, info for an account's): the level a person reading the log should care about. */
 const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "project.created": "info",
   "run.started": "info",
@@ -79,6 +88,12 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "clip.overlay_skipped": "warn",
   "clip.cut_unverified": "warn",
   "job.stalled": "warn",
+  // account events default to info
+  "user.flagged": "warn",
+  "user.banned": "warn",
+  "webhook.disabled": "warn",
+  "billing.payment_failed": "warn",
+  "billing.unknown_price": "warn",
 };
 
 /** The scalar fields of an event payload (counts, durations, reasons), trimmed: enough to read the log without the event feed. */
@@ -141,11 +156,12 @@ export function createUnitOfWork(
   instanceLimits?: () => InstanceLimits,
   entitlements: () => Entitlements | null = () => null,
   telemetry?: Telemetry,
+  eventHandlers?: { handlers: readonly EventHandlerMap[]; deps: () => EventHandlerDeps },
 ): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
-    const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
+    const emitted: EmittedEvent[] = [];
     /** jobs a person asked for in this unit (product analytics, sent after commit) */
     const requested: Array<{ queue: QueueName; projectId: string; clipId?: string }> = [];
     let result;
@@ -155,13 +171,22 @@ export function createUnitOfWork(
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, payload = {}) {
-          emitted.push({ projectId, type, payload });
-          const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
-          await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
-          // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
-          if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, row!.id, projectId, type);
-          return row!.id;
+        async emit(type, payload, meta) {
+          const actorId = meta && "actorId" in meta ? (meta.actorId ?? null) : (requestedBy.getStore()?.userId ?? null);
+          const [row] = await db
+            .insert(schema.events)
+            .values(eventRow(type, payload, actorId))
+            .returning({ id: schema.events.id });
+          const id = row!.id;
+          emitted.push({ id, type, actorId, payload });
+          if (isProjectEventType(type)) {
+            const { projectId } = eventSubject(payload);
+            if (!projectId) throw new Error(`${type} without its projectId`);
+            await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id, projectId })]);
+            // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
+            if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, id, projectId, type);
+          }
+          return id;
         },
         async enqueue(q, data, opts) {
           let a = await queue.admission(data, exec);
@@ -199,6 +224,17 @@ export function createUnitOfWork(
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
+      // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
+      if (eventHandlers && emitted.length) {
+        for (const r of await eventHandlerJobs(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
+          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfterSeconds: r.startAfter });
+          // null: the handler coalesces and a job is already waiting for this key
+          log.debug(
+            { handler: r.handler, event: r.data.event.type, ...eventSubject(r.data.event.payload), key: r.data.key, jobId },
+            jobId ? "event handler job queued" : "event handler job already queued",
+          );
+        }
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
@@ -206,17 +242,26 @@ export function createUnitOfWork(
     } finally {
       client.release();
     }
-    // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
+    // committed: every event is also a log line carrying its ids and who did it, so a log alone tells the
+    // story. This is the one place events are logged: an emit site does not log the same fact again.
     const who = requestedBy.getStore();
     for (const e of emitted) {
+      const { projectId, userId } = eventSubject(e.payload);
+      const actor = e.actorId ? { actorId: e.actorId } : {};
+      if (!projectId) {
+        // the account's address stays out of the log: the event row has it
+        const fields = Object.fromEntries(Object.entries(e.payload).filter(([k]) => k !== "email" && k !== "userId"));
+        log[EVENT_LEVEL[e.type] ?? "info"]({ userId, ...actor, event: e.type, ...eventFields(fields) }, "account event");
+        continue;
+      }
       const level = EVENT_LEVEL[e.type] ?? "debug";
-      log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
+      log[level]({ projectId, ...actor, event: e.type, ...eventFields(e.payload) }, "project event");
       const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
       if (telemetry && product) {
         // the owner is the distinct id (an admin acting on someone's project is not them); the surface is the request's
-        const properties = { projectId: e.projectId, ...product.properties, ...(who ? { surface: who.surface } : {}) };
+        const properties = { projectId, ...product.properties, ...(who ? { surface: who.surface } : {}) };
         void pool
-          .query<{ user_id: string }>("select user_id from projects where id = $1", [e.projectId])
+          .query<{ user_id: string }>("select user_id from projects where id = $1", [projectId])
           .then((r) => r.rows[0] && telemetry.capture(product.event, r.rows[0].user_id, properties))
           .catch(() => {});
       }

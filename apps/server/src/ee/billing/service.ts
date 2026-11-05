@@ -7,7 +7,7 @@
  *     (one unit of work; a failure returns 5xx and Stripe redelivers). The event id is the primary key, so a
  *     redelivery is a no-op that still gets a 200.
  *   - The sync job reads the subscription from Stripe at run time, locks the account's billing row, rewrites
- *     it and writes the admin events for whatever changed, in one transaction. Events that arrive out of
+ *     it and writes the events for whatever changed, in one transaction. Events that arrive out of
  *     order or twice converge on the same row. pg-boss retries a failed sync; one sync per subscription at a
  *     time (`exclusive` + singletonKey), and a sync queued while one runs waits its turn.
  *   - A daily reconcile (and `reelsaw billing sync`) walks Stripe's subscriptions and every pending event, so
@@ -337,7 +337,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
 
   /**
    * Rewrite the account's billing row from Stripe. Idempotent and convergent: whatever events were missed or
-   * reordered, the row ends up as Stripe has it now. One transaction: lock, upsert, admin events, mark events.
+   * reordered, the row ends up as Stripe has it now. One transaction: lock, upsert, events, mark billing events.
    */
   async function sync(
     subscriptionId: string,
@@ -422,13 +422,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd ||
         cur.periodEnd?.getTime() !== next.periodEnd?.getTime() ||
         cur.stripeSubscriptionId !== next.stripeSubscriptionId;
-      const base = { actorId: null, userId, email: account.email };
+      const base = { userId, email: account.email };
       const ids = { subscriptionId, plan: next.plan, interval: next.interval, status: next.status };
       const audit = async (
         type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.canceled",
         payload: Record<string, unknown>,
       ) => {
-        await u.db.insert(schema.adminEvents).values({ ...base, type, payload });
+        await u.emit(type, { ...base, ...payload }, { actorId: null });
         u.afterCommit(() => {
           svc.telemetry.capture(type, userId, { plan: next!.plan, interval: next!.interval, status: next!.status });
           // the plan in force as a person property, so every event segments by plan (Free once a cancellation ends it)
@@ -445,7 +445,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       // a price no plan matches puts the account on Free without anyone being told: say so once per price
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
-        await u.db.insert(schema.adminEvents).values({ ...base, type: "billing.unknown_price", payload: { ...ids, priceId: next.priceId, message } });
+        await u.emit("billing.unknown_price", { ...base, ...ids, priceId: next.priceId, message }, { actorId: null });
         u.afterCommit(() => slog.error({ err: new Error(message), userId, priceId: next!.priceId }, "subscription price unknown"));
       }
       await markProcessed(u, subscriptionId, readAt);
@@ -681,10 +681,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         };
         await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       } else if (cur) await u.db.delete(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId));
-      await u.db
-        .insert(schema.adminEvents)
-        .values({ type: "billing.complimentary", actorId, userId, email: user.email, payload: { plan, from: cur?.plan ?? null } });
-      u.afterCommit(() => log.info({ userId, plan, actorId }, "complimentary plan set"));
+      await u.emit("billing.complimentary", { userId, email: user.email, plan, from: cur?.plan ?? null }, { actorId });
       return { ok: true, plan };
     });
   }
@@ -693,21 +690,43 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * Called inside the transaction that deletes an account: remembers what to cancel at Stripe and returns the
    * after-commit task. Best effort there; a failure is logged and the daily reconcile lists the orphan.
    */
-  async function detachUser(u: UnitOfWork, userId: string): Promise<() => Promise<void>> {
+  /**
+   * The account is being removed (accounts.ts removeUser, in its unit of work): read what Stripe holds for it
+   * before the rows cascade away, and emit `billing.detached` with it. Its handler (ee/event-handlers.ts)
+   * cancels at Stripe after commit, with retries: a crash or a Stripe outage cannot leave it billing.
+   */
+  async function detachUser(u: UnitOfWork, userId: string, email: string): Promise<void> {
     const row = await u.db.query.billingSubscriptions.findFirst({ where: eq(schema.billingSubscriptions.userId, userId) });
     const customer = await u.db.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, userId) });
-    return async () => {
-      try {
-        if (row?.stripeSubscriptionId && isLive(row.status)) await stripe.subscriptions.cancel(row.stripeSubscriptionId, { prorate: false });
-        if (customer) await stripe.customers.update(customer.stripeCustomerId, { metadata: { userId: "", removedAt: new Date().toISOString() } });
-        log.info({ userId, subscriptionId: row?.stripeSubscriptionId ?? null }, "account removed; subscription canceled at Stripe");
-      } catch (err) {
-        log.error(
-          { err, userId, subscriptionId: row?.stripeSubscriptionId ?? null },
-          "could not cancel the removed account's subscription at Stripe; cancel it by hand",
-        );
-      }
-    };
+    const subscriptionId = row?.stripeSubscriptionId && isLive(row.status) ? row.stripeSubscriptionId : null;
+    const customerId = customer?.stripeCustomerId ?? null;
+    if (!subscriptionId && !customerId) return;
+    await u.emit("billing.detached", { userId, email, subscriptionId, customerId, removedAt: new Date().toISOString() });
+  }
+
+  /**
+   * `billing.detached`'s handler: cancel the subscription and clear the customer's link to the account.
+   * Idempotent: an already-canceled or missing subscription is done, and each call's idempotency key names
+   * what it changes (`cancel:<subscription>`, `detach:<customer>`), so a retry, or a second event about the
+   * same removal, is answered from Stripe's idempotency cache instead of acting twice.
+   */
+  async function cancelDetached(d: { userId: string; subscriptionId: string | null; customerId: string | null; removedAt: string }): Promise<void> {
+    const missing = (err: unknown) => err instanceof Stripe.errors.StripeError && err.code === "resource_missing";
+    if (d.subscriptionId) {
+      const sub = await stripe.subscriptions.retrieve(d.subscriptionId).catch((err: unknown) => {
+        if (missing(err)) return null;
+        throw err;
+      });
+      if (sub && sub.status !== "canceled")
+        await stripe.subscriptions.cancel(d.subscriptionId, { prorate: false }, { idempotencyKey: `cancel:${d.subscriptionId}` });
+    }
+    if (d.customerId)
+      await stripe.customers
+        .update(d.customerId, { metadata: { userId: "", removedAt: d.removedAt } }, { idempotencyKey: `detach:${d.customerId}` })
+        .catch((err: unknown) => {
+          if (!missing(err)) throw err;
+        });
+    log.info({ userId: d.userId, subscriptionId: d.subscriptionId }, "account removed; subscription canceled at Stripe");
   }
 
   /** `reelsaw billing <user>`: the row, the customer, and Stripe's view side by side. */
@@ -759,6 +778,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     plansOf,
     setComplimentary,
     detachUser,
+    cancelDetached,
     inspect,
   };
 }

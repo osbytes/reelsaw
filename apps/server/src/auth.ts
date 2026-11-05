@@ -16,6 +16,7 @@ import type { Logger } from "./log.js";
 import type { InstanceSettings } from "./instance-settings.js";
 import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
 import type { Telemetry } from "./telemetry.js";
+import type { RunInTx } from "./uow.js";
 import { FIRST_ADMIN_LOCK } from "./locks.js";
 import { EMAIL_VERIFY_EXPIRES_IN_SEC, rememberEmailVerifyToken, withLoginCallback } from "./email-verify.js";
 
@@ -42,7 +43,11 @@ export function withClientIp(req: Request, trust: Pick<Config, "TRUST_PROXY" | "
   return new Request(req, { headers });
 }
 
-export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, telemetry?: Telemetry) {
+/**
+ * `tx` is the services' unit of work, read when a sign-up happens (it is built after auth): the sign-up's
+ * event goes through it so the admins' "waiting for approval" mail commits with it (notify/account.ts).
+ */
+export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, tx: () => RunInTx, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
   // read them at request time, never once here. Better Auth checks `emailAndPassword.*` on the options
   // object it was given, so those fields are kept current from the settings' subscription.
@@ -167,9 +172,10 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             if (first) firstCandidates.add(user.email);
             return { data: { ...user, ...guard, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
           },
-          // Better Auth owns the user insert, so this audit row cannot share its transaction. It is a
+          // Better Auth owns the user insert, so this event cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
-          // and the gate read the user row). Admin actions in accounts.ts commit row + event together.
+          // and the gate read the user row). Its handler mails the admins when the sign-up waits for
+          // approval (notify/account.ts). Admin actions in accounts.ts commit row + event together.
           after: async (user) => {
             let u = user as typeof user & { role?: string; approvedAt?: Date | null };
             if (firstCandidates.delete(u.email)) {
@@ -183,16 +189,18 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
               });
               u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode() === "open" ? (u.approvedAt ?? new Date()) : null };
             }
-            await db
-              .insert(schema.adminEvents)
-              .values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() } });
+            const signedUp = u;
+            await tx()((w) =>
+              w.emit(
+                "user.signed_up",
+                { userId: signedUp.id, email: signedUp.email, role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode() },
+                { actorId: signedUp.id },
+              ),
+            );
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
             // id and role only: no email or name goes to PostHog
             telemetry?.identify(u.id, { role: u.role ?? "user" });
             telemetry?.capture("user.signed_up", u.id, { mode: mode(), approved: !!u.approvedAt });
-            if (u.approvedAt) return;
-            const admins = await db.query.user.findMany({ where: eq(schema.user.role, "admin"), columns: { email: true } });
-            for (const a of admins) void email.send({ to: a.email, ...templates.waitingForApproval(config.APP_URL, u.name, u.email) });
           },
         },
       },

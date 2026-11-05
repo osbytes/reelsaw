@@ -48,7 +48,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `SIGNUP_MODE` | unset | `open`: anyone may sign up. `approval`: new accounts wait for an admin (a private box). `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. A public instance with email confirmation, captcha and quotas should stay `open`. Runtime setting: admins can change it under Settings → System without a restart. Values: `open | approval | closed`. |
 | `ALLOW_SIGNUP` | unset | Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE. |
-| `EMAIL_DRIVER` | `none` | Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off. Values: `none | smtp | resend`. |
+| `EMAIL_DRIVER` | `none` | Outgoing mail for approval notices, password resets, verification and the ready note (clips finished while you were away): `none`, `smtp` or `resend`. `none` leaves those features off. Values: `none | smtp | resend`. |
+| `EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES` | `20` | Minutes to wait after the first project in a batch finishes before the ready email, so several projects become one note (1–180, default 20). The note is sent only when an email driver is set and the account has not come back since those projects finished. Runtime setting: admins can change it under Settings → System without a restart. |
 | `EMAIL_FROM` | unset | Sender, e.g. `Reelsaw <no-reply@example.com>`. Required with an email driver. |
 | `SMTP_URL` | unset | SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp. |
 | `RESEND_API_KEY` | unset | Required with EMAIL_DRIVER=resend. |

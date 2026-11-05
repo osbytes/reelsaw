@@ -1,10 +1,10 @@
 /**
  * Account administration: approve, change role, suspend, remove, set password. One function per
- * transition, each a unit of work that writes the user row and its admin event together and sends
- * mail after commit. tRPC (admin router) and the CLI call these; nothing else edits role/approval
+ * transition, each a unit of work that writes the user row and its event (`u.emit`)
+ * together; mail that follows is a handler on the event (notify/account.ts). tRPC (admin router) and the CLI call these; nothing else edits role/approval
  * columns or the credential hash.
  */
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
@@ -12,14 +12,8 @@ import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError } from "@reelsaw/shared
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
-import { templates } from "./email.js";
 import { purgeProject } from "./projects/service.js";
 import type { UserRole } from "./db/schema.js";
-
-/** The admin event is the record; this is the same fact in the log, written once the change has committed. */
-function audit(svc: Services, u: UnitOfWork, action: string, actorId: string | null, userId: string) {
-  u.afterCommit(() => svc.log.child({ module: "accounts", userId }).info({ action, actorId }, "admin action"));
-}
 
 async function lockedUser(u: UnitOfWork, id: string) {
   const [row] = await u.db.select().from(schema.user).where(eq(schema.user.id, id)).for("update");
@@ -40,9 +34,7 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     const user = await lockedUser(u, userId);
     if (user.approvedAt) return { ok: true, changed: false };
     await u.db.update(schema.user).set({ approvedAt: new Date(), updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.approved", actorId, userId, email: user.email, payload: {} });
-    audit(svc, u, "user.approved", actorId, userId);
-    u.afterCommit(() => svc.email.send({ to: user.email, ...templates.approved(svc.config.APP_URL) }));
+    await u.emit("user.approved", { userId, email: user.email }, { actorId });
     // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
     u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
     return { ok: true, changed: true };
@@ -58,8 +50,7 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
     if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0)
       throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.role_changed", actorId, userId, email: user.email, payload: { from: user.role, to: role } });
-    audit(svc, u, "user.role_changed", actorId, userId);
+    await u.emit("user.role_changed", { userId, email: user.email, from: user.role, to: role }, { actorId });
     return { ok: true, changed: true };
   });
 }
@@ -72,8 +63,7 @@ export async function banUser(svc: Services, actorId: string, userId: string, re
     await u.db.update(schema.user).set({ banned: true, banReason: reason, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     // their browser sessions end now; API keys fail at the next request (requester reads the row)
     await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.banned", actorId, userId, email: user.email, payload: { reason } });
-    audit(svc, u, "user.banned", actorId, userId);
+    await u.emit("user.banned", { userId, email: user.email, reason }, { actorId });
     return { ok: true };
   });
 }
@@ -82,8 +72,7 @@ export async function unbanUser(svc: Services, actorId: string, userId: string) 
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     await u.db.update(schema.user).set({ banned: false, banReason: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.db.insert(schema.adminEvents).values({ type: "user.unbanned", actorId, userId, email: user.email, payload: {} });
-    audit(svc, u, "user.unbanned", actorId, userId);
+    await u.emit("user.unbanned", { userId, email: user.email }, { actorId });
     return { ok: true };
   });
 }
@@ -95,16 +84,16 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own account from here." });
     if (user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin." });
     const projects = await u.db.query.projects.findMany({ where: eq(schema.projects.userId, userId), columns: { id: true } });
-    // hosted: the Stripe subscription must stop billing too; read what to cancel before the rows cascade away
-    const cancelAtStripe = svc.ee ? await svc.ee.billing.detachUser(u, userId) : null;
+    // hosted: the Stripe subscription must stop billing too. Read what to cancel before the rows cascade away;
+    // the cancel is a handler on the `billing.detached` event this commits (ee/event-handlers.ts)
+    if (svc.ee) await svc.ee.billing.detachUser(u, userId, user.email);
     // removing an account is final: its projects (deleted ones included) go now, not after the restore window
     for (const p of projects) await purgeProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
     await u.db.delete(schema.sourceUsage).where(eq(schema.sourceUsage.userId, userId)); // no FK: it outlives project purges, not the account
-    await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
-    audit(svc, u, "user.removed", actorId, userId);
-    // after commit, best effort: a failure is logged and the daily reconcile lists the orphan
-    if (cancelAtStripe) u.afterCommit(cancelAtStripe);
+    // its projects' history outlives a purge (like its decisions), not the account; its account events stay as the record
+    await u.db.delete(schema.events).where(and(eq(schema.events.userId, userId), isNotNull(schema.events.projectId)));
+    await u.emit("user.removed", { userId, email: user.email, projects: projects.length }, { actorId });
     return { ok: true, projects: projects.length };
   });
 }
@@ -120,15 +109,14 @@ export async function setUserWatermark(svc: Services, actorId: string | null, us
       .insert(schema.userSettings)
       .values({ userId, watermark })
       .onConflictDoUpdate({ target: schema.userSettings.userId, set: { watermark, updatedAt: new Date() } });
-    await u.db.insert(schema.adminEvents).values({ type: "user.watermark_changed", actorId, userId, email: user.email, payload: { watermark } });
-    audit(svc, u, "user.watermark_changed", actorId, userId);
+    await u.emit("user.watermark_changed", { userId, email: user.email, watermark }, { actorId });
     return { ok: true, watermark };
   });
 }
 
 /**
  * Per-user quota overrides (null = back to the instance setting). One statement merges the
- * patch into the jsonb (no read-modify-write), and the admin event commits with it.
+ * patch into the jsonb (no read-modify-write), and the event commits with it.
  */
 export async function setUserLimits(svc: Services, actorId: string, userId: string, patch: Record<string, number | null>) {
   const set = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== null)) as Record<string, number>;
@@ -146,8 +134,7 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
         },
       })
       .returning({ limits: schema.userSettings.limits });
-    await u.db.insert(schema.adminEvents).values({ type: "user.limits_changed", actorId, userId, email: user.email, payload: { limits: row!.limits } });
-    audit(svc, u, "user.limits_changed", actorId, userId);
+    await u.emit("user.limits_changed", { userId, email: user.email, limits: row!.limits }, { actorId });
     return { ok: true, overrides: row!.limits };
   });
 }
@@ -200,8 +187,7 @@ export async function setUserPassword(
     else await u.db.insert(schema.account).values({ id: randomUUID(), accountId: userId, providerId: CREDENTIAL, userId, password: hash });
     await u.db.update(schema.user).set({ mustChangePassword: opts.mustChange, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await dropSessions(u, userId, opts.keepSessionId);
-    await u.db.insert(schema.adminEvents).values({ type: "user.password_set", actorId, userId, email: user.email, payload: { mustChange: opts.mustChange } });
-    audit(svc, u, "user.password_set", actorId, userId);
+    await u.emit("user.password_set", { userId, email: user.email, mustChange: opts.mustChange }, { actorId });
     return { ok: true as const };
   });
 }

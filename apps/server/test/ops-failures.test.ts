@@ -85,7 +85,7 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
     const jobs = await h.jobsFor(ids);
     assert.equal(jobs.filter((j) => j.name === QUEUES.ingest).length, 2);
 
-    const ev = await h.pool.query(`select type, payload from admin_events where type = 'failures.retried' and user_id = $1 order by id desc limit 1`, [userId]);
+    const ev = await h.pool.query(`select type, payload from events where type = 'failures.retried' and user_id = $1 order by id desc limit 1`, [userId]);
     assert.equal(ev.rows[0]?.type, "failures.retried");
     assert.equal((ev.rows[0]!.payload as { retried: number }).retried, 2);
 

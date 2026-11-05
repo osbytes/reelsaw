@@ -92,7 +92,7 @@ const FEATURES = [
   {
     icon: Users,
     title: "Accounts, approval and quotas",
-    body: "The first account is the admin. Open, approval or closed sign-up, per-user quotas, retention, captcha, email notices and usage per account. Admins switch models and providers at runtime without a restart.",
+    body: "The first account is the admin. Open, approval or closed sign-up, per-user quotas, retention, captcha, email notices (including when clips are ready if you've stepped away) and usage per account. Admins switch models and providers at runtime without a restart.",
   },
   {
     icon: Database,

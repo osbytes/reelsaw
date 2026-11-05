@@ -223,7 +223,7 @@ export class StageContext {
         .where(currentStage(this.projectId, this.seq))
         .returning({ id: schema.projects.id });
       if (!row) throw new StaleJobError(this.projectId, this.seq);
-      await u.emit(this.projectId, "stage.started", { stage: this.stage, status });
+      await u.emit("stage.started", { projectId: this.projectId, stage: this.stage, status });
     });
   }
 
@@ -269,7 +269,7 @@ export class StageContext {
         .where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
       const payload = typeof extra === "function" ? await extra(u) : extra;
-      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...payload, ...(durationSec !== undefined ? { durationSec } : {}) });
+      await u.emit("stage.completed", { projectId: this.projectId, stage: this.stage, ...payload, ...(durationSec !== undefined ? { durationSec } : {}) });
       if (handoff) await handoff(u);
     });
   }
@@ -399,7 +399,7 @@ export async function failProject(svc: Services, projectId: string, stage: Pipel
       .update(schema.projects)
       .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), errorKind: errorKind(err), ...facts });
+    await u.emit("project.failed", { projectId: projectId, stage, error: message.slice(0, 1000), errorKind: errorKind(err), ...facts });
   });
 }
 
@@ -409,7 +409,8 @@ export async function stageFailedAttempt(svc: Services, projectId: string, stage
   const [cur] = await svc.database.db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq));
   if (!cur) return;
   const durationSec = await stageElapsed(svc.database.db, projectId, stage);
-  await svc.events.emit(projectId, "stage.failed", {
+  await svc.events.emit("stage.failed", {
+    projectId: projectId,
     stage,
     error: message.slice(0, 1000),
     attempt,

@@ -41,12 +41,66 @@ project already hit the problem it prevents.
   uses `u.db`, `u.emit`, `u.enqueue` and `u.cancelLiveJobs`. Never update with `svc.database.db`
   and then call `svc.events.emit` or `svc.queue.enqueue` afterwards. A crash between them leaves
   an event for a change that didn't happen, or a "pending" clip with no job.
+- **A side effect that must happen because of a change is an event handler, never `afterCommit`.**
+  Mail, a call to another service (cancelling at Stripe), anything whose loss someone would notice:
+  the change emits an event in its unit of work, and a handler on that event does the work. The
+  handler's job commits with the event, so a crash or a provider outage after COMMIT delays the work;
+  it never loses it, and pg-boss retries it. `u.afterCommit` is for best-effort work only: logs,
+  telemetry, deleting scratch or stored files that a sweep would also find. Mail a person is waiting
+  on in the request itself (password reset, email verification) is the one exception: they can ask
+  again.
+- **One events table, one emit.** Every event is `u.emit(type, payload, meta?)` into `events`, a
+  project's history and everything else alike; event-types.ts lists every type and its zod schema
+  (the project ones from `projectEventSchemas` in @reelsaw/shared, which the web reads too). The
+  payload names what the event is about, and the row's subject columns come from it: `project_id`
+  from `projectId` (a project event: the activity feed, live stream and webhooks read these),
+  `user_id` from an account event's `userId` or the project's owner, `actor_id` from the request's
+  account (or `meta.actorId`; null is the system). `u.emit` writes on the unit's own transaction (the
+  connection behind `u.db`), so the event commits or rolls back with the rows beside it. After commit
+  the unit of work logs every event once, with its ids and actor (an account's address left out): an
+  emit site doesn't log or "audit" the same fact again. Don't add another event table, a second emit
+  or a module's own outbox. An event that is about a project and an account is one event with both,
+  not two. Only `u.emit` runs handlers: a row written with `eventRow` outside a unit of work (instance
+  settings, model changes) or copied in (report import) follows with nothing. Events have no foreign
+  keys: a project's events outlive "Delete forever", like its decisions, and are forgotten with them
+  when the owner asks (`forgetDecisions`) or the account is removed; an account's own events outlive
+  the account as the record. A type a handler reads gets a real schema, not the loose object the
+  others start with.
+- **An idempotency key names what the effect is about, not the event or the job that caused it.**
+  Before choosing one (a handler's job key, a key handed to Resend or Stripe, a webhook id), work out
+  every way the effect can be asked for: retries of one job, a transition that ran twice, two events
+  about the same thing (a sibling `clip.done` after a re-run, a second `billing.detached` for one
+  removal). Key the effect by the thing those share: `approved:<account>`, `cancel:<subscription>`,
+  `webhook-disabled:<endpoint>:<when it was turned off>`. Keyed by the event id, siblings each act.
+  Keep the occurrence in the key when the same thing can rightly happen again (an endpoint turned
+  off, turned back on, and off again is two mails). A webhook's `webhook-id` (`evt_<event id>`) is a
+  message id, stable across retries of one delivery as Standard Webhooks requires; where a receiver
+  must collapse siblings, the payload names the occurrence (`clipId`, `runSeq`) for it to key on.
+- **Work that follows an event is a handler on it, not a call at the emit site.** Every handler is
+  listed in one map, `eventHandlerMap` in `event-handler-map.ts` (event type → handler
+  name → handler), so what follows each event is visible in one place; the handler itself lives with
+  its module (`readyEmail` in `notify/completion.ts`, the account mail in `notify/account.ts`). The
+  enterprise edition's handlers are the one other map, `eeEventHandlerMap` in
+  `ee/event-handlers.ts`, which services.ts adds after the open one when REELSAW_EE is on (a name on
+  one event in both is refused at boot). Each handler has its own pg-boss queue: `key` (select-only
+  reads on the emitting transaction; null skips) picks the job's key, and the unit of work writes
+  the job on the same connection just before COMMIT, so the event and every handler's job commit or
+  roll back together (a transactional outbox whose relay is pg-boss). `handle` runs after commit
+  with retries, idempotent per key; a provider that dedups (Resend, Stripe) gets a key naming
+  what the call does (above), so a retry or a sibling event after a call that went through is dropped. A handler reads the account or
+  project as it is when it runs (a removed account, a suspended one, a sign-up already approved get
+  nothing). Concurrency is opt-in and enforced by the queue's policy, not by hand: `coalesce` (a
+  waiting job for the key absorbs new ones) and `oneAtATime` (one running job per key, across
+  processes). Don't hand-roll claims or leases for that, and don't bring in a second outbox library:
+  the relay is the pg-boss we already run, monitor and retry with. Queue and worker options default
+  to `EVENT_HANDLER_DEFAULTS` and are overridden on the handler (`queue: { … }`); a handler's
+  settings are named `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`).
 - **Standalone `svc.events.emit` is only for notifications** that describe no state change, such as
   progress ticks. It is a single atomic statement (insert + NOTIFY).
 - **NOTIFY happens inside the transaction**, so listeners are only woken once the data they will
   read has committed.
 - **Files and other non-database side effects run after commit** (`u.afterCommit(…)`), or are
-  written under a versioned name. A rollback must never leave rows pointing at deleted files, or
+  written under a versioned name (mail and other must-happen effects are event handlers, above). A rollback must never leave rows pointing at deleted files, or
   files overwritten under a live row.
 - **A stage ends with its hand-off.** `ctx.complete(extra, async (u) => …)` writes the stage's
   results, emits `stage.completed` and enqueues the next stage in one commit.
@@ -67,9 +121,10 @@ project already hit the problem it prevents.
   atomic update rather than a lock.
   - A transaction that re-renders or deletes several clips locks them first (`lockProjectClips`, id
     order) and only then touches the project row.
-  - Inserting a `project_events` row (`u.emit`) takes `for key share` on the project. A project lock
-    taken after an emit must therefore be `for no key update`, never `for update`, or two
-    transactions that both emitted deadlock when they upgrade (`finalizeProjectIfDone`).
+  - Inserting a row that references the project (a clip, a stage artifact) takes `for key share` on
+    it. A project lock taken after such an insert must therefore be `for no key update`, never
+    `for update`, or two transactions that both inserted deadlock when they upgrade
+    (`finalizeProjectIfDone`).
   - `svc.tx` re-runs a unit that Postgres aborted for a deadlock or serialization failure (up to 3
     attempts), so units must keep their side effects in the unit (`emit`, `enqueue`, `afterCommit`).
 - **Work carries a version; stale work exits.** Each render request bumps `clips.render_gen`. A
@@ -124,6 +179,21 @@ project already hit the problem it prevents.
   the platform); a canonical, maintained library does it. Only then write it, and put it where the
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
+- **A count that must not go down lives in a ledger, never in history a user can delete or forget.**
+  Quota usage, first-video-free and the ready email's milestones count rows of `source_usage`, which
+  survives deleting a project, purging it and "forget what Reelsaw learned", and goes only with the
+  account. Events and decisions are history: a user may delete or forget them, so anything derived
+  from them (a total, "the 10th project") may drop, and must not be what a limit or a
+  once-only announcement reads. A new such count adds a column to that ledger, set once, rather
+  than counting events.
+- **A general helper gets a general name in a shared place, never a local one.** Cutting text
+  with an ellipsis, reading a number out of a payload, a person's first name: none of these is
+  about the module that first needs it. Write it once in `packages/shared` (or the app's `lib/`)
+  under the name of what it does (`truncate`, `finiteNumber`, `firstName`), taking the smallest
+  shape that works (`{ name }`, not a user row), and call it from there. A module-private
+  `clipLabel` or `greetingName` that wraps a general operation is the same helper written again,
+  under a name nobody will search for. Equally, don't wrap two lines in a helper with one caller
+  (`whenMailOn`, a lookup used once): inline it.
 
 #### Logging
 

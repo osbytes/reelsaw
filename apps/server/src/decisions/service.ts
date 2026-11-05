@@ -5,7 +5,7 @@
  * the source. tRPC `decisions.*`, MCP `list_decisions` / `export_decisions` / `forget_decisions` and
  * `reelsaw decisions …` all call these.
  */
-import { and, asc, count, desc, eq, gt, gte, lt, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, isNotNull, lt, sql } from "drizzle-orm";
 import type { DecisionKind, SourceRef, TranscriptFlag, TranscriptSegment, Word } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -334,12 +334,27 @@ export async function decisionSummary(db: Db, userId: string) {
   };
 }
 
-/** Delete a user's decisions: one project's (`projectId`) or all of them. Returns how many went. */
+/**
+ * Forget what Reelsaw learned from a user: their decisions, one project's (`projectId`) or all of them, and
+ * the event history of their projects that are gone (a deleted-forever project's events outlive it, like its
+ * decisions, until this). A live project's history stays: it is the project's activity, not what was learned.
+ * Returns how many decisions went.
+ */
 export async function forgetDecisions(db: Db, userId: string, o: { projectId?: string | undefined } = {}): Promise<number> {
   const gone = await db
     .delete(schema.userDecisions)
     .where(and(eq(schema.userDecisions.userId, userId), o.projectId ? eq(schema.userDecisions.projectId, o.projectId) : undefined))
     .returning({ id: schema.userDecisions.id });
+  const e = schema.events;
+  await db
+    .delete(e)
+    .where(
+      and(
+        eq(e.userId, userId),
+        o.projectId ? eq(e.projectId, o.projectId) : isNotNull(e.projectId),
+        sql`not exists (select 1 from projects p where p.id = ${e.projectId})`,
+      ),
+    );
   return gone.length;
 }
 

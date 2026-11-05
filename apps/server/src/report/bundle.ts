@@ -240,7 +240,7 @@ export async function createReportZip(
             where: eq(schema.clips.projectId, project.id),
             orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)],
           }),
-          db.query.projectEvents.findMany({ where: eq(schema.projectEvents.projectId, project.id), orderBy: asc(schema.projectEvents.id) }),
+          db.query.events.findMany({ where: eq(schema.events.projectId, project.id), orderBy: asc(schema.events.id) }),
           db.query.stageArtifacts.findMany({ where: eq(schema.stageArtifacts.projectId, project.id), orderBy: asc(schema.stageArtifacts.id) }),
         ]);
         const picked = new Set(reqSafe.clipIds);
@@ -301,12 +301,12 @@ export async function createReportZip(
           manifest.notes.push(`projects.json lists ${summaries.projects.length} of the instance's projects (in progress, recent failures, recently updated).`);
         const ids = summaries.projects.map((p) => p.id);
         const failures = ids.length
-          ? await db.query.projectEvents.findMany({
+          ? await db.query.events.findMany({
               where: and(
-                inArray(schema.projectEvents.projectId, ids),
-                inArray(schema.projectEvents.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[]),
+                inArray(schema.events.projectId, ids),
+                inArray(schema.events.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[]),
               ),
-              orderBy: desc(schema.projectEvents.id),
+              orderBy: desc(schema.events.id),
               limit: 200,
             })
           : [];
@@ -336,12 +336,12 @@ export async function createReportZip(
         addJson("projects.json", projects);
         const ids = projects.map((p) => p.id);
         const failures = ids.length
-          ? await db.query.projectEvents.findMany({
+          ? await db.query.events.findMany({
               where: and(
-                inArray(schema.projectEvents.projectId, ids),
-                inArray(schema.projectEvents.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[]),
+                inArray(schema.events.projectId, ids),
+                inArray(schema.events.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[]),
               ),
-              orderBy: desc(schema.projectEvents.id),
+              orderBy: desc(schema.events.id),
               limit: 100,
             })
           : [];

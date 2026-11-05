@@ -97,7 +97,7 @@ describe("render generations", { skip: notReady ?? false }, () => {
         .update(schema.clips)
         .set({ status: "done", outputKey })
         .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, gen)));
-      await u.emit(projectId, "clip.done", { clipId });
+      await u.emit("clip.done", { projectId: projectId, clipId });
       return true;
     });
   }

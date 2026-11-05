@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
+import type { EventType } from "../event-types.js";
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import type {
+  EmailPrefSource,
+  EmailTopic,
   ProjectSettings,
   UserProjectDefaults,
   ProjectStatus,
@@ -8,7 +11,6 @@ import type {
   ClipStatus,
   Word,
   TranscriptSegment,
-  ProjectEventType,
   ReframeMode,
   TranscriptFlag,
   RefineStatus,
@@ -58,6 +60,8 @@ export const user = pgTable(
     flags: jsonb("flags").$type<string[]>().notNull().default([]),
     /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
+    /** last seen in the web app (visible tab with recent input) or over MCP, coalesced (presence.ts). Null until then. */
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -179,48 +183,6 @@ export const apikey = pgTable(
   (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
 );
 
-/** Account-level audit trail: sign-ups, approvals, role changes, bans, model changes (admin page, email). */
-export const ADMIN_EVENT_TYPES = [
-  "user.signed_up",
-  "user.approved",
-  "user.role_changed",
-  "user.limits_changed",
-  "user.watermark_changed",
-  "user.flagged",
-  "user.banned",
-  "user.unbanned",
-  "user.removed",
-  "user.password_set",
-  "models.changed",
-  "provider.changed",
-  "settings.changed",
-  "failures.retried",
-  // billing (ee/): written by the subscription sync, never by a webhook handler directly
-  "billing.subscribed",
-  "billing.changed",
-  "billing.payment_failed",
-  "billing.canceled",
-  "billing.complimentary",
-  "billing.unknown_price",
-] as const;
-export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
-export const adminEvents = pgTable(
-  "admin_events",
-  {
-    id: bigserial("id", { mode: "number" }).primaryKey(),
-    type: text("type").$type<AdminEventType>().notNull(),
-    /** who did it; null = the system (sign-up, auto-approval) */
-    actorId: text("actor_id"),
-    /** the account it concerns; kept after the user row is deleted */
-    userId: text("user_id").notNull(),
-    email: text("email").notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [index("admin_events_user_id_idx").on(t.userId, t.id)],
-);
-export type AdminEventRow = typeof adminEvents.$inferSelect;
-
 /** One row per language-model call, for usage per user (tokens, latency). Written by the LLM middleware. */
 export const llmUsage = pgTable(
   "llm_usage",
@@ -243,8 +205,9 @@ export const llmUsage = pgTable(
 );
 
 /**
- * One row per project that used minutes: written at create, duration filled at ingest. Survives project
- * delete and purge so monthly minutes, first-video-free and admin usage cannot be reset by deleting.
+ * One row per project that used minutes: written at create, duration filled at ingest, first finish recorded
+ * once. Survives project delete, purge and "forget what Reelsaw learned" so monthly minutes, first-video-free,
+ * admin usage and the ready email's milestones cannot be reset by deleting or forgetting.
  * Not pruned by time: first-video-free reads the account's earliest row, so a retention cut would hand out a
  * second free video (and a cut shorter than a billing period would undercount minutes). One small row per
  * project ever created; the rows go with the account (`removeUser`).
@@ -260,6 +223,8 @@ export const sourceUsage = pgTable(
     durationSec: real("duration_sec"),
     /** when the project was created (the window minutes and hourly creates count in) */
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    /** the project's first project.done (events.id), set once; the ready email's "That's 10 projects" counts these */
+    firstDoneEventId: bigint("first_done_event_id", { mode: "number" }),
   },
   (t) => [uniqueIndex("source_usage_project_idx").on(t.projectId), index("source_usage_user_id_idx").on(t.userId, t.createdAt)],
 );
@@ -487,6 +452,11 @@ export const projects = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
     forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
+    /**
+     * The last `project.done` (events.id) the ready email covered (notify/completion.ts): a later finish, a
+     * re-render's, is above it and mailed; null until the first note.
+     */
+    readyMailedThrough: bigint("ready_mailed_through", { mode: "number" }),
     /** the creator's own key/value pairs (create_project `metadata`), never interpreted; echoed in every webhook for the project */
     metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
   },
@@ -651,24 +621,62 @@ export const clips = pgTable(
   ],
 );
 
-export const projectEvents = pgTable(
-  "project_events",
+/**
+ * Every event, in one table, through one emit (`u.emit`, uow.ts; types and payload schemas in
+ * event-types.ts): a project's history (`project_id` set: the activity feed, the live stream, webhooks)
+ * and what happens to an account or the instance (`project_id` null: the admin log). The handlers that
+ * follow an event (event-handler-map.ts) commit with it.
+ *
+ * No foreign keys: a project's events outlive "Delete forever", like its decisions (user_decisions), and
+ * are forgotten with them when the owner asks (projects/service.ts) or the account is removed; an
+ * account event outlives the account. Pruned by retention (events-retention.ts), a project's run
+ * skeleton kept.
+ */
+export const events = pgTable(
+  "events",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    type: text("type").$type<ProjectEventType>().notNull(),
+    type: text("type").$type<EventType>().notNull(),
+    /** the project it is about (from the payload's projectId) */
+    projectId: text("project_id"),
+    /** the account it is about: an account event's payload userId, or the project's owner */
+    userId: text("user_id"),
+    /** who did it, when a person did (the request's account, or the admin acting); null = the system */
+    actorId: text("actor_id"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("project_events_project_id_idx").on(t.projectId, t.id)],
+  (t) => [
+    index("events_project_id_idx").on(t.projectId, t.id),
+    index("events_user_id_idx").on(t.userId, t.id),
+    // account events (the admin log, their retention): a few rows among a project history that is most of the table
+    index("events_account_idx").on(t.id).where(sql`project_id is null`),
+  ],
 );
+export type EventRow = typeof events.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
-export type ProjectEventRow = typeof projectEvents.$inferSelect;
+
+/**
+ * An account's choice for one topic of optional mail (notify/preferences.ts). No row = the topic's
+ * default (`EMAIL_TOPICS` in @reelsaw/shared), so a new topic needs no backfill. `source` says where the
+ * choice was made, which is also the consent record an opt-in topic needs (docs/specs/email.md).
+ */
+export const emailTopicPrefs = pgTable(
+  "email_topic_prefs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    topic: text("topic").$type<EmailTopic>().notNull(),
+    enabled: boolean("enabled").notNull(),
+    source: text("source").$type<EmailPrefSource>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.topic] })],
+);
 
 /**
  * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate
@@ -987,7 +995,7 @@ export const webhookDeliveries = pgTable(
       .notNull()
       .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
-    /** project_events.id; no FK: events are pruned and projects purged. null for webhook.test */
+    /** events.id; no FK: events are pruned. null for webhook.test */
     eventId: bigint("event_id", { mode: "number" }),
     projectId: text("project_id"),
     type: text("type").notNull(),

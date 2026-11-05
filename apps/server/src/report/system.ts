@@ -211,7 +211,7 @@ export async function stuckInfo(svc: Services) {
     // raw rows keep timestamptz as text (drizzle's node-postgres driver), so it is cast and read as a string
     db.execute<{ project_id: string; type: string; at: string }>(sql`
       select distinct on (project_id) project_id, type, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at
-      from project_events where project_id in (${sql.join(
+      from events where project_id in (${sql.join(
         ids.map((id) => sql`${id}`),
         sql`, `,
       )})

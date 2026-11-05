@@ -6,7 +6,7 @@ import type { Config } from "../src/config.js";
 import type { Db } from "../src/db/index.js";
 import type { Logger } from "../src/log.js";
 
-/** Just enough of drizzle for instance-settings.ts: one row keyed by `key`, plus the admin events it writes. */
+/** Just enough of drizzle for instance-settings.ts: one row keyed by `key`, plus the events it writes. */
 function fakeDb() {
   const rows = new Map<string, { key: string; value: Record<string, unknown>; updatedBy: string | null; updatedAt: Date }>();
   const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
@@ -63,6 +63,7 @@ const config = {
   ADMIN_EVENT_RETENTION_DAYS: 365,
   DECISION_RETENTION_DAYS: 0,
   STALL_MINUTES: 15,
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: 20,
   UPDATE_CHECK: true,
   HEALTH_DETAILS: false,
 } as unknown as Config;
@@ -115,7 +116,11 @@ describe("createInstanceSettings", () => {
     assert.equal(st.source.HEALTH_DETAILS, "env");
     assert.equal(st.updatedBy, actor.email);
     assert.equal(events.length, 1);
-    assert.deepEqual(events[0]!.payload, { changed: { SIGNUP_MODE: { from: "open", to: "approval" }, MAX_UPLOAD_MB: { from: 4096, to: 2048 } } });
+    assert.deepEqual(events[0]!.payload, {
+      userId: actor.id,
+      email: actor.email,
+      changed: { SIGNUP_MODE: { from: "open", to: "approval" }, MAX_UPLOAD_MB: { from: 4096, to: 2048 } },
+    });
 
     // the environment's own value is not an override
     st = await s.set({ MAX_UPLOAD_MB: 4096 }, actor);

@@ -302,17 +302,19 @@ export async function retryFailures(
       log.warn({ err, kind: item.kind, id: item.id }, "retry failure skipped");
     }
   }
-  await svc.database.db.insert(schema.adminEvents).values({
-    type: "failures.retried",
-    actorId: actor?.id ?? null,
-    userId: actor?.id ?? "operator",
-    email: actor?.email ?? "operator",
-    payload: {
-      filter: { q: filter.q ?? null, stage: filter.stage ?? null, since: filter.since ?? null, ids: opts.ids ?? null },
-      retried,
-      skipped,
-    },
-  });
+  await svc.tx((u) =>
+    u.emit(
+      "failures.retried",
+      {
+        userId: actor?.id ?? "operator",
+        email: actor?.email ?? "operator",
+        filter: { q: filter.q ?? null, stage: filter.stage ?? null, since: filter.since ?? null, ids: opts.ids ?? null },
+        retried,
+        skipped,
+      },
+      { actorId: actor?.id ?? null },
+    ),
+  );
   return { retried, skipped, nextCursor };
 }
 

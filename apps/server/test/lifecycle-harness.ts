@@ -63,6 +63,8 @@ export function lifecycleHarness() {
     // the runtime settings a service function reads (instance-settings.ts); tests change the object in place
     settings: { get: () => runtime },
     database: { db: database, pool },
+    // no mail: nothing a service function does here may try to send
+    email: { enabled: false, driver: "none", check: async () => {}, send: async () => {} },
     storage: { delete: async (key: string) => void deletedKeys.push(key) },
     paths: { project: (id: string) => `/tmp/reelsaw-test-nonexistent/${id}` },
   } as unknown as Services;
@@ -94,7 +96,7 @@ export function lifecycleHarness() {
     return id;
   }
   async function eventCount(projectId: string, type: string): Promise<number> {
-    const r = await pool.query(`select count(*)::int as n from project_events where project_id = $1 and type = $2`, [projectId, type]);
+    const r = await pool.query(`select count(*)::int as n from events where project_id = $1 and type = $2`, [projectId, type]);
     return r.rows[0].n;
   }
   async function jobsFor(keys: string[]): Promise<Array<{ name: string; state: string; singleton_key: string }>> {

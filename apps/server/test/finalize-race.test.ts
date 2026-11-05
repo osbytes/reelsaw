@@ -31,7 +31,7 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
       clipIds.map((clipId) =>
         h.tx(async (u) => {
           await u.db.update(schema.clips).set({ status: outcome }).where(eq(schema.clips.id, clipId));
-          await u.emit(projectId, outcome === "done" ? "clip.done" : "clip.failed", { clipId });
+          await u.emit(outcome === "done" ? "clip.done" : "clip.failed", { projectId: projectId, clipId });
           if (!released) {
             if (++arrived === clipIds.length) {
               released = true;
@@ -61,10 +61,17 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
 
   it("four clips finishing together still emit once", async () => {
     const projectId = await h.makeProject(userId, "rendering");
+    await h.pool.query(`insert into source_usage (user_id, project_id, created_at) values ($1, $2, now())`, [userId, projectId]);
     const clips = await Promise.all([0, 1, 2, 3].map((i) => h.makeClip(projectId, i, "rendering")));
     await finishTogether(projectId, clips);
     assert.equal((await state(projectId)).status, "done");
     assert.equal(await h.eventCount(projectId, "project.done"), 1);
+    // the usage ledger records that one finish (the ready email's milestones count it)
+    const ledger = await h.pool.query(
+      `select su.first_done_event_id::text as first, (select id::text from events where project_id = $1 and type = 'project.done') as done from source_usage su where su.project_id = $1`,
+      [projectId],
+    );
+    assert.equal(ledger.rows[0].first, ledger.rows[0].done);
   });
 
   it("every clip failing together emits project.failed exactly once", async () => {

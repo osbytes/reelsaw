@@ -23,7 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
-import { templateBumpersSchema } from "@reelsaw/shared";
+import { emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
@@ -805,6 +805,19 @@ export const TOOLS = {
     description:
       "Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. Pass only the keys to change; null returns a key to the environment's value; an empty string clears an optional one (URLs, captcha). Validated as a whole (a captcha provider needs both keys; email verification needs an email driver). Returns the same state as get_instance_settings.",
     inputSchema: settingsPatchSchema.shape,
+    annotations: { idempotentHint: true },
+  },
+  get_email_preferences: {
+    title: "Email preferences",
+    description:
+      "Which optional emails you get, by topic. Returns { emailEnabled, emailPreferences: { ready } }; ready is the note sent when projects finish while you are away. emailEnabled false means this instance sends no mail at all.",
+    annotations: { readOnlyHint: true },
+  },
+  set_email_preferences: {
+    title: "Set email preferences",
+    description:
+      "Turn topics of optional email on or off; omitted topics stay as they are. ready = the note sent when projects finish while you are away (Settings → Account, or the link in the email). Mail you need (password reset, verification) is not affected. Returns { ok, emailPreferences }.",
+    inputSchema: emailPreferencesPatchSchema.shape,
     annotations: { idempotentHint: true },
   },
   get_billing: {

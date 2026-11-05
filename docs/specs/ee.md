@@ -123,7 +123,9 @@ Haiku-class selection and refinement), before compute and storage.
      for the old subscription, or an admin "sync", leaves the grant in place.
    - **Removed accounts.** A subscription whose account no longer exists is handled like one with
      no account: its events are marked processed with a reason and the reconcile lists it as an
-     orphan (the after-commit cancel at Stripe normally ends it first).
+     orphan. Removing an account emits `billing.detached` in the same transaction, and its handler
+     (`cancelAtStripe`, `ee/event-handlers.ts`) cancels the subscription and clears the customer's link with
+     retries, so the orphan only shows while Stripe is unreachable.
    - **Reconcile scope.** The daily walk lists only the statuses that matter (active, trialing,
      past_due, unpaid, paused), never every subscription the account ever had, and refuses to cancel
      rows en masse when more than a few are unknown to Stripe (a wrong or rotated key).

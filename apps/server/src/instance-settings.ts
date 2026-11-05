@@ -20,6 +20,7 @@ import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { Logger } from "./log.js";
 import { createSecretBox } from "./ai/crypto.js";
+import { eventRow } from "./event-types.js";
 
 export const SETTING_GROUPS = [
   ["access", "Access"],
@@ -178,6 +179,11 @@ export const RUNTIME_SETTINGS = {
   ),
 
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: def(
+    "operations",
+    z.number().int().min(1).max(180),
+    "Minutes to wait after the first project in a batch finishes before emailing that the clips are ready, so several projects land in one note. Sent only when an email driver is set and the account has not come back since those projects finished. A project that finishes while a note is already waiting joins that note.",
+  ),
   UPDATE_CHECK: def(
     "operations",
     z.boolean(),
@@ -277,7 +283,7 @@ export interface InstanceSettings {
   /** The settings in force now; cheap, read it at the point of use (never cache the result at boot). */
   get(): RuntimeSettings;
   state(): SettingsState;
-  /** Validate, store, write the admin event, apply. Throws SettingsError with a sentence. */
+  /** Validate, store, write the event, apply. Throws SettingsError with a sentence. */
   set(patch: SettingsPatch, actor: Actor): Promise<SettingsState>;
   /** Called after the effective settings changed (from a set here or in another process). */
   subscribe(fn: (s: RuntimeSettings) => void): () => void;
@@ -473,7 +479,8 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.adminEvents).values({ type: "settings.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { changed } });
+        // no unit of work here, so no handler runs (none follows a settings change)
+        await tx.insert(schema.events).values(eventRow("settings.changed", { userId: actor.id, email: actor.email, changed }, actor.id));
       });
       log.info({ keys: Object.keys(changed), by: actor.email }, "instance settings changed");
       lastSeen = "";

@@ -62,7 +62,7 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
   });
   const state = async () => (await trpc(user.cookie, "billing.get", undefined, "GET")).data as State;
   const events = async (type: string) =>
-    Number((await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = $2`, [user.userId, type])).rows[0].n);
+    Number((await pool.query(`select count(*)::int as n from events where user_id = $1 and type = $2`, [user.userId, type])).rows[0].n);
 
   it("a new account is on Free with the watermark and the Free limits", async () => {
     const s = await state();
