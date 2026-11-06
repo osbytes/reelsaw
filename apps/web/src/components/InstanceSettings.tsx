@@ -5,7 +5,8 @@ import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../lib/trpc";
 import { ago } from "../lib/time";
-import { Notice, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
+import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
+import { ConfirmDialog, Notice, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 
 type State = inferRouterOutputs<AppRouter>["admin"]["settings"]["get"];
 type Patch = inferRouterInputs<AppRouter>["admin"]["settings"]["set"];
@@ -17,6 +18,31 @@ export type Field =
   | { key: Key; label: string; kind: "bool"; on?: string; off?: string }
   | { key: Key; label: string; kind: "int"; min?: number; max?: number; unit?: string; zero?: string }
   | { key: Key; label: string; kind: "url" | "text" | "secret"; placeholder?: string };
+
+/** A retention setting's risky direction: keeping less, which the next sweep acts on. 0 is forever. */
+const shorter = (what: string) => (to: unknown, from: unknown) =>
+  Number(to) > 0 && (Number(from) === 0 || Number(to) < Number(from)) ? `${what} older than ${Number(to)} days are removed for good on the next sweep.` : null;
+
+/**
+ * What a change does when it is one to ask about (PRINCIPLES: "Confirm risky changes"), or null. Only
+ * the risky direction asks: tightening sign-ups or keeping data longer just saves.
+ */
+const RISK: Partial<Record<Key, (to: unknown, from: unknown) => string | null>> = {
+  SIGNUP_MODE: (to) =>
+    to === "open" ? "Anyone can create an account and use this instance without approval." : to === "closed" ? "Nobody new can sign up." : null,
+  REQUIRE_EMAIL_VERIFICATION: (to) => (to === false ? "New accounts no longer have to verify their email." : null),
+  BLOCK_DISPOSABLE_EMAILS: (to) => (to === false ? "Temporary email domains can sign up." : null),
+  CAPTCHA_PROVIDER: (to) => (to === "" ? "Sign-ups no longer need a captcha." : null),
+  ALLOW_PRIVATE_SOURCE_URLS: (to) => (to === true ? "Project links can reach private networks from this server." : null),
+  ALLOW_PRIVATE_WEBHOOK_URLS: (to) => (to === true ? "Webhooks can reach private networks from this server." : null),
+  SOURCE_RETENTION_DAYS: shorter("Source videos"),
+  CLIP_RETENTION_DAYS: shorter("Rendered clips"),
+  DELETED_RETENTION_DAYS: shorter("Deleted items"),
+  EVENT_RETENTION_DAYS: shorter("Project events"),
+  LLM_USAGE_RETENTION_DAYS: shorter("Usage rows"),
+  ADMIN_EVENT_RETENTION_DAYS: shorter("Admin log entries"),
+  DECISION_RETENTION_DAYS: shorter("Users’ decisions"),
+};
 
 export const ACCESS_FIELDS: Field[] = [
   {
@@ -195,9 +221,11 @@ export function InstanceSettingsGroup({
     return { patch: patch as Patch, problem };
   }, [draft, fields]);
   const dirty = Object.keys(patch).length > 0;
+  const [asking, setAsking] = useState(false);
+  const risks = riskyEffects(s, patch);
 
   return (
-    <section id={id} className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
+    <section id={id} className={`flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5 ${PANEL_FOCUS_CLEARANCE}`}>
       <div>
         <h2 className="text-[15px] font-bold">{title}</h2>
         <p className="mt-0.5 text-sm text-ink2">{intro}</p>
@@ -233,19 +261,50 @@ export function InstanceSettingsGroup({
       )}
       {children}
       {/* always-present footer, so saving never shifts the rows above */}
-      <div className="flex min-h-9 flex-wrap items-center justify-end gap-2">
+      <StickyPanelFooter>
         <span className="mr-auto min-h-5 text-xs text-ink3">
           {problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}
         </span>
         <button type="button" className="btn-quiet" disabled={!dirty || save.isPending} onClick={() => setDraft({})}>
           Discard
         </button>
-        <button type="button" className="btn-primary min-w-[6.5rem]" disabled={!dirty || !!problem || save.isPending} onClick={() => save.mutate(patch)}>
+        <button
+          type="button"
+          className="btn-primary min-w-[6.5rem]"
+          disabled={!dirty || !!problem || save.isPending}
+          onClick={() => (risks.length ? setAsking(true) : save.mutate(patch))}
+        >
           {save.isPending ? "Saving…" : "Save"}
         </button>
-      </div>
+      </StickyPanelFooter>
+      <ConfirmDialog
+        open={asking}
+        onOpenChange={setAsking}
+        title="Save this for every account?"
+        body="It applies across the instance within seconds."
+        confirm="Save"
+        danger
+        onConfirm={() => save.mutate(patch)}
+      >
+        <ul className="list-disc pl-5 text-sm leading-relaxed text-ink2">
+          {risks.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      </ConfirmDialog>
     </section>
   );
+}
+
+/** The consequences to ask about in a patch; null in a patch means back to the environment's value. */
+function riskyEffects(s: State | undefined, patch: Patch): string[] {
+  if (!s) return [];
+  const values = s.values as Record<string, unknown>;
+  const env = s.env as Record<string, unknown>;
+  return Object.entries(patch).flatMap(([key, v]) => {
+    const r = RISK[key as Key]?.(v === null ? env[key] : v, values[key]);
+    return r ? [r] : [];
+  });
 }
 
 function FieldRow({

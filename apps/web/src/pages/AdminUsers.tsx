@@ -77,7 +77,7 @@ function useDebounced<T>(value: T, ms: number) {
 }
 const num = new Intl.NumberFormat();
 
-/** Admin: who may use this instance. Pending accounts first; every action is one click plus a confirm for the destructive ones. */
+/** Admin: who may use this instance. Pending accounts first; every action is one click, plus a confirm for the risky ones (PRINCIPLES: "Confirm risky changes"). */
 export function AdminUsersPage() {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -85,7 +85,7 @@ export function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: "ban" | "delete"; row: Row } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
   const q = useDebounced(search.trim(), 200);
@@ -313,12 +313,8 @@ export function AdminUsersPage() {
                                 Suspend
                               </DropdownMenu.Item>
                             )}
-                            <DropdownMenu.Item
-                              className="menu-item"
-                              disabled={busy || self}
-                              onSelect={() => setRole.mutate({ id: r.id, role: r.role === "admin" ? "user" : "admin" })}
-                            >
-                              {r.role === "admin" ? "Make user" : "Make admin"}
+                            <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setConfirm({ kind: "role", row: r })}>
+                              {r.role === "admin" ? "Remove admin…" : "Make admin…"}
                               {self && <span className="menu-hint">not your own</span>}
                             </DropdownMenu.Item>
                             <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
@@ -366,6 +362,22 @@ export function AdminUsersPage() {
         danger
         onConfirm={() => {
           if (confirm) remove.mutate({ id: confirm.row.id });
+          setConfirm(null);
+        }}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "role"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={confirm?.row.role === "admin" ? `Remove admin from ${confirm.row.email}?` : `Make ${confirm?.row.email ?? "this account"} an admin?`}
+        body={
+          confirm?.row.role === "admin"
+            ? "They lose user management and instance settings right away. Their account and projects stay."
+            : "Right away, they can manage every account and change instance settings, models and provider keys."
+        }
+        confirm={confirm?.row.role === "admin" ? "Remove admin" : "Make admin"}
+        danger={confirm?.row.role !== "admin"}
+        onConfirm={() => {
+          if (confirm) setRole.mutate({ id: confirm.row.id, role: confirm.row.role === "admin" ? "user" : "admin" });
           setConfirm(null);
         }}
       />

@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { ModelPicker, type PickerProvider } from "./ModelPicker";
-import { ProgressBar, Skeleton } from "./ui";
+import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
+import { ConfirmDialog, ProgressBar, Skeleton } from "./ui";
 
 type Kind = "language" | "transcription" | "align";
 const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language" | "transcription" }> = [
@@ -57,7 +58,10 @@ export function ModelsSection() {
   );
   const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) =>
     saveCredentials.mutateAsync({ provider, ...patch });
-  const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });
+  const [clearing, setClearing] = useState<string | null>(null);
+  const clearingTitle = providers.data?.find((p) => p.provider === clearing)?.title ?? clearing;
+  // the pickers only ask; the dialog below does it
+  const onClearCredentials = async (provider: string) => setClearing(provider);
 
   const s = state.data;
   const [draft, setDraft] = useState<Partial<Record<Kind, string>>>({});
@@ -115,7 +119,7 @@ export function ModelsSection() {
         : "from .env";
 
   return (
-    <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
+    <section className={`flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5 ${PANEL_FOCUS_CLEARANCE}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[15px] font-bold">Models</h2>
         <span className="text-xs text-ink3">{s?.updatedAt ? `changed ${new Date(s.updatedAt).toLocaleString()}` : "as configured in .env"}</span>
@@ -229,8 +233,20 @@ export function ModelsSection() {
             ))}
         </div>
       )}
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-[12px] text-ink3">
+      <ConfirmDialog
+        open={clearing !== null}
+        onOpenChange={(o) => !o && setClearing(null)}
+        title={`Remove the ${clearingTitle ?? "provider"} credentials saved here?`}
+        body="The saved key and server address are deleted and this provider falls back to .env. Without credentials there, its models stop working for everyone until the key is entered again."
+        confirm="Remove"
+        danger
+        onConfirm={() => {
+          if (clearing) clearCredentials.mutate({ provider: clearing });
+          setClearing(null);
+        }}
+      />
+      <StickyPanelFooter>
+        <span className="mr-auto text-[12px] text-ink3">
           {dirty.length ? `${dirty.length} change${dirty.length === 1 ? "" : "s"} to save; each is checked first (key, server, word timestamps)` : ""}
         </span>
         <span className="flex gap-2">
@@ -248,7 +264,7 @@ export function ModelsSection() {
             {save.isPending ? "Checking…" : "Save"}
           </button>
         </span>
-      </div>
+      </StickyPanelFooter>
     </section>
   );
 }

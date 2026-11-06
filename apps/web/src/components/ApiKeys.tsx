@@ -39,6 +39,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const [admin, setAdmin] = useState(false);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [confirm, setConfirm] = useState<Key | null>(null);
+  const [confirmAdmin, setConfirmAdmin] = useState(false);
 
   const list = useQuery({
     queryKey: ["apiKeys"],
@@ -106,7 +107,9 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim()) create.mutate({ name: name.trim(), admin: admin && me.data?.role === "admin" });
+          if (!name.trim()) return;
+          if (admin && me.data?.role === "admin") setConfirmAdmin(true);
+          else create.mutate({ name: name.trim(), admin: false });
         }}
       >
         <input
@@ -234,6 +237,19 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         )}
       </div>
 
+      <ConfirmDialog
+        open={confirmAdmin}
+        onOpenChange={setConfirmAdmin}
+        title="Create a key that can administer this instance?"
+        body={
+          <>
+            Whoever holds “{name.trim()}” can change instance settings and retry failed work over MCP, as you. Leave this off for agents that only edit videos.
+          </>
+        }
+        confirm="Create admin key"
+        danger
+        onConfirm={() => create.mutate({ name: name.trim(), admin: true })}
+      />
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
