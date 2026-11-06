@@ -111,7 +111,7 @@ export function ProjectPage() {
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
-  const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
+  const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete" | "revokeLinks">(null);
   const [forgetDecisions, setForgetDecisions] = useState(false);
   const keepWindow = useRestoreWindow("project", confirm === "delete");
   const [actOpen, setActOpen] = useState(false);
@@ -593,9 +593,9 @@ export function ProjectPage() {
                 className="menu-item block"
                 disabled={revokeLinks.isPending}
                 title="Turn off every share link to this project's clips and zip"
-                onSelect={() => revokeLinks.mutate({ projectId: id })}
+                onSelect={() => setConfirm("revokeLinks")}
               >
-                Revoke this project’s share links
+                Revoke this project’s share links…
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               {failedClips.length > 0 && (
@@ -1128,6 +1128,15 @@ export function ProjectPage() {
       </Dialog.Root>
 
       <ShortcutSheet open={keysOpen} onOpenChange={setKeysOpen} />
+      <ConfirmDialog
+        open={confirm === "revokeLinks"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title="Revoke this project’s share links?"
+        body="Every share link to its clips and zip stops working now, for queued scheduler posts and people you sent them to as well. They cannot be turned back on; copying a link again makes a new one."
+        confirm="Revoke links"
+        danger
+        onConfirm={() => revokeLinks.mutate({ projectId: id })}
+      />
       <ConfirmDialog
         open={confirm === "repick"}
         onOpenChange={(o) => !o && setConfirm(null)}

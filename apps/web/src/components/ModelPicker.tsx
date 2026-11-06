@@ -169,6 +169,11 @@ export function ModelPicker({
     return { text: p.selfHosted ? `${p.models.filter((m) => m.installed).length} installed` : "from .env", tone: "text-ink3" };
   };
 
+  // the confirm is a dialog below this z-[80] popover: close it first
+  const askClear = (provider: string) => {
+    setOpen(false);
+    return onClearCredentials(provider);
+  };
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
@@ -252,12 +257,12 @@ export function ModelPicker({
                       catalog={selected}
                       saving={saving}
                       onSave={onSaveCredentials}
-                      onClear={onClearCredentials}
+                      onClear={askClear}
                     />
                   ) : selected ? (
                     <>
                       {selectedState && (
-                        <ProviderSummary state={selectedState} catalog={selected} onClear={onClearCredentials} saving={saving} onSave={onSaveCredentials} />
+                        <ProviderSummary state={selectedState} catalog={selected} onClear={askClear} saving={saving} onSave={onSaveCredentials} />
                       )}
                       {selected.models.length ? (
                         selected.models.map((m) => modelRow(m, selected, false))

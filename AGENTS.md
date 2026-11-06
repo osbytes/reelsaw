@@ -2,7 +2,8 @@
 
 Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) before changing code. It holds the backend
 (transactions, locking, versioned jobs, evals) and frontend (tokens, overlays, no layout shift, deep links,
-responsive, visible viewport not 100vh) rules that apply to every change, and the surfaces rule: MCP is the UI for agents and
+responsive, visible viewport not 100vh) rules that apply to every change, confirming risky changes
+(Product), and the surfaces rule: MCP is the UI for agents and
 the glue for integrations, so every user-facing feature ships with its MCP tool (and CLI command)
 backed by the same service code as the screen. The same change updates public copy (README,
 `website/content/`, the matching `docs/` page) so shipped work is not still on the roadmap or

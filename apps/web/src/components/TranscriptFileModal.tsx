@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Modal } from "./ui";
+import { ConfirmDialog, Modal } from "./ui";
 import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { uploadFile } from "../lib/uploads";
 
@@ -29,6 +29,7 @@ export function TranscriptFileModal({
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("");
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const imp = useMutation({
     mutationFn: async ({ file, language }: { file: File; language?: string | undefined }) => {
       const uploadId = await uploadFile(file);
@@ -45,6 +46,7 @@ export function TranscriptFileModal({
   });
   const busy = imp.isPending;
   const base = `/api/projects/${projectId}/transcript`;
+  const runImport = () => file && imp.mutate({ file, language: language.trim() || undefined });
 
   return (
     <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title="Transcript files" width={460}>
@@ -112,11 +114,20 @@ export function TranscriptFileModal({
         <button
           className="btn-primary min-w-[96px] justify-center"
           disabled={!file || !canImport || busy}
-          onClick={() => file && imp.mutate({ file, language: language.trim() || undefined })}
+          onClick={() => (hasTranscript ? setConfirmReplace(true) : runImport())}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Importing" /> : "Import"}
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmReplace}
+        onOpenChange={setConfirmReplace}
+        title="Replace the transcript?"
+        body={`“${file?.name ?? "This file"}” replaces the current transcript. Your accepted and rejected fixes, cuts and corrections are lost and cannot be brought back. The project then cleans it up and picks clips again.`}
+        confirm="Replace transcript"
+        danger
+        onConfirm={() => void runImport()}
+      />
     </Modal>
   );
 }
