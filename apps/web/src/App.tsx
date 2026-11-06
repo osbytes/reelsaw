@@ -38,6 +38,7 @@ import { CommandPaletteProvider, useCommandPalette } from "./components/CommandP
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
 import { Toaster } from "sonner";
+import { DeletedToastConfirm } from "./lib/deletedToast";
 
 /** The "cut monogram" mark: an ExtraBold Hanken Grotesk "r" (outlined, so it never waits on the web font) sliced by a cut in the accent colour. Same drawing as public/favicon.svg. */
 const MARK_R =
@@ -527,6 +528,7 @@ export function App() {
           </Routes>
           <ReportDialog />
           <AppToaster />
+          <DeletedToastConfirm />
         </CommandPaletteProvider>
       </UploadsProvider>
     </>

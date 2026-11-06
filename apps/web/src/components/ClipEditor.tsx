@@ -801,6 +801,7 @@ export function ClipEditor(props: Props) {
     if (selectedLayer && !layers.some((l) => l.id === selectedLayer)) setSelectedLayerRaw(null);
   }, [layers, selectedLayer]);
   const [styleScope, setStyleScope] = useState<"clip" | "all">("clip");
+  const [styleAll, setStyleAll] = useState<{ rerender: boolean; leave: boolean } | null>(null);
   const [playing, setPlaying] = useState(false);
   // `current` follows timeupdate (~4 Hz) and seeks; `clock` is the per-frame position, read only by
   // the timeline playhead and the preview so the rest of the editor does not re-render at 60 Hz
@@ -1648,7 +1649,14 @@ export function ClipEditor(props: Props) {
   const nativeUndo = (e: KeyboardEvent) => !!(e.target as HTMLElement | null)?.closest?.("[data-native-undo]");
   useShortcut("mod+z", (e) => !nativeUndo(e) && (e.preventDefault(), history.undo()), { inFields: true, preventDefault: false });
   useShortcut("mod+shift+z, mod+y", (e) => !nativeUndo(e) && (e.preventDefault(), history.redo()), { inFields: true, preventDefault: false });
-  useShortcut("mod+s", () => changed && !busy && void save(needsRender), { inFields: true });
+  /** Saving a style for all clips clears the styles set on other clips, which nothing can bring back: ask first. */
+  function requestSave(rerender: boolean, leave = false) {
+    if (styleChanged && styleScope === "all" && clipCount > 1) return setStyleAll({ rerender, leave });
+    void save(rerender).then((ok) => {
+      if (ok && leave) guard.leave();
+    });
+  }
+  useShortcut("mod+s", () => changed && !busy && requestSave(needsRender), { inFields: true });
   useShortcut("mod+b", () => splitAt(clock.get()), { inFields: true }); // ⌘K belongs to the command palette
   // copy / paste the selected layer; a text selection keeps the browser's own clipboard
   useShortcut("mod+c", (e) => !window.getSelection()?.toString() && copySelection() && e.preventDefault(), { preventDefault: false });
@@ -2756,7 +2764,7 @@ export function ClipEditor(props: Props) {
       <button
         className="btn-primary min-w-[5.5rem] justify-center sm:min-w-[148px]"
         disabled={busy || (!changed && clip.status !== "failed")}
-        onClick={() => void save(needsRender || (!changed && clip.status === "failed"))}
+        onClick={() => requestSave(needsRender || (!changed && clip.status === "failed"))}
         title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don’t need a re-render (${MOD}S)`}
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -2858,6 +2866,19 @@ export function ClipEditor(props: Props) {
               onError: (e) => toast.error(e.message),
             },
           );
+        }}
+      />
+      <ConfirmDialog
+        open={styleAll !== null}
+        onOpenChange={(o) => !o && setStyleAll(null)}
+        title={`Use this style for all ${clipCount} clips?`}
+        body={`It becomes the style of every clip in “${projectTitle}”. Styles set on a single clip are cleared and cannot be brought back. All ${clipCount} clips re-render.`}
+        confirm="Use for all clips"
+        danger
+        onConfirm={async () => {
+          const ask = styleAll;
+          setStyleAll(null);
+          if (ask && (await save(ask.rerender)) && ask.leave) guard.leave();
         }}
       />
       <ConfirmDialog
@@ -2973,13 +2994,7 @@ export function ClipEditor(props: Props) {
           <button className="btn-danger" onClick={guard.leave}>
             Discard
           </button>
-          <button
-            className="btn-primary"
-            disabled={busy}
-            onClick={async () => {
-              if (await save(needsRender)) guard.leave();
-            }}
-          >
+          <button className="btn-primary" disabled={busy} onClick={() => requestSave(needsRender, true)}>
             Save &amp; leave
           </button>
         </div>

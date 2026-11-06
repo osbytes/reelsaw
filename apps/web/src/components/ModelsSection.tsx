@@ -4,7 +4,7 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { ModelPicker, type PickerProvider } from "./ModelPicker";
 import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
-import { ProgressBar, Skeleton } from "./ui";
+import { ConfirmDialog, ProgressBar, Skeleton } from "./ui";
 
 type Kind = "language" | "transcription" | "align";
 const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language" | "transcription" }> = [
@@ -58,7 +58,10 @@ export function ModelsSection() {
   );
   const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) =>
     saveCredentials.mutateAsync({ provider, ...patch });
-  const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });
+  const [clearing, setClearing] = useState<string | null>(null);
+  const clearingTitle = providers.data?.find((p) => p.provider === clearing)?.title ?? clearing;
+  // the pickers only ask; the dialog below does it
+  const onClearCredentials = async (provider: string) => setClearing(provider);
 
   const s = state.data;
   const [draft, setDraft] = useState<Partial<Record<Kind, string>>>({});
@@ -230,6 +233,18 @@ export function ModelsSection() {
             ))}
         </div>
       )}
+      <ConfirmDialog
+        open={clearing !== null}
+        onOpenChange={(o) => !o && setClearing(null)}
+        title={`Remove the ${clearingTitle ?? "provider"} credentials saved here?`}
+        body="The saved key and server address are deleted and this provider falls back to .env. Without credentials there, its models stop working for everyone until the key is entered again."
+        confirm="Remove"
+        danger
+        onConfirm={() => {
+          if (clearing) clearCredentials.mutate({ provider: clearing });
+          setClearing(null);
+        }}
+      />
       <StickyPanelFooter>
         <span className="mr-auto text-[12px] text-ink3">
           {dirty.length ? `${dirty.length} change${dirty.length === 1 ? "" : "s"} to save; each is checked first (key, server, word timestamps)` : ""}

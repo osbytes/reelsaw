@@ -301,6 +301,7 @@ export function WebhooksSection() {
   const list = useQuery(trpc.webhooks.list.queryOptions());
   const [dialog, setDialog] = useState<{ edit: Endpoint | null } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Endpoint | null>(null);
+  const [confirmRotate, setConfirmRotate] = useState<Endpoint | null>(null);
   const [selected, setSelected] = useState<string | null>(readHash);
   const [rotated, setRotated] = useState<{ secret: string; until: string } | null>(null);
   const invalidate = () => void qc.invalidateQueries({ queryKey: trpc.webhooks.pathKey() });
@@ -430,9 +431,9 @@ export function WebhooksSection() {
                         <DropdownMenu.Item
                           className="menu-item flex-col items-start gap-0"
                           disabled={!!e.rotationEndsAt}
-                          onSelect={() => rotate.mutate({ id: e.id })}
+                          onSelect={() => window.setTimeout(() => setConfirmRotate(e), 0)}
                         >
-                          Rotate secret
+                          Rotate secret…
                           {e.rotationEndsAt && <span className="text-xs text-ink3">Old secret signs until {when(e.rotationEndsAt)}</span>}
                         </DropdownMenu.Item>
                         <DropdownMenu.Item className="menu-item" onSelect={() => update.mutate({ id: e.id, enabled: !e.enabled })}>
@@ -456,6 +457,22 @@ export function WebhooksSection() {
       </div>
       {sel && <DeliveryLog endpoint={sel} onClose={() => setSelected(null)} />}
       {dialog && <EndpointDialog open onOpenChange={(o) => !o && setDialog(null)} edit={dialog.edit} />}
+      <ConfirmDialog
+        open={!!confirmRotate}
+        onOpenChange={(o) => !o && setConfirmRotate(null)}
+        title="Rotate this webhook’s secret?"
+        body={
+          <>
+            Deliveries to {confirmRotate?.urlMasked} are signed with both the new and the old secret for 24 hours. Update the receiver before then, or it starts
+            refusing them. This cannot be reversed.
+          </>
+        }
+        confirm="Rotate secret"
+        onConfirm={() => {
+          if (confirmRotate) rotate.mutate({ id: confirmRotate.id });
+          setConfirmRotate(null);
+        }}
+      />
       <ConfirmDialog
         open={!!confirmDelete}
         onOpenChange={(o) => !o && setConfirmDelete(null)}

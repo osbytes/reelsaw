@@ -2,12 +2,14 @@
  * The standard delete toast: Undo, Delete forever, See deletions. Every soft-delete path
  * (project, clip, library, template, bulk) calls `useDeletedToast` so the affordances stay the same.
  */
+import { useSyncExternalStore } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { DELETED_PATH, deletedItemPath, formatBytes, type DeletedKind } from "@reelsaw/shared";
 import { useTRPC } from "./trpc";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { ConfirmDialog } from "../components/ui";
 
 export type DeletedToastItem = { kind: DeletedKind; id: string; title: string };
 
@@ -35,14 +37,62 @@ function failToast(err: { message: string }) {
   toast.error(quota ? <QuotaNotice message={err.message} quota={quota} /> : err.message.slice(0, 200));
 }
 
-export function showDeletedToast(opts: {
+type ToastOpts = {
   items: DeletedToastItem[];
   restorable?: string | undefined;
   storedBytes?: number | undefined;
   canPurge?: boolean | undefined;
   onUndo: () => Promise<unknown>;
   onPurge: () => Promise<unknown>;
-}) {
+};
+
+// The toast unmounts when it times out, so the question about purging lives outside it, mounted once.
+let asking: ToastOpts | null = null;
+const listeners = new Set<() => void>();
+function setAsking(next: ToastOpts | null) {
+  asking = next;
+  for (const l of listeners) l();
+}
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
+/** The confirm behind the toast's "Delete forever". Cancelling brings the toast back, so Undo is not lost. */
+export function DeletedToastConfirm() {
+  const ask = useSyncExternalStore(subscribe, () => asking);
+  const items = ask?.items ?? [];
+  return (
+    <ConfirmDialog
+      open={!!ask}
+      onOpenChange={(o) => {
+        if (o || !asking) return;
+        const back = asking;
+        setAsking(null);
+        showDeletedToast(back);
+      }}
+      title={items.length === 1 ? `Delete “${items[0]!.title}” forever?` : `Delete ${items.length} items forever?`}
+      body={`Stored files are deleted permanently${ask?.storedBytes ? ` (${formatBytes(ask.storedBytes)} freed)` : ""}. This cannot be undone.`}
+      confirm="Delete forever"
+      danger
+      onConfirm={() => {
+        if (!ask) return;
+        setAsking(null);
+        void ask.onPurge().then((r) => {
+          const msg =
+            r && typeof r === "object" && "message" in r && typeof r.message === "string"
+              ? r.message
+              : items.length === 1
+                ? `Deleted “${items[0]!.title}” forever`
+                : `Deleted ${items.length} items forever`;
+          toast(msg);
+        }, failToast);
+      }}
+    />
+  );
+}
+
+export function showDeletedToast(opts: ToastOpts) {
   const { items, restorable, storedBytes, canPurge = true } = opts;
   if (!items.length) return;
   const bits: string[] = [];
@@ -72,18 +122,10 @@ export function showDeletedToast(opts: {
               className="text-err hover:underline"
               onClick={() => {
                 toast.dismiss(id);
-                void opts.onPurge().then((r) => {
-                  const msg =
-                    r && typeof r === "object" && "message" in r && typeof r.message === "string"
-                      ? r.message
-                      : items.length === 1
-                        ? `Deleted “${items[0]!.title}” forever`
-                        : `Deleted ${items.length} items forever`;
-                  toast(msg);
-                }, failToast);
+                setAsking(opts);
               }}
             >
-              Delete forever
+              Delete forever…
             </button>
           ) : null}
           <Link to={seePath(items)} className="text-ink2 no-underline hover:underline" onClick={() => toast.dismiss(id)}>
