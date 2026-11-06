@@ -63,6 +63,7 @@ describe("settings", () => {
       "emailEnabled",
       "emailVerification",
       "maxUploadMb",
+      "mcpOauth",
       "otel",
       "paused",
       "privacyUrl",

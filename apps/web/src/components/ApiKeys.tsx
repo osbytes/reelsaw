@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { useTRPC } from "../lib/trpc";
-import { useMe } from "../lib/account";
+import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea } from "./scroll-area";
@@ -27,14 +27,37 @@ function when(d: Date | string | null | undefined) {
   return t.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+const copy = (s: string, what: string) => {
+  void navigator.clipboard.writeText(s).then(() => toast(`${what} copied`));
+};
+
+/** A labelled, copyable command or config in one scrolling block. */
+function Snippet({ label, what, value, className = "bg-panel" }: { label: string; what: string; value: string; className?: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-center justify-between gap-2 text-xs text-ink2">
+        <span>{label}</span>
+        <button className="btn-quiet text-xs" onClick={() => copy(value, what)}>
+          Copy
+        </button>
+      </div>
+      <ScrollArea className={`rounded-[8px] ${className}`}>
+        <pre className="w-max p-2 font-mono text-[11px] leading-4">{value}</pre>
+      </ScrollArea>
+    </div>
+  );
+}
+
 /**
  * API keys for agents (MCP) and scripts. The secret is shown once, right after creation, with
- * ready-to-paste client configs; afterwards only its first characters are listed.
+ * ready-to-paste client configs; afterwards only its first characters are listed. With MCP_OAUTH,
+ * clients that can sign in through the browser need no key, so that route comes first.
  */
 export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const qc = useQueryClient();
   const trpc = useTRPC();
   const me = useMe();
+  const oauth = useSystemStatus().data?.mcpOauth ?? false;
   const [name, setName] = useState("");
   const [admin, setAdmin] = useState(false);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
@@ -73,9 +96,6 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
     onError: (e) => toast.error(e.message),
   });
 
-  const copy = (s: string, what: string) => {
-    void navigator.clipboard.writeText(s).then(() => toast(`${what} copied`));
-  };
   const keys = list.data ?? [];
   const claudeCmd = fresh ? `claude mcp add --transport http reelsaw ${mcpUrl} --header "Authorization: Bearer ${fresh.key}"` : "";
   const json = fresh
@@ -98,9 +118,29 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         <h2 className="text-[15px] font-bold">API keys and MCP</h2>
         <span className="font-mono text-xs text-ink3">{mcpUrl}</span>
       </div>
+      {oauth && (
+        <div className="flex flex-col gap-2 border-b border-line pb-4">
+          <h3 className="text-[13px] font-semibold">Connect by signing in</h3>
+          <p className="text-[13px] text-ink2">
+            No key to copy: add this address to your agent, then sign in and approve it in the browser. It acts as you
+            {me.data?.role === "admin" ? ", without the instance administration tools" : ""}. Remove it any time under Connected apps.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Snippet
+              label="Claude Code, then run /mcp to sign in"
+              what="Command"
+              value={`claude mcp add --transport http reelsaw ${mcpUrl}`}
+              className="bg-sunk"
+            />
+            <Snippet label="claude.ai / Claude Desktop custom connector" what="Address" value={mcpUrl} className="bg-sunk" />
+          </div>
+        </div>
+      )}
+      {oauth && <h3 className="text-[13px] font-semibold">Or use an API key</h3>}
       <p className="text-[13px] text-ink2">
-        A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you: create projects, read transcripts, edit and download clips.
-        Send it as <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are shown once.
+        {oauth && "For scripts and clients that cannot sign in. "}A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you:
+        create projects, read transcripts, edit and download clips. Send it as <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are
+        shown once.
       </p>
 
       <form
@@ -148,28 +188,8 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
             </button>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between text-xs text-ink2">
-                <span>Claude Code</span>
-                <button className="btn-quiet text-xs" onClick={() => copy(claudeCmd, "Command")}>
-                  Copy
-                </button>
-              </div>
-              <ScrollArea className="rounded-[8px] bg-panel">
-                <pre className="w-max p-2 font-mono text-[11px] leading-4">{claudeCmd}</pre>
-              </ScrollArea>
-            </div>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between text-xs text-ink2">
-                <span>Cursor / Claude Desktop / mcp.json</span>
-                <button className="btn-quiet text-xs" onClick={() => copy(json, "Config")}>
-                  Copy
-                </button>
-              </div>
-              <ScrollArea className="rounded-[8px] bg-panel">
-                <pre className="w-max p-2 font-mono text-[11px] leading-4">{json}</pre>
-              </ScrollArea>
-            </div>
+            <Snippet label="Claude Code" what="Command" value={claudeCmd} />
+            <Snippet label="Cursor / Claude Desktop / mcp.json" what="Config" value={json} />
             <div className="flex flex-col gap-1 sm:col-span-2">
               <div className="flex items-center justify-between text-xs text-ink2">
                 <span>

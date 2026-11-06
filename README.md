@@ -407,8 +407,18 @@ Design and decisions: [docs/specs/ee.md](docs/specs/ee.md).
 
 ## MCP: drive Reelsaw from an agent
 
-Reelsaw is an MCP server (Model Context Protocol, Streamable HTTP) at `/api/mcp`. Create an API key
-in **Settings → API keys and MCP** (shown once) and point a client at it:
+Reelsaw is an MCP server (Model Context Protocol, Streamable HTTP) at `/api/mcp`. With
+`MCP_OAUTH=true` (on at app.reelsaw.com), a client needs only the address: you sign in and approve
+it in the browser, and **Settings → API keys and MCP** shows the command and connector address.
+
+```bash
+claude mcp add --transport http reelsaw https://your-host/api/mcp   # then /mcp in Claude Code to sign in
+```
+
+In claude.ai or Claude Desktop, add a custom connector with the same address.
+
+Scripts, and clients that cannot sign in, use an API key. Create one in **Settings → API keys and
+MCP** (shown once) and point the client at it:
 
 ```bash
 claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Authorization: Bearer rs_…"

@@ -438,6 +438,8 @@ const headRouter = router({
         privacyUrl: s.PRIVACY_URL ?? null,
         maxUploadMb: s.MAX_UPLOAD_MB,
         captcha: s.CAPTCHA_PROVIDER && s.CAPTCHA_SITE_KEY && s.CAPTCHA_SECRET_KEY ? { provider: s.CAPTCHA_PROVIDER, siteKey: s.CAPTCHA_SITE_KEY } : null,
+        /** MCP clients can sign in through the browser instead of sending an API key (already public: the discovery documents answer) */
+        mcpOauth: ctx.svc.config.MCP_OAUTH,
         /** heavy jobs wait for the machine; the word says what is short, never the numbers */
         paused,
         /** public keys for the browser's Sentry / PostHog (telemetry.ts); null = off */
@@ -918,6 +920,7 @@ const restRouter = router({
       email: ctx.svc.config.EMAIL_DRIVER,
       healthDetails: ctx.svc.settings.get().HEALTH_DETAILS,
       mcpUrl: new URL("/api/mcp", ctx.svc.config.APP_URL).toString(),
+      mcpOauth: ctx.svc.config.MCP_OAUTH,
       maxUploadMb: ctx.svc.settings.get().MAX_UPLOAD_MB,
       renderConcurrency: { ...ctx.svc.resources.renders(), max: ctx.svc.resources.maxRenders() },
       /** the GPU this process sees, the ffmpeg encoder renders use and where each on-device model runs (ONNX_EXECUTION_PROVIDER; the VAD is always cpu) */
