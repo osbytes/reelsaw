@@ -5,6 +5,7 @@ import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../lib/trpc";
 import { ago } from "../lib/time";
+import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
 import { ConfirmDialog, Notice, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 
 type State = inferRouterOutputs<AppRouter>["admin"]["settings"]["get"];
@@ -224,7 +225,7 @@ export function InstanceSettingsGroup({
   const risks = riskyEffects(s, patch);
 
   return (
-    <section id={id} className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
+    <section id={id} className={`flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5 ${PANEL_FOCUS_CLEARANCE}`}>
       <div>
         <h2 className="text-[15px] font-bold">{title}</h2>
         <p className="mt-0.5 text-sm text-ink2">{intro}</p>
@@ -260,7 +261,7 @@ export function InstanceSettingsGroup({
       )}
       {children}
       {/* always-present footer, so saving never shifts the rows above */}
-      <div className="flex min-h-9 flex-wrap items-center justify-end gap-2">
+      <StickyPanelFooter>
         <span className="mr-auto min-h-5 text-xs text-ink3">
           {problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}
         </span>
@@ -275,7 +276,7 @@ export function InstanceSettingsGroup({
         >
           {save.isPending ? "Saving…" : "Save"}
         </button>
-      </div>
+      </StickyPanelFooter>
       <ConfirmDialog
         open={asking}
         onOpenChange={setAsking}
