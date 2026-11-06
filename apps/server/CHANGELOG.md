@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.32.1
+
+### Patch Changes
+
+- [#241](https://github.com/osbytes/reelsaw/pull/241) [`c52cefe`](https://github.com/osbytes/reelsaw/commit/c52cefe4bd544975c9a826abb59831c021beae6b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Templates, Users and Deleted now share one list layout: the same page width, table, row height, empty state and count. Deleted rows have their own columns and a Restore button that is always visible.
+
+- [#238](https://github.com/osbytes/reelsaw/pull/238) [`e1364fb`](https://github.com/osbytes/reelsaw/commit/e1364fbe7986658d1cc847de6189fd396726f20e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Risky changes now ask first: making or removing an admin, creating an API key that can administer, "Delete forever" on the delete toast, revoking a share link or a project's links, rotating a webhook secret, removing saved provider credentials, replacing a transcript with a file, a style for all clips (it clears per-clip styles), and instance settings that open sign-ups, drop a sign-up guard, reach private networks or shorten retention.
+
+- [#239](https://github.com/osbytes/reelsaw/pull/239) [`09851d0`](https://github.com/osbytes/reelsaw/commit/09851d05273af19c1b17c10639ed76bb8e7327f0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - In Settings → System, Save and Discard stay on screen while you scroll through a long panel.
+
 ## 0.32.0
 
 ### Minor Changes
