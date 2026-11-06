@@ -362,7 +362,8 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   call. `onSuccess` invalidates the smallest query that changed (`pathKey()`). Extra local state is
   only for what Query cannot express: form drafts, XHR upload progress, per-row concurrent pending,
   blob-download side effects, SSE.
-- **Lists align.**
+- **Lists align.** A full-page list is built from `components/ListPage.tsx` (page frame, table, empty
+  state, count footer), so its width, row height, fold width and actions match the others.
   - Rows of one list share one column grid (a `<table>` with fixed layout, or CSS grid with fixed
     tracks), never per-row flex that wraps differently. Every column has a fixed or minimum width
     and an explicit alignment: text left, numbers right with `tabular-nums`, status glyph plus word

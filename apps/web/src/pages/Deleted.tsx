@@ -7,20 +7,35 @@ import { formatBytes, type DeletedKind } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useHashParams } from "../lib/hash";
 import { ago } from "../lib/time";
-import { ScrollArea } from "../components/scroll-area";
+import {
+  LIST_ACTION,
+  LIST_ACTIONS_WIDTH,
+  LIST_MENU,
+  LIST_MENU_ITEM_FOLDED,
+  LIST_SKELETON_ROWS,
+  LIST_SUB,
+  LIST_TITLE,
+  ListCell,
+  type ListColumn,
+  ListEmpty,
+  ListError,
+  ListFooter,
+  ListPage,
+  ListRow,
+  ListTable,
+} from "../components/ListPage";
 import { SelectionBar } from "../components/SelectionBar";
-import { ConfirmDialog, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
+import { ConfirmDialog, MoreButton, Skeleton } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
-const GRID = "grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-x-3 sm:grid-cols-[2rem_5.5rem_minmax(0,1fr)_minmax(14rem,1.4fr)_2rem]";
 /**
- * Hidden until that row is hovered (or a coarse pointer, or keyboard focus). The full class
- * string stays literal so Tailwind emits it. `!` beats the resting `opacity-0` (source order
- * inside one layer does not). A checked row keeps its own checkbox via `opacity-100`.
+ * A row's checkbox stays out of the way until that row is hovered (or a coarse pointer, or keyboard
+ * focus). The full class string stays literal so Tailwind emits it. `!` beats the resting `opacity-0`
+ * (source order inside one layer does not). A checked row keeps its own checkbox via `opacity-100`.
  */
-const REVEAL_ROW = "transition-opacity group-hover/row:!opacity-100 focus-within:!opacity-100 pointer-coarse:!opacity-100 data-[state=open]:!opacity-100";
+const REVEAL_ROW = "transition-opacity group-hover/row:!opacity-100 focus-within:!opacity-100 pointer-coarse:!opacity-100";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const dateFmt: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
@@ -32,13 +47,13 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
 
 /**
  * When the row is deleted forever, as a countdown (GitLab's "pending deletion", Immich's days left):
- * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`foreverDate`).
+ * "in 3 days" reads faster than a date. The date itself is the cell's tooltip (`foreverDate`).
  */
-function foreverLabel(purgeAt: string | null) {
-  if (!purgeAt) return "kept until you delete it forever";
+function foreverWhen(purgeAt: string | null) {
+  if (!purgeAt) return "when you choose";
   const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
-  if (days <= 0) return "deleted forever within the hour";
-  return days === 1 ? "deleted forever within a day" : `deleted forever in ${days} days`;
+  if (days <= 0) return "within the hour";
+  return days === 1 ? "within a day" : `in ${days} days`;
 }
 
 function foreverDate(purgeAt: string | null) {
@@ -68,20 +83,25 @@ function whyHeld(r: Row) {
   return "A project or clip still names this item";
 }
 
-function detailOf(r: Row) {
-  const size = r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files";
+const sizeOf = (r: Row) => (r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files");
+
+/** The line under the title: what the columns have no place for. */
+function noteOf(r: Row) {
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
-  const held = whyHeld(r);
-  const forget = r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined;
-  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt), forget].filter(Boolean).join(" · ");
+  return [extra, whyHeld(r), r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined].filter(Boolean).join(" · ");
+}
+
+/** Below the fold width the columns go on that line too. */
+function foldedLine(r: Row) {
+  const forever = r.purgeAt ? `deleted forever ${foreverWhen(r.purgeAt)}` : "kept until you delete it forever";
+  return [KIND_LABEL[r.kind], noteOf(r), sizeOf(r), `deleted ${ago(r.deletedAt)}`, forever].filter(Boolean).join(" · ");
 }
 
 /**
  * Restorable deletes in one selectable list: projects, clips of live projects, library items and
  * templates. Each row says when it was deleted and when it is deleted forever. The header checkbox stays
- * visible. A row's checkbox and ⋯ appear on hover (always on a coarse pointer); a checked row
- * keeps its checkbox. The checkbox hit target fills the row from its top and bottom to the left
- * edge. Deep links: `#project=id` (also clip, asset, template).
+ * visible. A row's checkbox appears on hover (always on a coarse pointer); a checked row keeps its
+ * checkbox, and its hit target fills the whole cell. Deep links: `#project=id` (also clip, asset, template).
  */
 export function DeletedPage() {
   const trpc = useTRPC();
@@ -151,77 +171,91 @@ export function DeletedPage() {
   const held = selected.filter((r) => !r.canPurge);
   const busy = restore.isPending || purge.isPending;
 
+  const columns: ListColumn[] = [
+    {
+      label: (
+        <label className="absolute inset-0 flex cursor-pointer items-center justify-center">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--acc)]"
+            checked={allOn}
+            disabled={!allKeys.length}
+            onChange={() => setSel(allOn ? [] : allKeys)}
+            aria-label={allOn ? "Clear selection" : "Select all"}
+          />
+        </label>
+      ),
+      width: "w-11",
+    },
+    { label: "Name" },
+    { label: "Kind", width: "min-[1040px]:w-[6.5rem]", full: true },
+    { label: "Size", width: "min-[1040px]:w-[5.5rem]", full: true, right: true },
+    { label: "Deleted", width: "min-[1040px]:w-[6.5rem]", full: true },
+    { label: "Deleted forever", width: "min-[1040px]:w-32", full: true },
+    { label: null, srLabel: "Actions", width: LIST_ACTIONS_WIDTH },
+  ];
+  const total = data?.total ?? items.length;
+
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <main className="mx-auto flex max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
-        <div className="min-w-0">
-          <h1 className="text-[28px] font-bold tracking-tight">Deleted</h1>
-          <p className="mt-1 min-h-5 text-sm text-ink2">
-            Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
-            {data && data.keepDays > 0
-              ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})`
-              : ""}
-            .
-          </p>
-        </div>
+    <ListPage
+      title="Deleted"
+      subtitle={
+        <>
+          Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
+          {data && data.keepDays > 0
+            ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})`
+            : ""}
+          .
+        </>
+      }
+    >
+      {list.error && <ListError message={list.error.message} />}
 
-        {list.isPending && !list.error && (
-          <SkeletonRegion label="Loading deleted items…" className="flex flex-col gap-2">
-            {["w-1/3", "w-2/5", "w-1/4"].map((w, i) => (
-              <div key={i} className={`${GRID} min-h-[3.5rem] px-3 py-2`}>
-                <Skeleton className="h-4 w-4 rounded" />
-                <Skeleton className={`h-4 ${w} sm:col-span-2`} />
-                <Skeleton className="hidden h-3.5 w-48 sm:block" />
-                <Skeleton className="h-8 w-8 rounded-[10px]" />
-              </div>
-            ))}
-          </SkeletonRegion>
-        )}
-        {list.error && <p className="text-err">✕ {list.error.message}</p>}
+      {data && empty && (
+        <ListEmpty icon={Trash2} title="Nothing waiting">
+          Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.
+        </ListEmpty>
+      )}
 
-        {data && empty && (
-          <div className="flex flex-col items-center gap-2 rounded-[16px] border border-dashed border-line2 px-5 py-10 text-center">
-            <Trash2 className="h-6 w-6 text-ink3" aria-hidden />
-            <b className="text-[15px]">Nothing waiting</b>
-            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">
-              Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.
-            </p>
-          </div>
-        )}
-
-        {data && items.length > 0 && (
-          <div className="flex flex-col text-[13px]">
-            <div className={`relative ${GRID} px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink3`}>
-              <span className="h-8 w-8" aria-hidden />
-              <label className="absolute inset-y-0 left-0 flex w-11 cursor-pointer items-center justify-center pl-3">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[var(--acc)]"
-                  checked={allOn}
-                  onChange={() => setSel(allOn ? [] : allKeys)}
-                  aria-label={allOn ? "Clear selection" : "Select all"}
-                />
-              </label>
-              <span className="hidden sm:block">Kind</span>
-              <span>Name</span>
-              <span className="hidden sm:block">When</span>
-              <span />
-            </div>
-            <ul className="flex flex-col gap-1">
-              {items.map((r) => {
-                const k = keyOf(r.kind, r.id);
-                const on = highlighted === k;
-                const checked = sel.includes(k);
-                const heldWhy = whyHeld(r);
-                return (
-                  <li
-                    key={k}
-                    id={`deleted-${r.id}`}
-                    className={`group/row relative ${GRID} min-h-[3.5rem] rounded-[10px] px-3 py-2 ${on || checked ? "bg-acc-soft" : "hover:bg-sunk/60"}`}
-                  >
-                    <span className="h-8 w-8" aria-hidden />
+      {(items.length > 0 || (list.isPending && !list.error)) && (
+        <section className="flex flex-col gap-2">
+          <ListTable caption="Deleted items you can restore" columns={columns} loading={list.isPending} loadingLabel="Loading deleted items…">
+            {list.isPending &&
+              Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
+                <ListRow key={i} skeleton>
+                  <ListCell>
+                    <Skeleton className="mx-auto h-4 w-4 rounded" />
+                  </ListCell>
+                  <ListCell>
+                    <Skeleton className={`h-4 ${["w-1/3", "w-2/5", "w-1/4", "w-1/2", "w-1/3"][i]}`} />
+                    <Skeleton className="mt-1.5 h-3 w-3/5 min-[1040px]:hidden" />
+                  </ListCell>
+                  <ListCell full>
+                    <Skeleton className="h-3.5 w-14" />
+                  </ListCell>
+                  <ListCell full>
+                    <Skeleton className="ml-auto h-3.5 w-10" />
+                  </ListCell>
+                  <ListCell full>
+                    <Skeleton className="h-3.5 w-14" />
+                  </ListCell>
+                  <ListCell full>
+                    <Skeleton className="h-3.5 w-16" />
+                  </ListCell>
+                  <ListCell>
+                    <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
+                  </ListCell>
+                </ListRow>
+              ))}
+            {items.map((r) => {
+              const k = keyOf(r.kind, r.id);
+              const checked = sel.includes(k);
+              const note = noteOf(r);
+              return (
+                <ListRow key={k} id={`deleted-${r.id}`} active={highlighted === k || checked}>
+                  <ListCell className="relative !p-0">
                     <label
-                      className={`absolute inset-y-0 left-0 z-[1] flex w-11 cursor-pointer items-center justify-center pl-3 ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}
+                      className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}
                     >
                       <input
                         type="checkbox"
@@ -231,78 +265,96 @@ export function DeletedPage() {
                         aria-label={`Select ${r.title}`}
                       />
                     </label>
-                    <span className="hidden font-semibold text-ink3 sm:block">{KIND_LABEL[r.kind]}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[14px] font-semibold text-ink2">{r.title}</span>
-                      <span className="block truncate text-xs text-ink3 sm:hidden" title={foreverDate(r.purgeAt)}>
-                        {KIND_LABEL[r.kind]} · {detailOf(r)}
-                      </span>
-                    </span>
-                    <span className="hidden truncate text-xs text-ink3 sm:block" title={foreverDate(r.purgeAt)}>
-                      {detailOf(r)}
-                    </span>
-                    <DropdownMenu.Root>
-                      <DropdownMenu.Trigger asChild>
-                        <MoreButton aria-label={`Actions for ${r.title}`} className={`opacity-0 ${REVEAL_ROW}`} />
-                      </DropdownMenu.Trigger>
-                      <DropdownMenu.Portal>
-                        <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[200px]">
-                          <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => onRestore([r])}>
-                            Restore
-                          </DropdownMenu.Item>
-                          <DropdownMenu.Item
-                            className="menu-item-danger"
-                            disabled={!r.canPurge || busy}
-                            title={heldWhy}
-                            onSelect={() => r.canPurge && setPending([r])}
-                          >
-                            Delete forever…
-                          </DropdownMenu.Item>
-                        </DropdownMenu.Content>
-                      </DropdownMenu.Portal>
-                    </DropdownMenu.Root>
-                  </li>
-                );
-              })}
-            </ul>
-            {data.truncated && (
-              <p className="mt-2 text-xs text-ink3">
-                Showing first {items.length} of {data.total}
-              </p>
+                  </ListCell>
+                  <ListCell>
+                    <div className={LIST_TITLE}>{r.title}</div>
+                    {note && <div className={`${LIST_SUB} hidden min-[1040px]:block`}>{note}</div>}
+                    <div className={`${LIST_SUB} min-[1040px]:hidden`} title={foreverDate(r.purgeAt)}>
+                      {foldedLine(r)}
+                    </div>
+                  </ListCell>
+                  <ListCell full variant="muted">
+                    {KIND_LABEL[r.kind]}
+                  </ListCell>
+                  <ListCell full variant="num">
+                    {sizeOf(r)}
+                  </ListCell>
+                  <ListCell full variant="muted">
+                    {ago(r.deletedAt)}
+                  </ListCell>
+                  <ListCell full variant="muted" title={foreverDate(r.purgeAt)}>
+                    {foreverWhen(r.purgeAt)}
+                  </ListCell>
+                  <ListCell variant="actions">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button type="button" className={`btn-ghost w-[5.5rem] ${LIST_ACTION}`} disabled={busy} onClick={() => onRestore([r])}>
+                        Restore
+                      </button>
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                          <MoreButton aria-label={`More actions for ${r.title}`} />
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
+                            <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} disabled={busy} onSelect={() => onRestore([r])}>
+                              Restore
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              className="menu-item-danger"
+                              disabled={!r.canPurge || busy}
+                              title={whyHeld(r)}
+                              onSelect={() => r.canPurge && setPending([r])}
+                            >
+                              Delete forever…
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
+                    </div>
+                  </ListCell>
+                </ListRow>
+              );
+            })}
+          </ListTable>
+          <ListFooter>
+            {list.isPending ? (
+              <Skeleton className="h-3 w-40" />
+            ) : (
+              `Showing ${items.length.toLocaleString()} of ${total.toLocaleString()} item${total === 1 ? "" : "s"}`
             )}
-            {selected.length > 0 && (
-              <SelectionBar label="Selected deletions" count={selected.length} onClear={() => setSel([])}>
-                <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>
-                  Restore
-                </button>
-                <DropdownMenu.Root>
-                  <DropdownMenu.Trigger asChild>
-                    <MoreButton aria-label="More actions for the selection" />
-                  </DropdownMenu.Trigger>
-                  <DropdownMenu.Portal>
-                    <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
-                      <DropdownMenu.Item
-                        className="menu-item-danger"
-                        disabled={busy || held.length === selected.length}
-                        title={
-                          held.length === selected.length
-                            ? "None of the selected items can be deleted forever yet"
-                            : held.length
-                              ? `${plural(held.length, "item")} still in use will be skipped`
-                              : undefined
-                        }
-                        onSelect={() => setPending(selected.filter((r) => r.canPurge))}
-                      >
-                        Delete forever…
-                      </DropdownMenu.Item>
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Portal>
-                </DropdownMenu.Root>
-              </SelectionBar>
-            )}
-          </div>
-        )}
-      </main>
+          </ListFooter>
+          {selected.length > 0 && (
+            <SelectionBar label="Selected deletions" count={selected.length} onClear={() => setSel([])}>
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>
+                Restore
+              </button>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <MoreButton aria-label="More actions for the selection" />
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content side="top" align="end" sideOffset={8} className={LIST_MENU}>
+                    <DropdownMenu.Item
+                      className="menu-item-danger"
+                      disabled={busy || held.length === selected.length}
+                      title={
+                        held.length === selected.length
+                          ? "None of the selected items can be deleted forever yet"
+                          : held.length
+                            ? `${plural(held.length, "item")} still in use will be skipped`
+                            : undefined
+                      }
+                      onSelect={() => setPending(selected.filter((r) => r.canPurge))}
+                    >
+                      Delete forever…
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            </SelectionBar>
+          )}
+        </section>
+      )}
       <ConfirmDialog
         open={!!pending}
         onOpenChange={(o) => {
@@ -366,6 +418,6 @@ export function DeletedPage() {
         {/* projects deleted with "forget" already go with their decisions; offer it only for the others */}
         {pending?.some((r) => r.kind === "project" && !r.forgetDecisions) && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
       </ConfirmDialog>
-    </ScrollArea>
+    </ListPage>
   );
 }
