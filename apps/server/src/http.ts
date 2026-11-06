@@ -271,13 +271,22 @@ export function createApp(svc: Services) {
     }),
   );
 
-  // MCP (agents): API key in the Authorization header; see README "MCP" and src/mcp.ts
+  // MCP (agents): API key in the Authorization header, or an OAuth access token with MCP_OAUTH; see README "MCP" and src/mcp.ts
   const mcpUnauthorized = (c: Context) =>
-    c.json({ error: "unauthorized", hint: "Send an API key from Settings as `Authorization: Bearer rs_…`" }, 401, {
-      "WWW-Authenticate": config.MCP_OAUTH
-        ? `Bearer realm="reelsaw", resource_metadata="${new URL("/.well-known/oauth-protected-resource/api/mcp", config.APP_URL)}"`
-        : 'Bearer realm="reelsaw"',
-    });
+    c.json(
+      {
+        error: "unauthorized",
+        hint: config.MCP_OAUTH
+          ? "Sign in through your MCP client, or send an API key from Settings as `Authorization: Bearer rs_…`"
+          : "Send an API key from Settings as `Authorization: Bearer rs_…`",
+      },
+      401,
+      {
+        "WWW-Authenticate": config.MCP_OAUTH
+          ? `Bearer realm="reelsaw", resource_metadata="${new URL("/.well-known/oauth-protected-resource/api/mcp", config.APP_URL)}"`
+          : 'Bearer realm="reelsaw"',
+      },
+    );
   app.all("/api/mcp", async (c) => {
     const token = bearerToken(c.req.raw.headers);
     // an OAuth access token (not one of our rs_ keys): the plugin verifies it and names the user in `sub`

@@ -333,6 +333,7 @@ function SystemTab() {
         ["On-device models", onDeviceSummary(s.onDevice)],
         ["OpenTelemetry", s.otel ? "on" : "off"],
         ["MCP endpoint", s.mcpUrl],
+        ["MCP sign-in", s.mcpOauth ? "OAuth or API key" : "API key only (MCP_OAUTH is off)"],
       ]
     : [];
 
