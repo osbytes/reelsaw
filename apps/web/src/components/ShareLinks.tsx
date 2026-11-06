@@ -143,6 +143,7 @@ export function ShareLinksSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [confirmAll, setConfirmAll] = useState(false);
+  const [confirmOne, setConfirmOne] = useState<{ id: string; title: string } | null>(null);
   const list = useInfiniteQuery(
     trpc.mediaLinks.list.infiniteQueryOptions({ limit: PAGE }, { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData }),
   );
@@ -245,7 +246,7 @@ export function ShareLinksSection() {
                       className="btn-danger w-[4.5rem] text-xs"
                       disabled={l.state !== "active" || revoke.isPending}
                       title={l.state === "active" ? "Turn this link off now" : "Already off"}
-                      onClick={() => revoke.mutate({ linkId: l.id })}
+                      onClick={() => setConfirmOne({ id: l.id, title: l.clipTitle ?? l.projectTitle })}
                     >
                       Revoke
                     </button>
@@ -260,6 +261,18 @@ export function ShareLinksSection() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={!!confirmOne}
+        onOpenChange={(o) => !o && setConfirmOne(null)}
+        title="Revoke this share link?"
+        body={`The link to “${confirmOne?.title ?? "this file"}” stops working now, for queued scheduler posts and people you sent it to as well. It cannot be turned back on; copying a link again makes a new one.`}
+        confirm="Revoke"
+        danger
+        onConfirm={() => {
+          if (confirmOne) revoke.mutate({ linkId: confirmOne.id });
+          setConfirmOne(null);
+        }}
+      />
       <ConfirmDialog
         open={confirmAll}
         onOpenChange={setConfirmAll}

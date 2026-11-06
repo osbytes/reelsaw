@@ -209,7 +209,7 @@ export const TOOLS = {
   import_transcript: {
     title: "Import transcript",
     description:
-      "Use an SRT or WebVTT file as the project's transcript instead of transcribing: right after create_project (only the video is fetched) or on a done or failed project (it then re-cleans the transcript and picks clips again). Give exactly one of text, uploadId or url. Returns { format, cues, words, warnings, message }; follow with wait_for_project.",
+      "Use an SRT or WebVTT file as the project's transcript instead of transcribing: right after create_project (only the video is fetched) or on a done or failed project (it then re-cleans the transcript and picks clips again; accepted and rejected fixes, cuts and corrections on the old transcript are lost for good). Give exactly one of text, uploadId or url. Returns { format, cues, words, warnings, message }; follow with wait_for_project.",
     inputSchema: {
       id: projectId(),
       text: z
@@ -222,6 +222,7 @@ export const TOOLS = {
       format: z.enum(["auto", "srt", "vtt"]).default("auto").describe("auto (default) decides from the WEBVTT header"),
       language: z.string().min(2).max(12).optional().describe("Language code of the text, e.g. en, es, ja (default: the existing transcript's, else unknown)"),
     },
+    annotations: { destructiveHint: true },
   },
   search_clips: {
     title: "Search clips",
@@ -423,6 +424,7 @@ export const TOOLS = {
     description:
       "A new signing secret for a webhook. Deliveries are signed with both the new and the old one for 24 h, so the receiver can switch; refused while a rotation is still open. Returns { secret, previousStopsAt, message }.",
     inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
+    annotations: { destructiveHint: true },
   },
   test_webhook: {
     title: "Test webhook",
@@ -497,6 +499,7 @@ export const TOOLS = {
       steps: z.array(z.enum(REFINE_STEPS)).min(1).optional().describe("Which refine steps to re-run; default all"),
       vocabulary: z.string().max(1000).optional().describe("Names and terms the transcript should spell this way; empty string clears it"),
     },
+    annotations: { destructiveHint: true },
   },
   reanalyze_project: {
     title: "Re-analyze project",
@@ -644,12 +647,14 @@ export const TOOLS = {
         .describe("Leave other clips' own sections in place; they still win over the project's framing (default false: clear them)"),
       rerender: z.boolean().optional().describe("Re-render the finished clips now (default true)"),
     },
+    annotations: { destructiveHint: true },
   },
   apply_layer_template: {
     title: "Apply layer template to clips",
     description:
       "Write a template onto clips of one project (up to 200 clipIds, or all): its layers fitted to each clip's length, and the intro / outro it sets as each clip's own. Not linked afterwards. mode replace (default) swaps the clips' layers, add keeps them and adds. rerender true re-renders finished clips now, else the next render shows them. update_project settings.layerTemplateId only affects clips created later. Returns { updated, rerendered, skipped: [{ clipId, reason }], layersSkipped, bumpers: slots set }",
     inputSchema: applyLayerTemplateInput,
+    annotations: { destructiveHint: true },
   },
   delete_project: {
     title: "Delete project",
@@ -805,7 +810,7 @@ export const TOOLS = {
     description:
       "Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. Pass only the keys to change; null returns a key to the environment's value; an empty string clears an optional one (URLs, captcha). Validated as a whole (a captcha provider needs both keys; email verification needs an email driver). Returns the same state as get_instance_settings.",
     inputSchema: settingsPatchSchema.shape,
-    annotations: { idempotentHint: true },
+    annotations: { destructiveHint: true, idempotentHint: true },
   },
   get_email_preferences: {
     title: "Email preferences",
@@ -930,7 +935,7 @@ export const TOOLS = {
       keepOverrides: z.boolean().optional().describe("Keep clips' own style overrides instead of clearing them (default false)"),
       rerender: z.boolean().default(true).describe("Re-render finished clips now (default true); false saves the style and the next render shows it"),
     },
-    annotations: { idempotentHint: true },
+    annotations: { destructiveHint: true, idempotentHint: true },
   },
   list_decisions: {
     title: "List decisions",

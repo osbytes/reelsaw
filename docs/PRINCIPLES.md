@@ -14,6 +14,24 @@ project already hit the problem it prevents.
 - **The user's decisions are durable.** Their fixes, cuts and rejections survive re-runs of the
   pipeline. User content is soft-deleted and restorable, and an edit that replaced something gives
   it back when undone.
+- **Confirm risky changes.** A change asks first when a slip would be costly and cannot simply be
+  taken back: it destroys data for good (purging, deleting an account), grants or removes privilege
+  (the admin role, an API key that can administer), cuts off something already handed out (revoking
+  a key or share link, rotating a secret, removing stored credentials), throws away the user's work
+  (re-running refine, replacing a transcript, a style for all clips that clears per-clip styles), or
+  loosens or deletes for every account (opening sign-ups, dropping a sign-up guard, lowering
+  retention).
+  - In the UI that is `ConfirmDialog`. It names the target, says what happens and what cannot be
+    recovered, and its button repeats the verb ("Make admin", never "OK"). `danger` is for destroying
+    data and granting privilege. A menu item that opens one ends in "…".
+  - Do not confirm what is easy to take back: a soft delete can rely on its Undo toast, and a toggle,
+    a preference or a re-render that only spends quota just runs. A dialog on everything teaches
+    people to click through. A setting confirms only in its risky direction.
+  - A form that already states the consequence beside a button naming the action is its own confirm.
+    A single checkbox or a generic "Save" is not.
+  - MCP has no dialog, so the client asks: the tool sets `destructiveHint: true` and its description
+    says what is lost. A CLI command typed by name is its own confirmation. None of this replaces the
+    service's guards (the last admin, your own role), which hold on every surface.
 - **Plain language.** Events, errors and notices are sentences a user understands ("No clean cut
   after 8 tries: it clipped the next word"), with the raw detail one click away. Say
   "disfluencies", not "stutters".
