@@ -1,0 +1,1 @@
+CREATE INDEX "user_list_idx" ON "user" USING btree ((case when "approved_at" is null then 0 else 1 end),"created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST);

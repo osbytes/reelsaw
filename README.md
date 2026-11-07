@@ -75,7 +75,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Agents and automation**
 
 - **MCP server** – `/api/mcp` (Streamable HTTP) lets Claude Code, Claude Desktop, Cursor or a script create projects, wait for them, read timed transcripts, edit layers and framing, create and re-render clips, manage the library and layer templates, and export the results. On a hosted plan the same tools are available, including Free. Authenticate with an API key from Settings, or with `MCP_OAUTH=true` so claude.ai and Claude Desktop connectors sign in through the browser.
-- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `set-password`, `library`, `templates`, `apply-framing`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
+- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `users-bulk`, `approve`, `make-admin`, `set-password`, `library`, `templates`, `apply-framing`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
 
 **Hosting and accounts**
 
@@ -287,6 +287,14 @@ form starts from them and can save its current values back. Admins also see the 
 (models, storage, resource meters) and `/api/health` includes machine numbers only for them (or
 with `HEALTH_DETAILS=true`).
 
+The Users page lists accounts a page at a time, pending first, with whether each email address is
+verified; search and the status, verification and "Flagged only" filters run in the database and stay in
+the link. Check rows (or "Select all" to take every match, not only the loaded page) to approve,
+suspend, reinstate or delete them together; each account goes through the same checks as one at a
+time (never yourself, never the last admin) and anything refused is listed with the reason. The same
+list and actions are `list_users` / `manage_users` over MCP and `reelsaw users` / `reelsaw users-bulk`
+on the box.
+
 Suspending an account (Users page) ends its sessions and refuses its API keys at the next request;
 removing one deletes its projects, clips and files. Locked out of the password? Sign-in has Forgot
 password when email is on. Without email, an operator sets a new one from the shell (`docker
@@ -430,7 +438,8 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 
 **Key permissions.** A key acts as you, with one exception: the instance-administration tools
 (`get_instance_settings`, `set_instance_settings`, `list_workers`, `get_queue`, `list_failures`,
-`get_failure`, `retry_failures`, `check_for_update`, and instance-wide `report_issue`) need a key
+`get_failure`, `retry_failures`, `list_users`, `manage_users`, `check_for_update`, and instance-wide
+`report_issue`) need a key
 created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
 Settings. Keys are created without it by default, and a key that lacks it is refused with "This
 key cannot change instance settings". Keys created before permissions existed were given the administration grant when the
@@ -544,6 +553,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
+| `list_users` | Admins only: accounts on this instance, pending first then newest, with status (pending, active, suspended), role, whether the email address is verified (emailVerified), abuse flags, plan, last active and all-time usage. |
+| `manage_users` | Admins only: approve, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 | `get_email_preferences` | Which optional emails you get, by topic. |
 | `set_email_preferences` | Turn topics of optional email on or off; omitted topics stay as they are. |
@@ -582,7 +593,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
-| `reelsaw users` | list accounts: role, status, sign-up date |
+| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
+| `reelsaw users-bulk <approve\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); filter flags as for `users`; delete is forever |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
 | `reelsaw set-password <email> [--must-change]` | set an account's password from a prompt (or two stdin lines); `--must-change` requires a new one at next sign-in. Do not put the secret on the command line |

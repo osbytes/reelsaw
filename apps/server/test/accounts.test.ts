@@ -118,6 +118,49 @@ describe("accounts", () => {
     assert.equal(rm.error?.data.code, "BAD_REQUEST");
   });
 
+  it("shows email verification, filters by it, and acts on many accounts at once", async () => {
+    const a = await signUp();
+    const b = await signUp();
+    await pool.query(`update "user" set email_verified = false, approved_at = null where id = any($1)`, [[a.userId, b.userId]]);
+    try {
+      const list = await trpc(admin.cookie, "admin.users.list", { status: "pending", verified: false, q: a.email }, "GET");
+      const items = (list.data as { items: Array<{ id: string; emailVerified: boolean; status: string }> }).items;
+      assert.ok(
+        items.some((r) => r.id === a.userId && !r.emailVerified && r.status === "pending"),
+        JSON.stringify(list),
+      );
+      const verified = await trpc(admin.cookie, "admin.users.list", { verified: true, q: a.email }, "GET");
+      assert.ok(!(verified.data as { items: Array<{ id: string }> }).items.some((r) => r.id === a.userId));
+
+      // ids: both approved, the admin's own account refused per account rather than failing the call
+      const approve = await trpc(admin.cookie, "admin.users.bulk", { action: "approve", ids: [a.userId, b.userId] });
+      assert.deepEqual(approve.data, { action: "approve", changed: 2, unchanged: 0, skipped: [], nextCursor: null });
+      const suspend = await trpc(admin.cookie, "admin.users.bulk", { action: "suspend", ids: [a.userId, admin.userId], reason: "bulk" });
+      const s = suspend.data as { changed: number; skipped: Array<{ id: string; reason: string }> };
+      assert.equal(s.changed, 1);
+      assert.equal(s.skipped[0]?.id, admin.userId);
+      // filter: every suspended account matching the search, walked with the cursor
+      const reinstate = await trpc(admin.cookie, "admin.users.bulk", { action: "reinstate", filter: { status: "suspended", q: a.email } });
+      assert.equal((reinstate.data as { changed: number }).changed, 1);
+      const rows = await pool.query(`select id, banned, approved_at is not null as approved from "user" where id = any($1) order by id`, [
+        [a.userId, b.userId],
+      ]);
+      assert.ok(rows.rows.every((r) => !r.banned && r.approved));
+      const ev = await pool.query(`select type from events where user_id = $1 order by id`, [a.userId]);
+      assert.deepEqual(
+        ev.rows.map((e) => e.type).filter((t: string) => t !== "user.signed_up"),
+        ["user.approved", "user.banned", "user.unbanned"],
+      );
+      const both = await trpc(admin.cookie, "admin.users.bulk", { action: "approve", ids: [a.userId], filter: {} });
+      assert.equal(both.error?.data.code, "BAD_REQUEST");
+      const plain = await trpc(user.cookie, "admin.users.bulk", { action: "delete", ids: [a.userId] });
+      assert.equal(plain.error?.data.code, "FORBIDDEN");
+    } finally {
+      await pool.query(`delete from "user" where id = any($1)`, [[a.userId, b.userId]]);
+      await pool.query(`delete from events where user_id = any($1)`, [[a.userId, b.userId]]);
+    }
+  });
+
   it("blocks a must-change browser session, keeps API keys, and accepts a new secret without the current password", async () => {
     const locked = await signUp();
     const key = await createKey(locked.cookie, "keep-working");

@@ -22,6 +22,12 @@ export const LIST_MENU_ITEM_FOLDED = "menu-item min-[1040px]:hidden";
 export const LIST_MENU = "menu w-[230px]";
 /** The actions column: one inline action and the ⋯ menu, or only the menu below the fold width. */
 export const LIST_ACTIONS_WIDTH = "w-14 min-[1040px]:w-[9.5rem]";
+/**
+ * A row's selection checkbox stays out of the way until that row is hovered (or a coarse pointer, or keyboard
+ * focus). The full class string stays literal so Tailwind emits it. `!` beats the resting `opacity-0`
+ * (source order inside one layer does not). A checked row keeps its own checkbox via `opacity-100`.
+ */
+export const LIST_REVEAL_ROW = "transition-opacity group-hover/row:!opacity-100 focus-within:!opacity-100 pointer-coarse:!opacity-100";
 /** How many rows a list shows while it loads. */
 export const LIST_SKELETON_ROWS = 5;
 

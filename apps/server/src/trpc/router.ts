@@ -7,7 +7,7 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { mediaLinksRouter, webhooksRouter } from "./integrations.js";
-import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
+import { approveUser, banUser, bulkUsers, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import {
   decisionSummary,
   EXPORT_MAX,
@@ -57,6 +57,8 @@ import {
 import { peekUrlMeta } from "../projects/peek.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
+import { listUsers } from "../accounts-list.js";
+import { bulkUsersInput, userListInput } from "../accounts-schema.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
@@ -140,10 +142,9 @@ import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
 import { touchLastActive } from "../presence.js";
 import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
-import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
-import { decodeCursor, LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
+import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
 import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
@@ -967,108 +968,14 @@ const restRouter = router({
       }),
     }),
     users: router({
+      /** Keyset page of accounts with their all-time usage; search and filters in SQL (accounts-list.ts). */
+      list: adminProcedure.input(userListInput.optional()).query(({ ctx, input }) => listUsers(ctx.svc, input)),
       /**
-       * Keyset page of accounts: pending first, then newest first (`approved, created_at desc, id desc`), with each
-       * account's all-time usage from one grouped query per metric table (see `usageByUser`).
+       * One action over many accounts (the selection bar, `manage_users`, `reelsaw users-bulk`): the ids, or a
+       * page of every account matching the filter. Each account is its own transition and event; refusals
+       * (yourself, the last admin) come back in `skipped`. Call again with `nextCursor` until it is null.
        */
-      list: adminProcedure
-        .input(
-          z
-            .object({
-              q: z.string().max(200).optional(),
-              flagged: z.boolean().optional(),
-              cursor: z.string().max(300).optional(),
-              limit: z.number().int().min(1).max(100).default(50),
-            })
-            .optional(),
-        )
-        .query(async ({ ctx, input }) => {
-          const db = ctx.svc.database.db;
-          const limit = input?.limit ?? 50;
-          const ws = words(input?.q ?? "");
-          const U = schema.user;
-          // flagged only: accounts the hourly abuse pass marked (abuse.ts)
-          const onlyFlagged = input?.flagged ? sql`jsonb_array_length(${U.flags}) > 0` : undefined;
-          // A search matches like the palette's (typo-tolerant, every word, best first) and returns the best
-          // SEARCH_USERS matches in one page: no cursor, the header says when more match. Without a search the
-          // list is the keyset-paged one: pending first, then newest.
-          const match = userMatch(ws);
-          const score = userScore(ws);
-          const approved = sql<number>`(case when ${U.approvedAt} is null then 0 else 1 end)`;
-          let after: SQL | undefined;
-          if (!ws.length && input?.cursor) {
-            const c = decodeCursor(input.cursor, 3);
-            if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
-            after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
-          }
-          const pageSize = ws.length ? SEARCH_USERS : limit;
-          const [fetched, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
-            await setSearchThreshold(tx);
-            return Promise.all([
-              tx
-                .select({
-                  id: U.id,
-                  name: U.name,
-                  email: U.email,
-                  role: U.role,
-                  approvedAt: U.approvedAt,
-                  banned: U.banned,
-                  banReason: U.banReason,
-                  flags: U.flags,
-                  signupIp: U.signupIp,
-                  mustChangePassword: U.mustChangePassword,
-                  lastActiveAt: U.lastActiveAt,
-                  createdAt: U.createdAt,
-                  approved,
-                  ts: sql<string>`${U.createdAt}::text`,
-                })
-                .from(U)
-                .where(and(match, onlyFlagged, after))
-                .orderBy(...(score ? [desc(score)] : []), approved, desc(U.createdAt), desc(U.id))
-                .limit(pageSize + 1),
-              tx.select({ total: sql<number>`count(*)::int` }).from(U).where(and(match, onlyFlagged)),
-            ]);
-          });
-          const { items, nextCursor } = ws.length
-            ? { items: fetched.slice(0, pageSize), nextCursor: null }
-            : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
-          const ids = items.map((r) => r.id);
-          const [usage, sessions, plans] = await Promise.all([
-            usageByUser(db, null, ids),
-            ids.length
-              ? db
-                  .select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` })
-                  .from(schema.session)
-                  .where(inArray(schema.session.userId, ids))
-                  .groupBy(schema.session.userId)
-              : [],
-            ctx.svc.ee ? ctx.svc.ee.billing.plansOf(ids) : new Map<string, { plan: string; status: string }>(),
-          ]);
-          const usageOf = new Map(usage.map((u) => [u.id, u]));
-          const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
-          return {
-            items: items.map(({ approved: _a, ts: _t, lastActiveAt, ...r }) => {
-              const sessionLast = lastOf.get(r.id);
-              const stamped = lastActiveAt?.getTime() ?? 0;
-              const sessionMs = sessionLast ? new Date(sessionLast).getTime() : 0;
-              const lastMs = Math.max(stamped, sessionMs);
-              const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
-              return {
-                ...r,
-                projects: projectsTotal,
-                usage: u,
-                status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
-                /** the plan in force (ee); null when this instance has no plans */
-                plan: ctx.svc.ee ? (plans.get(r.id)?.plan ?? "free") : null,
-                approvedAt: r.approvedAt?.toISOString() ?? null,
-                createdAt: r.createdAt.toISOString(),
-                lastActive: lastMs ? new Date(lastMs).toISOString() : null,
-              };
-            }),
-            nextCursor,
-            total,
-          };
-        }),
+      bulk: adminProcedure.input(bulkUsersInput).mutation(({ ctx, input }) => bulkUsers(ctx.svc, ctx.user.id, input)),
       flaggedCount: adminProcedure.query(async ({ ctx }) => {
         const [{ n } = { n: 0 }] = await ctx.svc.database.db
           .select({ n: sql<number>`count(*)::int` })

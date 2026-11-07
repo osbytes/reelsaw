@@ -25,6 +25,7 @@ import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } fro
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
+import { BULK_USERS, bulkUsersShape, userListInput } from "./accounts-schema.js";
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
@@ -804,6 +805,19 @@ export const TOOLS = {
         .describe("Retry these rows instead of the current filter; omitted = every match of q/stage/since"),
       limit: z.number().int().min(1).max(50).optional().describe("Max items to retry this call, default 50"),
     },
+  },
+  list_users: {
+    title: "List accounts",
+    description:
+      "Admins only: accounts on this instance, pending first then newest, with status (pending, active, suspended), role, whether the email address is verified (emailVerified), abuse flags, plan, last active and all-time usage. Filter with q (name or email), status, verified, flagged. Returns { items, nextCursor, total }; pass nextCursor for the next page (a search returns its best 100 in one page). Hosted non-admins are refused.",
+    inputSchema: userListInput.shape,
+    annotations: { readOnlyHint: true },
+  },
+  manage_users: {
+    title: "Act on many accounts",
+    description: `Admins only: approve, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). delete removes the accounts with all their projects and files forever; suspend signs them out and blocks the app, keys and MCP. Your own account and the last admin are skipped with the reason. Up to ${BULK_USERS} per call: with a filter, call again with nextCursor until null. Returns { action, changed, unchanged, skipped: [{ id, email, reason }], nextCursor }.`,
+    inputSchema: bulkUsersShape,
+    annotations: { destructiveHint: true },
   },
   set_instance_settings: {
     title: "Change instance settings",

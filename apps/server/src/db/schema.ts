@@ -74,6 +74,9 @@ export const user = pgTable(
     index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
     uniqueIndex("user_email_key_idx").on(t.emailKey),
     index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
+    // the admin Users list order (accounts-list.ts `approvedRank`): pending first, then newest. NULLS FIRST is what
+    // `order by … desc` means, so the index matches the query (the columns are never null)
+    index("user_list_idx").on(sql`(case when ${t.approvedAt} is null then 0 else 1 end)`, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst()),
   ],
 );
 

@@ -11,7 +11,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users                                   list accounts: role, status, sign-up date
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--limit n] [--cursor c] [--json]
+ *                                           list accounts a page at a time: role, status, email verified, sign-up date
+ *   users-bulk <approve|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
+ *                                           act on many accounts (same as the Users selection bar and manage_users);
+ *                                           filter flags as for `users`; delete is forever
  *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
  *   make-admin <email>                      promote an account to admin (approves it first if needed)
  *   set-password <email> [--must-change]    set an account's password from a prompt (or two stdin lines);
@@ -188,7 +192,9 @@ import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
-import { approveUser, setUserPassword, setUserRole, setUserWatermark } from "./accounts.js";
+import { approveUser, bulkUsers, setUserPassword, setUserRole, setUserWatermark } from "./accounts.js";
+import { listUsers } from "./accounts-list.js";
+import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
@@ -262,6 +268,30 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
+
+/** `--q`, `--status`, `--verified yes|no`, `--flagged yes` as the Users page filter (accounts-schema.ts). */
+function userFilterFlags(): UserFilter {
+  const f: UserFilter = {};
+  const yesNo = (name: string) => {
+    const v = flag(name);
+    if (v === undefined) return undefined;
+    if (v === "yes" || v === "true") return true;
+    if (v === "no" || v === "false") return false;
+    throw new Error(`--${name} takes yes or no`);
+  };
+  const q = flag("q");
+  if (q) f.q = q;
+  const status = flag("status");
+  if (status !== undefined) {
+    const st = USER_STATUSES.find((x) => x === status);
+    if (!st) throw new Error(`--status takes ${USER_STATUSES.join(", ")}`);
+    f.status = st;
+  }
+  const verified = yesNo("verified");
+  if (verified !== undefined) f.verified = verified;
+  if (yesNo("flagged")) f.flagged = true;
+  return f;
+}
 
 /** "x+12% y-5% | x2+3%": the per-pane offsets of a layout segment, empty when none. */
 function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number; offsetY2?: number }) {
@@ -427,18 +457,58 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       })),
     );
   },
-  /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
+  /** Accounts, a page at a time (same list as the Users page and list_users): role, status, verified, sign-up date. */
   async users(svc) {
-    const rows = await svc.database.db.query.user.findMany({ orderBy: schema.user.createdAt });
+    const limit = flag("limit") ? Number(flag("limit")) : 50;
+    const r = await listUsers(svc, { ...userFilterFlags(), limit, cursor: flag("cursor") });
+    if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     table(
-      rows.map((u) => ({
+      r.items.map((u) => ({
         email: u.email,
         name: u.name,
         role: u.role,
-        status: u.banned ? "suspended" : !u.approvedAt ? "pending" : u.mustChangePassword ? "must-change" : "active",
-        created: u.createdAt.toISOString().slice(0, 10),
+        status: u.mustChangePassword && u.status === "active" ? "must-change" : u.status,
+        verified: u.emailVerified ? "yes" : "no",
+        created: u.createdAt.slice(0, 10),
       })),
     );
+    console.log(`${r.items.length} of ${r.total}${r.nextCursor ? `; next page: --cursor ${r.nextCursor}` : ""}`);
+  },
+  /**
+   * approve | suspend | reinstate | delete, for the accounts named by email or every account matching the
+   * filter flags (`--all` for every account). Same path as the Users page selection bar and manage_users;
+   * a command typed by name is its own confirmation, so it walks every page.
+   */
+  async ["users-bulk"](svc) {
+    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes]) [--reason text] [--json]`;
+    const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
+    if (!action) throw new Error(usage);
+    const emails = pos.slice(1);
+    const filter = userFilterFlags();
+    if (!emails.length && !Object.keys(filter).length && !args.includes("--all"))
+      throw new Error(`name accounts, a filter, or --all
+${usage}`);
+    const reason = flag("reason");
+    const total = { changed: 0, unchanged: 0, skipped: [] as Array<{ id: string; email: string; reason: string }> };
+    const add = (r: Awaited<ReturnType<typeof bulkUsers>>) => {
+      total.changed += r.changed;
+      total.unchanged += r.unchanged;
+      total.skipped.push(...r.skipped);
+    };
+    if (emails.length) {
+      const ids = await Promise.all(emails.map(async (e) => (await userByEmail(svc, e)).id));
+      for (let i = 0; i < ids.length; i += BULK_USERS) add(await bulkUsers(svc, null, { action, ids: ids.slice(i, i + BULK_USERS), reason }));
+    } else {
+      let cursor: string | undefined;
+      do {
+        const r = await bulkUsers(svc, null, { action, filter, cursor, reason });
+        add(r);
+        cursor = r.nextCursor ?? undefined;
+      } while (cursor);
+    }
+    if (args.includes("--json")) return void console.log(JSON.stringify({ action, ...total }, null, 2));
+    console.log(`${action}: ${total.changed} changed, ${total.unchanged} unchanged, ${total.skipped.length} skipped`);
+    for (const k of total.skipped) console.log(`  skipped ${k.email}: ${k.reason}`);
   },
   async approve(svc) {
     const u = await userByEmail(svc, pos[0]);
@@ -2544,7 +2614,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }
