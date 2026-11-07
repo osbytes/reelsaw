@@ -4,7 +4,7 @@
  * together; mail that follows is a handler on the event (notify/account.ts). tRPC (admin router) and the CLI call these; nothing else edits role/approval
  * columns or the credential hash.
  */
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, ne, sql, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
@@ -14,6 +14,9 @@ import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
 import { purgeProject } from "./projects/service.js";
 import type { UserRole } from "./db/schema.js";
+import { statusOf, userFilterWhere } from "./accounts-list.js";
+import { BULK_USERS, type BulkUserAction, type BulkUsersInput, type UserStatus } from "./accounts-schema.js";
+import { setSearchThreshold, userMatch, words } from "./search.js";
 
 async function lockedUser(u: UnitOfWork, id: string) {
   const [row] = await u.db.select().from(schema.user).where(eq(schema.user.id, id)).for("update");
@@ -55,7 +58,7 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
   });
 }
 
-export async function banUser(svc: Services, actorId: string, userId: string, reason: string | null) {
+export async function banUser(svc: Services, actorId: string | null, userId: string, reason: string | null) {
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot suspend yourself." });
@@ -68,7 +71,7 @@ export async function banUser(svc: Services, actorId: string, userId: string, re
   });
 }
 
-export async function unbanUser(svc: Services, actorId: string, userId: string) {
+export async function unbanUser(svc: Services, actorId: string | null, userId: string) {
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     await u.db.update(schema.user).set({ banned: false, banReason: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
@@ -190,4 +193,84 @@ export async function setUserPassword(
     await u.emit("user.password_set", { userId, email: user.email, mustChange: opts.mustChange }, { actorId });
     return { ok: true as const };
   });
+}
+
+/** Which accounts each action can change; the others are left as they are (not an error). */
+const APPLIES: Record<BulkUserAction, (s: UserStatus) => boolean> = {
+  approve: (s) => s === "pending",
+  suspend: (s) => s !== "suspended",
+  reinstate: (s) => s === "suspended",
+  delete: () => true,
+};
+const APPLIES_SQL: Record<BulkUserAction, SQL | undefined> = {
+  approve: sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`,
+  suspend: sql`not ${schema.user.banned}`,
+  reinstate: sql`${schema.user.banned}`,
+  delete: undefined,
+};
+
+/**
+ * One action over many accounts: the listed `ids`, or a page of every account matching `filter` (the Users
+ * page's "select all matching"), walked in id order with `cursor` so a run over thousands always moves
+ * forward, whatever the action does to the filter. Each account goes through its own transition above, in
+ * its own unit of work, with its own event: the guards (yourself, the last admin) hold per account and a
+ * refusal skips that one with its reason instead of failing the rest.
+ */
+export async function bulkUsers(svc: Services, actorId: string | null, input: BulkUsersInput) {
+  const db = svc.database.db;
+  const U = schema.user;
+  const cols = { id: U.id, email: U.email, banned: U.banned, approvedAt: U.approvedAt };
+  let rows: Array<{ id: string; email: string; banned: boolean; approvedAt: Date | null }>;
+  let nextCursor: string | null = null;
+  if (input.ids) {
+    const found = await db.select(cols).from(U).where(inArray(U.id, input.ids));
+    const byId = new Map(found.map((r) => [r.id, r]));
+    rows = input.ids.flatMap((id) => byId.get(id) ?? []);
+  } else {
+    const f = input.filter ?? {};
+    const fetched = await db.transaction(async (tx) => {
+      await setSearchThreshold(tx);
+      return tx
+        .select(cols)
+        .from(U)
+        .where(and(userMatch(words(f.q ?? "")), userFilterWhere(f), APPLIES_SQL[input.action], input.cursor ? gt(U.id, input.cursor) : undefined))
+        .orderBy(asc(U.id))
+        .limit(BULK_USERS + 1);
+    });
+    rows = fetched.slice(0, BULK_USERS);
+    nextCursor = fetched.length > BULK_USERS ? rows[rows.length - 1]!.id : null;
+  }
+  const missing = input.ids ? input.ids.length - rows.length : 0;
+  let changed = 0;
+  let unchanged = missing;
+  const skipped: Array<{ id: string; email: string; reason: string }> = [];
+  const reason = input.reason?.trim() || null;
+  const log = svc.log.child({ module: "accounts" });
+  for (const r of rows) {
+    if (!APPLIES[input.action](statusOf(r))) {
+      unchanged++;
+      continue;
+    }
+    try {
+      if (input.action === "approve") {
+        if ((await approveUser(svc, actorId, r.id)).changed) changed++;
+        else unchanged++;
+      } else if (input.action === "suspend") {
+        await banUser(svc, actorId, r.id, reason);
+        changed++;
+      } else if (input.action === "reinstate") {
+        await unbanUser(svc, actorId, r.id);
+        changed++;
+      } else {
+        await removeUser(svc, actorId, r.id);
+        changed++;
+      }
+    } catch (err) {
+      // a guard (yourself, the last admin) or a row removed meanwhile: skip it, say why, go on
+      const message = err instanceof TRPCError ? err.message : "Something went wrong";
+      if (!(err instanceof TRPCError)) log.warn({ err, userId: r.id, action: input.action }, "bulk account action skipped");
+      skipped.push({ id: r.id, email: r.email, reason: message });
+    }
+  }
+  return { action: input.action, changed, unchanged, skipped, nextCursor };
 }

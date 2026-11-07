@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTRPC } from "../lib/trpc";
+import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { useMe } from "../lib/account";
+import { readHash, useHashParams, writeHash } from "../lib/hash";
 import { Users } from "lucide-react";
 import { toast } from "sonner";
 import { formatBytes } from "@reelsaw/shared";
@@ -12,6 +13,7 @@ import {
   LIST_ACTION,
   LIST_MENU,
   LIST_MENU_ITEM_FOLDED,
+  LIST_REVEAL_ROW,
   LIST_SKELETON_ROWS,
   LIST_SUB,
   LIST_TITLE,
@@ -24,6 +26,7 @@ import {
   ListRow,
   ListTable,
 } from "../components/ListPage";
+import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 
 type Usage = {
@@ -35,12 +38,15 @@ type Usage = {
   llmInputTokens: number;
   llmOutputTokens: number;
 };
+type Status = "pending" | "active" | "suspended";
 type Row = {
   id: string;
   name: string;
   email: string;
+  /** the address was confirmed (the verification link, or a sign-in provider that vouches for it) */
+  emailVerified: boolean;
   role: "user" | "admin";
-  status: "pending" | "active" | "suspended";
+  status: Status;
   banReason: string | null;
   projects: number;
   createdAt: string;
@@ -58,11 +64,28 @@ const FLAG_HELP: Record<string, string> = {
 };
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
-const STATUS: Record<Row["status"], { glyph: string; tone: string; word: string }> = {
+const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
   pending: { glyph: "◷", tone: "text-warn", word: "Pending" },
   active: { glyph: "●", tone: "text-ok", word: "Active" },
   suspended: { glyph: "✕", tone: "text-err", word: "Suspended" },
 };
+const STATUS_OPTIONS = [
+  { value: "", label: "Any status" },
+  { value: "pending", label: "Pending" },
+  { value: "active", label: "Active" },
+  { value: "suspended", label: "Suspended" },
+];
+const VERIFIED_OPTIONS = [
+  { value: "", label: "Any email" },
+  { value: "yes", label: "Verified" },
+  { value: "no", label: "Unverified" },
+];
+
+type BulkAction = "approve" | "suspend" | "reinstate" | "delete";
+type BulkResult = { changed: number; unchanged: number; skipped: Array<{ id: string; email: string; reason: string }> };
+/** Accounts per bulk call (BULK_USERS on the server): a longer selection goes in several calls. */
+const BULK_CHUNK = 50;
+const BULK_DONE: Record<BulkAction, string> = { approve: "Approved", suspend: "Suspended", reinstate: "Reinstated", delete: "Deleted" };
 
 const PAGE = 50;
 
@@ -76,29 +99,74 @@ function useDebounced<T>(value: T, ms: number) {
   return v;
 }
 const num = new Intl.NumberFormat();
+const accounts = (n: number) => `${num.format(n)} account${n === 1 ? "" : "s"}`;
+const asStatus = (v: string | null): Status | "" => (v === "pending" || v === "active" || v === "suspended" ? v : "");
+const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "no" ? v : "");
 
-/** Admin: who may use this instance. Pending accounts first; every action is one click, plus a confirm for the risky ones (PRINCIPLES: "Confirm risky changes"). */
+/**
+ * Admin: who may use this instance. Pending accounts first; every action is one click, plus a confirm for the
+ * risky ones (PRINCIPLES: "Confirm risky changes"). Search and filters run on the server and live in the hash
+ * (#q=…&status=pending&verified=no&flagged=1). Rows are selectable; the selection bar acts on the checked
+ * rows, or on every account matching the filters ("Select all 1,204"), in pages of 50 on the server.
+ */
 export function AdminUsersPage() {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const qc = useQueryClient();
   const me = useMe();
-  const [search, setSearch] = useState("");
-  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [search, setSearch] = useState(() => readHash().get("q") ?? "");
+  const [flaggedOnly, setFlaggedOnly] = useState(() => readHash().get("flagged") === "1");
+  const [status, setStatus] = useState<Status | "">(() => asStatus(readHash().get("status")));
+  const [verified, setVerified] = useState<"yes" | "no" | "">(() => asYesNo(readHash().get("verified")));
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role"; row: Row } | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<BulkAction | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
+  const [sel, setSel] = useState<string[]>([]);
+  /** the selection is every account matching the filters, not only the checked rows */
+  const [allMatching, setAllMatching] = useState(false);
+  /** how far a bulk run has got; local because one run is several calls */
+  const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
+  // a pasted link, back/forward or a hash edit re-applies the filters (our own writes do not notify the router)
+  const hash = useHashParams();
+  const hashKey = hash.toString();
+  useEffect(() => {
+    const h = new URLSearchParams(hashKey);
+    setSearch(h.get("q") ?? "");
+    setFlaggedOnly(h.get("flagged") === "1");
+    setStatus(asStatus(h.get("status")));
+    setVerified(asYesNo(h.get("verified")));
+  }, [hashKey]);
   const q = useDebounced(search.trim(), 200);
+  const filter = useMemo(
+    () => ({
+      q: q || undefined,
+      flagged: flaggedOnly || undefined,
+      status: status || undefined,
+      verified: verified ? verified === "yes" : undefined,
+    }),
+    [q, flaggedOnly, status, verified],
+  );
+  useEffect(() => {
+    writeHash({ q: q || null, flagged: flaggedOnly ? 1 : null, status: status || null, verified: verified || null });
+    // a selection made under other filters is not what the new list shows
+    setSel([]);
+    setAllMatching(false);
+  }, [q, flaggedOnly, status, verified]);
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { q: q || undefined, flagged: flaggedOnly || undefined, limit: PAGE },
+      { ...filter, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
     ),
   );
+  // counted over every account, not the loaded page
+  const pendingCount = useQuery(trpc.admin.users.pendingCount.queryOptions());
+  const refresh = () => void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
   const done = (msg: string) => () => {
     toast(msg);
-    void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
+    refresh();
   };
   const fail = (e: { message: string }) => toast.error(e.message);
   const approve = useMutation({ ...trpc.admin.users.approve.mutationOptions(), onSuccess: done("Approved"), onError: fail });
@@ -106,9 +174,51 @@ export function AdminUsersPage() {
   const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
   const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
   const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account deleted"), onError: fail });
-  const busy = approve.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending;
   const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
   const total = list.data?.pages[0]?.total ?? 0;
+  /** One action over the selection: chunks of checked ids, or every page of the filter until the server says it is done. */
+  const bulk = useMutation({
+    mutationFn: async ({ action, ids, reason }: { action: BulkAction; ids: string[] | null; reason?: string | undefined }) => {
+      const sum: BulkResult = { changed: 0, unchanged: 0, skipped: [] };
+      const add = (r: BulkResult) => {
+        sum.changed += r.changed;
+        sum.unchanged += r.unchanged;
+        sum.skipped.push(...r.skipped);
+        setProgress((p) => p && { ...p, done: Math.min(p.of, p.done + r.changed + r.unchanged + r.skipped.length) });
+      };
+      if (ids) {
+        for (let i = 0; i < ids.length; i += BULK_CHUNK) add(await client.admin.users.bulk.mutate({ action, ids: ids.slice(i, i + BULK_CHUNK), reason }));
+      } else {
+        let cursor: string | undefined;
+        do {
+          const r = await client.admin.users.bulk.mutate({ action, filter, cursor, reason });
+          add(r);
+          cursor = r.nextCursor ?? undefined;
+        } while (cursor);
+      }
+      return { action, ...sum };
+    },
+    onMutate: ({ ids }) => setProgress({ done: 0, of: ids?.length ?? total }),
+    onSuccess: (r) => {
+      const parts = [`${BULK_DONE[r.action]} ${accounts(r.changed)}`];
+      if (r.unchanged) parts.push(`${num.format(r.unchanged)} left as they were`);
+      if (r.skipped.length) parts.push(`${num.format(r.skipped.length)} skipped: ${r.skipped[0]!.reason}`);
+      toast(parts.join(" · "));
+      setSel([]);
+      setAllMatching(false);
+    },
+    onError: fail,
+    onSettled: () => {
+      setProgress(null);
+      refresh();
+    },
+  });
+  const busy = approve.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending || bulk.isPending;
+  // a refetch drops rows that left the list (deleted, or no longer matching): so does the selection
+  useEffect(() => {
+    const live = new Set(loaded.map((r) => r.id));
+    setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
+  }, [loaded]);
   // sorting is client side, over the rows loaded so far
   const rows = useMemo(() => {
     const base = loaded;
@@ -129,7 +239,32 @@ export function AdminUsersPage() {
     };
     return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
   }, [loaded, sort]);
-  const pending = rows.filter((r) => r.status === "pending").length;
+  const pending = pendingCount.data ?? 0;
+
+  const selfId = me.data?.id;
+  const selected = useMemo(() => loaded.filter((r) => sel.includes(r.id)), [loaded, sel]);
+  const allIds = rows.map((r) => r.id);
+  const allOn = allIds.length > 0 && allIds.every((id) => sel.includes(id));
+  const someOn = !allOn && sel.length > 0;
+  const toggle = (id: string) => {
+    setAllMatching(false);
+    setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  };
+  /** The checked rows each action can change (an approved account needs no approval, nobody suspends or deletes themself). */
+  const applies: Record<BulkAction, (r: Row) => boolean> = {
+    approve: (r) => r.status === "pending",
+    suspend: (r) => r.status !== "suspended" && r.id !== selfId,
+    reinstate: (r) => r.status === "suspended",
+    delete: (r) => r.id !== selfId,
+  };
+  const targets = (a: BulkAction) => selected.filter(applies[a]);
+  const selCount = allMatching ? total : selected.length;
+  const runBulk = (action: BulkAction, reason?: string) =>
+    bulk.mutate({ action, ids: allMatching ? null : targets(action).map((r) => r.id), reason: reason || undefined });
+  /** What a bulk action acts on, for its title and its confirm: "every matching account (1,204)" or "3 accounts". */
+  const scope = (a: BulkAction) => (allMatching ? `every matching account (${num.format(total)})` : accounts(targets(a).length));
+  const bulkOff = (a: BulkAction) => busy || (!allMatching && targets(a).length === 0);
+  const bulkTitle = (a: BulkAction, verb: string, none: string) => (bulkOff(a) && !busy ? none : `${verb} ${scope(a)}`);
 
   const sortable = (k: SortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => ({
     dir: sort?.key === k ? sort.dir : null,
@@ -138,6 +273,27 @@ export function AdminUsersPage() {
   });
   // the actions column fits the state button, Limits and the menu; below the fold width only the menu
   const columns: ListColumn[] = [
+    {
+      label: (
+        <label className="absolute inset-0 flex cursor-pointer items-center justify-center">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--acc)]"
+            checked={allOn || allMatching}
+            ref={(el) => {
+              if (el) el.indeterminate = someOn && !allMatching;
+            }}
+            disabled={!allIds.length || bulk.isPending}
+            onChange={() => {
+              setAllMatching(false);
+              setSel(allOn ? [] : allIds);
+            }}
+            aria-label={allOn ? "Clear selection" : "Select all loaded accounts"}
+          />
+        </label>
+      ),
+      width: "w-11",
+    },
     { label: "Account", sort: sortable("name") },
     { label: "Status", width: "min-[1040px]:w-28", full: true, sort: sortable("status") },
     { label: "Projects", width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("projects", true) },
@@ -147,11 +303,12 @@ export function AdminUsersPage() {
     { label: "Active", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
+  const filtered = !!(flaggedOnly || status || verified);
 
   return (
     <ListPage
       title="Users"
-      subtitle={`Who can use this instance${pending ? ` · ${pending} waiting for approval` : ""}`}
+      subtitle={`Who can use this instance${pending ? ` · ${num.format(pending)} waiting for approval` : ""}`}
       actions={
         <>
           <button
@@ -163,6 +320,14 @@ export function AdminUsersPage() {
           >
             {flaggedOnly ? "◆ Flagged only" : "◇ Flagged only"}
           </button>
+          <Select className="h-[38px] w-[8.5rem]" ariaLabel="Status" value={status} onValueChange={(v) => setStatus(asStatus(v))} options={STATUS_OPTIONS} />
+          <Select
+            className="h-[38px] w-[8.5rem]"
+            ariaLabel="Email verification"
+            value={verified}
+            onValueChange={(v) => setVerified(asYesNo(v))}
+            options={VERIFIED_OPTIONS}
+          />
           <input
             className="input w-[14rem]"
             placeholder="Search name or email"
@@ -174,13 +339,18 @@ export function AdminUsersPage() {
       }
     >
       {list.error && <ListError message={list.error.message} />}
-      {list.data && !list.isPlaceholderData && rows.length === 0 && <ListEmpty icon={Users} title={q ? `No accounts match “${q}”` : "No accounts match"} />}
+      {list.data && !list.isPlaceholderData && rows.length === 0 && (
+        <ListEmpty icon={Users} title={q ? `No accounts match “${q}”` : "No accounts match"}>
+          {filtered ? "Try another status, email or flag filter." : undefined}
+        </ListEmpty>
+      )}
       {(rows.length > 0 || (list.isPending && !list.error)) && (
         <section className="flex flex-col gap-2">
           <ListTable caption="Accounts, with all-time usage" columns={columns} loading={list.isPending} loadingLabel="Loading accounts…">
             {list.isPending &&
               Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
                 <ListRow key={i} tall skeleton>
+                  <ListCell />
                   <ListCell>
                     <Skeleton className={`h-4 ${["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5"][i]}`} />
                     <Skeleton className="mt-1.5 h-3 w-3/5" />
@@ -207,7 +377,8 @@ export function AdminUsersPage() {
               ))}
             {rows.map((r) => {
               const st = STATUS[r.status];
-              const self = r.id === me.data?.id;
+              const self = r.id === selfId;
+              const checked = allMatching || sel.includes(r.id);
               const u = r.usage;
               const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${formatBytes(u.storedBytes)}`;
               const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
@@ -224,7 +395,21 @@ export function AdminUsersPage() {
                 }
               };
               return (
-                <ListRow key={r.id} tall>
+                <ListRow key={r.id} tall active={checked}>
+                  <ListCell className="relative !p-0">
+                    <label
+                      className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${LIST_REVEAL_ROW}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--acc)]"
+                        checked={checked}
+                        disabled={allMatching || bulk.isPending}
+                        onChange={() => toggle(r.id)}
+                        aria-label={`Select ${r.email}`}
+                      />
+                    </label>
+                  </ListCell>
                   <ListCell title={model}>
                     <div className="flex items-center gap-2">
                       <span className={`min-w-0 ${LIST_TITLE}`}>{r.name || r.email}</span>
@@ -249,7 +434,16 @@ export function AdminUsersPage() {
                       ))}
                       {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
                     </div>
-                    <div className={LIST_SUB}>{r.email}</div>
+                    {/* the address truncates; whether it is verified always shows */}
+                    <div className="flex min-w-0 items-baseline gap-1.5 text-xs text-ink3">
+                      <span className="min-w-0 truncate">{r.email}</span>
+                      <span
+                        className={`shrink-0 ${r.emailVerified ? "text-ok" : "text-warn"}`}
+                        title={r.emailVerified ? "They confirmed this address" : "They have not confirmed this address yet"}
+                      >
+                        {r.emailVerified ? "✓ verified" : "◇ unverified"}
+                      </span>
+                    </div>
                     <div className={`${LIST_SUB} min-[1040px]:hidden`}>
                       <span className={st.tone}>
                         {st.glyph} {st.word}
@@ -342,13 +536,131 @@ export function AdminUsersPage() {
             {list.isPending ? (
               <Skeleton className="h-3 w-40" />
             ) : (
-              `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}`
+              `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${accounts(total)}`
             )}
           </ListFooter>
+          {(selected.length > 0 || allMatching) && (
+            <SelectionBar
+              label="Selected accounts"
+              count={selCount}
+              onClear={() => {
+                setSel([]);
+                setAllMatching(false);
+              }}
+            >
+              {progress ? (
+                <span className="min-w-[6rem] px-1.5 text-xs tabular-nums text-ink3" aria-live="polite">
+                  {num.format(progress.done)} of {num.format(progress.of)}…
+                </span>
+              ) : (
+                allOn &&
+                !allMatching &&
+                total > rows.length && (
+                  <button type="button" className="btn-ghost h-8 px-2 text-xs" onClick={() => setAllMatching(true)}>
+                    Select all {num.format(total)}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                className="btn-ghost h-8"
+                disabled={bulkOff("approve")}
+                title={bulkTitle("approve", "Approve", "None of the selected accounts is waiting for approval")}
+                onClick={() => (allMatching ? setBulkConfirm("approve") : runBulk("approve"))}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                className="btn-ghost h-8"
+                disabled={bulkOff("suspend")}
+                title={bulkTitle("suspend", "Suspend", "The selected accounts are already suspended")}
+                onClick={() => {
+                  setBanReason("");
+                  setBulkConfirm("suspend");
+                }}
+              >
+                Suspend…
+              </button>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <MoreButton aria-label="More actions for the selection" />
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
+                    <DropdownMenu.Item className="menu-item" disabled={bulkOff("reinstate")} onSelect={() => runBulk("reinstate")}>
+                      Reinstate
+                      {bulkOff("reinstate") && !busy && <span className="menu-hint">none suspended</span>}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+                    <DropdownMenu.Item
+                      className="menu-item-danger"
+                      disabled={bulkOff("delete")}
+                      onSelect={() => window.setTimeout(() => setBulkConfirm("delete"), 0)}
+                    >
+                      Delete accounts…
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            </SelectionBar>
+          )}
         </section>
       )}
 
       {limitsFor && <LimitsDialog row={limitsFor} onClose={() => setLimitsFor(null)} />}
+      <ConfirmDialog
+        open={bulkConfirm === "approve"}
+        onOpenChange={(o) => !o && setBulkConfirm(null)}
+        title={`Approve ${scope("approve")}?`}
+        body="Every one of them that is waiting can use the app right away and is told by email. Accounts already approved stay as they are."
+        confirm="Approve"
+        onConfirm={() => {
+          runBulk("approve");
+          setBulkConfirm(null);
+        }}
+      />
+      <ConfirmDialog
+        open={bulkConfirm === "suspend"}
+        onOpenChange={(o) => !o && setBulkConfirm(null)}
+        title={`Suspend ${scope("suspend")}?`}
+        body={
+          <>
+            They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay. Your own account and the last admin are
+            left out.
+            <input
+              className="input mt-3"
+              placeholder="Reason (shown to them, optional)"
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              maxLength={300}
+              aria-label="Reason"
+            />
+          </>
+        }
+        confirm="Suspend"
+        danger
+        onConfirm={() => {
+          runBulk("suspend", banReason);
+          setBulkConfirm(null);
+        }}
+      />
+      <ConfirmDialog
+        open={bulkConfirm === "delete"}
+        onOpenChange={(o) => !o && setBulkConfirm(null)}
+        title={`Delete ${scope("delete")} forever?`}
+        body={
+          allMatching
+            ? `Every account matching the filters (${num.format(total)}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
+            : `${accounts(targets("delete").length)}, with ${num.format(targets("delete").reduce((n, r) => n + r.projects, 0))} projects and all their clips and files, are deleted permanently. This cannot be undone.`
+        }
+        confirm="Delete accounts forever"
+        danger
+        onConfirm={() => {
+          runBulk("delete");
+          setBulkConfirm(null);
+        }}
+      />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}

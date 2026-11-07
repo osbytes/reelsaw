@@ -594,6 +594,10 @@ export function createMcpServer(
 
   server.registerTool("retry_failures", TOOLS.retry_failures, (input) => run(() => api.admin.failures.retry(input ?? {})));
 
+  server.registerTool("list_users", TOOLS.list_users, (input) => run(() => api.admin.users.list(input)));
+
+  server.registerTool("manage_users", TOOLS.manage_users, (input) => run(() => api.admin.users.bulk(input)));
+
   server.registerTool("set_instance_settings", TOOLS.set_instance_settings, (input) => run(() => api.admin.settings.set(input)));
 
   server.registerTool("get_billing", TOOLS.get_billing, () => run(() => api.billing.get()));

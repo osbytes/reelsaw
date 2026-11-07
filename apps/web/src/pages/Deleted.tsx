@@ -22,6 +22,7 @@ import {
   ListFooter,
   ListPage,
   ListRow,
+  LIST_REVEAL_ROW,
   ListTable,
 } from "../components/ListPage";
 import { SelectionBar } from "../components/SelectionBar";
@@ -30,12 +31,6 @@ import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
-/**
- * A row's checkbox stays out of the way until that row is hovered (or a coarse pointer, or keyboard
- * focus). The full class string stays literal so Tailwind emits it. `!` beats the resting `opacity-0`
- * (source order inside one layer does not). A checked row keeps its own checkbox via `opacity-100`.
- */
-const REVEAL_ROW = "transition-opacity group-hover/row:!opacity-100 focus-within:!opacity-100 pointer-coarse:!opacity-100";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const dateFmt: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
@@ -255,7 +250,7 @@ export function DeletedPage() {
                 <ListRow key={k} id={`deleted-${r.id}`} active={highlighted === k || checked}>
                   <ListCell className="relative !p-0">
                     <label
-                      className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}
+                      className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${LIST_REVEAL_ROW}`}
                     >
                       <input
                         type="checkbox"
