@@ -292,7 +292,7 @@ async function addManualFix(
       what.kind === "disfluency"
         ? merged.filter((f) => f.kind === "disfluency" && f.subkind !== "manual" && (f.status === "pending" || f.status === "auto"))
         : [];
-    await recordDecisions(svc, u.db, p, () =>
+    await recordDecisions(svc, u, p, () =>
       fixDecisions(u.db, p.id, raw, [
         ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const }, explicit: false })),
         { kind: "fix.manual", flag, before: null, after: flag },
@@ -1158,6 +1158,7 @@ const restRouter = router({
               prompt: "Reply with the single word: ready",
               maxOutputTokens: 8,
               abortSignal: AbortSignal.timeout(60_000),
+              telemetry: { functionId: "admin.models.test" },
             });
             return { ok: true as const, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };
           }
@@ -1617,7 +1618,7 @@ const restRouter = router({
           const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
           await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed.length, rerendered });
           // rejecting your own fix is deleting it: one fix.delete, like deleteFlag
-          await recordDecisions(svc, db, p, () =>
+          await recordDecisions(svc, u, p, () =>
             fixDecisions(
               db,
               p.id,
@@ -1657,7 +1658,7 @@ const restRouter = router({
           if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
           const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
           const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
-          await recordDecisions(ctx.svc, u.db, p, () =>
+          await recordDecisions(ctx.svc, u, p, () =>
             fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.delete", flag: f, before: f, after: null }]),
           );
           return { ok: true, rerendered };
@@ -1701,9 +1702,7 @@ const restRouter = router({
             flag,
             input.rerender,
           );
-          await recordDecisions(svc, u.db, p, () =>
-            fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]),
-          );
+          await recordDecisions(svc, u, p, () => fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]));
           return { ok: true, rerendered };
         }),
       ),

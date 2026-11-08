@@ -212,7 +212,7 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     const clip = fresh ?? row;
     if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
     if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, clip);
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, async () => [await clipEditDecision(u.db, p.id, c, clip, changed)].filter((d) => d !== null));
+    if (byOwner(actor, p)) await recordDecisions(svc, u, p, async () => [await clipEditDecision(u.db, p.id, c, clip, changed)].filter((d) => d !== null));
     return { clip, changed, needsRerender, rerendered };
   });
 }
@@ -264,7 +264,7 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     await requestPrepare(svc, u, p.id, inserted.id, { mode: input.mode, reason: "clip_added" });
     await u.emit("clip.created", { projectId: p.id, clipId: inserted.id, index, title: inserted.title });
     if (byOwner(actor, p)) {
-      await recordDecisions(svc, u.db, p, async () => {
+      await recordDecisions(svc, u, p, async () => {
         const [text] = await rangeTexts(u.db, p.id, [inserted]);
         return [
           {

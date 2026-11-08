@@ -68,6 +68,9 @@ export class SourceExpiredError extends NonRetryableError {
  */
 export class SourceUnavailableError extends NonRetryableError {}
 
+/** A download that failed in a way another attempt may not (a proxy, a rate limit, a server error): retried, and named so failures group by it. */
+export class DownloadFailedError extends Error {}
+
 export class ProjectGoneError extends Error {
   constructor(id: string) {
     super(`project ${id} no longer exists`);

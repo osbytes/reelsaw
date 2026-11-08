@@ -75,6 +75,7 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
       maxRetries: 2,
       temperature: 0.5,
       output: Output.object({ schema: describeSchema, name: "describe" }),
+      telemetry: { isEnabled: o.telemetry, functionId: "manual.describe", recordInputs: false, recordOutputs: false },
     });
     return output;
   } catch (err) {

@@ -4,7 +4,9 @@
  *   logs      – one structured log line per call: prompt, response, tokens, latency, error
  *               (LLM_TRACE_MAX_CHARS truncates prompt/response; logs also land in LOG_FILE)
  *   langfuse  – a Langfuse trace per job and a generation per call (LANGFUSE_PUBLIC_KEY,
- *               LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL), for replaying and comparing analysis runs
+ *               LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL), for replaying and comparing analysis runs; each
+ *               generation carries its step's prompt version, and a user's decisions about the output (a clip
+ *               deleted, a fix rejected) arrive as scores on the project's session (decisions/scores.ts)
  *
  * Implemented as AI SDK language-model middleware, so every generateText call is captured without
  * touching call sites. Context (project, clip, stage, job, call name) comes from AsyncLocalStorage:
@@ -14,6 +16,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
 import { reportedCost } from "../eval/meter.js";
+import type { DecisionScore } from "../decisions/scores.js";
 
 export interface LlmContext {
   projectId?: string;
@@ -22,6 +25,10 @@ export interface LlmContext {
   jobId?: string;
   /** what this call is for: "analyze.map", "analyze.score", "refine.entities", … */
   call?: string;
+  /** the durable step the call runs in ("map:3", "score:0"), when it runs in one */
+  step?: string;
+  /** the prompt version of that step (MAP_PROMPT_VERSION, …): what to group by when comparing prompt changes */
+  promptVersion?: string;
 }
 
 const als = new AsyncLocalStorage<LlmContext>();
@@ -48,6 +55,10 @@ export interface LlmTracer {
   middleware: LanguageModelMiddleware | null;
   /** Called after every call (usage accounting), independent of LLM_TRACE. Set once the database is up. */
   onUsage: ((u: LlmUsage) => void) | null;
+  /** true when `score` goes somewhere (Langfuse is a sink) */
+  scoring: boolean;
+  /** Eval scores on a project's session (decisions/scores.ts). Best-effort: queued with the traces, never throws. */
+  score(projectId: string, scores: DecisionScore[]): void;
   check(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -72,13 +83,56 @@ function promptText(prompt: Prompt): Array<{ role: string; content: string }> {
           : String(m.content),
   }));
 }
+/**
+ * Why a model call failed, as plain fields beside `err`: the error class, the HTTP status and the provider's error
+ * type or code. Error reporting scrubs a message it thinks holds a secret (gateway errors quote headers and keys), and
+ * then the class and status are all that is left to tell a rate limit from a bad request. None of these is user content.
+ */
+type LlmErrorFields = { errName?: string; statusCode?: number; errCode?: string; retryable?: boolean };
+const field = (o: object, k: string): unknown => (k in o ? Reflect.get(o, k) : undefined);
+export function llmErrorFields(err: unknown): LlmErrorFields {
+  if (!err || typeof err !== "object") return {};
+  const out: LlmErrorFields = {};
+  const name = field(err, "name");
+  const status = field(err, "statusCode");
+  const retryable = field(err, "isRetryable");
+  if (typeof name === "string") out.errName = name;
+  if (typeof status === "number") out.statusCode = status;
+  if (typeof retryable === "boolean") out.retryable = retryable;
+  const code = field(err, "code");
+  const type = field(err, "type");
+  const c = typeof code === "string" ? code : typeof type === "string" ? type : bodyCode(field(err, "responseBody"));
+  if (c) out.errCode = c.slice(0, 80);
+  return out;
+}
+function bodyCode(body: unknown): string | undefined {
+  if (typeof body !== "string" || !body.startsWith("{")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const error = parsed && typeof parsed === "object" ? field(parsed, "error") : undefined;
+    if (!error || typeof error !== "object") return undefined;
+    const c = field(error, "code") ?? field(error, "type");
+    return typeof c === "string" ? c : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… [+${s.length - n} chars]` : s);
 
 export async function createLlmTracer(config: TraceConfig, log: Logger): Promise<LlmTracer> {
   const sinks = config.LLM_TRACE.split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s): s is TraceSink => s === "logs" || s === "langfuse");
-  const tracer: LlmTracer = { sinks, middleware: null, onUsage: null, check: async () => {}, shutdown: async () => {} };
+  const tracer: LlmTracer = {
+    sinks,
+    middleware: null,
+    onUsage: null,
+    scoring: false,
+    score: () => {},
+    check: async () => {},
+    shutdown: async () => {},
+  };
 
   let langfuse: import("langfuse").Langfuse | undefined;
   const traces = new Map<string, ReturnType<import("langfuse").Langfuse["trace"]>>();
@@ -166,17 +220,27 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
             startTime,
             endTime: new Date(),
             usageDetails: usage,
-            metadata: { ...ctx, provider: model.provider },
+            ...(ctx.promptVersion ? { version: ctx.promptVersion } : {}),
+            metadata: { ...ctx, provider: model.provider, ...(finish ? { finishReason: finish } : {}) },
           });
         }
         return res;
       } catch (err) {
         const ms = Date.now() - startTime.getTime();
         tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: 0, outputTokens: 0, ms, ok: false });
-        if (!sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, ms, err }, "llm call failed");
+        const why = llmErrorFields(err);
+        if (!sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, ms, ...why, err }, "llm call failed");
         if (sinks.includes("logs"))
           traceLog.warn(
-            { ...ctx, model: model.modelId, ms, err, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })) },
+            {
+              ...ctx,
+              model: model.modelId,
+              provider: model.provider,
+              ms,
+              ...why,
+              err,
+              prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })),
+            },
             "llm call failed",
           );
         if (langfuse)
@@ -188,7 +252,8 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
             endTime: new Date(),
             level: "ERROR",
             statusMessage: (err as Error).message?.slice(0, 1000),
-            metadata: ctx,
+            ...(ctx.promptVersion ? { version: ctx.promptVersion } : {}),
+            metadata: { ...ctx, provider: model.provider, ...why },
           });
         throw err;
       }
@@ -196,6 +261,20 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
   };
 
   tracer.middleware = middleware;
+  if (langfuse) {
+    const lf = langfuse;
+    tracer.scoring = true;
+    tracer.score = (projectId, scores) => {
+      for (const s of scores) {
+        try {
+          // the score's id is the decision's, so a retried commit hook upserts instead of counting twice
+          lf.score({ id: s.id, sessionId: projectId, name: s.name, value: s.value, dataType: "BOOLEAN", metadata: s.metadata });
+        } catch (err) {
+          traceLog.warn({ err, projectId, score: s.name }, "langfuse score failed");
+        }
+      }
+    };
+  }
   tracer.check = async () => {
     if (!langfuse) return;
     // fail fast on wrong keys/URL instead of silently dropping traces

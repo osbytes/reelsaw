@@ -35,7 +35,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
-import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
+import { requestLogger, logTrpcError, refusalBody, type AppEnv } from "./request-log.js";
 import { z } from "zod";
 import { runHealthChecks } from "./health.js";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
@@ -92,7 +92,12 @@ export function createApp(svc: Services) {
   }
   // an exception in a handler: the access line above logs it at error with `err` (so it is reported, log.ts); the
   // client gets the request id to quote
-  app.onError((err, c) => (err instanceof HTTPException ? err.getResponse() : c.json({ error: "internal error", requestId: c.get("requestId") }, 500)));
+  app.onError(async (err, c) => {
+    if (!(err instanceof HTTPException)) return c.json({ error: "internal error", requestId: c.get("requestId") }, 500);
+    // a refusal whose reason is only in its body (an MCP protocol version): keep the reason for the access line
+    if (!err.message && err.res) err.message = await refusalBody(err.res);
+    return err.getResponse();
+  });
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
     const who = await activeRequester(auth, db, c.req.raw.headers);

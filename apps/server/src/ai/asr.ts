@@ -112,7 +112,7 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
             providerOptions,
             ...(opts.signal ? { abortSignal: opts.signal } : {}),
             maxRetries: opts.maxRetries ?? 2,
-            ...(opts.functionId ? { telemetry: { isEnabled: !!opts.telemetry, functionId: opts.functionId, recordOutputs: false } } : {}),
+            ...(opts.functionId ? { telemetry: { isEnabled: !!opts.telemetry, functionId: opts.functionId, recordInputs: false, recordOutputs: false } } : {}),
           });
           const audioSec = r.durationInSeconds ?? r.segments.at(-1)?.endSecond ?? 0;
           asr.onUsage?.({ ctx: llmContext(), provider, model: modelId, audioSec, ms: Date.now() - t0, ok: true });

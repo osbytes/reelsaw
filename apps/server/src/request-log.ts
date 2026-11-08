@@ -3,12 +3,14 @@
  * user-visible failure can be traced (`x-request-id` -> http line -> trpc error -> the job it started).
  *
  *  - `/api/*`: info (health at debug); 4xx that are not routine at warn; 5xx at error with `err`
+ *  - a handler that threw a 4xx HTTPException: warn with the reason ("request refused"), never an error report
  *  - `/media/*` and static files: debug, because a page load fetches dozens
  *  - tRPC failures are logged once, by `logTrpcError` (the access line stays at info)
  */
 import { randomUUID } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import { trace } from "@opentelemetry/api";
+import { HTTPException } from "hono/http-exception";
 import type { Logger } from "./log.js";
 
 export type AppEnv = { Variables: { requestId: string; log: Logger; userId?: string } };
@@ -69,9 +71,39 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
       userId: c.get("userId"),
       ...(level === "warn" && status < 400 ? { ms } : {}),
     };
-    if (c.error) httpLog.error({ ...entry, err: c.error }, "request failed");
+    // a handler that threw a 4xx (an HTTPException: a refused MCP protocol version, a bad body) answered the client as
+    // designed: logged at the access level with the reason, not as an error report
+    if (c.error && !isClientRefusal(c.error)) httpLog.error({ ...entry, err: c.error }, "request failed");
+    else if (c.error)
+      httpLog.warn(
+        { ...entry, reason: c.error.message.slice(0, 200) || `HTTP ${status}`, ...mcpVersion(c.req.header("mcp-protocol-version")) },
+        "request refused",
+      );
     else httpLog[level](entry, status >= 500 ? "request failed" : level === "warn" && status < 400 ? "slow request" : "request");
   };
+}
+
+/** A thrown HTTPException with a 4xx status: the request was refused on purpose, not a fault of ours. */
+export function isClientRefusal(err: Error): boolean {
+  return err instanceof HTTPException && err.status >= 400 && err.status < 500;
+}
+
+/**
+ * The reason a refusal gave in its body, for one thrown with an empty message: @hono/mcp puts "Unsupported protocol
+ * version (supported versions: …)" in a JSON-RPC body only. Read from a copy, before the response is sent.
+ */
+export async function refusalBody(res: Response): Promise<string> {
+  try {
+    const m = /"message"\s*:\s*"([^"]{1,200})/.exec(await res.clone().text());
+    return m?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** The protocol version an MCP client asked for, when it sent one: what to support next when clients are refused. */
+function mcpVersion(v: string | undefined): { mcpProtocolVersion?: string } {
+  return v && /^[\w.-]{1,32}$/.test(v) ? { mcpProtocolVersion: v } : {};
 }
 
 /** Reset, verification and share links carry their token in the path; the access log keeps the route, not the secret. */

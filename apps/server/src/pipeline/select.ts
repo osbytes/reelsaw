@@ -180,7 +180,10 @@ async function llmJsonInner<T>(
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
     const salvaged = salvage(err.text ?? "");
     if (salvaged) return salvaged;
-    const { text } = await generateText({ ...common, telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}.text` } });
+    const { text } = await generateText({
+      ...common,
+      telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}.text`, recordInputs: false, recordOutputs: false },
+    });
     return salvage(text);
   }
 }

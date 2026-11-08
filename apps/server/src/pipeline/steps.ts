@@ -13,6 +13,7 @@ import type { Logger } from "../log.js";
 import { histogram } from "../metrics.js";
 import { mapLimit } from "../lib/batch.js";
 import { withSlotWaitListener, type SlotWaitListener } from "../ai/slot-wait.js";
+import { withLlmContext } from "../ai/trace.js";
 
 /** What a unit of work is keyed on: change any part and the saved result no longer applies. */
 export interface StepKeyInput {
@@ -357,7 +358,8 @@ export class StepRunner {
     let out: T;
     this.live.add(timeout);
     try {
-      out = await withSlotWaitListener(timeout, () => fn(signal));
+      // the step's prompt version rides on every model call inside it (logs, Langfuse, spans), so runs compare by version
+      out = await withSlotWaitListener(timeout, () => withLlmContext({ step: name, promptVersion: keyInput.promptVersion }, () => fn(signal)));
     } catch (err) {
       const ms = Date.now() - t0;
       // the job was cancelled or superseded, or the idle timer ended the attempt: say so, record nothing

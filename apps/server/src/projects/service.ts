@@ -333,7 +333,7 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
     const p = await findProject(u.db, actor, c.projectId, { deleted: false });
     const changed = await markClipDeleted(svc, u, c);
     if (changed) await finalizeProjectIfDone(svc, u, c.projectId);
-    if (changed && byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.delete", [c]));
+    if (changed && byOwner(actor, p)) await recordDecisions(svc, u, p, () => clipDecisions(u.db, p.id, "clip.delete", [c]));
     const stored = clipStored(c);
     return {
       ok: true,
@@ -377,7 +377,7 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
       } else skipped++;
     }
     if (deleted) await finalizeProjectIfDone(svc, u, projectId);
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.delete", gone));
+    if (byOwner(actor, p)) await recordDecisions(svc, u, p, () => clipDecisions(u.db, p.id, "clip.delete", gone));
     return { ok: true as const, deleted, skipped, stoppedRenders, restorable: restorableFor(svc), storedBytes };
   });
 }
@@ -397,7 +397,7 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
       .where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit("clip.restored", { projectId: c.projectId, clipId, index: next, title: c.title });
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
+    if (byOwner(actor, p)) await recordDecisions(svc, u, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
     return { ok: true, changed: true, clipId, status: c.status, needsRerender: c.status !== "done" };
   });
 }
@@ -497,7 +497,7 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
       replacedClipIds: replaced.map((c) => c.id),
     });
     // the user asked for different picks: the replaced ones are weak negatives, not deletes they chose one by one
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
+    if (byOwner(actor, p)) await recordDecisions(svc, u, p, () => clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
     await u.artifact(p.id, "analyze", "kept", {
       kept: kept.map(({ c, why }) => ({ clipId: c.id, index: c.index, title: c.title, why })),
       replaced: replaced.map((c) => c.id),

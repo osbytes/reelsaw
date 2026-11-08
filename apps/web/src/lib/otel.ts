@@ -50,22 +50,31 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
     provider.register({ contextManager: new ZoneContextManager() });
 
     // Same-origin only: API calls carry traceparent, the collector export does not.
-    // ignoreUrls keeps the export request from becoming another span (that loop never ends).
-    const origin = new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
-    const ignoreUrls = [new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))];
+    // ignoreUrls keeps the export request from becoming another span (that loop never ends), and drops every other
+    // host (PostHog, Sentry, a CDN): a span for a third party's endpoint is volume with nothing of ours under it.
+    const here = escapeRegExp(window.location.origin);
+    const origin = new RegExp(`^${here}`);
+    const ignoreUrls = [new RegExp(escapeRegExp(base)), new RegExp(`^(?!${here}(?:/|$))[a-z][a-z0-9+.-]*://`, "i")];
+    const name = (span: { updateName(n: string): unknown }, method: string | undefined, url: string | undefined) => {
+      const n = apiSpanName(method, url, window.location.origin);
+      if (n) span.updateName(n);
+    };
     registerInstrumentations({
       instrumentations: [
         getWebAutoInstrumentations({
           // every click was a 0 ms root span with nothing under it: most of the trace volume, none of the insight
           "@opentelemetry/instrumentation-user-interaction": { enabled: false },
+          // spans start as a bare "GET"; name them for the call ("GET /api/trpc/projects.get") so Sentry groups them
           "@opentelemetry/instrumentation-fetch": {
             propagateTraceHeaderCorsUrls: [origin],
             ignoreUrls,
             clearTimingResources: true,
+            applyCustomAttributesOnSpan: (span, request, result) => name(span, request.method, result instanceof Response ? result.url : undefined),
           },
           "@opentelemetry/instrumentation-xml-http-request": {
             propagateTraceHeaderCorsUrls: [origin],
             ignoreUrls,
+            applyCustomAttributesOnSpan: (span, xhr) => name(span, undefined, xhr.responseURL),
           },
         }),
       ],
@@ -91,6 +100,29 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
     }
   })().catch((err) => console.warn("otel init failed", err));
   return started;
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const ID_SEGMENT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{24,}|\d+)$/i;
+/**
+ * A same-origin request's span name: method and path, ids replaced by `:id` and the query dropped (tRPC batches put
+ * their input there), so one endpoint is one row in Sentry. Null for another host or an unreadable URL.
+ */
+export function apiSpanName(method: string | undefined, url: string | undefined, origin: string): string | null {
+  if (!url) return null;
+  let u: URL;
+  try {
+    u = new URL(url, origin);
+  } catch {
+    return null;
+  }
+  if (u.origin !== origin) return null;
+  const path = u.pathname
+    .split("/")
+    .map((seg) => (ID_SEGMENT.test(seg) ? ":id" : seg))
+    .join("/");
+  return `${(method ?? "GET").toUpperCase()} ${path}`;
 }
 
 function asPublic(value: unknown): Public | null {

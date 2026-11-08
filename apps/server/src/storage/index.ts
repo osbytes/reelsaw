@@ -84,6 +84,18 @@ async function linkOrCopy(from: string, to: string) {
   }
 }
 
+/** The object is not in the store. A caller probing a cache expects this; one that needed the object fails on it. */
+export class StorageObjectMissing extends Error {
+  constructor(key: string) {
+    super(`storage object missing: ${key}`);
+  }
+}
+
+/** True when an operation failed because the object is not there (either driver). */
+export function isStorageMissing(err: unknown): boolean {
+  return err instanceof StorageObjectMissing || isS3NotFound(err);
+}
+
 /** True for the errors S3 gives a missing object (HeadObject has no body, so only the status or name tells). */
 export function isS3NotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -127,7 +139,7 @@ class LocalStorage implements Storage {
   async ensureLocal(key: string, localPath: string) {
     if (await fileExists(localPath)) return touched(localPath);
     const src = this.abs(key);
-    if (!(await fileExists(src))) throw new Error(`storage object missing: ${key}`);
+    if (!(await fileExists(src))) throw new StorageObjectMissing(key);
     await linkOrCopy(src, localPath);
     return localPath;
   }
@@ -242,7 +254,7 @@ class S3Storage implements Storage {
     if (await fileExists(localPath)) return touched(localPath);
     const { client, sdk } = await this.s3();
     const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
-    if (!res.Body) throw new Error(`storage object missing: ${key}`);
+    if (!res.Body) throw new StorageObjectMissing(key);
     await fsp.mkdir(path.dirname(localPath), { recursive: true });
     const tmp = `${localPath}.${process.pid}.${randomUUID()}.part`;
     try {
@@ -286,7 +298,7 @@ class S3Storage implements Storage {
   async openRead(key: string, range?: string) {
     const { client, sdk } = await this.s3();
     const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key), ...(range ? { Range: range } : {}) }));
-    if (!res.Body) throw new Error(`storage object missing: ${key}`);
+    if (!res.Body) throw new StorageObjectMissing(key);
     const headers: Record<string, string> = { "Accept-Ranges": "bytes" };
     if (res.ContentLength !== undefined) headers["Content-Length"] = String(res.ContentLength);
     if (res.ContentRange) headers["Content-Range"] = res.ContentRange;
@@ -343,13 +355,18 @@ async function fileExists(file: string) {
   }
 }
 
-/** Log a failed write, fetch or delete at warn with its key; behaviour is unchanged. Successes are not logged (bytes are in the rows, timing in spans). */
+/**
+ * Log a failed write, fetch or delete at warn with its key; behaviour is unchanged. Successes are not logged (bytes are
+ * in the rows, timing in spans). A missing object is debug: a cache probe (the shared ASR cache) misses by design, and
+ * a caller that needed the object fails with its own line.
+ */
 export function withStorageLogging(inner: Storage, log: Logger): Storage {
   const timed = async <T>(op: string, key: string, fn: () => Promise<T>): Promise<T> => {
     try {
       return await fn();
     } catch (err) {
-      log.warn({ err, op, key, driver: inner.driver }, "storage operation failed");
+      if (isStorageMissing(err)) log.debug({ op, key, driver: inner.driver }, "storage object missing");
+      else log.warn({ err, op, key, driver: inner.driver }, "storage operation failed");
       throw err;
     }
   };

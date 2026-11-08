@@ -12,6 +12,7 @@ import { createProviderSettings, type ProviderSettings } from "./ai/providers.js
 import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
 import { createAsr, type Asr } from "./ai/asr.js";
 import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
+import { registerAiTelemetry } from "./ai/otel-ai.js";
 import { createProviderGate } from "./ai/gate.js";
 import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
@@ -171,6 +172,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     const t = await createLlmTracer(config, log);
     if (env.REELSAW_CLI !== "1") await t.check();
     if (t.sinks.length) log.info({ module: "llm", sinks: t.sinks }, "capturing LLM calls");
+    // AI SDK spans (model, tokens, latency per call; never prompt or answer) go out only through a registered integration
+    if (otel.enabled) registerAiTelemetry();
     return t;
   });
 
