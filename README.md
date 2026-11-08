@@ -425,6 +425,15 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp   # then /mcp 
 
 In claude.ai or Claude Desktop, add a custom connector with the same address.
 
+**Downloading clips from an agent.** A connector's sign-in stays with the client: the agent's own
+shell never holds it, and the file routes (`/media/…`, `export.zip`) take API keys and the app's
+session only. So an agent signed in through a connector downloads with share links:
+`export_project` returns one for the zip by default (`share: false` asks for the keyed link), and
+`get_media_links` gives one per clip. If the download still fails with **403**, that answer comes
+from the client's sandbox, not Reelsaw (which answers 401 or 404): allow the Reelsaw host (for
+example `app.reelsaw.com`) in the client's network allowlist; in Claude, that is Settings →
+Capabilities → domain allowlist for code execution.
+
 Scripts, and clients that cannot sign in, use an API key. Create one in **Settings → API keys and
 MCP** (shown once) and point the client at it:
 
@@ -516,7 +525,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `test_webhook` | Send a webhook.test delivery now and wait for the answer. |
 | `list_webhook_deliveries` | The delivery log, newest first. |
 | `resend_webhook_delivery` | Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). |
-| `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. |
+| `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `refine_project` | Re-run refine steps on the existing transcript: entities (name spelling), disfluency (filler and repeat cuts), scenes (shot cuts); all three when steps is omitted. |

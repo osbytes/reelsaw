@@ -513,6 +513,12 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
   `fs.statfs`), so it behaves the same on Linux, macOS and Windows; thresholds in Settings.
+- **An agent cannot download its clips** (2026-11-08, hosted, Claude Desktop connector): the file routes take API
+  keys and sessions, not the connector's OAuth token, which the agent's shell does not hold anyway, so the keyed
+  `export.zip` and `/media/…` links answer 401. `export_project` now returns a share link for OAuth callers and
+  the server instructions point at `get_media_links`. A **403** on the download is never Reelsaw (it answers 401
+  or 404): it is the client sandbox's egress allowlist, so the user allows the host in the client (Claude:
+  Settings → Capabilities, code execution domain allowlist).
 
 ## 6. Lessons: UI
 

@@ -272,6 +272,26 @@ describe("mcp", () => {
     assert.equal((await fetch(`${BASE}/api/trpc/projects.list`)).status, 401);
   });
 
+  it("export_project gives a keyed zip link, or a share link that needs no sign-in", async () => {
+    await pool.query(`update clips set output_key = 'clips/mcp-export.mp4' where project_id = $1`, [mine]);
+    const keyed = await call<{ url: string; shared: boolean; clips: number }>("export_project", { id: mine });
+    assert.equal(keyed.data.shared, false); // an API-key caller can send the header itself
+    assert.match(keyed.data.url, new RegExp(`/api/projects/${mine}/export\\.zip$`));
+    assert.equal(keyed.data.clips, 1);
+    assert.equal((await fetch(keyed.data.url)).status, 401);
+    // share: true is what an OAuth caller (a connector in Claude or ChatGPT) gets by default
+    const shared = await call<{ url: string; shared: boolean; linkId: string }>("export_project", { id: mine, share: true });
+    assert.equal(shared.data.shared, true);
+    assert.ok(shared.data.linkId);
+    assert.doesNotMatch(shared.data.url, /export\.zip/);
+    // anonymous: the link authorizes (the fixture clip has no file, so anything but 401/403)
+    const anon = await fetch(shared.data.url);
+    assert.ok(![401, 403].includes(anon.status), `share link answered ${anon.status}`);
+    const again = await call<{ linkId: string }>("export_project", { id: mine, share: true });
+    assert.equal(again.data.linkId, shared.data.linkId); // the active link is reused
+    assert.equal((await call("export_project", { id: theirs, share: true })).isError, true);
+  });
+
   it("stops working once revoked", async () => {
     const res = await fetch(`${BASE}/api/auth/api-key/delete`, {
       method: "POST",
