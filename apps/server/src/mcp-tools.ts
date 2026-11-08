@@ -454,7 +454,7 @@ export const TOOLS = {
   export_project: {
     title: "Export clips",
     description:
-      "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Same conditions as the app's Export: the project live, at least one picked clip rendered, else the answer says why. Returns { url, shared, clips (rendered, in the zip), notRendered (picked, not finished, left out) }. Shared (the default when signed in through your MCP client): url needs no sign-in, with { linkId, expiresAt }; otherwise it needs this server's API key.",
+      "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. Same conditions as the app's Export: the project live, at least one picked clip rendered, else the answer says why. Returns { url, shared, clips (rendered, in the zip), notRendered (picked, not finished, left out) }. Shared (the default when signed in through your MCP client): url needs no sign-in, with { linkId, expiresAt }; otherwise it needs this server's API key.",
     inputSchema: {
       id: projectId(),
       clipIds: z
