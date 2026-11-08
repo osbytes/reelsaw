@@ -494,16 +494,26 @@ export function createMcpServer(
   );
   server.registerTool("resend_webhook_delivery", TOOLS.resend_webhook_delivery, ({ deliveryId }) => run(() => api.webhooks.resend({ deliveryId })));
 
-  server.registerTool("export_project", TOOLS.export_project, ({ id, clipIds }) =>
+  server.registerTool("export_project", TOOLS.export_project, ({ id, clipIds, share }) =>
     run(async () => {
       // the same preconditions as the zip route and `reelsaw export`
       const plan = await exportPlan(svc, { id: user.id, admin: false }, id, clipIds ?? []);
       const ids = [...new Set(clipIds ?? [])];
-      return {
-        url: abs(`/api/projects/${plan.project.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`),
-        clips: plan.rendered,
-        notRendered: plan.notRendered,
-      };
+      const summary = { clips: plan.rendered, notRendered: plan.notRendered };
+      // the zip route takes cookies and API keys, not OAuth tokens (and an agent's shell never holds the client's token):
+      // an OAuth caller gets a share link unless it asked otherwise
+      if (share ?? access.via === "oauth") {
+        const l = await api.mediaLinks.get({ kind: "export", projectId: plan.project.id, clipIds: ids.length ? ids : undefined });
+        return {
+          url: l.url,
+          shared: true,
+          linkId: l.id,
+          expiresAt: l.expiresAt,
+          ...summary,
+          hint: "Anyone with the link can download the zip until it expires; revoke_media_link turns it off.",
+        };
+      }
+      return { url: abs(`/api/projects/${plan.project.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`), shared: false, ...summary };
     }),
   );
 

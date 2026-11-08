@@ -211,7 +211,10 @@ tRPC, MCP, the CLI and the webhook body builder call it.
 
 `get_project` and `get_clip` do not add links on their own: a read tool should not create public URLs
 the caller did not ask for. Their descriptions point at `get_media_links`. Webhook payloads are the
-exception, because the receiver is an endpoint the owner registered.
+exception, because the receiver is an endpoint the owner registered. `export_project` is the other:
+it is a request for a download link, and a caller signed in through OAuth (a claude.ai or Claude
+Desktop connector) cannot open the keyed `export.zip` URL, so it gets the zip's share link unless it
+passes `share: false` (`share: true` gives an API-key caller the same).
 
 **CLI.** `reelsaw media-links <email> [--project <id>] [--active] [--json]`,
 `reelsaw media-links create <projectId> [clipId…] [--kind clip|thumb|srt|vtt|export] [--ttl <days>] [--label …]`,

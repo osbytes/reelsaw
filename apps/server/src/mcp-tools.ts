@@ -40,7 +40,7 @@ Your library (search_assets, add_asset, update_asset, delete_asset, restore_asse
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip), optionally with an intro and outro: save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers and get the template's intro / outro as their own choice), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 Reelsaw learns from what you decide: accepts, rejects, cuts, corrections and clip edits go in your decision log (list_decisions, export_decisions for evals), which outlives deleted projects; forget_decisions or purge_project forgetDecisions: true removes entries, set_learning turns recording off.
-You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server; get_media_links gives share links that need none (for schedulers, Instagram, Zapier).`;
+You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs (get_clip's video and thumbnail links) need an API key from Settings as the Authorization header; an OAuth sign-in from your MCP client does not open them and your shell does not hold it. To download clips yourself, use get_media_links (one share link per clip, no sign-in) or export_project (a zip, a share link by default when signed in through your client); share links also suit schedulers, Instagram and Zapier. Reelsaw answers 401 or 404, never 403: a 403 on a download comes from your own sandbox's network allowlist, so ask the user to allow this server's host there.`;
 
 const projectDefaultsShape = userProjectDefaultsSchema.omit({ introAssetId: true, outroAssetId: true }).shape;
 const projectDefaultsInput = z
@@ -454,7 +454,7 @@ export const TOOLS = {
   export_project: {
     title: "Export clips",
     description:
-      "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Same conditions as the app's Export: the project must be live and at least one picked clip rendered, else the answer says why (not found, or nothing rendered yet). Returns { url, clips (rendered, in the zip), notRendered (picked but not finished, left out) }; the link needs the same Authorization header as this server.",
+      "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Same conditions as the app's Export: the project live, at least one picked clip rendered, else the answer says why. Returns { url, shared, clips (rendered, in the zip), notRendered (picked, not finished, left out) }. Shared (the default when signed in through your MCP client): url needs no sign-in, with { linkId, expiresAt }; otherwise it needs this server's API key.",
     inputSchema: {
       id: projectId(),
       clipIds: z
@@ -462,8 +462,14 @@ export const TOOLS = {
         .max(200)
         .optional()
         .describe("Only these clips (max 200; must be rendered clips of the project); omitted = every rendered clip"),
+      share: z
+        .boolean()
+        .optional()
+        .describe(
+          "true = a share link that needs no sign-in (for downloading from your own shell); false = a link that needs this server's API key. Default: true when signed in through your MCP client (OAuth), whose token your shell does not hold; false with an API key",
+        ),
     },
-    annotations: { readOnlyHint: true },
+    annotations: { idempotentHint: true },
   },
   report_issue: {
     title: "Report an issue",
