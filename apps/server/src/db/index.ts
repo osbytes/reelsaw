@@ -17,8 +17,10 @@ export interface Database {
   /** Round-trip query; throws with a readable message when the server is unreachable. */
   check(): Promise<void>;
   migrate(): Promise<void>;
-  /** size of `pool` (DB_POOL_MAX) */
-  poolMax: number;
+  /** size of `pool` (DB_POOL_MAX, or what `growPool` raised it to) */
+  readonly poolMax: number;
+  /** Raise `pool`'s size to `max` when it is smaller (pg-pool reads its max on every checkout); never shrinks it. */
+  growPool(max: number): void;
   /** A second pool on the same database for work that holds a connection for a long time (model-call slots), so it cannot starve `pool`. Closed with `close()`. */
   extraPool(max: number): pg.Pool;
   close(): Promise<void>;
@@ -48,7 +50,7 @@ function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
   return pool;
 }
 
-export function createDatabase(connectionString: string, log: Logger, opts: { poolMax?: number } = {}): Database {
+export function createDatabase(connectionString: string, log: Logger, opts: { poolMax?: number | undefined } = {}): Database {
   const poolMax = opts.poolMax ?? 10;
   const pool = makePool(connectionString, poolMax, log);
   const extraPools = new Set<pg.Pool>();
@@ -84,7 +86,12 @@ export function createDatabase(connectionString: string, log: Logger, opts: { po
         client.release();
       }
     },
-    poolMax,
+    get poolMax() {
+      return pool.options.max;
+    },
+    growPool(max) {
+      if (max > pool.options.max) pool.options.max = max;
+    },
     extraPool(max) {
       const extra = makePool(connectionString, max, log);
       extraPools.add(extra);

@@ -7,7 +7,8 @@ import { StageContext } from "../src/pipeline/common.js";
 import { Hono } from "hono";
 import { createLogger, formatLogLevels, logControl, parseLogLevels } from "../src/log.js";
 import { mergeLogLevels, parseDuration, specFromStructured, knownModules, KNOWN_LOG_MODULES } from "../src/log-level.js";
-import { accessLevel, requestLogger, resolveRequestId, trpcLogLevel, type AppEnv } from "../src/request-log.js";
+import { accessLevel, isClientRefusal, refusalBody, requestLogger, resolveRequestId, trpcLogLevel, type AppEnv } from "../src/request-log.js";
+import { HTTPException } from "hono/http-exception";
 import { eventFields } from "../src/uow.js";
 import { lineMatches } from "../src/log-read.js";
 import { argSummary } from "../src/mcp-tools.js";
@@ -208,6 +209,42 @@ describe("request logging middleware", () => {
     assert.equal(boom.level, 50);
     assert.equal(boom.msg, "request failed");
     assert.match(String((boom.err as { message: string }).message), /kaboom/);
+  });
+  it("a thrown 4xx HTTPException is a warn with its reason, not an error report (an MCP protocol version, REELSAW-F)", async () => {
+    const { log, lines } = capture("debug");
+    const app = new Hono<AppEnv>();
+    app.use(requestLogger(log));
+    app.post("/api/mcp", () => {
+      // what @hono/mcp throws: the reason only in a JSON-RPC body, the message empty
+      throw new HTTPException(404, {
+        res: Response.json(
+          { jsonrpc: "2.0", error: { code: -32000, message: "Bad Request: Unsupported protocol version (supported versions: 2025-06-18)" } },
+          { status: 404 },
+        ),
+      });
+    });
+    app.get("/api/teapot", () => {
+      throw new HTTPException(418, { message: "short and stout" });
+    });
+    app.onError(async (err, c) => {
+      if (!(err instanceof HTTPException)) return c.json({ error: "internal error" }, 500);
+      if (!err.message && err.res) err.message = await refusalBody(err.res);
+      return err.getResponse();
+    });
+    const res = await app.request("/api/mcp", { method: "POST", headers: { "mcp-protocol-version": "2099-01-01" } });
+    assert.equal(res.status, 404);
+    assert.match(await res.text(), /Unsupported protocol version/, "the client still gets the body");
+    await app.request("/api/teapot");
+    const mcp = lines.find((l) => l.path === "/api/mcp")!;
+    assert.equal(mcp.level, 40);
+    assert.equal(mcp.msg, "request refused");
+    assert.equal("err" in mcp, false, "no err: nothing goes to Sentry");
+    assert.match(String(mcp.reason), /Unsupported protocol version/);
+    assert.equal(mcp.mcpProtocolVersion, "2099-01-01");
+    const teapot = lines.find((l) => l.path === "/api/teapot")!;
+    assert.equal(teapot.reason, "short and stout");
+    assert.equal(isClientRefusal(new HTTPException(500)), false);
+    assert.equal(isClientRefusal(new Error("x")), false);
   });
   it("at the default level only API calls are logged", async () => {
     const { app, lines } = appWith("info");

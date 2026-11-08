@@ -540,6 +540,16 @@ EVAL_DECISIONS=../../me.decisions.jsonl npx tsx src/eval/run.ts decisions       
 - Each case's `source` carries the link at the moment, `videoId` and the source's `sha256` from
   ingest. A re-download is usually not byte-identical; the case does not need the media (it stores
   its words).
+- **Online scores** (`LLM_TRACE=langfuse`): each explicit decision about model output is also a
+  boolean score on the project's Langfuse session as it happens, so a prompt or model change shows up
+  in production before anyone exports anything. Deleting an AI clip is `clip.kept` = 0 and restoring
+  it 1; adding a moment by hand is `clip.found` = 0; editing an AI clip is `clip.untouched` = 0, plus
+  `clip.bounds_kept` or `clip.copy_kept` = 0 for what was changed; accepting or rejecting a proposed
+  fix is `fix.accepted`, and typing your own is `fix.found` = 0. The person's own clips and fixes,
+  inferred and backfilled rows score nothing. Metadata carries the decision kind, clip id, AI score
+  and models, never text; generations carry their step's prompt version (`version`), so filter
+  generations by version and compare the scores of the sessions they ran in. Accounts that turned
+  learning off send no scores, as they write no decisions.
 
 ## Real-speech transcription cases
 

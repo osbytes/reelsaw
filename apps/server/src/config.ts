@@ -39,8 +39,11 @@ export const envSchema = z.object({
   UPDATE_CHECK_URL: z.string().url().default("https://api.github.com/repos/osbytes/reelsaw/releases/latest"),
   UPDATE_CHECK_HOURS: z.coerce.number().min(1).max(168).default(6),
   DATABASE_URL: z.string().min(1),
-  /** Connections in this process's main Postgres pool (pg-boss, requests, jobs). Model-call slots (ai/gate.ts) use their own small pool. */
-  DB_POOL_MAX: z.coerce.number().int().min(4).default(10),
+  /**
+   * Connections in this process's main Postgres pool (pg-boss, requests, jobs). Unset: 10, and a worker grows it to fit
+   * its job slots (workers.ts). Model-call slots (ai/gate.ts) use their own small pool.
+   */
+  DB_POOL_MAX: z.coerce.number().int().min(4).optional(),
   BETTER_AUTH_SECRET: z.string().min(16),
   DATA_DIR: z.string().default(path.resolve(process.cwd(), "data")),
   WEB_DIST: z.string().optional(),

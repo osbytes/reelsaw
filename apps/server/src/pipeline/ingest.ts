@@ -8,7 +8,7 @@ import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { UnresolvableHostError, UnsafeUrlError, assertPublicHttpUrl } from "../lib/safe-url.js";
 import { announcedDuration } from "../projects/peek.js";
-import { type StageContext, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
+import { type StageContext, DownloadFailedError, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
 import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 import { CommandError } from "../media.js";
@@ -110,7 +110,7 @@ export async function ingest(ctx: StageContext) {
           const message = describeDownloadFailure(err, stderrTail);
           // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
           if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
-          throw new Error(message);
+          throw new DownloadFailedError(message);
         });
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       const jsonLine = stdout

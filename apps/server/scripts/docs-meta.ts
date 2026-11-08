@@ -30,7 +30,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   DATABASE_URL: ["core", "Postgres connection string. Compose sets it; set it yourself when running from source."],
   DB_POOL_MAX: [
     "core",
-    "Connections in each process's Postgres pool (minimum 4). The app and every worker process hold their own, so keep (processes x this) under Postgres' `max_connections`. Raise it if the boot log warns that job concurrency exceeds the pool. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction.",
+    "Connections in each process's Postgres pool (minimum 4). Unset: 10, and a worker process grows its pool to half its job slots plus 4 (logged at boot as \"postgres pool sized to the job slots\"). The app and every worker process hold their own, so keep the total under Postgres' `max_connections`. Set explicitly, the value is used as is, and the boot log warns when the job slots are more than twice it. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction.",
   ],
   BETTER_AUTH_SECRET: [
     "core",
@@ -362,7 +362,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   LLM_TRACE: [
     "observability",
-    "Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse`; comma-separate for several.",
+    "Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse` (a trace per job, a generation per call tagged with its step's prompt version, and, for accounts with learning on, a score per decision about the output on the project's session: `clip.kept`, `clip.found`, `clip.untouched`, `clip.bounds_kept`, `clip.copy_kept`, `fix.accepted`, `fix.found`); comma-separate for several. A failed call's log line carries `errName`, `statusCode` and the provider's `errCode` beside the error.",
   ],
   LLM_TRACE_MAX_CHARS: ["observability", "Truncate captured prompts and responses to this many characters."],
   LANGFUSE_PUBLIC_KEY: ["observability", "Langfuse public key (checked at boot when LLM_TRACE includes langfuse)."],
@@ -370,7 +370,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   LANGFUSE_BASE_URL: ["observability", "Langfuse host."],
   OTEL_ENABLED: [
     "observability",
-    "OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end.",
+    "OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. AI SDK calls are GenAI spans (`invoke_agent analyze.map`: model, tokens, finish reason, the project/stage/step/prompt-version ids) and never carry the prompt or the answer. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end.",
   ],
   SENTRY_DSN: [
     "observability",

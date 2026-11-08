@@ -199,6 +199,11 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
   };
 }
 
+/** The pool a worker with `slots` job slots needs: half of them at once, plus pg-boss fetching and heartbeats. */
+export function poolForJobSlots(slots: number): number {
+  return Math.ceil(slots / 2) + 4;
+}
+
 export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate }> {
   const { boss } = svc.queue;
   const common = { pollingIntervalSeconds: 2 };
@@ -442,9 +447,16 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
     },
     "workers listening",
   );
-  // a running job takes a pooled connection only for its writes and pg-boss needs some for fetching and heartbeats. The defaults
-  // already have more job slots than connections (they are rarely all busy), so warn only when the slots are over twice the pool: more
-  // than that, queries queue on the pool and a heartbeat can be missed. (Model-call slots use their own pool, ai/gate.ts.)
+  // a running job takes a pooled connection only for its writes and pg-boss needs some for fetching and heartbeats. Job slots
+  // can outnumber connections (they are rarely all busy), but past twice the pool queries queue on it and a heartbeat can be
+  // missed. With DB_POOL_MAX unset the pool grows to half the slots plus a few, so a worker with more render slots fits by
+  // itself; set explicitly, the operator's number stands and is warned about. (Model-call slots use their own pool, ai/gate.ts.)
+  const fits = poolForJobSlots(concurrency);
+  if (svc.config.DB_POOL_MAX === undefined && fits > svc.database.poolMax) {
+    const from = svc.database.poolMax;
+    svc.database.growPool(fits);
+    svc.log.info({ module: "worker", jobSlots: concurrency, from, poolMax: svc.database.poolMax }, "postgres pool sized to the job slots");
+  }
   if (concurrency > svc.database.poolMax * 2) {
     svc.log.warn(
       { module: "worker", jobSlots: concurrency, poolMax: svc.database.poolMax },

@@ -53,6 +53,16 @@ export function isExpectedClientError(err: unknown): boolean {
   return typeof status === "number" && status >= 400 && status < 500;
 }
 
+/**
+ * React failing to remove or insert a node that something else moved: the browser's page translation (Chrome, Edge)
+ * swaps text nodes for its own `<font>` wrappers, so React's next commit finds a stranger where its node was. The
+ * page needs a reload; there is nothing of ours to fix, and translation stays on for the people who use it.
+ */
+export function isForeignDomMutation(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "NotFoundError") return false;
+  return /Failed to execute '(removeChild|insertBefore)' on 'Node'/.test(err.message);
+}
+
 export function initTelemetry(t: Public | null | undefined): Promise<void> {
   if (started || !t || (!t.sentry && !t.posthog)) return started ?? Promise.resolve();
   started = (async () => {
@@ -68,7 +78,7 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
         tracesSampleRate: 0,
         // the user id is set by identify(); nothing inferred (the IP address) is ours to keep
         dataCollection: { userInfo: false },
-        beforeSend: (event, hint) => (isExpectedClientError(hint.originalException) ? null : event),
+        beforeSend: (event, hint) => (isExpectedClientError(hint.originalException) || isForeignDomMutation(hint.originalException) ? null : event),
         // replay only around an error, every word and image masked (SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE, default off)
         ...(replays > 0
           ? {

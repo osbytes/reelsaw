@@ -165,6 +165,7 @@ export async function filterProperNouns(
       maxRetries: 1,
       ...abortOpt(callSignal(signal, timeoutMs)),
       output: Output.object({ schema: properNounSchema, name: "names" }),
+      telemetry: { functionId: "transcribe.entity-names", recordInputs: false, recordOutputs: false },
       prompt: `From the list below, return only the items that are proper nouns or fixed-spelling terms a transcriber might misspell: people, companies, brands, products, places, software names, acronyms.
 Drop generic topics, hashtags made of ordinary words, and plain English words or phrases.
 ${context.title ? `Video: "${context.title}"` : ""}${context.uploader ? ` by ${context.uploader}` : ""}

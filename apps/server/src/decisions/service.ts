@@ -11,6 +11,8 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { disfluencyCases, type ExportedDecision } from "./cases.js";
+import { decisionScores } from "./scores.js";
+import type { UnitOfWork } from "../uow.js";
 
 /** Words kept on each side of a fix: the window `eval/fixtures/disfluency` cases use. */
 export const FIX_CONTEXT_WORDS = 30;
@@ -60,36 +62,57 @@ export async function learningOn(db: Db, userId: string): Promise<boolean> {
 }
 
 /**
- * Append decisions about one project, in the caller's unit of work (pass `u.db`), so a rolled-back action records
- * nothing. Writes nothing when the owner turned learning off; `build` (the transcript and model reads behind the rows)
- * only runs when it is on. Returns how many rows were written.
+ * Append decisions about one project, in the caller's unit of work, so a rolled-back action records nothing. Writes
+ * nothing when the owner turned learning off; `build` (the transcript and model reads behind the rows) only runs when
+ * it is on. After commit, the rows that judge model output become Langfuse scores (decisions/scores.ts) when
+ * LLM_TRACE sends to Langfuse: best-effort telemetry, the decision log stays the record. Returns how many rows were written.
  */
 export async function recordDecisions(
-  svc: Pick<Services, "config">,
-  db: Db,
+  svc: Pick<Services, "config"> & Partial<Pick<Services, "llmTrace">>,
+  u: Pick<UnitOfWork, "db" | "afterCommit">,
   project: ProjectRef,
   build: () => Promise<DecisionInput[]> | DecisionInput[],
 ): Promise<number> {
+  const db = u.db;
   if (!(await learningOn(db, project.userId))) return 0;
   const rows = await build();
   if (!rows.length) return 0;
   const source = sourceRefOf(project);
-  await db.insert(schema.userDecisions).values(
-    rows.map((r) => ({
-      userId: project.userId,
-      projectId: project.id,
-      clipId: r.clipId ?? null,
-      kind: r.kind,
-      explicit: r.explicit ?? true,
-      before: r.before,
-      after: r.after,
-      context: r.context,
-      models: r.models ?? {},
-      source,
-      appVersion: svc.config.REELSAW_VERSION,
-      ...(r.createdAt ? { createdAt: r.createdAt } : {}),
-    })),
-  );
+  const written = await db
+    .insert(schema.userDecisions)
+    .values(
+      rows.map((r) => ({
+        userId: project.userId,
+        projectId: project.id,
+        clipId: r.clipId ?? null,
+        kind: r.kind,
+        explicit: r.explicit ?? true,
+        before: r.before,
+        after: r.after,
+        context: r.context,
+        models: r.models ?? {},
+        source,
+        appVersion: svc.config.REELSAW_VERSION,
+        ...(r.createdAt ? { createdAt: r.createdAt } : {}),
+      })),
+    )
+    .returning({ id: schema.userDecisions.id });
+  const tracer = svc.llmTrace;
+  if (tracer?.scoring) {
+    const scores = rows.flatMap((r, i) =>
+      decisionScores({
+        id: written[i]!.id,
+        kind: r.kind,
+        explicit: r.explicit ?? true,
+        clipId: r.clipId ?? null,
+        context: r.context,
+        before: r.before,
+        models: r.models ?? {},
+        backfilled: !!r.createdAt,
+      }),
+    );
+    if (scores.length) u.afterCommit(() => tracer.score(project.id, scores));
+  }
   return rows.length;
 }
 
@@ -493,7 +516,7 @@ export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; bu
           if (!fresh.length) return 0;
           const rows = await fixDecisions(u.db, id, t.rawWords ?? t.words, fresh);
           if (o.dryRun) return (await learningOn(u.db, p.userId)) ? rows.length : 0;
-          return recordDecisions(svc, u.db, p, () => rows);
+          return recordDecisions(svc, u, p, () => rows);
         });
         if (n) {
           projects++;
