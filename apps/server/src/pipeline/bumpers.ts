@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { DEFAULT_IMAGE_BUMPER_SEC } from "@reelsaw/shared";
+import { DEFAULT_IMAGE_BUMPER_SEC, fitFades } from "@reelsaw/shared";
 import { keys, type Storage } from "../storage/index.js";
 import { rasterizeSvg } from "./raster.js";
 import { videoEncodeArgs, type ProbeInfo } from "../media.js";
@@ -317,21 +317,165 @@ export function bumperConcat(o: {
   bodyVideo: string;
   bodyAudio: string;
   bodySec: number;
+  /** the transitions to burn in (`planTransitions`); absent = straight cuts and no fades, the graph from before transitions */
+  plan?: TransitionPlan | undefined;
 }): string {
-  const fade =
-    o.outroInput !== undefined && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
+  const p = o.plan;
+  const hasIntro = o.introInput !== undefined;
+  const hasOutro = o.outroInput !== undefined;
   const body = o.bodySec.toFixed(3);
-  const slots = [
-    ...(o.introInput !== undefined ? [`[${o.introInput}:v][${o.introInput}:a]`] : []),
-    "[bodyv][bodya]",
-    ...(o.outroInput !== undefined ? [`[${o.outroInput}:v][${o.outroInput}:a]`] : []),
-  ];
-  return (
-    `${o.bodyVideo}fps=${BUMPER_FPS},format=yuv420p,setsar=1[bodyv];` +
-    `${o.bodyAudio}${fade}apad=whole_dur=${body},atrim=end=${body},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp[bodya];` +
-    `${slots.join("")}concat=n=${slots.length}:v=1:a=1[v][a]`
-  );
+  const aFmt = "aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp";
+  const join = p?.join ?? "cut";
+  if (!p || (join === "cut" && !p.fadeIn && !p.fadeOut)) {
+    const fade = hasOutro && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
+    const slots = [
+      ...(hasIntro ? [`[${o.introInput}:v][${o.introInput}:a]`] : []),
+      "[bodyv][bodya]",
+      ...(hasOutro ? [`[${o.outroInput}:v][${o.outroInput}:a]`] : []),
+    ];
+    return (
+      `${o.bodyVideo}fps=${BUMPER_FPS},format=yuv420p,setsar=1[bodyv];` +
+      `${o.bodyAudio}${fade}apad=whole_dur=${body},atrim=end=${body},asetpts=PTS-STARTPTS,${aFmt}[bodya];` +
+      `${slots.join("")}concat=n=${slots.length}:v=1:a=1[v][a]`
+    );
+  }
+  // every piece gets an exact length first (held last frame / silence pad, then trimmed), so the crossfade offsets and
+  // the fade-out start computed from the plan land on the frame they name
+  const exact = (v: string, a: string, sec: number, tag: string, vExtra: string[], aExtra: string[]) => {
+    const s = sec.toFixed(3);
+    const vf = [
+      `fps=${BUMPER_FPS}`,
+      "format=yuv420p",
+      "setsar=1",
+      "tpad=stop_mode=clone:stop_duration=1",
+      `trim=end=${s}`,
+      "setpts=PTS-STARTPTS",
+      "settb=AVTB",
+      ...vExtra,
+    ];
+    const af = [`apad=whole_dur=${s}`, `atrim=end=${s}`, "asetpts=PTS-STARTPTS", aFmt, ...aExtra];
+    return `${v}${vf.join(",")}[${tag}v];${a}${af.join(",")}[${tag}a]`;
+  };
+  // a dip fades each side of a join through black over half the transition, so the length does not change
+  const half = p.joinSec / 2;
+  const dipIn = (on: boolean) => (on ? { v: [`fade=t=in:st=0:d=${half.toFixed(3)}`], a: [`afade=t=in:st=0:d=${half.toFixed(3)}`] } : { v: [], a: [] });
+  const dipOut = (on: boolean, sec: number) =>
+    on
+      ? { v: [`fade=t=out:st=${(sec - half).toFixed(3)}:d=${half.toFixed(3)}`], a: [`afade=t=out:st=${(sec - half).toFixed(3)}:d=${half.toFixed(3)}`] }
+      : { v: [], a: [] };
+  const dip = join === "dip";
+  const pieces: Array<{ tag: string; sec: number }> = [];
+  const parts: string[] = [];
+  if (hasIntro) {
+    const out = dipOut(dip, p.introSec);
+    parts.push(exact(`[${o.introInput}:v]`, `[${o.introInput}:a]`, p.introSec, "in", out.v, out.a));
+    pieces.push({ tag: "in", sec: p.introSec });
+  }
+  {
+    const i = dipIn(dip && hasIntro);
+    const out =
+      join === "cut" && hasOutro && o.bodySec > OUTRO_FADE_SEC * 2
+        ? { v: [], a: [`afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC}`] }
+        : dipOut(dip && hasOutro, o.bodySec);
+    parts.push(exact(o.bodyVideo, o.bodyAudio, o.bodySec, "body", [...i.v, ...out.v], [...i.a, ...out.a]));
+    pieces.push({ tag: "body", sec: o.bodySec });
+  }
+  if (hasOutro) {
+    const i = dipIn(dip);
+    parts.push(exact(`[${o.outroInput}:v]`, `[${o.outroInput}:a]`, p.outroSec, "out", i.v, i.a));
+    pieces.push({ tag: "out", sec: p.outroSec });
+  }
+  let v: string;
+  let a: string;
+  if (pieces.length === 1) {
+    v = "[bodyv]";
+    a = "[bodya]";
+  } else if (join === "crossfade") {
+    // xfade at (length so far − d), acrossfade overlaps the same d of sound
+    let prevV = `[${pieces[0]!.tag}v]`;
+    let prevA = `[${pieces[0]!.tag}a]`;
+    let length = pieces[0]!.sec;
+    for (let i = 1; i < pieces.length; i++) {
+      const pc = pieces[i]!;
+      parts.push(
+        `${prevV}[${pc.tag}v]xfade=transition=fade:duration=${p.joinSec.toFixed(3)}:offset=${(length - p.joinSec).toFixed(3)}[xv${i}];` +
+          `${prevA}[${pc.tag}a]acrossfade=d=${p.joinSec.toFixed(3)}:c1=qsin:c2=qsin[xa${i}]`,
+      );
+      length += pc.sec - p.joinSec;
+      prevV = `[xv${i}]`;
+      prevA = `[xa${i}]`;
+    }
+    v = prevV;
+    a = prevA;
+  } else {
+    parts.push(`${pieces.map((pc) => `[${pc.tag}v][${pc.tag}a]`).join("")}concat=n=${pieces.length}:v=1:a=1[jv][ja]`);
+    v = "[jv]";
+    a = "[ja]";
+  }
+  // the video's own fade in from black and out to black, over everything that was joined
+  const vf: string[] = [];
+  const af: string[] = [];
+  if (p.fadeIn > 0) {
+    vf.push(`fade=t=in:st=0:d=${p.fadeIn.toFixed(3)}`);
+    af.push(`afade=t=in:st=0:d=${p.fadeIn.toFixed(3)}`);
+  }
+  if (p.fadeOut > 0) {
+    const st = (p.totalSec - p.fadeOut).toFixed(3);
+    vf.push(`fade=t=out:st=${st}:d=${p.fadeOut.toFixed(3)}`);
+    af.push(`afade=t=out:st=${st}:d=${p.fadeOut.toFixed(3)}`);
+  }
+  parts.push(`${v}${vf.length ? vf.join(",") : "null"}[v];${a}${af.length ? af.join(",") : "anull"}[a]`);
+  return parts.join(";");
 }
+
+/** What a render burns in at the joins and the ends, fitted to the pieces it has (`planTransitions`). */
+export interface TransitionPlan {
+  fadeIn: number;
+  fadeOut: number;
+  /** how the intro / outro join the body; "cut" when there is neither */
+  join: "cut" | "dip" | "crossfade";
+  /** seconds of the join (0 for a cut) */
+  joinSec: number;
+  introSec: number;
+  outroSec: number;
+  /** where the body starts in the finished video (the intro's length, less a crossfade's overlap) */
+  bodyStartSec: number;
+  /** the finished video's length */
+  totalSec: number;
+}
+
+/**
+ * The transitions a clip gets, fitted to what is there: a join only exists next to an intro or outro, a crossfade is
+ * at most half of the shorter side (so it never swallows a short bumper), and the fades are at most half of the video
+ * each (`fitFades`). Pure, so the renderer, its log line and the diagnostics agree.
+ */
+export function planTransitions(o: {
+  style: { fadeIn: number; fadeOut: number; bumperTransition: "cut" | "dip" | "crossfade"; bumperTransitionSec: number };
+  introSec: number;
+  bodySec: number;
+  outroSec: number;
+}): TransitionPlan {
+  const sides = [o.introSec, o.outroSec].filter((s) => s > 0);
+  const join = sides.length ? o.style.bumperTransition : "cut";
+  const joinSec = join === "cut" ? 0 : Math.max(0, Math.min(o.style.bumperTransitionSec, ...sides.map((s) => s / 2), o.bodySec / 2));
+  const effJoin = joinSec < 0.05 ? "cut" : join;
+  const overlap = effJoin === "crossfade" ? joinSec : 0;
+  const totalSec = o.introSec + o.bodySec + o.outroSec - overlap * sides.length;
+  const f = fitFades(totalSec, o.style.fadeIn, o.style.fadeOut);
+  return {
+    fadeIn: Number(f.fadeIn.toFixed(3)),
+    fadeOut: Number(f.fadeOut.toFixed(3)),
+    join: effJoin,
+    joinSec: effJoin === "cut" ? 0 : Number(joinSec.toFixed(3)),
+    introSec: o.introSec,
+    outroSec: o.outroSec,
+    bodyStartSec: Math.max(0, o.introSec - (o.introSec > 0 ? overlap : 0)),
+    totalSec,
+  };
+}
+
+/** True when the plan changes anything over a straight join with no fades. */
+export const hasTransitions = (p: TransitionPlan) => p.fadeIn > 0 || p.fadeOut > 0 || p.join !== "cut";
 
 export const BUMPER_THUMB = { width: 270, height: 480 } as const;
 

@@ -57,7 +57,7 @@ export const saveLayerTemplateInput = {
   layers: layerTemplateLayersSchema
     .optional()
     .describe(
-      "Or the layers themselves, each with a timing: { kind: asset|text|audio, id, timing: { mode: head|tail|fill|relative, start, end, minSec, maxSec }, ...the layer's own fields (assetId, x, y, w / text, size, color / volume, duck, fade, loop) }",
+      "Or the layers themselves, each with a timing: { kind: asset|text|audio, id, timing: { mode: head|tail|fill|relative, start, end, minSec, maxSec }, ...the layer's own fields (assetId, x, y, w, fade / text, size, color, fade / volume, duck, fade, loop) }",
     ),
   bumpers: templateBumpersSchema
     .optional()

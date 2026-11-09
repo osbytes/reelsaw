@@ -155,6 +155,25 @@ describe("overlayChain", () => {
     assert.ok(chain.includes("colorchannelmixer=aa=0.500"), chain);
   });
 
+  it("fades the alpha in at the window's start and out at its end", () => {
+    const { chain } = overlayChain([item({ fade: 0.5 })], 1, 1080, 1920, "[in]");
+    assert.ok(chain.includes("format=rgba,fade=t=in:st=1.000:d=0.500:alpha=1,fade=t=out:st=3.500:d=0.500:alpha=1[ov0]"), chain);
+    assert.ok(!overlayChain([item()], 1, 1080, 1920, "[in]").chain.includes("fade="), "no fade unless asked");
+  });
+
+  it("reads a fading still as a stream of frames up to its window's end, so the fade can change it", () => {
+    assert.deepEqual(overlayInputArgs({ path: "/x.png", kind: "image", loop: false, start: 1, end: 4, fade: 0.5 }), [
+      "-loop",
+      "1",
+      "-framerate",
+      "30",
+      "-t",
+      "4.000",
+      "-i",
+      "/x.png",
+    ]);
+  });
+
   it("chains several items", () => {
     const { chain, out } = overlayChain([item(), item({ id: "b" })], 1, 1080, 1920, "[in]");
     assert.ok(chain.includes("[oc0][ov1]overlay"), chain);
@@ -268,6 +287,13 @@ describe("text overlays", () => {
     assert.ok(line!.includes(",TextBox,"), line);
     assert.ok(line!.includes("{\\an5\\pos(270,960)}{\\fs96\\c&H4DD8FF&\\alpha&H80&}Hello there"), line);
     assert.ok(ass.includes("Style: Text,") && ass.includes("Style: TextBox,"), ass);
+  });
+
+  it("fades a text layer with \\fad, fitted to its window", () => {
+    const [ev] = textOverlayEvents([{ id: "t", kind: "text", text: "Hi", start: 101, end: 102, x: 0.5, y: 0.3, fade: 2 }], 100, 20, (t) => t);
+    assert.equal(ev!.fade, 0.5, "never more than half the window");
+    const ass = buildAss([], { width: 1080, height: 1920, font: "DejaVu Sans", style, texts: [ev!] });
+    assert.ok(ass.includes("\\fad(500,500)}Hi"), ass);
   });
 
   it("puts the watermark text under the logo, smaller, when the logo is composited", () => {

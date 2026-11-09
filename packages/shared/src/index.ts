@@ -64,6 +64,57 @@ const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 /** Fraction of the 9:16 frame, 0 = left/top, 1 = right/bottom. */
 const frac = (what: string) => z.number().min(0).max(1).describe(`${what}, as a fraction of the 9:16 frame (0-1)`);
 
+/** Longest fade or transition, seconds: past this a short loses its pace. */
+export const MAX_FADE_SEC = 2;
+/** Shortest intro/outro transition that still reads as one (shorter is a cut). */
+export const MIN_TRANSITION_SEC = 0.2;
+export const BUMPER_TRANSITIONS = ["cut", "dip", "crossfade"] as const;
+export const bumperTransitionSchema = z
+  .enum(BUMPER_TRANSITIONS)
+  .describe(
+    "How the intro/outro joins the clip: cut (default), dip (fade through black, no change in length) or crossfade (the two overlap, so the video is shorter by the transition)",
+  );
+export type BumperTransition = z.infer<typeof bumperTransitionSchema>;
+export const BUMPER_TRANSITION_LABEL: Record<BumperTransition, string> = { cut: "Cut", dip: "Dip to black", crossfade: "Crossfade" };
+/** The lengths the editor offers for a fade (seconds); 0 is off. Any value 0-MAX_FADE_SEC is valid. */
+export const FADE_PRESETS = [
+  { sec: 0, label: "Off" },
+  { sec: 0.3, label: "Quick" },
+  { sec: 0.6, label: "Smooth" },
+  { sec: 1, label: "Slow" },
+] as const;
+
+/**
+ * Fade-in and fade-out fitted to a video `total` seconds long: each at most half of it, so the two never overlap.
+ * The renderer and the editor's preview both call this, so what plays in the browser is what is burned in.
+ */
+export function fitFades(total: number, fadeIn: number, fadeOut: number): { fadeIn: number; fadeOut: number } {
+  const half = Math.max(0, total) / 2;
+  return { fadeIn: Math.max(0, Math.min(fadeIn, half)), fadeOut: Math.max(0, Math.min(fadeOut, half)) };
+}
+
+/** How visible something is at time `t` of a window [start, end] that fades in and out over `fade` seconds (0-1). */
+export function fadeLevel(t: number, start: number, end: number, fadeIn: number, fadeOut: number = fadeIn): number {
+  if (t < start || t > end) return 0;
+  const f = fitFades(end - start, fadeIn, fadeOut);
+  const a = f.fadeIn > 0 ? Math.min(1, (t - start) / f.fadeIn) : 1;
+  const b = f.fadeOut > 0 ? Math.min(1, (end - t) / f.fadeOut) : 1;
+  return Math.max(0, Math.min(a, b));
+}
+
+/**
+ * The fades the clip's own part of the video gets at its two edges (the editor previews only that part): the
+ * video's fade-in when nothing plays before it, half a dip when an intro does (the other half is on the intro), and
+ * nothing for a cut or a crossfade (that one blends into the intro's picture). The outro side the same way round.
+ */
+export function bodyEdgeFades(
+  style: Pick<Style, "fadeIn" | "fadeOut" | "bumperTransition" | "bumperTransitionSec">,
+  has: { intro: boolean; outro: boolean },
+): { fadeIn: number; fadeOut: number } {
+  const dip = style.bumperTransition === "dip" ? style.bumperTransitionSec / 2 : 0;
+  return { fadeIn: has.intro ? dip : style.fadeIn, fadeOut: has.outro ? dip : style.fadeOut };
+}
+
 /**
  * Everything that is burned into the picture besides the framing. Lives on the project (defaults for
  * every clip) and optionally per clip (`clips.style`, partial override). Positions are the centre of
@@ -91,6 +142,31 @@ export const styleSchema = z.object({
   hookX: frac("Hook centre, horizontal").default(0.5),
   hookY: frac("Hook centre, vertical (default 0.16)").default(0.16),
   hookSeconds: z.number().min(0).max(15).describe("How long the hook shows, seconds (0-15, default 3.5)").default(3.5),
+  /**
+   * Transitions (docs/specs/transitions.md). The fades are on the finished video: from black and silence at its first
+   * frame (the intro's when there is one), to black and silence at its last (the outro's). Off by default: the first
+   * frame is the hook, and a fade to black is a visible seam where a platform loops the video.
+   */
+  fadeIn: z
+    .number()
+    .min(0)
+    .max(MAX_FADE_SEC)
+    .describe(`Fade in from black (picture and sound) at the start of the video, seconds (0-${MAX_FADE_SEC}, default 0 = off)`)
+    .default(0),
+  fadeOut: z
+    .number()
+    .min(0)
+    .max(MAX_FADE_SEC)
+    .describe(`Fade out to black (picture and sound) at the end of the video, seconds (0-${MAX_FADE_SEC}, default 0 = off)`)
+    .default(0),
+  /** How the intro and outro join the clip: a straight cut, a dip through black, or a crossfade that overlaps them. */
+  bumperTransition: bumperTransitionSchema.default("cut"),
+  bumperTransitionSec: z
+    .number()
+    .min(MIN_TRANSITION_SEC)
+    .max(MAX_FADE_SEC)
+    .describe(`Length of the intro/outro transition, seconds (${MIN_TRANSITION_SEC}-${MAX_FADE_SEC}, default 0.5); ignored for cut`)
+    .default(0.5),
 });
 export type Style = z.infer<typeof styleSchema>;
 /** Partial style without the defaults (`.partial()` would fill every unset field with its default). */
@@ -268,6 +344,12 @@ const clipOverlayBase = z.object({
   box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
   font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
   opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
+  fade: z
+    .number()
+    .min(0)
+    .max(MAX_FADE_SEC)
+    .optional()
+    .describe(`Fade in when it appears and out when it goes, seconds (0-${MAX_FADE_SEC}, default 0 = appears and goes at once)`),
 });
 export const clipOverlaySchema = clipOverlayBase.refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), {
   message: "an asset overlay needs assetId, a text overlay needs text",
@@ -781,6 +863,8 @@ export interface ClipDiagnostics {
   bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[]; fromClip?: Array<"intro" | "outro"> };
   /** overlays composited (and any that were skipped, with reasons) */
   overlays?: { used: number; skipped?: string[] };
+  /** the fades and the intro/outro join this render burned in, in seconds after fitting them to the video (absent = none) */
+  transitions?: { fadeIn: number; fadeOut: number; join?: BumperTransition; joinSec?: number };
   renderMs: number;
 }
 
@@ -923,6 +1007,10 @@ export const userProjectDefaultsSchema = z
     highlightColor: hexColor,
     wordsPerLine: z.number().int().min(1).max(8),
     uppercase: z.boolean(),
+    fadeIn: z.number().min(0).max(MAX_FADE_SEC),
+    fadeOut: z.number().min(0).max(MAX_FADE_SEC),
+    bumperTransition: bumperTransitionSchema,
+    bumperTransitionSec: z.number().min(MIN_TRANSITION_SEC).max(MAX_FADE_SEC),
     refineEntities: z.boolean(),
     refineDisfluency: z.boolean(),
     disfluencyLlm: z.boolean(),

@@ -1,7 +1,8 @@
 import { Select, Skeleton } from "./ui";
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UserProjectDefaults } from "@reelsaw/shared";
+import { BUMPER_TRANSITIONS, BUMPER_TRANSITION_LABEL, FADE_PRESETS, type BumperTransition, type UserProjectDefaults } from "@reelsaw/shared";
+import { fadeText } from "./FadeField";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useMe } from "../lib/account";
@@ -24,6 +25,10 @@ type Form = {
   highlightColor: string;
   wordsPerLine: string;
   uppercase: "" | "yes" | "no";
+  fadeIn: string;
+  fadeOut: string;
+  bumperTransition: BumperTransition | "";
+  bumperTransitionSec: string;
   layerTemplateId: string;
 } & RefineForm;
 
@@ -40,6 +45,10 @@ const EMPTY: Form = {
   highlightColor: "",
   wordsPerLine: "",
   uppercase: "",
+  fadeIn: "",
+  fadeOut: "",
+  bumperTransition: "",
+  bumperTransitionSec: "",
   layerTemplateId: "",
   refineEntities: "",
   refineDisfluency: "",
@@ -65,6 +74,10 @@ function fromSaved(d: UserProjectDefaults): Form {
     highlightColor: d.highlightColor ?? "",
     wordsPerLine: d.wordsPerLine?.toString() ?? "",
     uppercase: d.uppercase === undefined ? "" : d.uppercase ? "yes" : "no",
+    fadeIn: d.fadeIn?.toString() ?? "",
+    fadeOut: d.fadeOut?.toString() ?? "",
+    bumperTransition: d.bumperTransition ?? "",
+    bumperTransitionSec: d.bumperTransitionSec?.toString() ?? "",
     layerTemplateId: d.layerTemplateId ?? "",
     refineEntities: yn(d.refineEntities),
     refineDisfluency: yn(d.refineDisfluency),
@@ -88,6 +101,10 @@ function toSaved(f: Form): UserProjectDefaults {
     highlightColor: f.highlightColor.trim() || undefined,
     wordsPerLine: num(f.wordsPerLine),
     uppercase: f.uppercase === "" ? undefined : f.uppercase === "yes",
+    fadeIn: num(f.fadeIn),
+    fadeOut: num(f.fadeOut),
+    bumperTransition: f.bumperTransition || undefined,
+    bumperTransitionSec: num(f.bumperTransitionSec),
     layerTemplateId: f.layerTemplateId || undefined,
     refineEntities: fromYn(f.refineEntities),
     refineDisfluency: fromYn(f.refineDisfluency),
@@ -245,6 +262,49 @@ export function ProjectDefaultsSection() {
               { value: "", label: `built-in (${b?.uppercase ? "yes" : "no"})` },
               { value: "yes", label: "yes" },
               { value: "no", label: "no" },
+            ]}
+          />
+        </label>
+        {(
+          [
+            ["fadeIn", "Fade in from black"],
+            ["fadeOut", "Fade out to black"],
+          ] as const
+        ).map(([k, label]) => (
+          <label key={k} className="flex flex-col gap-1 text-xs text-ink2">
+            {label}
+            <Select
+              ariaLabel={label}
+              value={f[k]}
+              onValueChange={pick(k)}
+              options={[
+                { value: "", label: `built-in (${fadeText(b?.[k] ?? 0).toLowerCase()})` },
+                ...FADE_PRESETS.map((p) => ({ value: String(p.sec), label: p.sec ? `${p.label.toLowerCase()} (${p.sec} s)` : "off" })),
+              ]}
+            />
+          </label>
+        ))}
+        <label className="flex flex-col gap-1 text-xs text-ink2">
+          Intro and outro join
+          <Select
+            ariaLabel="Intro and outro join"
+            value={f.bumperTransition}
+            onValueChange={pick("bumperTransition")}
+            options={[
+              { value: "", label: `built-in (${BUMPER_TRANSITION_LABEL[b?.bumperTransition ?? "cut"].toLowerCase()})` },
+              ...BUMPER_TRANSITIONS.map((t) => ({ value: t, label: BUMPER_TRANSITION_LABEL[t].toLowerCase() })),
+            ]}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink2">
+          Join length
+          <Select
+            ariaLabel="Join length"
+            value={f.bumperTransitionSec}
+            onValueChange={pick("bumperTransitionSec")}
+            options={[
+              { value: "", label: `built-in (${b?.bumperTransitionSec ?? 0.5} s)` },
+              ...[0.3, 0.6, 1].map((s) => ({ value: String(s), label: `${s} s` })),
             ]}
           />
         </label>

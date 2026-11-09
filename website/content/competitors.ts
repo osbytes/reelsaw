@@ -611,7 +611,7 @@ export const COMPETITORS: Competitor[] = [
       "Selection you can audit: every candidate is scored as the median of several samples, the top picks are compared pairwise with positions swapped to cancel judge bias, a separate judge model can do the scoring, and the rubric breakdown is one click away. OpenShorts asks Gemini for 3 to 15 moments in one pass.",
       "Filler, repetition and false-start cuts located by forced alignment and checked by listening to the seam, each one reviewable. OpenShorts does not list this.",
       "Framing decided per segment, not per video: face, split, stack and fit can change inside one clip at scene cuts, with active-speaker following, and any section can be overridden in the editor.",
-      "A real editor: multi-lane timeline, frame-accurate trims, layout sections, layers, layer templates, transitions, intros and outros, undo.",
+      "A real editor: multi-lane timeline, frame-accurate trims, layout sections, layers, layer templates, fades and crossfades, intros and outros, undo.",
       "Built for more than one person: accounts, admin approval, per-user quotas, usage, and pg-boss jobs that resume after a crash.",
       "AGPL-3.0, so a hosted fork has to share its changes; Reelsaw's own hosted service runs the public code with the billing module as the only addition.",
     ],

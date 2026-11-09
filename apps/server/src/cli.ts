@@ -38,7 +38,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   source-text <projectId> <hide|keep|always>
  *                                           hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text)
  *   update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]
- *                                           change the caption/hook style of the whole project, clearing per-clip overrides and re-rendering
+ *                                           change the caption/hook style and fades (fadeIn, fadeOut, bumperTransition, bumperTransitionSec) of the whole project, clearing per-clip overrides and re-rendering
  *                                           (same as projects.updateStyle and update_project_style); values are JSON or text
  *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
  *                                           start a project from a link for an account (the given user, else the only account);
@@ -130,7 +130,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           a clip's own choice (inherit the project's, none or an item);
  *                                           both act as the project's owner;
  *                                           --rerender re-renders only the affected clips
- *   clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]
+ *   clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--fade <sec>] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] [--fade <sec>] | --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]
  *                                           everything laid over or played under a clip, one list (source seconds, x/y/w/size as
  *                                           fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at
  *                                           full level, anything else music (ducked, faded, looped); with no change flag it lists them
@@ -2139,7 +2139,7 @@ ${usage}`);
       noLoop,
     } = bumperArgs();
     const usage =
-      "usage: reelsaw clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --add-sound <assetId> --from <sec> --to <sec> [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]";
+      "usage: reelsaw clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--fade <sec>] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] [--fade <sec>] | --add-sound <assetId> --from <sec> --to <sec> [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]";
     if (p.length < 2) throw new Error(usage);
     const { api, user } = await bumperApi(svc, p[0]);
     const clip = await svc.database.db.query.clips.findFirst({
@@ -2159,7 +2159,7 @@ ${usage}`);
       next = parsed.data;
     } else if (add !== undefined || addText !== undefined) {
       if (from === undefined || to === undefined) throw new Error(`--add / --add-text need --from and --to\n${usage}`);
-      const common = { id: newId(), start: from, end: to, x: x ?? 0.5, y: y ?? 0.5, ...(opacity !== undefined ? { opacity } : {}) };
+      const common = { id: newId(), start: from, end: to, x: x ?? 0.5, y: y ?? 0.5, ...(opacity !== undefined ? { opacity } : {}), ...(fade ? { fade } : {}) };
       const parsed = clipLayerSchema.safeParse(
         addText !== undefined
           ? {
@@ -2223,7 +2223,7 @@ ${usage}`);
           position:
             l.kind === "audio"
               ? ""
-              : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
+              : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}${l.fade ? ` fade ${l.fade}` : ""}`,
           sound:
             l.kind === "audio"
               ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}`
@@ -2300,7 +2300,7 @@ ${usage}`);
             position:
               l.kind === "audio"
                 ? ""
-                : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
+                : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}${l.fade ? ` fade ${l.fade}` : ""}`,
             sound:
               l.kind === "audio"
                 ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}`
