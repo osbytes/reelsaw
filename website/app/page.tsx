@@ -49,7 +49,7 @@ const STEPS = [
   {
     icon: ScanFace,
     title: "Reframe and render",
-    body: "A 1.2 MB face detector on the CPU picks a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro in one encode.",
+    body: "A 1.2 MB face detector on the CPU picks a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
   },
 ];
 
@@ -82,7 +82,7 @@ const FEATURES = [
   {
     icon: Film,
     title: "A real editor",
-    body: "Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, layers, transitions, undo and redo. Keyboard first, shortcuts listed under ?.",
+    body: "Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, layers, fades in and out, intro and outro crossfades, undo and redo. Keyboard first, shortcuts listed under ?.",
   },
   {
     icon: Layers,

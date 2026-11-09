@@ -92,6 +92,7 @@ export function Segmented<T extends string | number>({
   className = "",
   size = "md",
   ariaLabel,
+  disabled,
 }: {
   value: T;
   options: Array<{ value: T; label: ReactNode; title?: string }>;
@@ -99,9 +100,11 @@ export function Segmented<T extends string | number>({
   className?: string;
   size?: "sm" | "md";
   ariaLabel?: string;
+  /** the whole control greyed out (it keeps its place, so nothing moves when it turns on) */
+  disabled?: boolean | undefined;
 }) {
   return (
-    <div className={`seg ${className}`} role="radiogroup" aria-label={ariaLabel}>
+    <div className={`seg ${disabled ? "opacity-50" : ""} ${className}`} role="radiogroup" aria-label={ariaLabel} aria-disabled={disabled || undefined}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -109,8 +112,9 @@ export function Segmented<T extends string | number>({
           role="radio"
           aria-checked={o.value === value}
           title={o.title}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
-          className={`flex-1 rounded-[8px] font-semibold whitespace-nowrap transition ${size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-[13px]"} ${o.value === value ? "bg-panel text-ink shadow-[0_1px_2px_rgba(0,0,0,.12)]" : "text-ink2 hover:text-ink"}`}
+          className={`flex-1 rounded-[8px] font-semibold whitespace-nowrap transition disabled:cursor-not-allowed ${size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-[13px]"} ${o.value === value ? "bg-panel text-ink shadow-[0_1px_2px_rgba(0,0,0,.12)]" : "text-ink2 enabled:hover:text-ink"}`}
         >
           {o.label}
         </button>

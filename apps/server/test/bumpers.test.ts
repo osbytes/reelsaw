@@ -14,6 +14,8 @@ import path from "node:path";
 import {
   bumperConcat,
   bumperFrames,
+  planTransitions,
+  hasTransitions,
   resolveClipBumpers,
   bumperKind,
   assetKind,
@@ -64,6 +66,44 @@ async function packets(file: string, stream: "v" | "a") {
   ]);
   return (JSON.parse(stdout) as { packets: Array<{ pts_time: string; dts_time: string; duration_time: string }> }).packets;
 }
+
+describe("planTransitions", () => {
+  const style = (o: Partial<Parameters<typeof planTransitions>[0]["style"]> = {}) => ({
+    fadeIn: 0,
+    fadeOut: 0,
+    bumperTransition: "cut" as const,
+    bumperTransitionSec: 0.5,
+    ...o,
+  });
+  it("is a plain join when nothing is asked", () => {
+    const p = planTransitions({ style: style(), introSec: 2, bodySec: 30, outroSec: 1 });
+    assert.deepEqual([p.join, p.joinSec, p.fadeIn, p.fadeOut, p.bodyStartSec, p.totalSec], ["cut", 0, 0, 0, 2, 33]);
+    assert.equal(hasTransitions(p), false);
+  });
+  it("only joins next to an intro or outro", () => {
+    const p = planTransitions({ style: style({ bumperTransition: "dip" }), introSec: 0, bodySec: 30, outroSec: 0 });
+    assert.equal(p.join, "cut");
+    assert.equal(hasTransitions(p), false);
+  });
+  it("a crossfade overlaps each join and moves the body earlier; a dip keeps every length", () => {
+    const x = planTransitions({ style: style({ bumperTransition: "crossfade", bumperTransitionSec: 0.5 }), introSec: 2, bodySec: 30, outroSec: 2 });
+    assert.deepEqual([x.join, x.joinSec, x.bodyStartSec, x.totalSec], ["crossfade", 0.5, 1.5, 33]);
+    const d = planTransitions({ style: style({ bumperTransition: "dip", bumperTransitionSec: 0.5 }), introSec: 2, bodySec: 30, outroSec: 2 });
+    assert.deepEqual([d.join, d.joinSec, d.bodyStartSec, d.totalSec], ["dip", 0.5, 2, 34]);
+  });
+  it("never lets a transition swallow more than half of a short intro, or fades overlap", () => {
+    const p = planTransitions({
+      style: style({ bumperTransition: "crossfade", bumperTransitionSec: 2, fadeIn: 2, fadeOut: 2 }),
+      introSec: 1,
+      bodySec: 3,
+      outroSec: 0,
+    });
+    assert.equal(p.joinSec, 0.5);
+    assert.ok(p.fadeIn + p.fadeOut <= p.totalSec);
+    const short = planTransitions({ style: style({ fadeIn: 2, fadeOut: 2 }), introSec: 0, bodySec: 3, outroSec: 0 });
+    assert.deepEqual([short.fadeIn, short.fadeOut], [1.5, 1.5]);
+  });
+});
 
 describe("resolveClipBumpers", () => {
   const project = { introAssetId: "pi", outroAssetId: "po" };
@@ -292,6 +332,126 @@ describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () =
       assert.ok(Math.abs(ap[ap.length - 1]! - (expected - 0.0213)) < 0.05, `audio ends ${ap[ap.length - 1]} vs ${expected}`);
     });
   }
+
+  /** Mean brightness (0-255) of the frame at `t` seconds. */
+  async function luma(file: string, t: number): Promise<number> {
+    const { stdout } = await promisify(execFile)(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        t.toFixed(3),
+        "-i",
+        file,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=1:1:flags=area,format=gray",
+        "-f",
+        "rawvideo",
+        "-",
+      ],
+      { encoding: "buffer" },
+    );
+    return stdout[0] ?? -1;
+  }
+  /** Mean absolute level (0-1) of the sound in [t, t + 0.05]. */
+  async function loudness(file: string, t: number): Promise<number> {
+    const { stdout } = await promisify(execFile)(
+      "ffmpeg",
+      ["-hide_banner", "-loglevel", "error", "-ss", t.toFixed(3), "-t", "0.05", "-i", file, "-vn", "-ac", "1", "-f", "f32le", "-"],
+      { encoding: "buffer", maxBuffer: 1 << 24 },
+    );
+    const n = Math.floor(stdout.length / 4);
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += Math.abs(stdout.readFloatLE(i * 4));
+    return n ? sum / n : 0;
+  }
+  const encodeJoin = async (out: string, inputs: string[], graph: string) =>
+    ffmpeg([
+      "-i",
+      path.join(dir, "body.mp4"),
+      ...inputs,
+      "-filter_complex",
+      graph,
+      "-map",
+      "[v]",
+      "-map",
+      "[a]",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      "30",
+      "-c:a",
+      "aac",
+      "-ar",
+      "48000",
+      out,
+    ]);
+
+  for (const join of ["dip", "crossfade"] as const) {
+    it(`joins intro + body + outro with a ${join}, fading in and out: length, black frames, silence`, async () => {
+      const intro = await ensureNormalised(deps, { id: "intro", sourceKey: "bumpers/intro/source.mp4", durationSec: 2, hasAudio: true }, canvas);
+      const outro = await ensureNormalised(deps, { id: "outro", sourceKey: "bumpers/outro/source.mp4", durationSec: 1.5, hasAudio: false }, canvas);
+      const introSec = bumperFrames(2) * FRAME;
+      const outroSec = bumperFrames(1.5) * FRAME;
+      const plan = planTransitions({
+        style: { fadeIn: 0.5, fadeOut: 0.5, bumperTransition: join, bumperTransitionSec: 0.6 },
+        introSec,
+        bodySec: 5,
+        outroSec,
+      });
+      const out = path.join(dir, `join-${join}.mp4`);
+      await encodeJoin(
+        out,
+        ["-i", intro, "-i", outro],
+        `[0:v]null[bodyraw];[0:a:0]anull[ca];` + bumperConcat({ introInput: 1, outroInput: 2, bodyVideo: "[bodyraw]", bodyAudio: "[ca]", bodySec: 5, plan }),
+      );
+      const info = await probe(out);
+      const expected = join === "crossfade" ? introSec + 5 + outroSec - 2 * 0.6 : introSec + 5 + outroSec;
+      assert.ok(Math.abs(plan.totalSec - expected) < 1e-6, `plan ${plan.totalSec} vs ${expected}`);
+      assert.ok(Math.abs(Number(info.format.duration) - expected) <= FRAME * 2, `duration ${info.format.duration} vs ${expected}`);
+      // fade in from black, fade out to black
+      assert.ok((await luma(out, 0)) < 20, "first frame is black");
+      assert.ok((await luma(out, expected - FRAME)) < 30, "last frame is near black");
+      assert.ok((await luma(out, plan.bodyStartSec + 2)) > 60, "the body plays at full brightness");
+      // the sound fades with the picture: silent at the very start, audible in the body
+      assert.ok((await loudness(out, 0)) < 0.02, "starts silent");
+      assert.ok((await loudness(out, plan.bodyStartSec + 2)) > 0.05, "the body is audible");
+      if (join === "dip") {
+        // the dip's midpoint is the join itself: black there, at full length
+        assert.ok((await luma(out, introSec)) < 25, `black at the intro/body join (${await luma(out, introSec)})`);
+        assert.equal(plan.bodyStartSec, introSec);
+      } else {
+        // a crossfade never goes through black: halfway through it both pictures show
+        assert.ok((await luma(out, introSec - 0.3)) > 40, "the crossfade blends, it does not dip");
+        assert.ok(Math.abs(plan.bodyStartSec - (introSec - 0.6)) < 1e-6);
+      }
+    });
+  }
+
+  it("fades a clip in and out with no intro or outro", async () => {
+    const plan = planTransitions({
+      style: { fadeIn: 0.6, fadeOut: 1, bumperTransition: "crossfade", bumperTransitionSec: 0.5 },
+      introSec: 0,
+      bodySec: 5,
+      outroSec: 0,
+    });
+    assert.equal(plan.join, "cut", "no intro or outro, nothing to join");
+    const out = path.join(dir, "fades-only.mp4");
+    await encodeJoin(out, [], `[0:v]null[bodyraw];[0:a:0]anull[ca];` + bumperConcat({ bodyVideo: "[bodyraw]", bodyAudio: "[ca]", bodySec: 5, plan }));
+    assert.ok(Math.abs(Number((await probe(out)).format.duration) - 5) <= FRAME * 2);
+    assert.ok((await luma(out, 0)) < 20, "starts black");
+    assert.ok((await luma(out, 0.3)) > 15 && (await luma(out, 0.3)) < (await luma(out, 2)), "half way into the fade");
+    assert.ok((await luma(out, 2.5)) > 60, "full brightness in the middle");
+    assert.ok((await luma(out, 5 - FRAME)) < 30, "ends black");
+  });
 
   for (const seconds of [3, 1, 2.5]) {
     it(`turns an image into a ${seconds} s video with silence and joins it as an outro`, async (t) => {

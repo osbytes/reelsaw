@@ -40,6 +40,7 @@ export function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: Clip
       x: r3(o.x),
       y: r3(o.y),
       ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: r3(o.opacity) } : {}),
+      ...(o.fade ? { fade: Number(o.fade.toFixed(2)) } : {}),
     };
     if (kind === "text")
       out.push({

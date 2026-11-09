@@ -57,6 +57,7 @@ import {
   overlayKind,
   TEXT_OVERLAY_DEFAULTS,
   ASSET_OVERLAY_DEFAULT_W,
+  fitFades,
   CLIP_AUDIO_DEFAULTS,
   clipLayers,
   isStickerAsset,
@@ -76,7 +77,19 @@ import {
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
-import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, ensureRaster, isSvgAsset, RASTER_WIDTH, BUMPER_FPS } from "./bumpers.js";
+import {
+  bumperConcat,
+  bumperFrames,
+  planTransitions,
+  hasTransitions,
+  type TransitionPlan,
+  resolveClipBumpers,
+  ensureNormalised,
+  ensureRaster,
+  isSvgAsset,
+  RASTER_WIDTH,
+  BUMPER_FPS,
+} from "./bumpers.js";
 
 const OUT_W = 1080;
 const OUT_H = 1920;
@@ -751,10 +764,13 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     clip.id,
     log,
   );
-  const srcHasAudio = bumpers.intro || bumpers.outro || music.length ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
+  const srcHasAudio =
+    bumpers.intro || bumpers.outro || music.length || style.fadeIn > 0 || style.fadeOut > 0 ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
-  const buildGraph = (withBumpers: boolean, withOverlays: boolean): { graph: string; audioMap: string[] } => {
-    const vOut = withBumpers ? "[bodyraw]" : "[v]";
+  const buildGraph = (withBumpers: boolean, withOverlays: boolean, transitions: TransitionPlan): { graph: string; audioMap: string[] } => {
+    // the tail joins the intro / outro and burns in the fades; it runs when there is either
+    const withTail = withBumpers || hasTransitions(transitions);
+    const vOut = withTail ? "[bodyraw]" : "[v]";
     let graph: string;
     let audioMap: string[];
     const hasCutBranch = segments.length > 1 || cuts.length > 0;
@@ -827,7 +843,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     }
     // the body's audio as one labelled stream when something has to be mixed in or joined after it
     let bodyAudio = hasCutBranch ? "[ca]" : "0:a:0?";
-    if ((withBumpers || withMusic) && !hasCutBranch) {
+    if ((withTail || withMusic) && !hasCutBranch) {
       // concat / amix need audio in every slot: the no-cuts branch has optional audio, so give it a guaranteed [ca]
       graph += `;${srcHasAudio ? "[0:a:0]anull[ca]" : `anullsrc=r=48000:cl=stereo,atrim=end=${duration.toFixed(3)}[ca]`}`;
       bodyAudio = "[ca]";
@@ -837,21 +853,22 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       bodyAudio = "[mixed]";
       audioMap = ["-map", bodyAudio];
     }
-    if (withBumpers) {
+    if (withTail) {
       // the burned-in captions are on the body's own timeline, so the intro never shifts them
       // ffmpeg inputs: 0 = source, then the overlays (+ logo), then the music tracks, then the intro and outro
       const base = 1 + nOverlayInputs + (withMusic ? music.length : 0);
-      const introInput = bumpers.intro ? base : undefined;
-      const outroInput = bumpers.outro ? base + (bumpers.intro ? 1 : 0) : undefined;
-      graph += `;${bumperConcat({ introInput, outroInput, bodyVideo: "[bodyraw]", bodyAudio, bodySec: outDuration })}`;
+      const introInput = withBumpers && bumpers.intro ? base : undefined;
+      const outroInput = withBumpers && bumpers.outro ? base + (bumpers.intro ? 1 : 0) : undefined;
+      graph += `;${bumperConcat({ introInput, outroInput, bodyVideo: "[bodyraw]", bodyAudio, bodySec: outDuration, plan: transitions })}`;
       audioMap = ["-map", "[a]"];
     }
     return { graph, audioMap };
   };
   const encodeWith = async (withBumpers: boolean, withOverlays: boolean, encoder: VideoEncoder) => {
-    const { graph, audioMap } = buildGraph(withBumpers, withOverlays);
     const introSec = withBumpers && bumpers.intro ? bumpers.intro.sec : 0;
     const outroSec = withBumpers && bumpers.outro ? bumpers.outro.sec : 0;
+    const transitions = planTransitions({ style, introSec, bodySec: outDuration, outroSec });
+    const { graph, audioMap } = buildGraph(withBumpers, withOverlays, transitions);
     await svc.media.ffmpeg(
       [
         "-ss",
@@ -890,10 +907,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       // progress counts the bumper seconds too, or the bar would finish early
       {
         signal: ctx.signal,
-        onProgress: (sec) => void ctx.progress(sec / (introSec + outDuration + outroSec), `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}),
+        onProgress: (sec) => void ctx.progress(sec / transitions.totalSec, `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}),
       },
     );
-    return { introSec, outroSec };
+    return { introSec, outroSec, transitions };
   };
   // a hardware encoder can fail where the probe passed (NVENC session limit, VRAM, a driver reset): the
   // clip is then encoded on the CPU rather than failed, and the line says so
@@ -907,7 +924,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       return await encodeWith(withBumpers, withOverlays, "libx264");
     }
   };
-  let attached: { introSec: number; outroSec: number };
+  let attached: { introSec: number; outroSec: number; transitions: TransitionPlan };
   let usedBumpers = !!(bumpers.intro || bumpers.outro);
   // the "extras" that the first retry drops together: overlays and music
   let usedOverlays = overlayItems.items.length > 0 || music.length > 0;
@@ -969,7 +986,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   await fs.rename(tmpOut, outPath);
   // the thumbnail is a still of the clip itself, so it is taken after the intro
   await svc.media.ffmpeg(
-    ["-ss", (attached.introSec + outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath],
+    ["-ss", (attached.transitions.bodyStartSec + outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath],
     { signal: ctx.signal },
   );
 
@@ -992,6 +1009,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     },
     "bumpers",
   );
+  if (hasTransitions(attached.transitions))
+    log.debug(
+      {
+        fadeIn: attached.transitions.fadeIn,
+        fadeOut: attached.transitions.fadeOut,
+        join: attached.transitions.join,
+        joinSec: attached.transitions.joinSec,
+        asked: { fadeIn: style.fadeIn, fadeOut: style.fadeOut, join: style.bumperTransition, joinSec: style.bumperTransitionSec },
+        bodyStartSec: attached.transitions.bodyStartSec,
+      },
+      "transitions",
+    );
   if (visualLayerCount)
     log.debug(
       {
@@ -1017,6 +1046,15 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     ...(captionTiming ? { captionTiming } : {}),
     ...(visualLayerCount
       ? { overlays: { used: usedOverlays ? overlayItems.items.length : 0, ...(overlayItems.skipped.length ? { skipped: overlayItems.skipped } : {}) } }
+      : {}),
+    ...(hasTransitions(attached.transitions)
+      ? {
+          transitions: {
+            fadeIn: attached.transitions.fadeIn,
+            fadeOut: attached.transitions.fadeOut,
+            ...(attached.transitions.join !== "cut" ? { join: attached.transitions.join, joinSec: attached.transitions.joinSec } : {}),
+          },
+        }
       : {}),
     layout: summary,
     cuts: {
@@ -1057,7 +1095,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .for("update");
     if (!cur || cur.gen !== gen) return false;
     // the caption lines as burned in, in the video's own seconds, so an SRT / VTT export matches the file
-    const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.introSec);
+    const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.transitions.bodyStartSec);
     await u.db
       .update(schema.clips)
       .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, captions, updatedAt: new Date() })
@@ -1172,6 +1210,8 @@ export interface LoadedOverlay {
   y: number;
   w: number;
   opacity: number;
+  /** seconds it fades in at `start` and out at `end` (absent = appears and goes at once); already fitted to the window */
+  fade?: number;
 }
 
 /**
@@ -1246,6 +1286,7 @@ async function loadOverlays(
         y: o.y,
         w: o.w ?? ASSET_OVERLAY_DEFAULT_W,
         opacity: o.opacity ?? 1,
+        ...(o.fade ? { fade: fitFades(end - start, o.fade, o.fade).fadeIn } : {}),
       });
     } catch (err) {
       if (ctx.signal.aborted) throw err;
@@ -1449,6 +1490,7 @@ export function textOverlayEvents(
       color: o.color ?? TEXT_OVERLAY_DEFAULTS.color,
       box: !!o.box,
       opacity: o.opacity ?? 1,
+      ...(o.fade ? { fade: fitFades(end - start, o.fade, o.fade).fadeIn } : {}),
       ...(o.font ? { font: o.font } : {}),
     });
   }
@@ -1463,7 +1505,11 @@ const MAX_INPUT_LOOPS = 1000;
  * number of extra plays that cover the window (never -1, an endless input can keep the encode alive) and
  * `-t` cuts it at the window's length. A GIF also gets `-ignore_loop 0` so its own loop flag is honoured.
  */
-export function overlayInputArgs(o: Pick<LoadedOverlay, "path" | "loop" | "gif" | "durationSec" | "start" | "end">): string[] {
+export function overlayInputArgs(
+  o: Pick<LoadedOverlay, "path" | "loop" | "gif" | "durationSec" | "start" | "end" | "fade"> & { kind?: LoadedOverlay["kind"] },
+): string[] {
+  // a still is one frame, and a fade needs frames to change: a fading image is read as a 30 fps stream up to its window's end
+  if (o.kind === "image" && o.fade) return ["-loop", "1", "-framerate", "30", "-t", Math.max(0.05, o.end).toFixed(3), "-i", o.path];
   if (!o.loop) return ["-i", o.path];
   const windowSec = Math.max(0.05, o.end - o.start);
   const extra = o.durationSec && o.durationSec > 0 ? Math.min(MAX_INPUT_LOOPS, Math.ceil(windowSec / o.durationSec)) : 0;
@@ -1490,6 +1536,9 @@ export function overlayChain(items: LoadedOverlay[], firstInput: number, outW: n
       `scale=${w}:-2`,
       "format=rgba",
       o.opacity < 1 ? `colorchannelmixer=aa=${o.opacity.toFixed(3)}` : "",
+      // fades on the alpha only, at the window's own edges (timestamps are the body's here)
+      o.fade ? `fade=t=in:st=${o.start.toFixed(3)}:d=${o.fade.toFixed(3)}:alpha=1` : "",
+      o.fade ? `fade=t=out:st=${(o.end - o.fade).toFixed(3)}:d=${o.fade.toFixed(3)}:alpha=1` : "",
     ]
       .filter(Boolean)
       .join(",");

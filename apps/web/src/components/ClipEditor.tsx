@@ -134,7 +134,12 @@ import {
   type TranscriptFlag,
   type TranscriptSegment,
   type Word,
+  BUMPER_TRANSITIONS,
+  BUMPER_TRANSITION_LABEL,
+  bodyEdgeFades,
+  fadeLevel,
 } from "@reelsaw/shared";
+import { FadePresets, fadeText } from "./FadeField";
 
 export interface EditorClip {
   id: string;
@@ -446,6 +451,13 @@ function LayerCard({
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
+  // pictures and text: fades in when its window opens and out when it closes (sounds have their own seconds slider)
+  const fadeField = (aria: string) =>
+    l.kind === "audio" ? null : (
+      <Field label="Fade in / out" hint={<span className="font-mono">{fadeText(l.fade ?? 0)}</span>}>
+        <FadePresets ariaLabel={aria} value={l.fade ?? 0} onChange={(sec) => onPatch({ fade: sec || undefined })} />
+      </Field>
+    );
   const opacityField = (aria: string) => {
     const o = l.kind === "audio" ? 1 : (l.opacity ?? 1);
     return (
@@ -541,6 +553,7 @@ function LayerCard({
             <Swatches label="Text colour" colors={TEXT_COLORS} value={l.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => onPatch({ color: c })} />
           </Field>
           <Switch checked={!!l.box} onChange={(v) => onPatch({ box: v || undefined })} label="Dark plate behind the text" />
+          {fadeField("Text fade")}
         </div>
       )}
       {l.kind === "asset" && (
@@ -584,6 +597,7 @@ function LayerCard({
             </Field>
             {opacityField("Layer opacity")}
           </div>
+          {fadeField("Layer fade")}
           {isAnimatedAsset(asset) && <Switch checked={l.loop ?? isStickerAsset(asset!)} onChange={(v) => onPatch({ loop: v })} label="Repeat while it shows" />}
         </div>
       )}
@@ -653,19 +667,31 @@ function LivePreview({
   framingAt,
   assetOverlaysAt,
   rangeStart,
+  rangeEnd,
+  edgeFades,
   playing,
   ...props
-}: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays"> & {
+}: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays" | "veil"> & {
   clock: Clock;
   framingAt: (t: number) => Framing;
   assetOverlaysAt: (t: number) => PreviewAssetOverlay[];
   rangeStart: number;
+  rangeEnd: number;
+  /** the fades at the clip's own edges (`bodyEdgeFades`), played while the clip plays */
+  edgeFades: { fadeIn: number; fadeOut: number };
   playing: boolean;
 }) {
   const t = useClock(clock);
   const framing = useMemo(() => framingAt(t), [framingAt, t]);
   const assetOverlays = useMemo(() => assetOverlaysAt(t), [assetOverlaysAt, t]);
-  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} playing={playing} />;
+  // only while playing: a paused frame at the very start would otherwise be black while the captions are being placed
+  const fades = edgeFades.fadeIn > 0 || edgeFades.fadeOut > 0;
+  const level = playing && fades ? fadeLevel(t, rangeStart, rangeEnd, edgeFades.fadeIn, edgeFades.fadeOut) : 1;
+  const source = props.source;
+  useEffect(() => {
+    if (source instanceof HTMLVideoElement) source.volume = level;
+  }, [source, level]);
+  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} playing={playing} veil={1 - level} />;
 }
 
 /**
@@ -1368,6 +1394,8 @@ export function ClipEditor(props: Props) {
       .filter(isVisualLayer)
       .filter((l) => t >= l.start - 0.001 && t <= l.end + 0.001)
       .flatMap((l): PreviewAssetOverlay[] => {
+        // fades play like the render; a paused, selected layer stays fully visible so it can be placed at its own edges
+        const seen = l.fade && (playing || selectedLayer !== l.id) ? fadeLevel(t, l.start, l.end, l.fade) : 1;
         if (l.kind === "text")
           return [
             {
@@ -1379,7 +1407,7 @@ export function ClipEditor(props: Props) {
               size: l.size ?? TEXT_OVERLAY_DEFAULTS.size,
               color: l.color ?? TEXT_OVERLAY_DEFAULTS.color,
               box: !!l.box,
-              opacity: l.opacity ?? 1,
+              opacity: (l.opacity ?? 1) * seen,
               ...(l.font ? { font: l.font } : {}),
             },
           ];
@@ -1397,7 +1425,7 @@ export function ClipEditor(props: Props) {
             x: l.x,
             y: l.y,
             w: l.w ?? ASSET_OVERLAY_DEFAULT_W,
-            opacity: l.opacity ?? 1,
+            opacity: (l.opacity ?? 1) * seen,
             video: a.kind === "video",
             loop: l.loop ?? isStickerAsset(a),
             offsetSec: t - l.start,
@@ -1786,6 +1814,74 @@ export function ClipEditor(props: Props) {
   const curSec = sections[secIdx];
   const capWarn = safe && style.captions !== "none" ? safeZoneWarning(platform, style.captionX, style.captionY) : "";
 
+  // ----- fades: the video's own start and end, and how an intro / outro joins it (part of the style, so "Apply style to" covers it) -----
+  const hasBumper = !!bumperBlocks.intro || !!bumperBlocks.outro;
+  const joins = style.bumperTransition !== "cut";
+  /** play the first or last seconds of the clip, where the fades are */
+  const playEdge = (edge: "start" | "end") => {
+    const v = videoRef.current;
+    if (!v) return;
+    seek(edge === "start" ? range[0] : Math.max(range[0], range[1] - 2.5));
+    v.play().catch((err) => reportClientError("error", err));
+  };
+  const fadesSection = (
+    <div className="flex flex-col gap-3 border-t border-line pt-4" aria-label="Fades">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-semibold">Fades</span>
+        <span className="flex gap-1">
+          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("start")} title="Play the first seconds with the fade">
+            Play start
+          </button>
+          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("end")} title="Play the last seconds with the fade">
+            Play end
+          </button>
+        </span>
+      </div>
+      {/* one per row: four presets do not fit two abreast in the inspector's width */}
+      <div className="flex flex-col gap-3">
+        <Field label={bumperBlocks.intro ? "Fade in (on the intro)" : "Fade in"} hint={<span className="font-mono">{fadeText(style.fadeIn)}</span>}>
+          <FadePresets ariaLabel="Fade in from black" value={style.fadeIn} onChange={(sec) => setStyle({ fadeIn: sec })} />
+        </Field>
+        <Field label={bumperBlocks.outro ? "Fade out (on the outro)" : "Fade out"} hint={<span className="font-mono">{fadeText(style.fadeOut)}</span>}>
+          <FadePresets ariaLabel="Fade out to black" value={style.fadeOut} onChange={(sec) => setStyle({ fadeOut: sec })} />
+        </Field>
+      </div>
+      <Field
+        label="Intro and outro join"
+        hint={hasBumper ? <span className="font-mono">{joins ? fadeText(style.bumperTransitionSec) : ""}</span> : <span>no intro or outro</span>}
+      >
+        <Segmented
+          size="sm"
+          ariaLabel="How the intro and outro join the clip"
+          disabled={!hasBumper}
+          value={style.bumperTransition}
+          onChange={(v) => setStyle({ bumperTransition: v })}
+          options={BUMPER_TRANSITIONS.map((t) => ({
+            value: t,
+            label: BUMPER_TRANSITION_LABEL[t],
+            title: t === "cut" ? "Straight cut" : t === "dip" ? "Fades through black; the length stays the same" : "The two overlap, so the video gets shorter",
+          }))}
+        />
+        {/* always in place, greyed out for a cut, so choosing a transition never pushes the panel down */}
+        <FadePresets
+          ariaLabel="Length of the intro and outro join"
+          disabled={!hasBumper || !joins}
+          value={style.bumperTransitionSec}
+          onChange={(sec) => setStyle({ bumperTransitionSec: sec })}
+          presets={[
+            { sec: 0.3, label: "Quick" },
+            { sec: 0.6, label: "Smooth" },
+            { sec: 1, label: "Slow" },
+          ]}
+        />
+      </Field>
+      <p className="text-[11px] leading-snug text-ink3">
+        Picture and sound fade together. The first second is your hook, so keep a fade-in quick; a fade-out leaves a black frame where TikTok and Reels loop the
+        video. Plays here while the clip plays; needs a re-render.
+      </p>
+    </div>
+  );
+
   const captionsTab = (
     <div className="flex flex-col gap-5">
       {/* the follow-up action lives in the label row's reserved slot, so toggling never pushes the panel down */}
@@ -1973,6 +2069,7 @@ export function ClipEditor(props: Props) {
         )}
         <p className="text-[11px] text-ink3">Drag the caption or hook on the preview to move them. They snap to the centre; hold Alt to place freely.</p>
       </div>
+      {fadesSection}
     </div>
   );
 
@@ -2327,7 +2424,7 @@ export function ClipEditor(props: Props) {
   );
 
   const tabs: Array<[Tab, string]> = [
-    ["captions", "Captions"],
+    ["captions", "Style"],
     ["framing", "Framing"],
     ["layers", layers.length ? `Layers · ${layers.length}` : "Layers"],
     ["text", "Details"],
@@ -2378,6 +2475,8 @@ export function ClipEditor(props: Props) {
           playing={playing}
           framingAt={framingAt}
           rangeStart={range[0]}
+          rangeEnd={range[1]}
+          edgeFades={bodyEdgeFades(style, { intro: !!bumperBlocks.intro, outro: !!bumperBlocks.outro })}
           source={videoEl}
           srcW={srcW}
           srcH={srcH}

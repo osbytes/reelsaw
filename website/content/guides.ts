@@ -147,7 +147,7 @@ export const GUIDES: Guide[] = [
             ["Filler removal", "Yes, forced-alignment verified, each cut reviewable", "Not listed"],
             [
               "Editor",
-              "Live 9:16 preview, multi-lane timeline, snapping, layout sections, layers, layer templates, transitions, intros and outros, undo",
+              "Live 9:16 preview, multi-lane timeline, snapping, layout sections, layers, layer templates, fades and crossfades, intros and outros, undo",
               "Dashboard with per-video settings",
             ],
             ["Agents", "MCP server (OAuth optional), operator CLI", "MCP server, REST API with webhooks, CLI, agent skill"],

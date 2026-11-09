@@ -47,6 +47,8 @@ export interface TextOverlayEvent {
   /** dark plate behind the text instead of an outline */
   box: boolean;
   opacity: number;
+  /** seconds it fades in and out (ASS `\fad`); absent = appears and goes at once */
+  fade?: number;
   /** font family (TEXT_FONTS); absent = the caption font */
   font?: string;
 }
@@ -178,8 +180,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
     const fs = Math.max(8, Math.round(t.size * height));
     const fn = t.font && t.font !== font ? `\\fn${esc(t.font).replace(/[\\,]/g, "")}` : "";
+    const fadeMs = t.fade ? Math.round(t.fade * 1000) : 0;
+    const fad = fadeMs ? `\\fad(${fadeMs},${fadeMs})` : "";
     events.push(
-      `Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`,
+      `Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}${fad}}${esc(t.text)}`,
     );
   }
 

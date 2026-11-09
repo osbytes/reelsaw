@@ -203,6 +203,8 @@ interface Props {
   playing?: boolean;
   /** a still shown instead of the video (the intro/outro poster while its block is selected) with its tag */
   still?: { url: string; tag: string } | null;
+  /** 0-1 black over the whole picture, captions and layers included: a fade to or from black as the renderer burns it in */
+  veil?: number;
   showSafeZones?: boolean;
   platform?: Platform;
   /** small label in the top-left corner (e.g. which framing is showing) */
@@ -384,6 +386,7 @@ export function VerticalPreview({
   onHookChange,
   playing = true,
   still,
+  veil = 0,
   showSafeZones,
   platform = "tiktok",
   tag,
@@ -748,6 +751,7 @@ export function VerticalPreview({
           </div>,
         );
       })}
+      {veil > 0.001 && !still && <div className="pointer-events-none absolute inset-0 z-[4] bg-black" style={{ opacity: Math.min(1, veil) }} aria-hidden />}
       {still && (
         <div className="absolute inset-0 z-[5] bg-black">
           <img src={still.url} alt="" className="h-full w-full object-cover" />
