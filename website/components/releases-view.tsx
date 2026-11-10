@@ -2,7 +2,6 @@
 
 import { useEffect, type ReactNode } from "react";
 import type { ReleasesFeed } from "@/lib/releases-data";
-import { ReleaseArticle } from "./release-list";
 import { ShippingChart } from "./shipping-chart";
 
 function jump(tag: string) {
@@ -11,7 +10,8 @@ function jump(tag: string) {
   if (el) window.history.replaceState(null, "", `#${tag}`);
 }
 
-export function ReleasesView({ feed, heading }: { feed: ReleasesFeed; heading: ReactNode }) {
+/** The changelog's heading and commit map, then the day-grouped list (`children`, rendered on the server). */
+export function ReleasesView({ feed, heading, children }: { feed: ReleasesFeed; heading: ReactNode; children: ReactNode }) {
   useEffect(() => {
     const tag = window.location.hash.replace(/^#/, "");
     if (tag) {
@@ -27,10 +27,8 @@ export function ReleasesView({ feed, heading }: { feed: ReleasesFeed; heading: R
           <ShippingChart feed={feed} onSelectRelease={jump} />
         </section>
       </div>
-      <section aria-label="Release notes" className="flex flex-col">
-        {feed.releases.map((r) => (
-          <ReleaseArticle key={r.tag} release={r} />
-        ))}
+      <section aria-label="Release notes" className="mt-4">
+        {children}
       </section>
     </>
   );

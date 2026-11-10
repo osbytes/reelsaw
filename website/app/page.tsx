@@ -22,12 +22,14 @@ import transcriptFixes from "@/public/transcript-fixes.png";
 import workspace from "@/public/workspace.png";
 import { Code, Command } from "@/components/command";
 import { PipelineFilm } from "@/components/pipeline-film";
+import { RecentReleases } from "@/components/release-list";
 import { JsonLd } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { GitHubMark } from "@/components/logo";
 import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
+import { githubReleases } from "@/lib/github";
 import { SITE, appLink } from "@/lib/site";
 
 const STEPS = [
@@ -171,7 +173,13 @@ function HomeJsonLd() {
   return <JsonLd data={data} />;
 }
 
-export default function HomePage() {
+/** The release list is GitHub's; the page re-renders hourly like `/releases`. */
+export const revalidate = 3600;
+
+const RECENT_RELEASES = 3;
+
+export default async function HomePage() {
+  const recent = (await githubReleases())?.releases.slice(0, RECENT_RELEASES) ?? [];
   return (
     <>
       <HomeJsonLd />
@@ -429,6 +437,21 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* Recently shipped */}
+        {recent.length > 0 && (
+          <section id="changelog" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="changelog-title">
+            <div className="container-page flex flex-col gap-10">
+              <SectionHeading
+                id="changelog-title"
+                eyebrow="Recently shipped"
+                title="The changelog is public, and it moves."
+                body="Every release is tagged on GitHub with its change notes. The newest:"
+              />
+              <RecentReleases releases={recent} />
+            </div>
+          </section>
+        )}
 
         {/* Install */}
         <section id="install" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="install-title">

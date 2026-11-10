@@ -38,7 +38,23 @@ stay the same animation.
 
 ## SEO
 
-- `/releases` is the changelog: GitHub releases plus a 90-day commit heatmap (ISR hourly). `/releases/feed.xml` is the RSS. Footer, the home-page "Latest release" button, and the app's What's new / version links open this page.
+- `/releases` is the changelog: GitHub releases plus a 90-day commit heatmap (ISR hourly), a "Latest release" card, and
+  the releases grouped under the day they shipped (a sticky rail with the month, the day and that day's tags; each
+  release's tag stays pinned under the header while its notes scroll). Days keep `#YYYY-MM-DD` anchors, releases `#vX.Y.Z`.
+  `/releases/feed.xml` is the RSS (items link to release pages). Footer, the home-page "Latest release" button, and the
+  app's What's new / version links open this page. The home page's "Recently shipped" section (`#changelog`, after
+  "How it compares") lists the three newest releases, each linking to its page; it is left out when GitHub
+  does not answer, and the home page revalidates hourly like `/releases`.
+- `/releases/[releases]` (`lib/release-pages.ts`):
+  - `/releases/v0.33.0` is one release: tag, day, headline (its first note's first sentence), other releases that day,
+    the notes, and older / newer cards. Built ahead of time, in the sitemap, with its own OG card.
+  - Sets, like git's `a..b`: `/releases/v0.32.4..v0.34.0` (both ends included, either order), `/releases/v0.30.0,v0.33.0`
+    (up to 20 parts, mixable), and days: `/releases/2026-11-06`, `/releases/2026-11-05..2026-11-10` (leading zeros
+    optional). They show the count, the days, up to three merged highlights (minor and major notes first), then the
+    releases by day. Each set has one spelling (runs become `older..newer`, oldest first; days padded, sorted, merged)
+    and other spellings 308 there; a one-tag set is that release's page. Sets render on request and are `noindex, follow`.
+  - Real days with no release say "Nothing shipped …" with the release before and after; an unknown tag or a link that
+    is not a selection gets the changelog's own 404 (`app/releases/not-found.tsx`) with the latest release.
 - `app/layout.tsx`: title template, description, keywords, canonical, Open Graph and Twitter cards,
   robots directives. `NEXT_PUBLIC_SITE_URL` (default `https://reelsaw.com`) is the `metadataBase`.
 - Open Graph images (Next.js file convention, built with `next/og` via `lib/og.tsx`):

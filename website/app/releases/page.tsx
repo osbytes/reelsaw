@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Breadcrumbs } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { ReleaseCard, ReleaseDayList } from "@/components/release-list";
 import { ReleasesView } from "@/components/releases-view";
 import { githubReleases } from "@/lib/github";
-import { formatUtcDate } from "@/lib/releases-data";
+import { groupReleasesByDay } from "@/lib/release-pages";
 import { SITE } from "@/lib/site";
 import { socialMeta } from "@/lib/social-meta";
 
@@ -28,8 +29,7 @@ export default async function ReleasesPage() {
     <header className="flex min-w-0 flex-1 flex-col gap-1.5">
       <h1 className="text-[22px] leading-tight font-extrabold tracking-tight sm:text-[28px]">What has been shipping</h1>
       <p className="text-sm leading-snug text-ink2 text-pretty">
-        Newest first.
-        {latest ? ` Latest is ${latest.version}, ${formatUtcDate(latest.publishedAt)}.` : ""} A ring is a ship day.{" "}
+        Every published version, newest first. A ring is a ship day.{" "}
         <a href={SITE.releases} target="_blank" rel="noreferrer" className="text-ink2 hover:text-ink">
           GitHub ↗
         </a>
@@ -44,6 +44,11 @@ export default async function ReleasesPage() {
           {feed.releaseDays === 1 ? "" : "s"} with a release.
         </p>
       )}
+      {latest && (
+        <div className="mt-2 w-full sm:w-80">
+          <ReleaseCard release={latest} caption="Latest release" />
+        </div>
+      )}
     </header>
   );
   return (
@@ -57,7 +62,9 @@ export default async function ReleasesPage() {
           ]}
         />
         {feed ? (
-          <ReleasesView feed={feed} heading={heading} />
+          <ReleasesView feed={feed} heading={heading}>
+            <ReleaseDayList groups={groupReleasesByDay(feed.releases)} />
+          </ReleasesView>
         ) : (
           <>
             {heading}

@@ -1,4 +1,5 @@
 import { githubReleases } from "@/lib/github";
+import { releasePath } from "@/lib/release-pages";
 import { SITE } from "@/lib/site";
 
 export const revalidate = 3600;
@@ -15,8 +16,8 @@ export async function GET() {
       const notes = r.notes.map((n) => `<li>${xml(n.text)}</li>`).join("");
       return `<item>
       <title>${xml(r.tag)}</title>
-      <link>${SITE.url}/releases#${xml(r.tag)}</link>
-      <guid isPermaLink="true">${SITE.url}/releases#${xml(r.tag)}</guid>
+      <link>${SITE.url}${releasePath(xml(r.tag))}</link>
+      <guid isPermaLink="false">${SITE.url}/releases#${xml(r.tag)}</guid>
       <pubDate>${new Date(r.publishedAt).toUTCString()}</pubDate>
       <description><![CDATA[<p>${xml(r.summary)}</p>${notes ? `<ul>${notes}</ul>` : ""}]]></description>
     </item>`;
