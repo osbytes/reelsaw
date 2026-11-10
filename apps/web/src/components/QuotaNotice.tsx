@@ -15,10 +15,13 @@ function isRefusal(v: unknown): v is QuotaRefusal {
   return !!v && typeof v === "object" && "key" in (v as object);
 }
 
-function Action({ action, quota }: { action: QuotaAction; quota: QuotaRefusal }) {
+/** Where the notice was shown: a refusal the server sent back, or a warning before the user submitted (New Project). */
+export type QuotaPlacement = "refusal" | "precheck";
+
+function Action({ action, quota, placement }: { action: QuotaAction; quota: QuotaRefusal; placement: QuotaPlacement }) {
   const cls = action.kind === "upgrade" || action.kind === "request" ? "btn-primary py-1.5 text-xs no-underline" : "btn-ghost py-1.5 text-xs no-underline";
-  // the server's `quota.refused` counts who hit the limit; this counts who acted on it (upgrade, request, free space)
-  const clicked = () => track("quota_action_clicked", { key: quota.key, action: action.kind });
+  // the server's `quota.refused` / `quota.warned` count who met the limit; this counts who acted on it (upgrade, request, free space)
+  const clicked = () => track("quota_action_clicked", { key: quota.key, action: action.kind, placement });
   if (action.kind === "request") {
     return (
       <button
@@ -50,15 +53,28 @@ function Action({ action, quota }: { action: QuotaAction; quota: QuotaRefusal })
   );
 }
 
-/** Sentence plus the upgrade / request / free-space actions the server attached to a quota refusal. */
-export function QuotaNotice({ message, quota, className }: { message: string; quota?: QuotaRefusal | undefined; className?: string }) {
+/**
+ * Sentence plus the upgrade / request / free-space actions the server attached to a quota refusal. A `precheck` notice
+ * is a heads-up before anything was submitted, so it reads as a warning, not an error.
+ */
+export function QuotaNotice({
+  message,
+  quota,
+  className,
+  placement = "refusal",
+}: {
+  message: string;
+  quota?: QuotaRefusal | null | undefined;
+  className?: string;
+  placement?: QuotaPlacement;
+}) {
   return (
     <div className={`flex min-w-0 flex-col gap-2 ${className ?? ""}`}>
-      <p className="text-[13px] leading-snug text-err">{message}</p>
+      <p className={`text-[13px] leading-snug ${placement === "precheck" ? "text-warn" : "text-err"}`}>{message}</p>
       {(quota?.primary || quota?.secondary) && (
         <div className="flex flex-wrap items-center gap-2">
-          {quota.primary && <Action action={quota.primary} quota={quota} />}
-          {quota.secondary && <Action action={quota.secondary} quota={quota} />}
+          {quota.primary && <Action action={quota.primary} quota={quota} placement={placement} />}
+          {quota.secondary && <Action action={quota.secondary} quota={quota} placement={placement} />}
         </div>
       )}
     </div>

@@ -28,7 +28,20 @@ import {
   type SectionAdjustFields,
   type SectionMode,
 } from "@reelsaw/shared";
-import { checkAnnouncedMinutes, checkProjectQuota, checkRestoreQuota, hasMinuteLimits, projectStoredBytes, recordProjectCreated } from "../quota.js";
+import {
+  checkAnnouncedMinutes,
+  checkProjectQuota,
+  checkRestoreQuota,
+  hasMinuteLimits,
+  minutesAllowance,
+  projectStoredBytes,
+  QuotaError,
+  recordProjectCreated,
+  refusalEvent,
+  sourceMinutesRefusal,
+  type MinutesAllowance,
+} from "../quota.js";
+import type { QuotaRefusal } from "@reelsaw/shared";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { schema, type Db } from "../db/index.js";
@@ -915,6 +928,55 @@ async function announcedMinutesFor(svc: Services, userId: string, url: string, l
 }
 /** How long creating a project from a link may wait for the site to say how long the video is. */
 const ANNOUNCED_LOOKUP_MS = 12_000;
+
+export const checkSourceInput = z
+  .object({
+    sourceUrl: z.url().optional().describe("Link to the video you are about to add; its length is looked up without downloading it"),
+    durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you are about to upload, in seconds (instead of sourceUrl)"),
+  })
+  .refine((v) => !!v.sourceUrl !== (v.durationSec !== undefined), { message: "Give sourceUrl or durationSec, not both" });
+
+export interface SourceCheck {
+  /** the video's length in minutes, when it is known (a link whose site does not say has none) */
+  minutes: number | null;
+  /** false: creating the project now would be refused (message and quota say why and what to do); null: the length is unknown, so ingest decides */
+  fits: boolean | null;
+  message: string | null;
+  quota: QuotaRefusal | null;
+  /** the monthly minutes this account has, when a minutes limit applies */
+  allowance: MinutesAllowance | null;
+}
+
+/**
+ * Would a project from this link (or a file of this length) be accepted right now? The same checks `createProject` and
+ * ingest run (project count, storage, minutes), answered before anything is created or uploaded, with the refusal's
+ * sentence and upgrade offer when it would not. Nothing is reserved: the binding check still runs at creation and ingest.
+ * tRPC `projects.checkSource`, the MCP check_source tool and `reelsaw check-source` call this. A predicted refusal is a
+ * `quota.warned` product event, with the same properties as the `quota.refused` it heads off.
+ */
+export async function checkSource(svc: Services, userId: string, input: z.infer<typeof checkSourceInput>, surface: string): Promise<SourceCheck> {
+  const db = svc.database.db;
+  const s = svc.settings.get();
+  const log = svc.log.child({ module: "projects", userId });
+  const [allowance, durationSec] = await Promise.all([
+    minutesAllowance(db, s, userId, svc.entitlements),
+    input.durationSec ?? (input.sourceUrl ? announcedMinutesFor(svc, userId, input.sourceUrl, log) : null),
+  ]);
+  const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
+  const refused = (err: QuotaError): SourceCheck => {
+    svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
+    return { minutes, fits: false, message: err.message, quota: err.quota ?? null, allowance };
+  };
+  try {
+    await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
+  } catch (err) {
+    if (err instanceof QuotaError) return refused(err);
+    throw err;
+  }
+  if (!durationSec) return { minutes, fits: null, message: null, quota: null, allowance };
+  const over = await sourceMinutesRefusal(db, s, userId, durationSec, svc.entitlements);
+  return over ? refused(over) : { minutes, fits: true, message: null, quota: null, allowance };
+}
 
 /** Resume a project from its furthest completed stage (the Retry button, retry_project, `reelsaw retry`). */
 export async function retryOwnedProject(svc: Services, actor: Actor, projectId: string) {

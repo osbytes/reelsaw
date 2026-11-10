@@ -5,7 +5,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { deletedProjectsPath } from "@reelsaw/shared";
-import { checkJobLimits, QuotaExceededError, quotaRefusal, upgradeCapacityLabel, type Grants, type Limits, type LimitsDetail } from "../src/quota.js";
+import {
+  checkJobLimits,
+  QuotaError,
+  QuotaExceededError,
+  quotaRefusal,
+  refusalEvent,
+  upgradeCapacityLabel,
+  watermarkUpgrade,
+  type Grants,
+  type Limits,
+  type LimitsDetail,
+} from "../src/quota.js";
 
 const limits = {
   MAX_PROJECTS_PER_USER: 10,
@@ -83,6 +94,35 @@ describe("upgradeCapacityLabel", () => {
     assert.equal(upgradeCapacityLabel(starterUpgrade, "MAX_SOURCE_MINUTES_PER_MONTH"), "Starter gives 100 minutes a month");
     assert.equal(upgradeCapacityLabel(starterUpgrade, "MAX_PROJECTS_PER_USER"), "Starter gives 50 projects");
   });
+  it("names the price on the minutes offer when the plan has one", () => {
+    assert.equal(upgradeCapacityLabel({ ...starterUpgrade, monthlyPrice: 12 }, "MAX_SOURCE_MINUTES_PER_MONTH"), "Starter: 100 minutes a month for $12");
+  });
+});
+
+describe("watermarkUpgrade", () => {
+  it("offers the next plan when it renders without the watermark, with its price", () => {
+    const g: Grants = { ...freeGrants, upgrade: { ...starterUpgrade, monthlyPrice: 12, watermark: false } };
+    assert.deepEqual(watermarkUpgrade(g), { label: "Starter removes it for $12 a month", href: starterUpgrade.url });
+  });
+  it("offers nothing when the next plan keeps it, there is no next plan, or billing is off", () => {
+    assert.equal(watermarkUpgrade({ ...freeGrants, upgrade: { ...starterUpgrade, watermark: null } }), undefined);
+    assert.equal(watermarkUpgrade({ ...freeGrants, upgrade: undefined }), undefined);
+    assert.equal(watermarkUpgrade(null), undefined);
+  });
+});
+
+describe("refusal events", () => {
+  it("quota.refused and quota.warned carry the limit, surface, offer and whether it was the first video; never the sentence", () => {
+    const quota = quotaRefusal({ limits, source, plan: "free", grants: freeGrants }, "MAX_SOURCE_MINUTES_PER_MONTH");
+    const err = new QuotaError("This video is 94 minutes.", quota, "MAX_SOURCE_MINUTES_PER_MONTH", { firstVideo: true });
+    assert.deepEqual(refusalEvent(err.limit, "web", err.quota, err.props), {
+      key: "MAX_SOURCE_MINUTES_PER_MONTH",
+      surface: "web",
+      offer: "upgrade",
+      firstVideo: true,
+    });
+    assert.deepEqual(refusalEvent("MAX_PROJECTS_PER_USER", "mcp", undefined), { key: "MAX_PROJECTS_PER_USER", surface: "mcp" });
+  });
 });
 
 describe("job limits", () => {
@@ -110,5 +150,7 @@ describe("QuotaExceededError", () => {
     const e = new QuotaExceededError("This video is 90 minutes.");
     assert.ok(e instanceof Error);
     assert.equal(e.message, "This video is 90 minutes.");
+    // ingest reports it as `quota.refused` with the limit it met
+    assert.equal(e.limit, "MAX_SOURCE_MINUTES_PER_MONTH");
   });
 });

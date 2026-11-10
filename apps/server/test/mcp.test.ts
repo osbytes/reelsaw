@@ -83,6 +83,7 @@ describe("mcp", () => {
     for (const n of [
       "list_projects",
       "get_project",
+      "check_source",
       "create_project",
       "wait_for_project",
       "get_transcript",

@@ -87,6 +87,8 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
             plan: next.name,
             planLabel: next.label,
             limits: next.limits,
+            monthlyPrice: next.price?.month,
+            watermark: next.watermark,
           },
         }
       : {}),

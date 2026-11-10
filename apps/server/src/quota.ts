@@ -48,7 +48,17 @@ export interface Grants {
   /** the billing period, when the account has one; monthly allowances count inside it */
   period: { start: Date; end: Date } | null;
   /** appended to a refusal: "Pro gives 1,200 minutes a month" and where to go; `plan`/`limits` drive the upgrade CTA */
-  upgrade?: { text: string; url: string; plan: string; planLabel: string; limits: Partial<Limits> };
+  upgrade?: {
+    text: string;
+    url: string;
+    plan: string;
+    planLabel: string;
+    limits: Partial<Limits>;
+    /** USD a month on monthly billing, for buttons that name the cost */
+    monthlyPrice?: number | undefined;
+    /** false = that plan renders without the watermark (the "Remove watermark" offer) */
+    watermark?: boolean | null | undefined;
+  };
 }
 export interface Entitlements {
   /** Read at the point of use, inside the caller's transaction when it has one. Never cached across requests. */
@@ -94,32 +104,64 @@ export async function watermarkFor(
   instance: InstanceLimits,
   user: { id: string; role: UserRole },
   ent?: Entitlements | null,
-): Promise<{ on: boolean; text: string; source: LimitSource | "admin" }> {
+): Promise<{ on: boolean; text: string; source: LimitSource | "admin"; upgrade?: WatermarkUpgrade }> {
   const text = instance.WATERMARK_TEXT;
   const [row, grants] = await Promise.all([
     db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, user.id), columns: { watermark: true } }),
     ent ? ent.grantsFor(db, user.id) : null,
   ]);
   if (typeof row?.watermark === "boolean") return { on: row.watermark, text, source: "override" };
-  if (typeof grants?.watermark === "boolean") return { on: grants.watermark, text, source: "plan" };
+  const upgrade = watermarkUpgrade(grants);
+  if (typeof grants?.watermark === "boolean") return { on: grants.watermark, text, source: "plan", ...(grants.watermark && upgrade ? { upgrade } : {}) };
   if (user.role === "admin") return { on: false, text, source: "admin" };
-  return { on: instance.WATERMARK_NON_ADMINS, text, source: "instance" };
+  const on = instance.WATERMARK_NON_ADMINS;
+  return { on, text, source: "instance", ...(on && upgrade ? { upgrade } : {}) };
 }
+
+/** The plan that takes the watermark off, for the "Remove watermark" button; only when the next plan does. */
+export interface WatermarkUpgrade {
+  label: string;
+  href: string;
+}
+export function watermarkUpgrade(grants: Grants | null): WatermarkUpgrade | undefined {
+  const u = grants?.upgrade;
+  if (u?.watermark !== false) return undefined;
+  return { label: `${u.planLabel} removes it${u.monthlyPrice ? ` for $${u.monthlyPrice.toLocaleString("en-US")} a month` : ""}`, href: u.url };
+}
+
+/** Extra analytics properties on a refusal (`firstVideo`: the account's first video was the one refused). Never content. */
+export type RefusalProps = { firstVideo?: boolean };
 
 export class QuotaError extends TRPCError {
   readonly quota?: QuotaRefusal | undefined;
   /** the limit that refused (a LimitKey), for analytics; the refusal's own key when it has one */
   readonly limit: string;
-  constructor(message: string, quota?: QuotaRefusal, limit?: string) {
+  readonly props: RefusalProps;
+  constructor(message: string, quota?: QuotaRefusal, limit?: string, props: RefusalProps = {}) {
     super({ code: "TOO_MANY_REQUESTS", message });
     this.quota = quota;
     this.limit = limit ?? quota?.key ?? "unknown";
+    this.props = props;
   }
 }
 
-/** A refusal as a product event (`quota.refused`): which limit, the surface, and the offer shown; never the message. */
+/**
+ * A refusal as a product event (`quota.refused`): which limit, the surface (web, api, mcp, cli, or ingest when the length
+ * was only known after the project was created), the offer shown, and whether it was the account's first video; never
+ * the message.
+ */
 export function trackQuotaRefusal(telemetry: Pick<Telemetry, "capture">, userId: string, err: QuotaError, surface: string) {
-  telemetry.capture("quota.refused", userId, { key: err.limit, surface, ...(err.quota?.primary ? { offer: err.quota.primary.kind } : {}) });
+  telemetry.capture("quota.refused", userId, refusalEvent(err.limit, surface, err.quota, err.props));
+}
+
+/** The properties `quota.refused` and `quota.warned` share, so a warning and the refusal it heads off line up. */
+export function refusalEvent(key: string, surface: string, quota: QuotaRefusal | null | undefined, props: RefusalProps = {}) {
+  return {
+    key,
+    surface,
+    ...(quota?.primary ? { offer: quota.primary.kind } : {}),
+    ...(props.firstVideo !== undefined ? { firstVideo: props.firstVideo } : {}),
+  };
 }
 
 /**
@@ -127,7 +169,13 @@ export function trackQuotaRefusal(telemetry: Pick<Telemetry, "capture">, userId:
  * worker fails the project at once instead of downloading the same video again.
  */
 export class QuotaExceededError extends NonRetryableError {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** the limit that refused, for `quota.refused` */
+    readonly limit: LimitKey = "MAX_SOURCE_MINUTES_PER_MONTH",
+    readonly quota?: QuotaRefusal,
+    readonly props: RefusalProps = {},
+  ) {
     super(message);
     this.name = "QuotaExceededError";
   }
@@ -145,7 +193,11 @@ export function upgradeCapacityLabel(upgrade: NonNullable<Grants["upgrade"]>, ke
   if (key === "MAX_STORAGE_MB")
     return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${formatMb(n)} of storage` : `Upgrade to ${upgrade.planLabel}`;
   if (key === "MAX_SOURCE_MINUTES_PER_MONTH" || key === "MAX_SOURCE_MINUTES_PER_DAY")
-    return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} minutes a month` : `Upgrade to ${upgrade.planLabel}`;
+    return typeof n === "number" && n > 0
+      ? upgrade.monthlyPrice
+        ? `${upgrade.planLabel}: ${n.toLocaleString("en-US")} minutes a month for $${upgrade.monthlyPrice.toLocaleString("en-US")}`
+        : `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} minutes a month`
+      : `Upgrade to ${upgrade.planLabel}`;
   if (key === "MAX_PROJECTS_PER_USER")
     return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} projects` : `Upgrade to ${upgrade.planLabel}`;
   return `Upgrade to ${upgrade.planLabel}`;
@@ -178,8 +230,8 @@ export function quotaRefusal(d: LimitsDetail, key: LimitKey): QuotaRefusal {
   return { key };
 }
 
-function refuse(d: LimitsDetail, key: LimitKey, message: string): never {
-  throw new QuotaError(message, quotaRefusal(d, key));
+function refuse(d: LimitsDetail, key: LimitKey, message: string, props: RefusalProps = {}): never {
+  throw new QuotaError(message, quotaRefusal(d, key), key, props);
 }
 
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
@@ -422,7 +474,7 @@ async function minutesOver(
   projectId: string | null,
   durationSec: number,
   ent?: Entitlements | null,
-): Promise<{ d: LimitsDetail; key: LimitKey; message: string } | null> {
+): Promise<{ d: LimitsDetail; key: LimitKey; message: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const mins = Math.round(durationSec / 60);
@@ -433,7 +485,8 @@ async function minutesOver(
       return {
         d,
         key: "MAX_SOURCE_MINUTES_PER_DAY",
-        message: `This video is ${mins} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.`,
+        message: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
+        firstVideo: false,
       };
   }
   if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
@@ -442,18 +495,22 @@ async function minutesOver(
     // the account's first video is on the house up to the plan's allowance
     if (m.firstPending && durationSec / 60 <= m.firstFree) return null;
     if (m.used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_MONTH) {
-      const firstNote = m.firstPending ? ` (a first video is free up to ${m.firstFree} minutes; this one is longer)` : "";
-      return {
-        d,
-        key: "MAX_SOURCE_MINUTES_PER_MONTH",
-        message: `This video is ${mins} minutes; with ${Math.round(m.used)} already used this period that passes the monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes${firstNote}. Resets on ${dayOf(period.end)}.${hint(d, "MAX_SOURCE_MINUTES_PER_MONTH")}`,
-      };
+      const upgrade = hint(d, "MAX_SOURCE_MINUTES_PER_MONTH");
+      // a new account has used nothing: "0 already used passes the limit" read like a fault, so say what does fit
+      const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
+      const message = m.firstPending
+        ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.${upgrade}`
+        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${dayOf(period.end)}.${upgrade}`;
+      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message, firstVideo: m.firstPending };
     }
   }
   return null;
 }
 
-/** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
+/** Whole minutes still free under a cap, never negative. */
+const left = (cap: number, used: number) => Math.max(0, Math.floor(cap - used));
+
+/** After ffprobe, when the length is known. Returns the refusal to fail the project with (its sentence is the message), or null. */
 export async function sourceMinutesExceeded(
   db: Db,
   instance: InstanceLimits,
@@ -461,8 +518,14 @@ export async function sourceMinutesExceeded(
   projectId: string,
   durationSec: number,
   ent?: Entitlements | null,
-): Promise<string | null> {
-  return (await minutesOver(db, instance, userId, projectId, durationSec, ent))?.message ?? null;
+): Promise<QuotaExceededError | null> {
+  const over = await minutesOver(db, instance, userId, projectId, durationSec, ent);
+  return over ? new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key), { firstVideo: over.firstVideo }) : null;
+}
+
+/** `quota.refused` for a video refused by ingest (its length was only known after the project was created). */
+export function trackIngestRefusal(telemetry: Pick<Telemetry, "capture">, userId: string, err: QuotaExceededError) {
+  telemetry.capture("quota.refused", userId, refusalEvent(err.limit, "ingest", err.quota, err.props));
 }
 
 /** Does a minutes limit apply to this account at all (so a link's length is worth looking up before creating)? */
@@ -477,7 +540,39 @@ export async function hasMinuteLimits(db: Db, instance: InstanceLimits, userId: 
  */
 export async function checkAnnouncedMinutes(db: Db, instance: InstanceLimits, userId: string, durationSec: number, ent?: Entitlements | null): Promise<void> {
   const over = await minutesOver(db, instance, userId, null, durationSec, ent);
-  if (over) refuse(over.d, over.key, over.message);
+  if (over) refuse(over.d, over.key, over.message, { firstVideo: over.firstVideo });
+}
+
+/** What a source would meet if it were added now: the minutes limit it passes (with the sentence and offer), else null. */
+export async function sourceMinutesRefusal(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  durationSec: number,
+  ent?: Entitlements | null,
+): Promise<QuotaError | null> {
+  const over = await minutesOver(db, instance, userId, null, durationSec, ent);
+  return over ? new QuotaError(over.message, quotaRefusal(over.d, over.key), over.key, { firstVideo: over.firstVideo }) : null;
+}
+
+/** The monthly minutes allowance as the New Project form states it; null when no minutes limit applies. */
+export interface MinutesAllowance {
+  /** minutes a month the plan covers */
+  perMonth: number;
+  /** whole minutes left this period */
+  left: number;
+  /** the first video is free up to this many minutes, while it has not been used (0 = no such allowance left) */
+  firstVideoFree: number;
+  /** ISO date the allowance resets */
+  resetsOn: string;
+}
+export async function minutesAllowance(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null): Promise<MinutesAllowance | null> {
+  const d = await limitsDetail(db, instance, userId, ent);
+  const cap = d.limits.MAX_SOURCE_MINUTES_PER_MONTH;
+  if (!(cap > 0)) return null;
+  const period = periodFor(d.grants);
+  const m = await monthlyMinutes(db, userId, period.start, d.grants);
+  return { perMonth: cap, left: left(cap, m.used), firstVideoFree: m.firstPending ? m.firstFree : 0, resetsOn: period.end.toISOString() };
 }
 
 const minutesToday = (db: Db, userId: string, exceptProjectId?: string) =>

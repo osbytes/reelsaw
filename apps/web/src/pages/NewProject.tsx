@@ -11,7 +11,15 @@ import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
-import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
+import {
+  defaultProjectSettings,
+  projectSettingsSchema,
+  userProjectDefaultsSchema,
+  styleSchema,
+  type ProjectSettings,
+  type QuotaRefusal,
+  type Style,
+} from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
 import { youtubeId } from "../lib/links";
@@ -152,12 +160,16 @@ export function NewProjectPage() {
   const objectUrl = useMemo(() => (mode === "upload" && file ? URL.createObjectURL(file) : null), [mode, file]);
   useEffect(() => () => void (objectUrl && URL.revokeObjectURL(objectUrl)), [objectUrl]);
   const hiddenVideo = useRef<HTMLVideoElement>(null);
+  // the picked file's length, so the minutes check runs before minutes of uploading, not after
+  const [fileSec, setFileSec] = useState<number | null>(null);
   useEffect(() => {
     const v = hiddenVideo.current;
+    setFileSec(null);
     if (!v || !objectUrl) return setVideoEl(null);
     const onMeta = () => {
       v.currentTime = Math.min(30, (v.duration || 10) * 0.2);
       setSrcDims({ w: v.videoWidth, h: v.videoHeight });
+      if (Number.isFinite(v.duration) && v.duration > 0) setFileSec(v.duration);
     };
     const onSeeked = () => setVideoEl(v);
     v.addEventListener("loadedmetadata", onMeta);
@@ -168,9 +180,23 @@ export function NewProjectPage() {
     };
   }, [objectUrl]);
 
+  // Would this source be accepted? The same checks creating it runs (minutes, projects, storage), asked before submit, so a
+  // video the plan cannot cover is said up front with the upgrade offer instead of failing after the click (or the upload).
+  const checkInput = mode === "url" ? (validUrl ? { sourceUrl: debouncedUrl } : null) : fileSec ? { durationSec: Math.ceil(fileSec) } : null;
+  const check = useQuery({
+    ...trpc.projects.checkSource.queryOptions(checkInput ?? { durationSec: 1 }),
+    enabled: !!checkInput,
+    staleTime: 60_000,
+    retry: false,
+  });
+  // a link still being typed has not been checked yet; neither has a file whose length is not read yet
+  const fit = checkInput && (mode === "upload" || debouncedUrl === url) ? check.data : undefined;
+  const blocked = fit?.fits === false;
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (mode === "upload" && !file) return;
+    if (blocked) return;
     const tooBig = mode === "upload" && file ? uploadSizeProblem(file, maxMb) : null;
     if (tooBig) return void toast.error(tooBig);
     create.mutate(
@@ -309,6 +335,8 @@ export function NewProjectPage() {
                   <video ref={hiddenVideo} src={objectUrl ?? undefined} muted playsInline preload="auto" className="hidden" />
                 </>
               )}
+              {checkInput && check.isFetching && !fit && <div className="text-xs text-ink3">Checking the video’s length against your plan…</div>}
+              {fit && <SourceFit fit={fit} />}
               <input
                 className="input"
                 value={title}
@@ -625,12 +653,41 @@ export function NewProjectPage() {
           <Link to="/" className="btn-quiet no-underline">
             Cancel
           </Link>
-          <button className="btn-primary px-5 py-2.5 text-sm" disabled={busy || !canStart}>
+          <button
+            className="btn-primary px-5 py-2.5 text-sm"
+            disabled={busy || !canStart || blocked}
+            title={blocked ? "This video doesn’t fit your plan’s minutes; see the note under the source" : undefined}
+          >
             {busy ? "Starting…" : "Find clips"}
           </button>
         </div>
       </div>
     </form>
+  );
+}
+
+type SourceCheck = {
+  minutes: number | null;
+  fits: boolean | null;
+  message: string | null;
+  quota: QuotaRefusal | null;
+  allowance: { perMonth: number; left: number; firstVideoFree: number; resetsOn: string } | null;
+};
+
+/** Under the source: the refusal it would meet (with the upgrade offer), else what the plan's minutes cover. Nothing without a minutes limit. */
+function SourceFit({ fit }: { fit: SourceCheck }) {
+  if (fit.fits === false && fit.message) return <QuotaNotice message={fit.message} quota={fit.quota} placement="precheck" />;
+  const a = fit.allowance;
+  if (!a) return null;
+  const len = fit.minutes !== null ? `${Math.round(fit.minutes)}-minute video. ` : "";
+  const plan = a.firstVideoFree
+    ? `Your first video is free up to ${a.firstVideoFree} minutes, then ${a.perMonth} minutes a month.`
+    : `${a.left} of your ${a.perMonth} minutes left this month.`;
+  return (
+    <div className="text-xs text-ink3">
+      {len}
+      {plan}
+    </div>
   );
 }
 

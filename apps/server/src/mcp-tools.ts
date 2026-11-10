@@ -29,7 +29,7 @@ import { BULK_USERS, bulkUsersShape, userListInput } from "./accounts-schema.js"
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
-Workflow: create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
+Workflow: (check_source when the account may have a minutes limit) → create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
@@ -113,6 +113,16 @@ export const TOOLS = {
     description:
       "One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. Returns the project object. For one clip's full detail use get_clip, for the words get_transcript, for the pipeline history get_project_events.",
     inputSchema: { id: projectId() },
+    annotations: { readOnlyHint: true },
+  },
+  check_source: {
+    title: "Check source",
+    description:
+      "Before create_project: would this video be accepted now? Give sourceUrl (its length is looked up, nothing is downloaded) or durationSec for a file. Returns { minutes, fits, message, quota, allowance }; fits false means create_project would be refused, message says why, quota.primary is the upgrade offer (a link for a person). fits null: the length is unknown.",
+    inputSchema: {
+      sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or durationSec"),
+      durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you will upload, in seconds; give this or sourceUrl"),
+    },
     annotations: { readOnlyHint: true },
   },
   create_project: {
