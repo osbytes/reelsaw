@@ -67,6 +67,9 @@ describe("grants and the quota chain", () => {
     assert.match(free.upgrade!.text, /Starter gives 100 minutes a month/);
     assert.equal(free.firstVideoFreeMinutes, 60);
     assert.equal(free.upgrade!.url, "https://app.example.com/settings/billing");
+    // the offer names Starter's price and that it takes the watermark off
+    assert.equal(free.upgrade!.monthlyPrice, 12);
+    assert.equal(free.upgrade!.watermark, false);
     assert.equal(free.watermark, null);
     assert.deepEqual(periodFor(free, now), { start: new Date("2026-10-01T00:00:00Z"), end: new Date("2026-11-01T00:00:00Z"), source: "calendar" });
     const paid = grantsOf(row({}), 7, "https://app.example.com", now);

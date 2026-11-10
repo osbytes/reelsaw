@@ -186,6 +186,8 @@ export function createMcpServer(
     }),
   );
 
+  server.registerTool("check_source", TOOLS.check_source, ({ sourceUrl, durationSec }) => run(() => api.projects.checkSource({ sourceUrl, durationSec })));
+
   server.registerTool(
     "create_project",
     TOOLS.create_project,

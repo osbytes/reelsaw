@@ -337,11 +337,15 @@ them), so a single-user box stays as it is:
   length is refused when the project is created (with the upgrade offer), so no project is made for it.
   Otherwise the length is checked again before the download and once the file is probed, so an over-long
   video fails the project with that reason, once, without being fetched again. The first video of a plan with a free allowance is the first
-  one whose length is known.
+  one whose length is known. New Project checks before you submit: once a link is pasted (or a file picked, by its
+  length) it says what your minutes cover, and a video that would be refused shows the reason and the upgrade
+  offer, with its price, before anything is created or uploaded. Agents ask the same with `check_source`, operators
+  with `reelsaw check-source`.
 - **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
   `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan
   removes it, and an admin can switch it per user on the Users page (Limits). Decided at render time,
   so a re-render after the change applies it. Clips already rendered keep what they were rendered with.
+  On a hosted instance, a project whose finished clips carry it names the plan that takes it off and its price.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
@@ -499,6 +503,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | --- | --- |
 | `list_projects` | Your projects, most recently updated first. |
 | `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
+| `check_source` | Before create_project: would this video be accepted now? |
 | `create_project` | Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. |
 | `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. |
 | `wait_for_project` | Block until the project is done or failed, or timeoutSeconds pass. |
@@ -621,6 +626,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw source-text <projectId> <hide\|keep\|always>` | hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text) |
 | `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]` | change the caption/hook style and fades (fadeIn, fadeOut, bumperTransition, bumperTransitionSec) of the whole project, clearing per-clip overrides and re-rendering (same as projects.updateStyle and update_project_style); values are JSON or text |
+| `reelsaw check-source <url> [--user <email\|id>] \| --minutes <n> [--user <email\|id>]` | would a project from this link (or a file this long) be accepted for the account now: its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source) |
 | `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |

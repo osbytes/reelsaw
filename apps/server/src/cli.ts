@@ -40,6 +40,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]
  *                                           change the caption/hook style and fades (fadeIn, fadeOut, bumperTransition, bumperTransitionSec) of the whole project, clearing per-clip overrides and re-rendering
  *                                           (same as projects.updateStyle and update_project_style); values are JSON or text
+ *   check-source <url> [--user <email|id>] | --minutes <n> [--user <email|id>]
+ *                                           would a project from this link (or a file this long) be accepted for the account now:
+ *                                           its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source)
  *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
@@ -231,6 +234,8 @@ import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
 import { listDeleted } from "./deleted.js";
 import {
+  checkSource,
+  checkSourceInput,
   createProject,
   deleteClip,
   deleteClips,
@@ -645,6 +650,27 @@ ${usage}`);
     console.log(
       `changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`,
     );
+  },
+  /** Would this source be accepted now: `reelsaw check-source <url> | --minutes <n> [--user email|id]`. Same function as projects.checkSource and the check_source tool. */
+  async "check-source"(svc) {
+    const usage = "usage: reelsaw check-source <url> [--user <email|id>]  |  reelsaw check-source --minutes <n> [--user <email|id>]";
+    const minutes = flag("minutes");
+    const input = checkSourceInput.safeParse({ sourceUrl: pos[0], durationSec: minutes === undefined ? undefined : Number(minutes) * 60 });
+    if (!input.success) throw new Error(`${input.error.issues.map((i) => i.message).join("; ")}\n${usage}`);
+    const user = await actingUser(svc, flag("user"));
+    const r = await checkSource(svc, user.id, input.data, "cli");
+    const a = r.allowance;
+    console.log(r.minutes === null ? "length: unknown (the site does not say; ingest checks the file)" : `length: ${r.minutes} minutes`);
+    if (a)
+      console.log(
+        `allowance: ${a.left} of ${a.perMonth} minutes a month left, resets ${a.resetsOn.slice(0, 10)}${a.firstVideoFree ? `; first video free up to ${a.firstVideoFree} minutes` : ""}`,
+      );
+    else console.log("allowance: no minutes limit");
+    if (r.fits === false) {
+      console.log(`refused: ${r.message}`);
+      if (r.quota?.primary && "href" in r.quota.primary) console.log(`offer: ${r.quota.primary.label}: ${r.quota.primary.href}`);
+      process.exitCode = 1;
+    } else console.log(r.fits ? "fits" : "fits so far (length unknown)");
   },
   /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {
@@ -2614,7 +2640,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

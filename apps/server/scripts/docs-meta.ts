@@ -383,7 +383,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   POSTHOG_KEY: [
     "observability",
-    "PostHog project key (public). Set, the server sends sign-ups, approvals, project created/done/failed/cancelled, clip done/failed, requested jobs, quota refusals, downloads and exports, MCP tool calls, billing and abuse-flag events (with the surface: web, api, mcp, cli), and the web app sends page views and a few product events; properties are ids, counts and names, and people are identified by user id, role and plan only (no email or name). Unset, nothing is sent.",
+    "PostHog project key (public). Set, the server sends sign-ups, approvals, project created/done/failed/cancelled, clip done/failed, requested jobs, quota refusals and the warnings that head them off, downloads and exports, MCP tool calls, billing and abuse-flag events (with the surface: web, api, mcp, cli), and the web app sends page views and a few product events; properties are ids, counts and names, and people are identified by user id, role and plan only (no email or name). Unset, nothing is sent.",
   ],
   POSTHOG_HOST: ["observability", "PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance)."],
 

@@ -20,6 +20,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { ShortcutSheet } from "../components/ShortcutSheet";
 import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
+import { WatermarkOffer } from "../components/WatermarkOffer";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { ProjectTemplateModal } from "../components/TemplatePicker";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
@@ -943,6 +944,9 @@ export function ProjectPage() {
         </div>
       )}
       <div className="flex flex-col gap-3 p-3">
+        {me.data?.watermark?.upgrade && sortedClips.some((c) => c.watermark && c.status === "done") && (
+          <WatermarkOffer text={me.data.watermark.text} offer={me.data.watermark.upgrade} projectId={p.id} />
+        )}
         {sortedClips.map((c) => (
           <ClipCard
             key={c.id}

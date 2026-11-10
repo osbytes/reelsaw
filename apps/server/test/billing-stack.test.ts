@@ -40,6 +40,13 @@ type State = {
   period: { source?: string } | null;
   canManage: boolean;
 };
+type SourceCheck = {
+  minutes: number | null;
+  fits: boolean | null;
+  message: string | null;
+  quota: { key: string; primary?: { kind: string; label: string } } | null;
+  allowance: { perMonth: number; left: number; firstVideoFree: number } | null;
+};
 async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 20_000): Promise<T> {
   const t0 = Date.now();
   for (;;) {
@@ -70,9 +77,36 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(s.limits.MAX_SOURCE_MINUTES_PER_MONTH, 20);
     assert.equal(s.watermark.on, true);
     assert.equal(s.canManage, false);
-    const me = (await trpc(user.cookie, "me.get", undefined, "GET")).data as { ee: { billing: boolean }; watermark: { on: boolean } };
+    const me = (await trpc(user.cookie, "me.get", undefined, "GET")).data as {
+      ee: { billing: boolean };
+      watermark: { on: boolean; upgrade?: { label: string; href: string } };
+    };
     assert.equal(me.ee.billing, true);
     assert.equal(me.watermark.on, true);
+    // the Free account is offered the plan that takes the watermark off, with its price
+    assert.equal(me.watermark.upgrade?.label, "Starter removes it for $12 a month");
+    assert.match(me.watermark.upgrade?.href ?? "", /\/settings\/billing$/);
+  });
+
+  it("checkSource warns before a first video longer than the free 60 minutes, and says what fits", async () => {
+    const long = (await trpc(user.cookie, "projects.checkSource", { durationSec: 94 * 60 }, "GET")).data as SourceCheck;
+    assert.equal(long.fits, false);
+    assert.equal(long.minutes, 94);
+    assert.match(
+      long.message ?? "",
+      /^This video is 94 minutes\. Your first video is free up to 60 minutes, and after that your plan covers 20 minutes a month\. Try a video under 60 minutes\./,
+    );
+    assert.equal(long.quota?.primary?.kind === "upgrade" ? long.quota.primary.label : "", "Starter: 100 minutes a month for $12");
+    assert.deepEqual(long.allowance && { perMonth: long.allowance.perMonth, left: long.allowance.left, firstVideoFree: long.allowance.firstVideoFree }, {
+      perMonth: 20,
+      left: 20,
+      firstVideoFree: 60,
+    });
+    const short = (await trpc(user.cookie, "projects.checkSource", { durationSec: 45 * 60 }, "GET")).data as SourceCheck;
+    assert.equal(short.fits, true);
+    assert.equal(short.message, null);
+    const both = await trpc(user.cookie, "projects.checkSource", { durationSec: 60, sourceUrl: "https://example.com/v.mp4" }, "GET");
+    assert.equal(both.error?.data.code, "BAD_REQUEST");
   });
 
   it("the first video is free up to 60 minutes; the next ones count against the 20-minute month", async () => {
@@ -100,7 +134,13 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     await mk("Third, 10 min", 10 * 60);
     const refused = await trpc(user.cookie, "projects.create", { sourceUrl: "https://example.com/other.mp4" });
     assert.equal(refused.error?.data.code, "TOO_MANY_REQUESTS");
-    assert.match(refused.error!.message, /Monthly limit of 20 minutes of video reached \(25 used\); resets on .*Starter gives 100 minutes a month: http/);
+    assert.match(refused.error!.message, /Monthly limit of 20 minutes of video reached \(25 used\); resets on .*Starter: 100 minutes a month for \$12: http/);
+    // checked before submit, the same refusal and offer come back without creating anything
+    const pre = (await trpc(user.cookie, "projects.checkSource", { durationSec: 5 * 60 }, "GET")).data as SourceCheck;
+    assert.equal(pre.fits, false);
+    assert.match(pre.message ?? "", /Monthly limit of 20 minutes of video reached/);
+    assert.equal(pre.quota?.primary?.kind, "upgrade");
+    assert.deepEqual(pre.allowance && { left: pre.allowance.left, firstVideoFree: pre.allowance.firstVideoFree }, { left: 0, firstVideoFree: 0 });
     await pool.query(`delete from projects where user_id = $1`, [user.userId]);
     await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
   });

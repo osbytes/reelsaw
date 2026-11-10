@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { QuotaExceededError, hasMinuteLimits, recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
+import { hasMinuteLimits, recordSourceDuration, sourceMinutesExceeded, trackIngestRefusal } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -64,8 +64,9 @@ export async function ingest(ctx: StageContext) {
           return sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, announced, svc.entitlements);
         });
         if (over) {
-          ctx.log.warn({ userId: project.userId, durationSec: announced, reason: over }, "source-minutes limit reached before download");
-          throw new QuotaExceededError(over);
+          ctx.log.warn({ userId: project.userId, durationSec: announced, reason: over.message }, "source-minutes limit reached before download");
+          trackIngestRefusal(svc.telemetry, project.userId, over);
+          throw over;
         }
       }
       let stderrTail = "";
@@ -206,8 +207,9 @@ export async function ingest(ctx: StageContext) {
     await takeTxLock(u.db, txLock.quota(project.userId));
     const over = await sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, probe.durationSec, svc.entitlements);
     if (over) {
-      ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "source-minutes limit reached");
-      throw new QuotaExceededError(over);
+      ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over.message }, "source-minutes limit reached");
+      trackIngestRefusal(svc.telemetry, project.userId, over);
+      throw over;
     }
     await u.db
       .update(schema.projects)

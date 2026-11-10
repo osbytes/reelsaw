@@ -22,6 +22,8 @@ import {
 import { DECISION_KINDS, emailPreferencesPatchSchema } from "@reelsaw/shared";
 import {
   applyProjectFraming,
+  checkSource,
+  checkSourceInput,
   createProject,
   deleteClip,
   deleteClips,
@@ -1446,6 +1448,11 @@ const restRouter = router({
 
     /** oEmbed title/thumbnail for the new-project preview, before anything is created. */
     peek: protectedProcedure.input(z.object({ url: z.url() })).query(async ({ input }) => peekUrlMeta(input.url)),
+
+    /** Would a project from this link (or a file this long) be accepted now? Length, the minutes left, and the refusal with its upgrade offer when not. */
+    checkSource: protectedProcedure
+      .input(checkSourceInput)
+      .query(({ ctx, input }) => checkSource(ctx.svc, ctx.user.id, input, ctx.surface ?? (ctx.who.via === "session" ? "web" : "api"))),
 
     /**
      * Change the project-wide caption/hook style. Clears per-clip style overrides unless keepOverrides,
