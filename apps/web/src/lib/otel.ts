@@ -64,12 +64,15 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
         getWebAutoInstrumentations({
           // every click was a 0 ms root span with nothing under it: most of the trace volume, none of the insight
           "@opentelemetry/instrumentation-user-interaction": { enabled: false },
-          // spans start as a bare "GET"; name them for the call ("GET /api/trpc/projects.get") so Sentry groups them
+          // spans start as a bare "GET"; name them for the call ("GET /api/trpc/projects.get") so Sentry groups them.
+          // The URL comes from the span, not the result: a stream that ends by abort or a dropped connection (the live
+          // project events) hands this hook an error with no URL, and those spans stayed "GET".
           "@opentelemetry/instrumentation-fetch": {
             propagateTraceHeaderCorsUrls: [origin],
             ignoreUrls,
             clearTimingResources: true,
-            applyCustomAttributesOnSpan: (span, request, result) => name(span, request.method, result instanceof Response ? result.url : undefined),
+            applyCustomAttributesOnSpan: (span, request, result) =>
+              name(span, request.method, spanUrl(span) ?? (result instanceof Response ? result.url : undefined)),
           },
           "@opentelemetry/instrumentation-xml-http-request": {
             propagateTraceHeaderCorsUrls: [origin],
@@ -103,6 +106,13 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The request URL the fetch instrumentation put on its span when it started (`url.full`), if the span exposes it. */
+function spanUrl(span: object): string | undefined {
+  const attrs: unknown = Reflect.get(span, "attributes");
+  const url = attrs && typeof attrs === "object" ? Reflect.get(attrs, "url.full") : undefined;
+  return typeof url === "string" ? url : undefined;
+}
 
 const ID_SEGMENT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{24,}|\d+)$/i;
 /**
