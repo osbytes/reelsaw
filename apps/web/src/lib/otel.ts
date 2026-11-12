@@ -77,7 +77,9 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
           "@opentelemetry/instrumentation-xml-http-request": {
             propagateTraceHeaderCorsUrls: [origin],
             ignoreUrls,
-            applyCustomAttributesOnSpan: (span, xhr) => name(span, undefined, xhr.responseURL),
+            // same for XHR (uploads): the method and URL come from the span. responseURL is empty when the connection
+            // drops mid-upload, and the hook gets no method, so uploads were "POST" or, when they finished, "GET /api/upload"
+            applyCustomAttributesOnSpan: (span, xhr) => name(span, spanAttr(span, "http.request.method"), spanUrl(span) ?? (xhr.responseURL || undefined)),
           },
         }),
       ],
@@ -107,12 +109,15 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The request URL the fetch instrumentation put on its span when it started (`url.full`), if the span exposes it. */
-function spanUrl(span: object): string | undefined {
+/** A string attribute the fetch or XHR instrumentation put on its span when it started, if the span exposes it. */
+function spanAttr(span: object, key: string): string | undefined {
   const attrs: unknown = Reflect.get(span, "attributes");
-  const url = attrs && typeof attrs === "object" ? Reflect.get(attrs, "url.full") : undefined;
-  return typeof url === "string" ? url : undefined;
+  const value = attrs && typeof attrs === "object" ? Reflect.get(attrs, key) : undefined;
+  return typeof value === "string" ? value : undefined;
 }
+
+/** The request URL the instrumentation recorded when the request started (`url.full`). */
+const spanUrl = (span: object) => spanAttr(span, "url.full");
 
 const ID_SEGMENT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{24,}|\d+)$/i;
 /**
