@@ -85,13 +85,13 @@ importers:
         version: 1.7.10(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.13)(kysely@0.29.7)(nanostores@1.5.5))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.7)(pg@8.23.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(better-call@1.4.4(zod@4.6.7))
       '@hono/mcp':
         specifier: 0.3.2
-        version: 0.3.2(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7))(hono-rate-limiter@0.5.4(hono@4.13.13))(hono@4.13.13)(zod@4.6.7)
+        version: 0.3.2(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7))(hono-rate-limiter@0.5.4(hono@4.13.16))(hono@4.13.16)(zod@4.6.7)
       '@hono/node-server':
-        specifier: ^2.1.5
-        version: 2.1.5(hono@4.13.13)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.13.16)
       '@hono/trpc-server':
         specifier: ^0.4.2
-        version: 0.4.2(@trpc/server@11.19.0(typescript@5.9.3))(hono@4.13.13)
+        version: 0.4.2(@trpc/server@11.19.0(typescript@5.9.3))(hono@4.13.16)
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(supports-color@8.1.1)(zod@4.6.7)
@@ -159,8 +159,8 @@ importers:
         specifier: 7.1.0
         version: 7.1.0
       hono:
-        specifier: ^4.13.13
-        version: 4.13.13
+        specifier: ^4.13.16
+        version: 4.13.16
       langfuse:
         specifier: 3.39.2
         version: 3.39.2
@@ -1119,8 +1119,8 @@ packages:
       hono-rate-limiter: ^0.5.3
       zod: ^3.25.0 || ^4.0.0
 
-  '@hono/node-server@2.1.5':
-    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
+  '@hono/node-server@2.1.6':
+    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -2421,7 +2421,9 @@ packages:
   '@smithy/core@3.36.2':
     resolution: {integrity: sha512-oRw0rB9QSUiCZfEs23G5F4Af+b2rQt1lItIICWu5IejFNd+uPM8SWqiKLMpQ6bX1Q7slsLbjuoE2niErFtkVPQ==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -3347,8 +3349,8 @@ packages:
       unstorage:
         optional: true
 
-  hono@4.13.13:
-    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   http-errors@2.0.1:
@@ -5161,22 +5163,22 @@ snapshots:
       protobufjs: 7.6.6
       yargs: 17.7.3
 
-  '@hono/mcp@0.3.2(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7))(hono-rate-limiter@0.5.4(hono@4.13.13))(hono@4.13.13)(zod@4.6.7)':
+  '@hono/mcp@0.3.2(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7))(hono-rate-limiter@0.5.4(hono@4.13.16))(hono@4.13.16)(zod@4.6.7)':
     dependencies:
       '@modelcontextprotocol/sdk': 1.32.1(supports-color@8.1.1)(zod@4.6.7)
-      hono: 4.13.13
-      hono-rate-limiter: 0.5.4(hono@4.13.13)
+      hono: 4.13.16
+      hono-rate-limiter: 0.5.4(hono@4.13.16)
       pkce-challenge: 5.0.1
       zod: 4.6.7
 
-  '@hono/node-server@2.1.5(hono@4.13.13)':
+  '@hono/node-server@2.1.6(hono@4.13.16)':
     dependencies:
-      hono: 4.13.13
+      hono: 4.13.16
 
-  '@hono/trpc-server@0.4.2(@trpc/server@11.19.0(typescript@5.9.3))(hono@4.13.13)':
+  '@hono/trpc-server@0.4.2(@trpc/server@11.19.0(typescript@5.9.3))(hono@4.13.16)':
     dependencies:
       '@trpc/server': 11.19.0(typescript@5.9.3)
-      hono: 4.13.13
+      hono: 4.13.16
 
   '@isaacs/nonrecursive-glob-match@1.0.3': {}
 
@@ -5218,7 +5220,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7)':
     dependencies:
-      '@hono/node-server': 2.1.5(hono@4.13.13)
+      '@hono/node-server': 2.1.6(hono@4.13.16)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -5228,7 +5230,7 @@ snapshots:
       eventsource-parser: 3.1.1
       express: 5.3.0(supports-color@8.1.1)
       express-rate-limit: 8.7.1(express@5.3.0(supports-color@8.1.1))(supports-color@8.1.1)
-      hono: 4.13.13
+      hono: 4.13.16
       jose: 6.2.13
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -7416,11 +7418,11 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono-rate-limiter@0.5.4(hono@4.13.13):
+  hono-rate-limiter@0.5.4(hono@4.13.16):
     dependencies:
-      hono: 4.13.13
+      hono: 4.13.16
 
-  hono@4.13.13: {}
+  hono@4.13.16: {}
 
   http-errors@2.0.1:
     dependencies:
