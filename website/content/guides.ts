@@ -119,7 +119,7 @@ export const GUIDES: Guide[] = [
             ],
             [
               "Language model",
-              "Any: OpenAI, Anthropic, Google, Groq, Vercel AI Gateway, Ollama, vLLM, LM Studio or any OpenAI-compatible server; switched at runtime",
+              "Any: OpenAI, Anthropic, Google, Groq, Vercel AI Gateway, OpenRouter, Ollama, vLLM, LM Studio or any OpenAI-compatible server; switched at runtime",
               "Gemini by default; any OpenAI-compatible server for moment picking only",
             ],
             [
