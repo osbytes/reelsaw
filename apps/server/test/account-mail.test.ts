@@ -6,7 +6,7 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
-import { approveUser } from "../src/accounts.js";
+import { approveUser, holdUser } from "../src/accounts.js";
 import { eventHandlerQueues, parseEventHandlerJob } from "../src/event-handlers.js";
 import type { EventType } from "../src/event-types.js";
 import { eventHandlerMap } from "../src/event-handler-map.js";
@@ -84,7 +84,17 @@ describe("account mail", { skip: notReady ?? false }, () => {
     assert.equal(sent[0]!.to, `${u}@example.test`);
     assert.equal(sent[0]!.subject, "Your Reelsaw account is ready");
     // the key names the approval, not the event: a second event about it is the same mail
-    assert.equal(sent[0]!.key, `approved:${u}`);
+    const first = sent[0]!.key;
+    assert.match(first ?? "", new RegExp(`^approved:${u}:\\d{4}-`));
+
+    // sent back to approval and approved again is a new approval, so a new mail (the old key would have deduplicated it)
+    await holdUser(svc, null, u);
+    await approveUser(svc, null, u);
+    const queued = await jobs("user.approved", u);
+    assert.equal(queued.length, 2, "the second approval queues its own mail");
+    sent.length = 0;
+    for (const j of queued) await run("user.approved", j.data);
+    assert.equal(new Set(sent.map((m) => m.key)).size, 2, "two approvals, two keys");
   });
 
   it("a rolled-back change leaves neither the event nor its job", async () => {

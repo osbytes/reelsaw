@@ -36,10 +36,18 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     if (user.approvedAt) return { ok: true, changed: false };
-    await u.db.update(schema.user).set({ approvedAt: new Date(), updatedAt: new Date() }).where(eq(schema.user.id, userId));
-    await u.emit("user.approved", { userId, email: user.email }, { actorId });
-    // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
-    u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
+    const approvedAt = new Date();
+    await u.db.update(schema.user).set({ approvedAt, updatedAt: approvedAt }).where(eq(schema.user.id, userId));
+    // approvedAt names this approval: an account sent back to approval (holdUser) and approved again is told again
+    await u.emit("user.approved", { userId, email: user.email, approvedAt: approvedAt.toISOString() }, { actorId });
+    // how long it waited for an admin: since it was last sent back to approval, else since it signed up
+    const [held] = await u.db
+      .select({ at: sql<Date>`max(${schema.events.createdAt})` })
+      .from(schema.events)
+      .where(and(eq(schema.events.userId, userId), eq(schema.events.type, "user.held")));
+    const waitingSince = held?.at ? new Date(held.at) : user.createdAt;
+    // the approved account is the distinct id
+    u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - waitingSince.getTime()) / 360_000) / 10 }));
     return { ok: true, changed: true };
   });
 }
@@ -53,6 +61,7 @@ export async function holdUser(svc: Services, actorId: string | null, userId: st
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     if (!user.approvedAt) return { ok: true, changed: false };
+    if (user.banned) throw new TRPCError({ code: "BAD_REQUEST", message: "This account is suspended. Reinstate it first, then require approval." });
     if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot send your own account back to approval." });
     if (user.role === "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "Admins cannot be sent back to approval. Remove the admin role first." });
     await u.db.update(schema.user).set({ approvedAt: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));

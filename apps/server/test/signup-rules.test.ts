@@ -17,6 +17,14 @@ describe("normalizePattern", () => {
     assert.ok("error" in normalizePattern("ip", "example.com"));
     assert.ok("error" in normalizePattern("ip", "1.2.3.4/8/9"));
   });
+  it("stores one canonical form per network, so the same range cannot be two rules", () => {
+    assert.deepEqual(normalizePattern("ip", "203.0.113.5/24"), { pattern: "203.0.113.0/24" }, "host bits cleared");
+    assert.deepEqual(normalizePattern("ip", "2001:0DB8:0000::/32"), { pattern: "2001:db8::/32" });
+    assert.deepEqual(normalizePattern("ip", "2001:db8:0:0:1:0:0:1"), { pattern: "2001:db8::1:0:0:1" }, "the first longest zero run becomes ::");
+    assert.deepEqual(normalizePattern("ip", "::ffff:203.0.113.0/120"), { pattern: "203.0.113.0/24" }, "an IPv4-mapped range is IPv4");
+    assert.ok("error" in normalizePattern("ip", "::ffff:0:0/64"), "wider than the mapped block");
+    assert.deepEqual(normalizePattern("ip", "203.0.113.7/32"), { pattern: "203.0.113.7" });
+  });
   it("lower-cases emails and domains, and refuses a pattern that would match everyone", () => {
     assert.deepEqual(normalizePattern("email", "Spam*@Gmail.com"), { pattern: "spam*@gmail.com" });
     assert.ok("error" in normalizePattern("email", "*@*"));
@@ -51,6 +59,18 @@ describe("decideSignup", () => {
     assert.equal(decideSignup(rules, facts("riyad.b@gmail.com")).action, "hold");
     assert.equal(decideSignup(rules, facts("someone@gmail.com")).action, null);
     assert.equal(decideSignup([rule("email", "a.b@x.com")], facts("aXb@x.com")).action, null, "a dot in the pattern is a dot");
+  });
+  it("matches an IPv4-mapped rule against plain IPv4 clients", () => {
+    const rules = [rule("ip", "203.0.113.0/24")]; // as normalizePattern stores ::ffff:203.0.113.0/120
+    assert.equal(decideSignup(rules, facts("a@x.com", "203.0.113.9")).action, "hold");
+    assert.equal(decideSignup(rules, facts("a@x.com", "::ffff:203.0.113.9")).action, "hold");
+  });
+  it("matches an email glob in time linear in the address, whatever the stars", () => {
+    const rules = [rule("email", "a*a*a*a*a*a*a*a*b@x.com")];
+    const t = performance.now();
+    assert.equal(decideSignup(rules, facts(`${"a".repeat(300)}@x.com`)).action, null);
+    assert.equal(decideSignup(rules, facts(`${"a".repeat(300)}b@x.com`)).action, "hold");
+    assert.ok(performance.now() - t < 50, "no backtracking blow-up");
   });
   it("matches a domain and its subdomains, not a lookalike", () => {
     const rules = [rule("domain", "example.com")];

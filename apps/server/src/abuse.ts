@@ -169,6 +169,11 @@ export async function pruneRequestRate(db: Db): Promise<number> {
 }
 
 export const ABUSE_FLAGS = ["shared_ip", "signup_burst", "disposable_email"] as const;
+/** shared_ip: this many accounts from one sign-up address within SHARED_IP_DAYS. One definition for the hourly pass and the sign-up rules (signup-rules.ts). */
+export const SHARED_IP_ACCOUNTS = 3;
+export const SHARED_IP_DAYS = 7;
+/** signup_burst: this many accounts from one address in one clock hour (date_trunc), as the hourly pass buckets them. */
+export const BURST_ACCOUNTS = 5;
 export type AbuseFlag = (typeof ABUSE_FLAGS)[number];
 export const FLAG_HELP: Record<AbuseFlag, string> = {
   shared_ip: "three or more accounts signed up from the same address in the last 7 days",
@@ -196,14 +201,14 @@ export async function flagAccounts(
   const sharedIps = new Set(
     (
       await db.execute<{ signup_ip: string }>(
-        sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip having count(*) >= 3`,
+        sql`select signup_ip from "user" where created_at >= now() - make_interval(days => ${SHARED_IP_DAYS}) and signup_ip is not null group by signup_ip having count(*) >= ${SHARED_IP_ACCOUNTS}`,
       )
     ).rows.map((r) => r.signup_ip),
   );
   const burstIps = new Set(
     (
       await db.execute<{ signup_ip: string }>(
-        sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= 5`,
+        sql`select signup_ip from "user" where created_at >= now() - make_interval(days => ${SHARED_IP_DAYS}) and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= ${BURST_ACCOUNTS}`,
       )
     ).rows.map((r) => r.signup_ip),
   );

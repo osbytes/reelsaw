@@ -330,20 +330,40 @@ export function RuleFromUserDialog({ user, onClose }: { user: RuleSource; onClos
   const [alsoHold, setAlsoHold] = useState(canHold);
   const holding = alsoHold && canHold && action !== "allow";
   const chosen = options[pick] ?? options[0]!;
+  /**
+   * The rule, once it is saved. Two calls (add the rule, then hold the account): when the second fails, the rule
+   * stays, the form locks to it, and the button retries only the hold instead of adding the rule again (CONFLICT).
+   */
+  const [added, setAdded] = useState<string | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: trpc.admin.signupRules.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
+  };
   const save = useMutation({
     mutationFn: async () => {
-      await client.admin.signupRules.change.mutate({
-        add: [{ kind: chosen.kind, pattern: chosen.pattern, action, ...(note.trim() ? { note: note.trim() } : {}) }],
-      });
-      if (holding) await client.admin.users.hold.mutate({ id: user.id });
+      if (!added) {
+        await client.admin.signupRules.change.mutate({
+          add: [{ kind: chosen.kind, pattern: chosen.pattern, action, ...(note.trim() ? { note: note.trim() } : {}) }],
+        });
+        setAdded(`${action} ${KIND_WORD[chosen.kind]} ${chosen.pattern}`);
+      }
+      if (!holding) return;
+      try {
+        await client.admin.users.hold.mutate({ id: user.id });
+      } catch (err) {
+        const why = err instanceof Error ? err.message : "something went wrong";
+        throw new Error(`The rule is saved, but ${user.email} was not sent back to approval: ${why}`);
+      }
     },
     onSuccess: () => {
       toast(`Added: ${action} ${KIND_WORD[chosen.kind]} ${chosen.pattern}${holding ? `. ${user.email} waits for approval` : ""}`);
-      void qc.invalidateQueries({ queryKey: trpc.admin.signupRules.pathKey() });
-      void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
+      refresh();
       onClose();
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => {
+      refresh();
+      toast.error(e.message);
+    },
   });
   const why = user.role === "admin" ? "Not for an admin." : user.status === "pending" ? "They are already waiting for approval." : "They are suspended.";
   return (
@@ -355,7 +375,7 @@ export function RuleFromUserDialog({ user, onClose }: { user: RuleSource; onClos
           save.mutate();
         }}
       >
-        <fieldset className="flex flex-col gap-1">
+        <fieldset className={`flex flex-col gap-1 ${added ? "opacity-60" : ""}`} disabled={!!added}>
           <legend className="mb-1.5 text-xs font-semibold text-ink2">Match</legend>
           {options.map((o, i) => (
             <label key={o.label} className="flex cursor-pointer items-start gap-2.5 rounded-[10px] px-2 py-1.5 hover:bg-sunk">
@@ -370,8 +390,8 @@ export function RuleFromUserDialog({ user, onClose }: { user: RuleSource; onClos
         </fieldset>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold text-ink2">Then</span>
-          <Segmented ariaLabel="What a match does" value={action} onChange={setAction} options={ACTIONS} />
-          <p className="min-h-8 text-xs text-ink3">{EFFECT[action]}</p>
+          <Segmented ariaLabel="What a match does" value={action} onChange={setAction} options={ACTIONS} disabled={!!added} />
+          <p className="min-h-8 text-xs text-ink3">{added ? `Saved: ${added}.` : EFFECT[action]}</p>
         </div>
         <input
           className="input"
@@ -380,13 +400,14 @@ export function RuleFromUserDialog({ user, onClose }: { user: RuleSource; onClos
           onChange={(e) => setNote(e.target.value)}
           maxLength={300}
           aria-label="Note"
+          disabled={!!added}
         />
-        <label className={`flex items-start gap-2.5 text-sm ${canHold && action !== "allow" ? "cursor-pointer" : "opacity-50"}`}>
+        <label className={`flex items-start gap-2.5 text-sm ${canHold && action !== "allow" && !added ? "cursor-pointer" : "opacity-50"}`}>
           <input
             type="checkbox"
             className="mt-0.5 h-4 w-4 accent-[var(--acc)]"
             checked={holding}
-            disabled={!canHold || action === "allow"}
+            disabled={!canHold || action === "allow" || !!added}
             onChange={(e) => setAlsoHold(e.target.checked)}
           />
           <span>
@@ -398,10 +419,10 @@ export function RuleFromUserDialog({ user, onClose }: { user: RuleSource; onClos
         </label>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-quiet" onClick={onClose}>
-            Cancel
+            {added ? "Close" : "Cancel"}
           </button>
           <button type="submit" className="btn-primary min-w-[8.5rem]" disabled={save.isPending}>
-            Add {action} rule
+            {added ? "Require approval" : `Add ${action} rule`}
           </button>
         </div>
       </form>

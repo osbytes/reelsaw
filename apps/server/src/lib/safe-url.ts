@@ -1,6 +1,7 @@
 import dns from "node:dns/promises";
 import net from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
+import { ipv6Groups } from "./ip.js";
 
 /** Thrown with a sentence a user can act on. */
 export class UnsafeUrlError extends Error {}
@@ -31,23 +32,6 @@ function ipv4Blocked(ip: string): boolean {
     (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmarking
     a >= 224 // multicast, reserved, broadcast
   );
-}
-
-/** The eight 16-bit groups of an IPv6 address (handles `::` and a dotted IPv4 tail); null when it does not parse. */
-function ipv6Groups(ip: string): number[] | null {
-  let s = ip.toLowerCase();
-  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s);
-  if (dotted) {
-    const [a = 0, b = 0, c = 0, d = 0] = dotted.slice(1).map(Number);
-    s = `${s.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
-  }
-  const halves = s.split("::");
-  if (halves.length > 2) return null;
-  const head = halves[0] ? halves[0].split(":") : [];
-  const tail = halves[1] ? halves[1].split(":") : [];
-  if (halves.length === 1 ? head.length !== 8 : head.length + tail.length > 7) return null;
-  const fill = halves.length === 1 ? [] : Array.from({ length: 8 - head.length - tail.length }, () => "0");
-  return [...head, ...fill, ...tail].map((g) => parseInt(g, 16));
 }
 
 const v4 = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;

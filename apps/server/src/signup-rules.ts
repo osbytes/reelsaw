@@ -17,7 +17,6 @@
  * accounts.ts), never by a rule added later. One implementation behind every surface: the admin router, the
  * MCP tools (list_signup_rules, manage_signup_rules), and `reelsaw signup-rules`.
  */
-import { BlockList, isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -25,8 +24,10 @@ import { schema, type Db } from "./db/index.js";
 import type { SignupRuleRow } from "./db/schema.js";
 import type { Services } from "./services.js";
 import type { Logger } from "./log.js";
-import { ABUSE_FLAGS, type AbuseFlag, emailDomain, emailKey, isDisposable } from "./abuse.js";
+import { ABUSE_FLAGS, type AbuseFlag, BURST_ACCOUNTS, emailDomain, emailKey, isDisposable, SHARED_IP_ACCOUNTS, SHARED_IP_DAYS } from "./abuse.js";
 import { takeTxLock, txLock } from "./locks.js";
+import { globMatch } from "./lib/glob.js";
+import { formatRange, inRange, parseIp, parseRange } from "./lib/ip.js";
 import { MAX_SIGNUP_RULES, type ListSignupRulesInput, type ManageSignupRulesInput, type SignupRuleAction, type SignupRuleKind } from "./signup-rules-schema.js";
 
 export type SignupRule = Pick<SignupRuleRow, "id" | "kind" | "pattern" | "action">;
@@ -42,28 +43,17 @@ export const ruleLabel = (r: Pick<SignupRule, "kind" | "pattern">) => `${r.kind}
 
 const isFlag = (v: string): v is AbuseFlag => ABUSE_FLAGS.some((f) => f === v);
 
-/** A client address as the rules compare it: an IPv4 address mapped into IPv6 (`::ffff:1.2.3.4`) is the IPv4 address. */
-function plainIp(ip: string): string {
-  const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip.trim());
-  return m ? m[1]! : ip.trim();
-}
-
 /**
  * The pattern as stored, or a sentence saying what is wrong with it. Emails and domains are lower-case (sign-ups
- * are compared lower-case); an address range keeps the form it was typed in once it parses.
+ * are compared lower-case); an address or range is canonical (host bits cleared, RFC 5952 IPv6, an IPv4-mapped
+ * range as IPv4), so one network is one pattern and the unique index and `held_by` agree on it.
  */
 export function normalizePattern(kind: SignupRuleKind, raw: string): { pattern: string } | { error: string } {
   const p = raw.trim().toLowerCase();
   switch (kind) {
     case "ip": {
-      const [addr = "", bits, extra] = p.split("/");
-      const family = isIP(addr);
-      if (!family || extra !== undefined) return { error: `“${raw}” is not an IP address or a range like 203.0.113.0/24.` };
-      if (bits === undefined) return { pattern: plainIp(addr) };
-      const max = family === 4 ? 32 : 128;
-      const n = Number(bits);
-      if (!/^\d{1,3}$/.test(bits) || n > max) return { error: `“${raw}”: the range after / must be 0-${max}.` };
-      return { pattern: `${addr}/${n}` };
+      const range = parseRange(p);
+      return "error" in range ? { error: range.error.replace(`“${p}”`, `“${raw.trim()}”`) } : { pattern: formatRange(range) };
     }
     case "email": {
       if (!/^[^\s@]+@[^\s@]+$/.test(p)) return { error: `“${raw}” is not an email pattern. Use name@domain, with * for any characters (spam*@gmail.com).` };
@@ -80,48 +70,45 @@ export function normalizePattern(kind: SignupRuleKind, raw: string): { pattern: 
   }
 }
 
-/** `*` is any run of characters; everything else is literal. Anchored. */
-function globRegex(glob: string): RegExp {
-  return new RegExp(
-    `^${glob
-      .split("*")
-      .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-      .join(".*")}$`,
-  );
-}
-
 /** What the rules know about one sign-up. `flags` is only needed when a flag rule exists. */
 export type SignupFacts = { email: string; ip: string | null; flags: readonly AbuseFlag[] };
 
-function matches(rule: SignupRule, facts: SignupFacts): boolean {
-  const email = facts.email.trim().toLowerCase();
+/** A rule's test, built once per pattern: parsing a range or splitting a glob is not redone for every sign-up. */
+type Matcher = (facts: SignupFacts) => boolean;
+const compiled = new Map<string, Matcher>();
+
+function compile(rule: Pick<SignupRule, "kind" | "pattern">): Matcher {
   switch (rule.kind) {
     case "ip": {
-      if (!facts.ip) return false;
-      const ip = plainIp(facts.ip);
-      const family = isIP(ip);
-      if (!family) return false;
-      const [addr = "", bits] = rule.pattern.split("/");
-      const ruleFamily = isIP(addr);
-      if (ruleFamily !== family) return false;
-      const type = family === 4 ? "ipv4" : "ipv6";
-      const list = new BlockList();
-      if (bits === undefined) list.addAddress(addr, type);
-      else list.addSubnet(addr, Number(bits), type);
-      return list.check(ip, type);
+      const range = parseRange(rule.pattern);
+      if ("error" in range) return () => false; // stored patterns are canonical; an old or hand-edited row matches nothing
+      return (f) => !!f.ip && inRange(range, f.ip);
     }
-    case "email": {
+    case "email":
       // the address as typed, and the mailbox it really is (gmail dots and +tags folded), so `a.b+x@gmail.com` cannot dodge `ab*@gmail.com`
-      const re = globRegex(rule.pattern);
-      return re.test(email) || re.test(emailKey(email));
-    }
-    case "domain": {
-      const d = emailDomain(email);
-      return d === rule.pattern || d.endsWith(`.${rule.pattern}`);
-    }
+      return (f) => {
+        const email = f.email.trim().toLowerCase();
+        return globMatch(rule.pattern, email) || globMatch(rule.pattern, emailKey(email));
+      };
+    case "domain":
+      return (f) => {
+        const d = emailDomain(f.email);
+        return d === rule.pattern || d.endsWith(`.${rule.pattern}`);
+      };
     case "flag":
-      return facts.flags.some((f) => f === rule.pattern);
+      return (f) => f.flags.some((x) => x === rule.pattern);
   }
+}
+
+function matches(rule: SignupRule, facts: SignupFacts): boolean {
+  const key = ruleLabel(rule);
+  let m = compiled.get(key);
+  if (!m) {
+    if (compiled.size >= MAX_SIGNUP_RULES * 2) compiled.clear(); // removed rules' matchers go with the next refill
+    m = compile(rule);
+    compiled.set(key, m);
+  }
+  return m(facts);
 }
 
 const ORDER: Record<SignupRuleAction, number> = { block: 0, allow: 1, hold: 2 };
@@ -143,9 +130,10 @@ export function decideSignup(rules: readonly SignupRule[], facts: SignupFacts): 
 }
 
 /**
- * The abuse flags of a sign-up that has not happened yet, on the same thresholds as the hourly pass
- * (`flagAccounts`): this would be the third account from the address in 7 days (shared_ip), the fifth within
- * an hour (signup_burst), or a temporary domain. One indexed count (`user_signup_ip_idx`).
+ * The abuse flags of a sign-up that has not happened yet, on the hourly pass's own definitions (`flagAccounts`,
+ * constants in abuse.ts): this would be the SHARED_IP_ACCOUNTS-th account from the address within SHARED_IP_DAYS
+ * (shared_ip), the BURST_ACCOUNTS-th in the same clock hour (signup_burst), or a temporary domain. One indexed
+ * count (`user_signup_ip_idx`).
  */
 export async function signupFlags(db: Db, email: string, ip: string | null): Promise<AbuseFlag[]> {
   const flags: AbuseFlag[] = [];
@@ -153,12 +141,13 @@ export async function signupFlags(db: Db, email: string, ip: string | null): Pro
     const [row] = await db
       .select({
         week: sql<number>`count(*)::int`,
-        hour: sql<number>`(count(*) filter (where ${schema.user.createdAt} >= now() - interval '1 hour'))::int`,
+        hour: sql<number>`(count(*) filter (where date_trunc('hour', ${schema.user.createdAt}) = date_trunc('hour', now())))::int`,
       })
       .from(schema.user)
-      .where(and(eq(schema.user.signupIp, ip), gte(schema.user.createdAt, sql`now() - interval '7 days'`)));
-    if ((row?.week ?? 0) >= 2) flags.push("shared_ip");
-    if ((row?.hour ?? 0) >= 4) flags.push("signup_burst");
+      .where(and(eq(schema.user.signupIp, ip), gte(schema.user.createdAt, sql`now() - make_interval(days => ${SHARED_IP_DAYS})`)));
+    // the counts are of earlier accounts; this sign-up would be one more
+    if ((row?.week ?? 0) + 1 >= SHARED_IP_ACCOUNTS) flags.push("shared_ip");
+    if ((row?.hour ?? 0) + 1 >= BURST_ACCOUNTS) flags.push("signup_burst");
   }
   if (isDisposable(email)) flags.push("disposable_email");
   return flags;
@@ -177,9 +166,10 @@ export async function evaluateSignup(db: Db, input: { email: string; ip: string 
 }
 
 /**
- * Called from the Better Auth create hook (auth.ts) before the user row is inserted. Returns the decision and
- * counts the deciding rule's hit; the caller refuses a block and stores a hold. Never fails a sign-up for
- * itself: if the rules cannot be read, it logs and lets SIGNUP_MODE decide.
+ * Called from the Better Auth create hook (auth.ts) before the user row is inserted. Returns the decision; the
+ * caller refuses a block and stores a hold, and counts the hit (`countRuleHit`) once the outcome is real: a
+ * block at once, a hold or allow after the account exists. Never fails a sign-up for itself: if the rules cannot
+ * be read, it logs and lets SIGNUP_MODE decide.
  */
 export async function applySignupRules(db: Db, input: { email: string; ip: string | null }, log: Logger): Promise<SignupDecision> {
   let d: SignupDecision & { flags: AbuseFlag[] };
@@ -189,14 +179,17 @@ export async function applySignupRules(db: Db, input: { email: string; ip: strin
     log.warn({ err }, "sign-up rules unreadable; following SIGNUP_MODE");
     return { action: null, rule: null, matched: [] };
   }
-  if (!d.rule) return d;
-  log.info({ ruleId: d.rule.id, rule: ruleLabel(d.rule), action: d.action, ip: input.ip, flags: d.flags }, "sign-up rule matched");
+  if (d.rule) log.info({ ruleId: d.rule.id, rule: ruleLabel(d.rule), action: d.action, ip: input.ip, flags: d.flags }, "sign-up rule matched");
+  return d;
+}
+
+/** One more sign-up a rule decided (the "Caught" count). Best effort: a missed count never fails a sign-up. */
+export async function countRuleHit(db: Db, ruleId: string, log: Logger): Promise<void> {
   await db
     .update(schema.signupRules)
     .set({ hits: sql`${schema.signupRules.hits} + 1`, lastHitAt: new Date() })
-    .where(eq(schema.signupRules.id, d.rule.id))
-    .catch((err: unknown) => log.warn({ err, ruleId: d.rule?.id }, "sign-up rule hit not counted"));
-  return d;
+    .where(eq(schema.signupRules.id, ruleId))
+    .catch((err: unknown) => log.warn({ err, ruleId }, "sign-up rule hit not counted"));
 }
 
 const ruleOut = (r: SignupRuleRow) => ({
@@ -222,8 +215,8 @@ export async function listSignupRules(svc: Pick<Services, "database">, input?: L
   const test = t
     ? await (async () => {
         const ip = t.ip?.trim() || null;
-        if (ip && !isIP(plainIp(ip))) throw new TRPCError({ code: "BAD_REQUEST", message: `“${ip}” is not an IP address.` });
-        const d = await evaluateSignup(db, { email: t.email, ip: ip ? plainIp(ip) : null });
+        if (ip && !parseIp(ip)) throw new TRPCError({ code: "BAD_REQUEST", message: `“${ip}” is not an IP address.` });
+        const d = await evaluateSignup(db, { email: t.email, ip });
         return {
           email: t.email,
           ip,

@@ -61,7 +61,8 @@ const accountEventSchemas = {
     rule: z.string().optional(),
     ruleAction: z.enum(["hold", "allow"]).optional(),
   }),
-  "user.approved": account,
+  /** approvedAt names the approval (absent on events from before holdUser existed) */
+  "user.approved": account.extend({ approvedAt: z.string().optional() }),
   "user.held": loose,
   "user.role_changed": loose,
   "user.limits_changed": loose,

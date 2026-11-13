@@ -69,7 +69,7 @@ describe("sign-up rules", () => {
     const blocked = (me.data as { blocked: { kind: string; reason: string } | null }).blocked;
     assert.deepEqual(blocked, { kind: "pending", reason: PENDING_APPROVAL_MESSAGE });
 
-    const free = await trySignup(`free.${tag}@example.test`, "203.0.113.77");
+    const free = await trySignup(`free.${tag}@example.test`, "192.0.2.77");
     assert.equal(free.status, 200, free.text);
     made.push(free.userId!);
     const freeRow = await pool.query(`select approved_at, held_by from "user" where id = $1`, [free.userId]);
@@ -91,7 +91,7 @@ describe("sign-up rules", () => {
   });
 
   it("refuses a blocked sign-up with a sentence that names no rule", async () => {
-    const r = await trySignup(`someone@mail.${blockedDomain}`, "203.0.113.78");
+    const r = await trySignup(`someone@mail.${blockedDomain}`, "192.0.2.78");
     assert.equal(r.status, 422, r.text);
     assert.match(r.text, /This sign-up cannot be accepted/);
     assert.ok(!r.text.includes(blockedDomain), r.text);
@@ -129,5 +129,13 @@ describe("sign-up rules", () => {
     assert.equal(ev.rows[0].n, 1);
     const back = await trpc(admin.cookie, "admin.users.approve", { id });
     assert.equal(back.error, undefined, back.error?.message);
+
+    // a suspended account is not quietly un-approved: reinstating it must bring it back as it was
+    await trpc(admin.cookie, "admin.users.ban", { id });
+    const refused = await trpc(admin.cookie, "admin.users.hold", { id });
+    assert.match(refused.error?.message ?? "", /suspended/);
+    const still = await pool.query(`select approved_at from "user" where id = $1`, [id]);
+    assert.notEqual(still.rows[0].approved_at, null);
+    await trpc(admin.cookie, "admin.users.unban", { id });
   });
 });

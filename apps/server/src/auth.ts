@@ -15,7 +15,7 @@ import { templates } from "./email.js";
 import type { Logger } from "./log.js";
 import type { InstanceSettings } from "./instance-settings.js";
 import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
-import { applySignupRules, ruleLabel, SIGNUP_BLOCKED_MESSAGE } from "./signup-rules.js";
+import { applySignupRules, countRuleHit, ruleLabel, SIGNUP_BLOCKED_MESSAGE } from "./signup-rules.js";
 import type { Telemetry } from "./telemetry.js";
 import type { RunInTx } from "./uow.js";
 import { FIRST_ADMIN_LOCK } from "./locks.js";
@@ -107,7 +107,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
   /** emails whose sign-up saw an empty user table; resolved in the `after` hook */
   const firstCandidates = new Set<string>();
   // the sign-up rule that decided a sign-up, from `before` to the event `after` writes (same request, same process)
-  const ruleOf = new Map<string, { rule: string; ruleAction: "hold" | "allow" }>();
+  const ruleOf = new Map<string, { ruleId: string; rule: string; ruleAction: "hold" | "allow" }>();
   return betterAuth({
     baseURL: config.APP_URL,
     secret: config.BETTER_AUTH_SECRET,
@@ -178,12 +178,16 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             // the admin's sign-up rules (signup-rules.ts): block > allow > hold, else SIGNUP_MODE. The first account
             // is the admin whatever the rules say. A held account sees the usual "waiting for approval", never why.
             const rule = first ? null : await applySignupRules(db, { email: user.email, ip }, log);
-            if (rule?.action === "block") throw new APIError("UNPROCESSABLE_ENTITY", { message: SIGNUP_BLOCKED_MESSAGE });
+            if (rule?.action === "block") {
+              if (rule.rule) await countRuleHit(db, rule.rule.id, log);
+              throw new APIError("UNPROCESSABLE_ENTITY", { message: SIGNUP_BLOCKED_MESSAGE });
+            }
             const approved = first || rule?.action === "allow" || (rule?.action !== "hold" && mode() === "open");
             const heldBy = rule?.action === "hold" && rule.rule ? ruleLabel(rule.rule) : null;
             if (ruleOf.size > 1000) ruleOf.clear(); // inserts that failed after `before` never reach `after`
+            // a hold or allow is counted in `after`, once the account exists, so "Caught" matches the accounts it lists
             if (rule?.rule && (rule.action === "hold" || rule.action === "allow"))
-              ruleOf.set(user.email, { rule: ruleLabel(rule.rule), ruleAction: rule.action });
+              ruleOf.set(user.email, { ruleId: rule.rule.id, rule: ruleLabel(rule.rule), ruleAction: rule.action });
             return { data: { ...user, ...guard, role: "user", heldBy, approvedAt: approved ? new Date() : null } };
           },
           // Better Auth owns the user insert, so this event cannot share its transaction. It is a
@@ -204,8 +208,10 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
               u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode() === "open" ? (u.approvedAt ?? new Date()) : null };
             }
             const signedUp = u;
-            const decided = ruleOf.get(u.email);
+            const hit = ruleOf.get(u.email);
             ruleOf.delete(u.email);
+            const decided = hit ? { rule: hit.rule, ruleAction: hit.ruleAction } : undefined;
+            if (hit) await countRuleHit(db, hit.ruleId, log);
             await tx()((w) =>
               w.emit(
                 "user.signed_up",

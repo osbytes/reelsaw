@@ -19,7 +19,14 @@ import type { EventHandler } from "../event-handlers.js";
 
 /** `user.approved` → "Your Reelsaw account is ready" to the account; once per account. */
 export const approvedEmail: EventHandler<"user.approved"> = {
-  key: ({ event, deps }) => (deps.email.enabled ? `approved:${event.payload.userId}` : null),
+  // per approval, not per account: one sent back to approval (holdUser) and approved again is told again
+  // (PRINCIPLES: keep the occurrence in the key when the same thing can rightly happen again)
+  key: ({ event, deps }) =>
+    deps.email.enabled
+      ? event.payload.approvedAt
+        ? `approved:${event.payload.userId}:${event.payload.approvedAt}`
+        : `approved:${event.payload.userId}`
+      : null,
   handle: async ({ event, key, svc }) => {
     const user = await svc.database.db.query.user.findFirst({
       where: eq(schema.user.id, event.payload.userId),
