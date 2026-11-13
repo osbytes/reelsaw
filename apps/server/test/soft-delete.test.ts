@@ -84,9 +84,11 @@ describe("soft delete", () => {
 
   it("delete hides the project, restore brings it back", async () => {
     assert.ok((await listed()).includes(projectId));
+    // the stack's worker may already have finished the re-analyze above, so pin the project mid-run
+    await pool.query(`update projects set status = 'analyzing', stage = 'analyze' where id = $1`, [projectId]);
     const del = await trpc(owner.cookie, "projects.delete", { id: projectId });
     assert.equal(del.status, 200, JSON.stringify(del.error));
-    // work in progress (the re-analyze above) stopped; rows and files are kept
+    // work in progress stopped; rows and files are kept
     const row = await pool.query(`select deleted_at is not null as deleted, status from projects where id = $1`, [projectId]);
     assert.deepEqual(row.rows[0], { deleted: true, status: "failed" });
     assert.ok(!(await listed()).includes(projectId));
