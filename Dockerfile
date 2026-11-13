@@ -25,7 +25,13 @@ ENV DATA_DIR=/data \
     ALIGN_MODEL_DIR=/app/server/models/wav2vec2-base-960h \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=3000
+# Security updates: `upgrade` takes Debian's fixes for packages already in the base image (apt, libc, ...)
+# and `install` takes the current ones for everything ffmpeg pulls in. The registry layer cache would
+# otherwise keep serving this layer as first built, so the release workflow passes the ISO week here and
+# the OS packages are refreshed at least weekly (other builds keep the default and reuse the cache).
+ARG OS_PACKAGES_REFRESH=local
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 \
  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
  && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
