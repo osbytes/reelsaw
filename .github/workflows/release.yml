@@ -55,6 +55,8 @@ jobs:
           echo "version=$(printf %s "${GITHUB_REF_NAME#v}" | tr -cd 'A-Za-z0-9.+-')" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "built_at=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
+          # busts the cached OS-package layer once a week so Debian security fixes reach the image
+          echo "os_week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
           if [ -n "$DOCKERHUB_IMAGE" ] && [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
             echo "dockerhub=true" >> "$GITHUB_OUTPUT"
             printf 'images<<EOF\n%s\n%s\nEOF\n' "$GHCR_IMAGE" "$DOCKERHUB_IMAGE" >> "$GITHUB_OUTPUT"
@@ -105,6 +107,7 @@ jobs:
             REELSAW_VERSION=${{ steps.v.outputs.version }}
             REELSAW_COMMIT=${{ steps.v.outputs.commit }}
             REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
+            OS_PACKAGES_REFRESH=${{ steps.v.outputs.os_week }}
             SENTRY_ORG=${{ vars.SENTRY_ORG }}
             SENTRY_PROJECT=${{ vars.SENTRY_PROJECT }}
           # a BuildKit secret: never in a layer, the cache or the build log
