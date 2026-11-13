@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { EventType } from "../event-types.js";
+import type { SignupRuleAction, SignupRuleKind } from "../signup-rules-schema.js";
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import type {
   EmailPrefSource,
@@ -58,6 +59,11 @@ export const user = pgTable(
     signupIp: text("signup_ip"),
     /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
     flags: jsonb("flags").$type<string[]>().notNull().default([]),
+    /**
+     * The sign-up rule that sent this account to approval (`hold`, signup-rules.ts), as it read then
+     * ("ip 203.0.113.0/24"); null otherwise. Admins see it; the account never does.
+     */
+    heldBy: text("held_by"),
     /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
     /** last seen in the web app (visible tab with recent input) or over MCP, coalesced (presence.ts). Null until then. */
@@ -74,11 +80,38 @@ export const user = pgTable(
     index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
     uniqueIndex("user_email_key_idx").on(t.emailKey),
     index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
+    // the Users filter "held by this rule" (accounts-list.ts); most accounts have none
+    index("user_held_by_idx").on(t.heldBy).where(sql`${t.heldBy} is not null`),
     // the admin Users list order (accounts-list.ts `approvedRank`): pending first, then newest. NULLS FIRST is what
     // `order by … desc` means, so the index matches the query (the columns are never null)
     index("user_list_idx").on(sql`(case when ${t.approvedAt} is null then 0 else 1 end)`, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst()),
   ],
 );
+
+/**
+ * Admin rules applied to each sign-up (signup-rules.ts): an address or range, an email glob, a domain or an abuse
+ * flag, and what a match does (hold for approval, block, allow). A small list (MAX_SIGNUP_RULES) read whole per sign-up.
+ */
+export const signupRules = pgTable(
+  "signup_rules",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").$type<SignupRuleKind>().notNull(),
+    /** normalized (signup-rules.ts `normalizePattern`): lower-case email and domain, an address or CIDR range as typed */
+    pattern: text("pattern").notNull(),
+    action: text("action").$type<SignupRuleAction>().notNull(),
+    note: text("note"),
+    /** the address of the admin who added it, as it was then ("cli" from the operator CLI) */
+    createdBy: text("created_by"),
+    /** sign-ups it decided (blocked ones included); bumped atomically at sign-up */
+    hits: integer("hits").notNull().default(0),
+    lastHitAt: timestamp("last_hit_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  // one rule per pattern: two rules on the same address with different actions would read as a contradiction
+  (t) => [uniqueIndex("signup_rules_pattern_idx").on(t.kind, t.pattern)],
+);
+export type SignupRuleRow = typeof signupRules.$inferSelect;
 
 /** Per-account request counter for the mutation rate limit (abuse.ts `checkRequestRate`): one row per user and minute, pruned hourly. */
 export const userRate = pgTable(

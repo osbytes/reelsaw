@@ -19,6 +19,8 @@ import { z } from "zod";
 export const ACCOUNT_EVENT_TYPES = [
   "user.signed_up",
   "user.approved",
+  /** an admin sent an active account back to waiting for approval (accounts.ts holdUser) */
+  "user.held",
   "user.role_changed",
   "user.limits_changed",
   "user.watermark_changed",
@@ -31,6 +33,8 @@ export const ACCOUNT_EVENT_TYPES = [
   "models.changed",
   "provider.changed",
   "settings.changed",
+  /** sign-up rules added or removed (signup-rules.ts), recorded against the admin who did it */
+  "signup_rules.changed",
   "failures.retried",
   // billing (ee/): written by the subscription sync, never by a webhook handler directly
   "billing.subscribed",
@@ -49,8 +53,16 @@ const account = z.object({ userId: z.string(), email: z.string() });
 const loose = account.catchall(z.unknown());
 
 const accountEventSchemas = {
-  "user.signed_up": account.extend({ role: z.string(), approved: z.boolean(), mode: z.string() }),
+  "user.signed_up": account.extend({
+    role: z.string(),
+    approved: z.boolean(),
+    mode: z.string(),
+    /** the sign-up rule that decided it ("ip 203.0.113.0/24"), and what it did; absent when none matched */
+    rule: z.string().optional(),
+    ruleAction: z.enum(["hold", "allow"]).optional(),
+  }),
   "user.approved": account,
+  "user.held": loose,
   "user.role_changed": loose,
   "user.limits_changed": loose,
   "user.watermark_changed": loose,
@@ -64,6 +76,7 @@ const accountEventSchemas = {
   "models.changed": loose,
   "provider.changed": loose,
   "settings.changed": loose,
+  "signup_rules.changed": loose,
   "failures.retried": loose,
   "billing.subscribed": loose,
   "billing.changed": loose,

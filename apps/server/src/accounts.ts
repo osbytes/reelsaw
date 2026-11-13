@@ -1,5 +1,5 @@
 /**
- * Account administration: approve, change role, suspend, remove, set password. One function per
+ * Account administration: approve, hold for approval, change role, suspend, remove, set password. One function per
  * transition, each a unit of work that writes the user row and its event (`u.emit`)
  * together; mail that follows is a handler on the event (notify/account.ts). tRPC (admin router) and the CLI call these; nothing else edits role/approval
  * columns or the credential hash.
@@ -40,6 +40,23 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     await u.emit("user.approved", { userId, email: user.email }, { actorId });
     // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
     u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
+    return { ok: true, changed: true };
+  });
+}
+
+/**
+ * Send an active account back to waiting for approval: it sees the usual "waiting for approval" page from its
+ * next request (the requester reads the row), keeps its projects, and is not told why. Approving it again
+ * undoes it. Not for admins (demote first) or yourself.
+ */
+export async function holdUser(svc: Services, actorId: string | null, userId: string) {
+  return svc.tx(async (u) => {
+    const user = await lockedUser(u, userId);
+    if (!user.approvedAt) return { ok: true, changed: false };
+    if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot send your own account back to approval." });
+    if (user.role === "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "Admins cannot be sent back to approval. Remove the admin role first." });
+    await u.db.update(schema.user).set({ approvedAt: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
+    await u.emit("user.held", { userId, email: user.email }, { actorId });
     return { ok: true, changed: true };
   });
 }
@@ -198,12 +215,14 @@ export async function setUserPassword(
 /** Which accounts each action can change; the others are left as they are (not an error). */
 const APPLIES: Record<BulkUserAction, (s: UserStatus) => boolean> = {
   approve: (s) => s === "pending",
+  hold: (s) => s === "active",
   suspend: (s) => s !== "suspended",
   reinstate: (s) => s === "suspended",
   delete: () => true,
 };
 const APPLIES_SQL: Record<BulkUserAction, SQL | undefined> = {
   approve: sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`,
+  hold: sql`${schema.user.approvedAt} is not null and not ${schema.user.banned}`,
   suspend: sql`not ${schema.user.banned}`,
   reinstate: sql`${schema.user.banned}`,
   delete: undefined,
@@ -254,6 +273,9 @@ export async function bulkUsers(svc: Services, actorId: string | null, input: Bu
     try {
       if (input.action === "approve") {
         if ((await approveUser(svc, actorId, r.id)).changed) changed++;
+        else unchanged++;
+      } else if (input.action === "hold") {
+        if ((await holdUser(svc, actorId, r.id)).changed) changed++;
         else unchanged++;
       } else if (input.action === "suspend") {
         await banUser(svc, actorId, r.id, reason);

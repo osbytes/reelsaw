@@ -8,7 +8,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { ACCOUNT_EXISTS_MESSAGE } from "@reelsaw/shared";
-import { BASE, db, signUp } from "./helpers.js";
+import { BASE, db, postSignUp, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
@@ -21,24 +21,7 @@ async function trpc(cookie: string, path: string, input?: unknown, method: "GET"
   return { status: res.status, data: body.result?.data as never, error: body.error };
 }
 /** A raw sign-up attempt from a given (proxied) address; returns the status and the server's sentence. */
-async function trySignup(email: string, ip: string) {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${BASE}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { ...json, "x-forwarded-for": ip },
-      body: JSON.stringify({ email, password: `pw-${randomUUID()}`, name: "Guard" }),
-    });
-    const text = await res.text();
-    if (res.status !== 429 || attempt >= 12) {
-      let userId: string | null = null;
-      try {
-        userId = (JSON.parse(text) as { user?: { id: string } }).user?.id ?? null;
-      } catch {}
-      return { status: res.status, text, userId };
-    }
-    await new Promise((r) => setTimeout(r, 2500 + Math.random() * 1500));
-  }
-}
+const trySignup = (email: string, ip: string) => postSignUp({ email, password: `pw-${randomUUID()}`, name: "Guard" }, { "x-forwarded-for": ip });
 
 describe("abuse guards", () => {
   const pool = db();

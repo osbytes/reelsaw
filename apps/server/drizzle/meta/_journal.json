@@ -393,6 +393,20 @@
       "when": 1794085641199,
       "tag": "0055_user_list_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794533259931,
+      "tag": "0056_signup_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794534644191,
+      "tag": "0057_user_held_by_idx",
+      "breakpoints": true
     }
   ]
 }

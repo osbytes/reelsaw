@@ -28,6 +28,8 @@ export const txLock = {
   mediaLinks: (userId: string) => `media-links:${userId}`,
   /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
   diskVolume: (volume: string) => `disk:${volume}`,
+  /** the instance's sign-up rules, counted against MAX_SIGNUP_RULES when some are added (signup-rules.ts) */
+  signupRules: () => "signup-rules",
 } as const;
 
 /** The one lock with no subject: "which sign-up becomes the first admin" (auth.ts). Arbitrary constant. */

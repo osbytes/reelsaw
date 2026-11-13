@@ -1,3 +1,4 @@
+import { SignupRulesSection } from "../components/SignupRules";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useLocation } from "react-router";
@@ -64,6 +65,7 @@ const SYSTEM_SECTIONS: Section[] = [
   ["queue", "Queue"],
   ["models", "Models"],
   ["access", "Access"],
+  ["signup-rules", "Sign-up rules"],
   ["limits", "Limits"],
   ["pipeline", "Pipeline"],
   ["retention", "Retention"],
@@ -389,6 +391,7 @@ function SystemTab() {
         intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in."
         fields={ACCESS_FIELDS}
       />
+      <SignupRulesSection />
       <InstanceSettingsGroup
         id="limits"
         title="Limits"

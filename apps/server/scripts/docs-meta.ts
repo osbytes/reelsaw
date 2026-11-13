@@ -56,7 +56,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   SIGNUP_MODE: [
     "accounts",
-    "`open`: anyone may sign up. `approval`: new accounts wait for an admin (a private box). `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. A public instance with email confirmation, captcha and quotas should stay `open`.",
+    "`open`: anyone may sign up. `approval`: new accounts wait for an admin (a private box). `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. A public instance with email confirmation, captcha and quotas should stay `open`, with sign-up rules (Settings → System → Sign-up rules, `reelsaw signup-rules`) holding the addresses, emails, domains or abuse flags that should wait for an admin.",
   ],
   ALLOW_SIGNUP: ["accounts", "Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE."],
   EMAIL_DRIVER: [

@@ -1,0 +1,1 @@
+CREATE INDEX "user_held_by_idx" ON "user" USING btree ("held_by") WHERE "user"."held_by" is not null;
