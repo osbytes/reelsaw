@@ -199,6 +199,27 @@ OPENAI_API_KEY=local
 
 Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; qwen2.5 14b (the installer's default on 24 GB or more), llama3.1 8b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
 
+### OpenRouter and other OpenAI-compatible cloud APIs
+
+Routers such as [OpenRouter](https://openrouter.ai) go through the `compat` provider too. Name it so
+model ids read naturally, and keep transcription on a vendor that returns word timestamps (OpenRouter
+has no Whisper endpoint):
+
+```
+OPENAI_COMPATIBLE_NAME=openrouter
+OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_COMPATIBLE_API_KEY=sk-or-v1-...
+AI_MODEL=openrouter:anthropic/claude-sonnet-4.5   # any id from openrouter.ai/models after "openrouter:"
+TRANSCRIPTION_MODEL=groq:whisper-large-v3-turbo   # or openai:whisper-1, deepgram:nova-3, assemblyai:best
+GROQ_API_KEY=...
+```
+
+Only the first `:` separates the provider, so `vendor/model` ids (and OpenRouter's `:free` suffixes)
+pass through unchanged. Don't point `OPENAI_BASE_URL` at OpenRouter: that moves `openai:` transcription
+there as well, and the boot check then looks for `whisper-1` and bare model names that OpenRouter
+doesn't list. The compat server is capped at 2 model calls in flight, sized for a local machine; a
+cloud router takes more, so raise it with `PROVIDER_CONCURRENCY=openrouter=8`.
+
 ### Using a GPU
 
 Three things can use one, each in its own container, so the GPU is a Compose override rather than

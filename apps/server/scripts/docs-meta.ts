@@ -172,7 +172,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
 
   OPENAI_API_KEY: ["providers", "OpenAI key. With OPENAI_BASE_URL it is the key for that server (`local` for Speaches)."],
-  OPENAI_BASE_URL: ["providers", "Point the OpenAI provider at a local OpenAI-compatible server (Speaches, LM Studio, vLLM), e.g. `http://speaches:8000/v1`."],
+  OPENAI_BASE_URL: [
+    "providers",
+    "Point the OpenAI provider at a local OpenAI-compatible server (Speaches, LM Studio, vLLM), e.g. `http://speaches:8000/v1`. It also moves `openai:` transcription there, so use OPENAI_COMPATIBLE_BASE_URL for a cloud router such as OpenRouter.",
+  ],
   OPENAI_API_MODE: ["providers", "`responses` (OpenAI default) or `chat`. Defaults to `chat` whenever OPENAI_BASE_URL is set."],
   ANTHROPIC_API_KEY: ["providers", "Anthropic key (language model only; Anthropic has no speech-to-text)."],
   GOOGLE_GENERATIVE_AI_API_KEY: ["providers", "Google Gemini key."],
@@ -186,10 +189,13 @@ export const DOCS: Record<string, [GroupId, string]> = {
   VERCEL_OIDC_TOKEN: ["providers", "Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform)."],
   OPENAI_COMPATIBLE_BASE_URL: [
     "providers",
-    "Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`).",
+    "Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`).",
   ],
   OPENAI_COMPATIBLE_API_KEY: ["providers", "Key for the compat server (`ollama` for Ollama)."],
-  OPENAI_COMPATIBLE_NAME: ["providers", "Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>`."],
+  OPENAI_COMPATIBLE_NAME: [
+    "providers",
+    "Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>` (`openrouter` gives `openrouter:anthropic/claude-sonnet-4.5`).",
+  ],
   OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS: [
     "providers",
     "Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient.",
