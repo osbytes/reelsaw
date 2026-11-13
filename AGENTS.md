@@ -7,7 +7,9 @@ responsive, visible viewport not 100vh) rules that apply to every change, confir
 the glue for integrations, so every user-facing feature ships with its MCP tool (and CLI command)
 backed by the same service code as the screen. The same change updates public copy (README,
 `website/content/`, the matching `docs/` page) so shipped work is not still on the roadmap or
-described as something Reelsaw cannot do (Process). Overlay stacking (Select/Combobox inside a
+described as something Reelsaw cannot do (Process). Every fix closes its class, not just the
+instance: name the mistake, fix its siblings, and add the strongest guard that fits (a type or the
+one shared helper, else a lint rule or test, else a written rule here or in `docs/`) (Process). Overlay stacking (Select/Combobox inside a
 dialog) and the mobile viewport (`h-dvh`, never `h-screen`) are [docs/UI.md](docs/UI.md).
 
 Layout: `apps/server` (Hono, tRPC, Drizzle, pg-boss workers), `apps/web` (Vite, React, Tailwind,
