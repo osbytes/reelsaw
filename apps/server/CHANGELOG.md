@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.35.0
+
+### Minor Changes
+
+- [#263](https://github.com/osbytes/reelsaw/pull/263) [`8437346`](https://github.com/osbytes/reelsaw/commit/8437346020758d4d21a00137b312977d632aac75) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Sign-up rules. Keep sign-ups open and send only the ones that look wrong to approval. A rule matches an address or CIDR range, an email pattern (`spam*@gmail.com`, which dots and `+tags` cannot dodge), an email domain, or an abuse flag worked out at sign-up (a shared address, a burst, a temporary domain). It then holds the sign-up for approval, blocks it, or lets it in at once even when sign-ups need approval. A held account sees the usual "Waiting for approval" page and is never told why; admins see which rule held it on the Users page. Set rules up under Settings → System → Sign-up rules, which also counts what each rule caught and lets you try an address against them; a hold rule's count opens Users filtered to the accounts it held. Or make one from an account: **Add sign-up rule…** in its menu on the Users page offers its address, that address's range, its email and its domain, and can send that account back to approval at the same time. Over MCP they are `list_signup_rules` and `manage_signup_rules`; on the box, `reelsaw signup-rules`. For accounts that already exist, the Users page has **Require approval** for one account or a selection (every flagged account, say), also available as `manage_users` and `reelsaw users-bulk` with `hold`.
+
+### Patch Changes
+
+- [#266](https://github.com/osbytes/reelsaw/pull/266) [`9d909d7`](https://github.com/osbytes/reelsaw/commit/9d909d715f19340ee50d7c35b129620dfa696706) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Security fixes. Hono 4.13.18 and @hono/node-server 2.1.7 close advisories in CSRF checks, form validation, mounted-route middleware, router wildcards and backslash paths, and a crash on a reset WebSocket upgrade. The Docker image now takes Debian's security updates for apt, Cyrus SASL and SRT, and release builds refresh the OS packages every week instead of reusing an old cached layer.
+
 ## 0.34.1
 
 ### Patch Changes
