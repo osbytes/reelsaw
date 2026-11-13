@@ -322,7 +322,7 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   Update baselines deliberately with `--update`.
 - **Don't overfit.** A fix should be a general rule that explains the failure, not a special
   case for one video. The regression fixture proves the case. Other fixtures prove you didn't
-  break them.
+  break them. (The pipeline form of "Fix the class, not the instance" under Process.)
 - **Prompted models over-delete and over-claim.** Put structural guards (rules) in front and a
   verifier behind, and keep only verified uncertain results, for review.
 - **Operable by default.** Logs are the first debugging tool (see "Logging" under Backend /
@@ -454,6 +454,34 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   new `h-screen`). Run the relevant evals for pipeline work.
 - Commit and push only when asked. Commit messages describe the change and why; no
   tool-attribution trailers.
+- **Fix the class, not the instance.** A bug is evidence that the codebase made a mistake easy.
+  Patching the one place it showed up leaves every sibling in place and the next person free to
+  write it again. Every fix answers four questions, in the same change:
+  1. **What is the class?** Name the mistake, not the symptom: not "the settings footer scrolls
+     away" but "a page-height layout without a bounded scroll container", not "this job ran twice"
+     but "a side effect outside the transaction that claims the work". Ask why it was easy to get
+     wrong: a missing helper, an API that invites misuse, a rule nobody wrote down.
+  2. **Where else is it?** Search for the pattern (`rg`), not just the file you were in. Fix the
+     siblings in the same change, or list the ones you left and why.
+  3. **What stops the next one?** Take the strongest guard whose cost fits the class:
+     - *Unrepresentable*: a type, a zod schema, or the one shared helper or component that is the
+       only way to do the thing (`ConfirmDialog`, the transaction helpers, the shared geometry), so
+       the wrong version does not compile or has nowhere to live.
+     - *Fails CI*: a Biome rule or GritQL plugin (`biome.json`), a test that scans the source for
+       the pattern, a `docs:check`-style drift check, an eval fixture for pipeline behaviour.
+     - *Written down*: a rule in this file, `UI.md`, `EVALS.md` or `TROUBLESHOOTING.md`, phrased as
+       the general rule with the incident as its example. Prose is the weakest guard: use it when a
+       check would be noisy or the class is about judgement, and say so.
+  4. **Is the general solution better than the fix?** Often the right change is the abstraction
+     the bug pointed at (a primitive that owns the scroll container, a wrapper that owns the
+     lock) and the original fix falls out of adopting it everywhere.
+
+  Keep guards honest. A rule earned by one incident stays as narrow as the evidence; widen it when
+  the class shows up again. Edit the existing rule rather than adding a near-duplicate, and delete
+  a rule a check now enforces, pointing at the check. The commit or PR says the class, the guard,
+  and the siblings fixed. Reviews ask the same thing: "what stops this happening again?" A fix
+  with no answer is a whack-a-mole fix; take it only when it is urgent, and leave the class as a
+  tracked follow-up, not a memory.
 - **Docs ship with the capability.** A user-facing feature or improvement is not finished until
   the public copy matches the code, in the same change, not as a follow-up. Leaving
   "Reelsaw cannot X" on the site after X shipped is the same class of bug as shipping a screen
