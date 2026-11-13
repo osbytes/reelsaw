@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.34.1
+
+### Patch Changes
+
+- [#259](https://github.com/osbytes/reelsaw/pull/259) [`e545be3`](https://github.com/osbytes/reelsaw/commit/e545be34fd375833847407ac1f48a635eed126fd) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Browser traces name uploads correctly. An upload used to show up as `GET /api/upload`, or as a bare `POST` when the connection dropped partway. It is now `POST /api/upload` either way, so failed uploads group together with the ones that finished.
+
 ## 0.34.0
 
 ### Minor Changes
