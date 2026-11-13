@@ -27,6 +27,7 @@ import {
   ListTable,
 } from "../components/ListPage";
 import { SelectionBar } from "../components/SelectionBar";
+import { RuleFromUserDialog } from "../components/SignupRules";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 
 type Usage = {
@@ -55,6 +56,8 @@ type Row = {
   plan: string | null /** abuse flags from the hourly pass (abuse.ts) */;
   flags: string[];
   signupIp: string | null;
+  /** the sign-up rule that held it for approval ("ip 203.0.113.0/24"); admins only, the account is never told */
+  heldBy: string | null;
   mustChangePassword: boolean;
 };
 const FLAG_HELP: Record<string, string> = {
@@ -81,11 +84,17 @@ const VERIFIED_OPTIONS = [
   { value: "no", label: "Unverified" },
 ];
 
-type BulkAction = "approve" | "suspend" | "reinstate" | "delete";
+type BulkAction = "approve" | "hold" | "suspend" | "reinstate" | "delete";
 type BulkResult = { changed: number; unchanged: number; skipped: Array<{ id: string; email: string; reason: string }> };
 /** Accounts per bulk call (BULK_USERS on the server): a longer selection goes in several calls. */
 const BULK_CHUNK = 50;
-const BULK_DONE: Record<BulkAction, string> = { approve: "Approved", suspend: "Suspended", reinstate: "Reinstated", delete: "Deleted" };
+const BULK_DONE: Record<BulkAction, string> = {
+  approve: "Approved",
+  hold: "Sent back to approval:",
+  suspend: "Suspended",
+  reinstate: "Reinstated",
+  delete: "Deleted",
+};
 
 const PAGE = 50;
 
@@ -118,8 +127,11 @@ export function AdminUsersPage() {
   const [flaggedOnly, setFlaggedOnly] = useState(() => readHash().get("flagged") === "1");
   const [status, setStatus] = useState<Status | "">(() => asStatus(readHash().get("status")));
   const [verified, setVerified] = useState<"yes" | "no" | "">(() => asYesNo(readHash().get("verified")));
+  /** only the accounts one sign-up rule held ("ip 203.0.113.0/24"), from the rule's link in Settings */
+  const [heldBy, setHeldBy] = useState(() => readHash().get("held") ?? "");
+  const [ruleFor, setRuleFor] = useState<Row | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role"; row: Row } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role" | "hold"; row: Row } | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState<BulkAction | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
@@ -137,6 +149,7 @@ export function AdminUsersPage() {
     setFlaggedOnly(h.get("flagged") === "1");
     setStatus(asStatus(h.get("status")));
     setVerified(asYesNo(h.get("verified")));
+    setHeldBy(h.get("held") ?? "");
   }, [hashKey]);
   const q = useDebounced(search.trim(), 200);
   const filter = useMemo(
@@ -145,15 +158,16 @@ export function AdminUsersPage() {
       flagged: flaggedOnly || undefined,
       status: status || undefined,
       verified: verified ? verified === "yes" : undefined,
+      heldBy: heldBy || undefined,
     }),
-    [q, flaggedOnly, status, verified],
+    [q, flaggedOnly, status, verified, heldBy],
   );
   useEffect(() => {
-    writeHash({ q: q || null, flagged: flaggedOnly ? 1 : null, status: status || null, verified: verified || null });
+    writeHash({ q: q || null, flagged: flaggedOnly ? 1 : null, status: status || null, verified: verified || null, held: heldBy || null });
     // a selection made under other filters is not what the new list shows
     setSel([]);
     setAllMatching(false);
-  }, [q, flaggedOnly, status, verified]);
+  }, [q, flaggedOnly, status, verified, heldBy]);
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
@@ -170,6 +184,7 @@ export function AdminUsersPage() {
   };
   const fail = (e: { message: string }) => toast.error(e.message);
   const approve = useMutation({ ...trpc.admin.users.approve.mutationOptions(), onSuccess: done("Approved"), onError: fail });
+  const hold = useMutation({ ...trpc.admin.users.hold.mutationOptions(), onSuccess: done("Sent back to approval"), onError: fail });
   const setRole = useMutation({ ...trpc.admin.users.setRole.mutationOptions(), onSuccess: done("Role changed"), onError: fail });
   const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
   const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
@@ -213,7 +228,7 @@ export function AdminUsersPage() {
       refresh();
     },
   });
-  const busy = approve.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending || bulk.isPending;
+  const busy = approve.isPending || hold.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending || bulk.isPending;
   // a refetch drops rows that left the list (deleted, or no longer matching): so does the selection
   useEffect(() => {
     const live = new Set(loaded.map((r) => r.id));
@@ -253,6 +268,7 @@ export function AdminUsersPage() {
   /** The checked rows each action can change (an approved account needs no approval, nobody suspends or deletes themself). */
   const applies: Record<BulkAction, (r: Row) => boolean> = {
     approve: (r) => r.status === "pending",
+    hold: (r) => r.status === "active" && r.role !== "admin" && r.id !== selfId,
     suspend: (r) => r.status !== "suspended" && r.id !== selfId,
     reinstate: (r) => r.status === "suspended",
     delete: (r) => r.id !== selfId,
@@ -303,7 +319,7 @@ export function AdminUsersPage() {
     { label: "Active", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
-  const filtered = !!(flaggedOnly || status || verified);
+  const filtered = !!(flaggedOnly || status || verified || heldBy);
 
   return (
     <ListPage
@@ -311,6 +327,19 @@ export function AdminUsersPage() {
       subtitle={`Who can use this instance${pending ? ` · ${num.format(pending)} waiting for approval` : ""}`}
       actions={
         <>
+          {/* arrives with the link from a rule in Settings → Sign-up rules; nothing on this page turns it on, so it never moves the others */}
+          {heldBy && (
+            <button
+              type="button"
+              className="btn-ghost h-[38px] max-w-[16rem] gap-1.5 bg-sunk text-xs font-semibold"
+              onClick={() => setHeldBy("")}
+              title={`Only accounts the sign-up rule ${heldBy} held. Click to show everyone.`}
+            >
+              <span className="truncate">Held by {heldBy}</span>
+              <span aria-hidden>✕</span>
+              <span className="sr-only">Clear this filter</span>
+            </button>
+          )}
           <button
             type="button"
             className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`}
@@ -423,6 +452,18 @@ export function AdminUsersPage() {
                         </span>
                       )}
                       {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
+                      {r.status === "pending" && r.heldBy && (
+                        // the kind only ("held · email"), so the name keeps its room; the whole rule is in the title.
+                        // A click lists everyone that rule held.
+                        <button
+                          type="button"
+                          className="chip shrink-0 bg-sunk text-ink2 hover:text-ink"
+                          onClick={() => setHeldBy(r.heldBy ?? "")}
+                          title={`Held for approval by the sign-up rule ${r.heldBy}. They only see “waiting for approval”. Click to list everyone it held.`}
+                        >
+                          held · {r.heldBy.split(" ")[0]}
+                        </button>
+                      )}
                       {r.flags.map((f) => (
                         <span
                           key={f}
@@ -495,6 +536,16 @@ export function AdminUsersPage() {
                             <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => setLimitsFor(r)}>
                               Limits…
                             </DropdownMenu.Item>
+                            {r.status === "active" && (
+                              <DropdownMenu.Item
+                                className="menu-item"
+                                disabled={busy || self || r.role === "admin"}
+                                onSelect={() => setConfirm({ kind: "hold", row: r })}
+                              >
+                                Require approval…
+                                {(self || r.role === "admin") && <span className="menu-hint">{self ? "not your own" : "not an admin"}</span>}
+                              </DropdownMenu.Item>
+                            )}
                             {r.status === "pending" && (
                               <DropdownMenu.Item
                                 className="menu-item"
@@ -507,6 +558,9 @@ export function AdminUsersPage() {
                                 Suspend
                               </DropdownMenu.Item>
                             )}
+                            <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => window.setTimeout(() => setRuleFor(r), 0)}>
+                              Add sign-up rule…
+                            </DropdownMenu.Item>
                             <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setConfirm({ kind: "role", row: r })}>
                               {r.role === "admin" ? "Remove admin…" : "Make admin…"}
                               {self && <span className="menu-hint">not your own</span>}
@@ -592,6 +646,10 @@ export function AdminUsersPage() {
                       Reinstate
                       {bulkOff("reinstate") && !busy && <span className="menu-hint">none suspended</span>}
                     </DropdownMenu.Item>
+                    <DropdownMenu.Item className="menu-item" disabled={bulkOff("hold")} onSelect={() => window.setTimeout(() => setBulkConfirm("hold"), 0)}>
+                      Require approval…
+                      {bulkOff("hold") && !busy && <span className="menu-hint">none active</span>}
+                    </DropdownMenu.Item>
                     <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
                     <DropdownMenu.Item
                       className="menu-item-danger"
@@ -609,6 +667,7 @@ export function AdminUsersPage() {
       )}
 
       {limitsFor && <LimitsDialog row={limitsFor} onClose={() => setLimitsFor(null)} />}
+      {ruleFor && <RuleFromUserDialog user={ruleFor} onClose={() => setRuleFor(null)} />}
       <ConfirmDialog
         open={bulkConfirm === "approve"}
         onOpenChange={(o) => !o && setBulkConfirm(null)}
@@ -617,6 +676,17 @@ export function AdminUsersPage() {
         confirm="Approve"
         onConfirm={() => {
           runBulk("approve");
+          setBulkConfirm(null);
+        }}
+      />
+      <ConfirmDialog
+        open={bulkConfirm === "hold"}
+        onOpenChange={(o) => !o && setBulkConfirm(null)}
+        title={`Require approval for ${scope("hold")}?`}
+        body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until approved again. They are not told why, and their projects stay. Admins and your own account are left out."
+        confirm="Require approval"
+        onConfirm={() => {
+          runBulk("hold");
           setBulkConfirm(null);
         }}
       />
@@ -690,6 +760,17 @@ export function AdminUsersPage() {
         danger={confirm?.row.role !== "admin"}
         onConfirm={() => {
           if (confirm) setRole.mutate({ id: confirm.row.id, role: confirm.row.role === "admin" ? "user" : "admin" });
+          setConfirm(null);
+        }}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "hold"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={`Require approval for ${confirm?.row.email ?? "this account"}?`}
+        body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until you approve them again. They are not told why, and their projects stay."
+        confirm="Require approval"
+        onConfirm={() => {
+          if (confirm) hold.mutate({ id: confirm.row.id });
           setConfirm(null);
         }}
       />

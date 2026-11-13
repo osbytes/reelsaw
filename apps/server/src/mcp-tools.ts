@@ -26,6 +26,7 @@ import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpers
 import { emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { BULK_USERS, bulkUsersShape, userListInput } from "./accounts-schema.js";
+import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
@@ -833,8 +834,21 @@ export const TOOLS = {
   },
   manage_users: {
     title: "Act on many accounts",
-    description: `Admins only: approve, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). delete removes the accounts with all their projects and files forever; suspend signs them out and blocks the app, keys and MCP. Your own account and the last admin are skipped with the reason. Up to ${BULK_USERS} per call: with a filter, call again with nextCursor until null. Returns { action, changed, unchanged, skipped: [{ id, email, reason }], nextCursor }.`,
+    description: `Admins only: approve, hold, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). hold: back to waiting for approval, not told why; suspend: signed out, app, keys and MCP blocked; delete: gone with all projects and files, forever. You and the last admin are skipped with the reason. Up to ${BULK_USERS} per call: with a filter, call again with nextCursor until null. Returns { action, changed, unchanged, skipped: [{ id, email, reason }], nextCursor }.`,
     inputSchema: bulkUsersShape,
+    annotations: { destructiveHint: true },
+  },
+  list_signup_rules: {
+    title: "List sign-up rules",
+    description: `Admins only: the sign-up rules in front of SIGNUP_MODE, oldest first (at most ${MAX_SIGNUP_RULES}). A rule matches by ip (address or CIDR), email (glob), domain or abuse flag and holds the sign-up for approval (not told why), blocks it or allows it; block beats allow beats hold, no match follows SIGNUP_MODE. test { email, ip } says what they would do, creating nothing. Returns { rules: [{ id, kind, pattern, action, note, hits, lastHitAt }], max, test: { action, rule, matched, flags } | null }.`,
+    inputSchema: listSignupRulesShape,
+    annotations: { readOnlyHint: true },
+  },
+  manage_signup_rules: {
+    title: "Change sign-up rules",
+    description:
+      "Admins only: add and remove sign-up rules in one call (ids from list_signup_rules). Rules apply to the next sign-up only; accounts that exist are not touched (send one back to approval with manage_users action hold). Removing a hold or block rule lets those sign-ups in again. One rule per kind and pattern: remove the old one to change what it does. Returns { added, removed } with the rules as list_signup_rules shows them.",
+    inputSchema: manageSignupRulesShape,
     annotations: { destructiveHint: true },
   },
   set_instance_settings: {

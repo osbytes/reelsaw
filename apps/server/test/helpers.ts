@@ -29,28 +29,52 @@ export function db(): pg.Pool {
   return new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL ?? `postgres://reelsaw:${pw}@127.0.0.1:5432/reelsaw` });
 }
 
+/** How long a sign-up keeps waiting out Better Auth's limit before the test fails. */
+const SIGNUP_DEADLINE_MS = 180_000;
+
+/**
+ * One sign-up through the real endpoint, waiting out Better Auth's rate limit (3 sign-ups per 10 s for the whole
+ * instance). Stack suites run in parallel and each makes a few accounts, so a burst queues: on a 429 it sleeps for
+ * the `X-Retry-After` the server sends, plus jitter so the waiters do not all come back in the same millisecond, until
+ * a deadline rather than a fixed number of tries (a fixed count lost the race in CI). Any other status is returned
+ * as it is, for tests that expect a refusal. `cookie` is the new session, empty when there is none.
+ */
+export async function postSignUp(
+  input: { email: string; password: string; name: string },
+  headers: Record<string, string> = {},
+): Promise<{ status: number; text: string; cookie: string; userId: string | null }> {
+  const deadline = Date.now() + SIGNUP_DEADLINE_MS;
+  for (;;) {
+    const res = await fetch(`${BASE}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, ...headers },
+      body: JSON.stringify(input),
+    });
+    const text = await res.text();
+    if (res.status === 429 && Date.now() < deadline) {
+      const after = Number(res.headers.get("x-retry-after"));
+      const waitMs = (Number.isFinite(after) && after > 0 ? after * 1000 : 3000) + Math.random() * 2000;
+      await new Promise((r) => setTimeout(r, Math.min(waitMs, Math.max(0, deadline - Date.now()))));
+      continue;
+    }
+    let userId: string | null = null;
+    try {
+      userId = (JSON.parse(text) as { user?: { id?: string } }).user?.id ?? null;
+    } catch {}
+    const cookie = res.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
+    return { status: res.status, text, cookie, userId };
+  }
+}
+
 export async function signUp(opts?: { password?: string }): Promise<{ email: string; cookie: string; userId: string; password: string }> {
   const email = `test-${randomUUID().slice(0, 8)}@example.test`;
   const password = opts?.password ?? `pw-${randomUUID()}`;
-  let res!: Response;
-  // Better Auth allows 3 sign-ups per 10 s; suites run in parallel and each makes a few users
-  for (let attempt = 0; ; attempt++) {
-    res = await fetch(`${BASE}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: BASE },
-      body: JSON.stringify({ email, password, name: "Test" }),
-    });
-    if (res.status !== 429 || attempt >= 12) break;
-    await res.text();
-    await new Promise((r) => setTimeout(r, 2500 + Math.random() * 1500));
-  }
-  if (!res.ok) throw new Error(`sign-up failed: ${res.status} ${await res.text()}`);
-  const cookie = res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0])
-    .join("; ");
-  const body = (await res.json()) as { user: { id: string } };
-  return { email, cookie, userId: body.user.id, password };
+  const r = await postSignUp({ email, password, name: "Test" });
+  if (r.status !== 200 || !r.userId) throw new Error(`sign-up failed: ${r.status} ${r.text}`);
+  return { email, cookie: r.cookie, userId: r.userId, password };
 }
 
 /** Create an API key for a signed-in account (the same call Settings → API keys makes). */

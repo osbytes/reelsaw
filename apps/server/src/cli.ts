@@ -11,11 +11,12 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--limit n] [--cursor c] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--held rule] [--limit n] [--cursor c] [--json]
  *                                           list accounts a page at a time: role, status, email verified, sign-up date
- *   users-bulk <approve|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
+ *   users-bulk <approve|hold|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
  *                                           act on many accounts (same as the Users selection bar and manage_users);
- *                                           filter flags as for `users`; delete is forever
+ *                                           hold sends active ones back to approval; filter flags as for `users`
+ *                                           (--held "ip 203.0.113.0/24": accounts that sign-up rule held); delete is forever
  *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
  *   make-admin <email>                      promote an account to admin (approves it first if needed)
  *   set-password <email> [--must-change]    set an account's password from a prompt (or two stdin lines);
@@ -159,6 +160,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           same as their Settings → Account and the email's unsubscribe link)
  *   abuse [--run]                           accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
+ *   signup-rules [list | add <ip|email|domain|flag> <pattern> <hold|block|allow> [--note text] | rm <id…> | test <email> [--ip addr]]
+ *                                           sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules
+ *                                           and list_signup_rules / manage_signup_rules); hold = needs approval
+ *                                           without saying why; rm takes ids or their first 8 characters
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
  *                                           hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its
  *                                           last webhook events; `sync` re-reads Stripe for one account or every
@@ -188,6 +193,8 @@ import { listWorkers } from "./ops/workers.js";
 import { summarizeQueue } from "./ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
+import { changeSignupRules, listSignupRules } from "./signup-rules.js";
+import { SIGNUP_RULE_ACTIONS, SIGNUP_RULE_KINDS } from "./signup-rules-schema.js";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { backfillDecisions, decisionSummary, EXPORT_MAX, exportDecisions, forgetDecisions, listDecisions, setLearning } from "./decisions/service.js";
@@ -295,6 +302,8 @@ function userFilterFlags(): UserFilter {
   const verified = yesNo("verified");
   if (verified !== undefined) f.verified = verified;
   if (yesNo("flagged")) f.flagged = true;
+  const held = flag("held");
+  if (held) f.heldBy = held;
   return f;
 }
 
@@ -485,7 +494,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
    * a command typed by name is its own confirmation, so it walks every page.
    */
   async ["users-bulk"](svc) {
-    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes]) [--reason text] [--json]`;
+    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--held rule]) [--reason text] [--json]`;
     const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
     if (!action) throw new Error(usage);
     const emails = pos.slice(1);
@@ -1091,6 +1100,60 @@ ${usage}`);
             .map(([k, v]) => `${k} = ${v}`)
             .join("; "),
       );
+  },
+  ["signup-rules"]: async (svc) => {
+    const usage = `usage: reelsaw signup-rules [list] | add <${SIGNUP_RULE_KINDS.join("|")}> <pattern> <${SIGNUP_RULE_ACTIONS.join("|")}> [--note text] | rm <id…> | test <email> [--ip addr]`;
+    const sub = pos[0] ?? "list";
+    const cli = { id: "cli", email: "cli" };
+    if (sub === "add") {
+      const kind = SIGNUP_RULE_KINDS.find((k) => k === pos[1]);
+      const action = SIGNUP_RULE_ACTIONS.find((a) => a === pos[3]);
+      if (!kind || !pos[2] || !action) throw new Error(usage);
+      const note = flag("note");
+      const r = await changeSignupRules(svc, cli, { add: [{ kind, pattern: pos[2], action, ...(note ? { note } : {}) }] });
+      for (const a of r.added) console.log(`added ${a.id.slice(0, 8)}  ${a.action} ${a.kind} ${a.pattern}`);
+      return;
+    }
+    if (sub === "rm") {
+      if (pos.length < 2) throw new Error(usage);
+      const { rules } = await listSignupRules(svc);
+      const ids = pos.slice(1).map((want) => {
+        const hit = rules.filter((r) => r.id === want || (want.length >= 8 && r.id.startsWith(want)));
+        if (hit.length !== 1) throw new Error(hit.length ? `${want} matches more than one rule; give more of the id` : `no rule ${want}`);
+        return hit[0]!.id;
+      });
+      const r = await changeSignupRules(svc, cli, { remove: ids });
+      for (const x of r.removed) console.log(`removed ${x.id.slice(0, 8)}  ${x.action} ${x.kind} ${x.pattern}`);
+      return;
+    }
+    if (sub === "test") {
+      if (!pos[1]) throw new Error(usage);
+      const ip = flag("ip");
+      const { test } = await listSignupRules(svc, { test: ip ? { email: pos[1], ip } : { email: pos[1] } });
+      if (args.includes("--json")) return void console.log(JSON.stringify(test, null, 2));
+      if (!test) return;
+      console.log(test.action ? `${test.action} (${test.rule})` : `no rule matches: SIGNUP_MODE=${svc.settings.get().SIGNUP_MODE} decides`);
+      if (test.flags.length) console.log(`flags at sign-up: ${test.flags.join(", ")}`);
+      for (const m of test.matched.slice(1)) console.log(`  also matches ${m.rule} (${m.action})`);
+      return;
+    }
+    if (sub !== "list") throw new Error(usage);
+    const { rules, max } = await listSignupRules(svc);
+    if (args.includes("--json")) return void console.log(JSON.stringify(rules, null, 2));
+    if (!rules.length) return void console.log(`no sign-up rules; SIGNUP_MODE=${svc.settings.get().SIGNUP_MODE} decides every sign-up`);
+    table(
+      rules.map((r) => ({
+        id: r.id.slice(0, 8),
+        action: r.action,
+        kind: r.kind,
+        pattern: r.pattern,
+        hits: r.hits,
+        lastHit: r.lastHitAt?.slice(0, 10) ?? "",
+        note: r.note ?? "",
+      })),
+    );
+    console.log(`
+${rules.length} of at most ${max}; block beats allow beats hold, no match follows SIGNUP_MODE=${svc.settings.get().SIGNUP_MODE}`);
   },
   billing: async (svc) => {
     if (!svc.ee) throw new Error("billing is not enabled on this instance (REELSAW_EE is off)");
@@ -2640,7 +2703,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

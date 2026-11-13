@@ -15,6 +15,7 @@ import { templates } from "./email.js";
 import type { Logger } from "./log.js";
 import type { InstanceSettings } from "./instance-settings.js";
 import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
+import { applySignupRules, ruleLabel, SIGNUP_BLOCKED_MESSAGE } from "./signup-rules.js";
 import type { Telemetry } from "./telemetry.js";
 import type { RunInTx } from "./uow.js";
 import { FIRST_ADMIN_LOCK } from "./locks.js";
@@ -105,6 +106,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
   };
   /** emails whose sign-up saw an empty user table; resolved in the `after` hook */
   const firstCandidates = new Set<string>();
+  // the sign-up rule that decided a sign-up, from `before` to the event `after` writes (same request, same process)
+  const ruleOf = new Map<string, { rule: string; ruleAction: "hold" | "allow" }>();
   return betterAuth({
     baseURL: config.APP_URL,
     secret: config.BETTER_AUTH_SECRET,
@@ -136,6 +139,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
         banReason: { type: "string", required: false, input: false },
         emailKey: { type: "string", required: false, input: false },
         signupIp: { type: "string", required: false, input: false },
+        heldBy: { type: "string", required: false, input: false },
         mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
       },
     },
@@ -160,9 +164,10 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             // success (no session, and the submitted password is not saved). The form looks like the sign-up
             // worked, and a password manager stores a password that is not the one in the database.
             const headers = ctx?.request?.headers ?? ctx?.headers ?? new Headers();
+            const ip = clientIp(headers, config);
             let guard: { emailKey: string; signupIp: string | null };
             try {
-              guard = await signupGuard(db, settings.get(), { email: user.email, ip: clientIp(headers, config) }, log);
+              guard = await signupGuard(db, settings.get(), { email: user.email, ip }, log);
             } catch (err) {
               if (err instanceof SignupRefused) throw new APIError("UNPROCESSABLE_ENTITY", { message: err.message });
               throw err;
@@ -170,7 +175,16 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
             const first = n === 0;
             if (first) firstCandidates.add(user.email);
-            return { data: { ...user, ...guard, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
+            // the admin's sign-up rules (signup-rules.ts): block > allow > hold, else SIGNUP_MODE. The first account
+            // is the admin whatever the rules say. A held account sees the usual "waiting for approval", never why.
+            const rule = first ? null : await applySignupRules(db, { email: user.email, ip }, log);
+            if (rule?.action === "block") throw new APIError("UNPROCESSABLE_ENTITY", { message: SIGNUP_BLOCKED_MESSAGE });
+            const approved = first || rule?.action === "allow" || (rule?.action !== "hold" && mode() === "open");
+            const heldBy = rule?.action === "hold" && rule.rule ? ruleLabel(rule.rule) : null;
+            if (ruleOf.size > 1000) ruleOf.clear(); // inserts that failed after `before` never reach `after`
+            if (rule?.rule && (rule.action === "hold" || rule.action === "allow"))
+              ruleOf.set(user.email, { rule: ruleLabel(rule.rule), ruleAction: rule.action });
+            return { data: { ...user, ...guard, role: "user", heldBy, approvedAt: approved ? new Date() : null } };
           },
           // Better Auth owns the user insert, so this event cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
@@ -190,14 +204,16 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
               u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode() === "open" ? (u.approvedAt ?? new Date()) : null };
             }
             const signedUp = u;
+            const decided = ruleOf.get(u.email);
+            ruleOf.delete(u.email);
             await tx()((w) =>
               w.emit(
                 "user.signed_up",
-                { userId: signedUp.id, email: signedUp.email, role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode() },
+                { userId: signedUp.id, email: signedUp.email, role: signedUp.role ?? "user", approved: !!signedUp.approvedAt, mode: mode(), ...decided },
                 { actorId: signedUp.id },
               ),
             );
-            log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
+            log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode(), rule: decided?.rule }, "sign-up");
             // id and role only: no email or name goes to PostHog
             telemetry?.identify(u.id, { role: u.role ?? "user" });
             telemetry?.capture("user.signed_up", u.id, { mode: mode(), approved: !!u.approvedAt });

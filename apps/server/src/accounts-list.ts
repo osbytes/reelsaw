@@ -35,6 +35,7 @@ export function userFilterWhere(f: Omit<UserFilter, "q">): SQL | undefined {
     f.flagged ? sql`jsonb_array_length(${U.flags}) > 0` : undefined,
     status,
     f.verified === undefined ? undefined : sql`${U.emailVerified} = ${f.verified}`,
+    f.heldBy ? sql`${U.heldBy} = ${f.heldBy}` : undefined,
   );
 }
 
@@ -78,6 +79,7 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
           banReason: U.banReason,
           flags: U.flags,
           signupIp: U.signupIp,
+          heldBy: U.heldBy,
           mustChangePassword: U.mustChangePassword,
           lastActiveAt: U.lastActiveAt,
           createdAt: U.createdAt,

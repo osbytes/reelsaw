@@ -7,7 +7,18 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { mediaLinksRouter, webhooksRouter } from "./integrations.js";
-import { approveUser, banUser, bulkUsers, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
+import {
+  approveUser,
+  banUser,
+  bulkUsers,
+  holdUser,
+  removeUser,
+  setUserLimits,
+  setUserPassword,
+  setUserRole,
+  setUserWatermark,
+  unbanUser,
+} from "../accounts.js";
 import {
   decisionSummary,
   EXPORT_MAX,
@@ -61,6 +72,8 @@ import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from 
 import { USER_ROLES } from "../db/schema.js";
 import { listUsers } from "../accounts-list.js";
 import { bulkUsersInput, userListInput } from "../accounts-schema.js";
+import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
+import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
@@ -969,6 +982,16 @@ const restRouter = router({
         }
       }),
     }),
+    /**
+     * Sign-up rules (signup-rules.ts): hold, block or allow sign-ups by address, email, domain or abuse flag. The
+     * same code serves `list_signup_rules` / `manage_signup_rules` and `reelsaw signup-rules`.
+     */
+    signupRules: router({
+      list: adminProcedure.input(listSignupRulesInput.optional()).query(({ ctx, input }) => listSignupRules(ctx.svc, input)),
+      change: adminProcedure
+        .input(manageSignupRulesInput)
+        .mutation(({ ctx, input }) => changeSignupRules(ctx.svc, { id: ctx.user.id, email: ctx.user.email }, input)),
+    }),
     users: router({
       /** Keyset page of accounts with their all-time usage; search and filters in SQL (accounts-list.ts). */
       list: adminProcedure.input(userListInput.optional()).query(({ ctx, input }) => listUsers(ctx.svc, input)),
@@ -993,6 +1016,8 @@ const restRouter = router({
         return n;
       }),
       approve: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => approveUser(ctx.svc, ctx.user.id, input.id)),
+      /** back to waiting for approval, without saying why (accounts.ts `holdUser`) */
+      hold: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => holdUser(ctx.svc, ctx.user.id, input.id)),
       setRole: adminProcedure
         .input(z.object({ id: z.string(), role: z.enum(USER_ROLES) }))
         .mutation(({ ctx, input }) => setUserRole(ctx.svc, ctx.user.id, input.id, input.role)),

@@ -316,7 +316,7 @@ export const GUIDES: Guide[] = [
       },
       {
         q: "Can my producer and I both use the same install?",
-        a: "Yes. The first account is the admin, sign-up can be open, approval-based or closed, and each person gets their own project defaults, vocabulary, API keys and usage. Admins can set per-user quotas.",
+        a: "Yes. The first account is the admin, sign-up can be open, approval-based or closed, sign-up rules can hold or block particular addresses, emails and domains while everyone else gets straight in, and each person gets their own project defaults, vocabulary, API keys and usage. Admins can set per-user quotas.",
       },
     ],
     sources: [

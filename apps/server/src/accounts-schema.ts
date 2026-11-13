@@ -14,6 +14,13 @@ export const userFilterSchema = z.object({
   flagged: z.boolean().optional().describe("Only accounts the hourly abuse pass flagged"),
   status: z.enum(USER_STATUSES).optional().describe("pending = waiting for approval, active, suspended"),
   verified: z.boolean().optional().describe("true = email address confirmed, false = not confirmed yet"),
+  heldBy: z
+    .string()
+    .max(240)
+    .optional()
+    .describe(
+      'Only accounts a sign-up rule held for approval, by the rule as list_signup_rules shows it (kind and pattern: "ip 203.0.113.0/24"), whatever their status now',
+    ),
 });
 export type UserFilter = z.infer<typeof userFilterSchema>;
 
@@ -23,7 +30,7 @@ export const userListInput = userFilterSchema.extend({
 });
 
 /** What a bulk action does to each account; each one is the single-account transition in accounts.ts. */
-export const BULK_USER_ACTIONS = ["approve", "suspend", "reinstate", "delete"] as const;
+export const BULK_USER_ACTIONS = ["approve", "hold", "suspend", "reinstate", "delete"] as const;
 export type BulkUserAction = (typeof BULK_USER_ACTIONS)[number];
 /** Accounts per call: each is its own unit of work (a delete purges every project), so a call stays short. */
 export const BULK_USERS = 50;
@@ -32,7 +39,7 @@ export const bulkUsersShape = {
   action: z
     .enum(BULK_USER_ACTIONS)
     .describe(
-      "approve a waiting account; suspend (signs them out now, keeps their projects); reinstate a suspended one; delete the account and everything it owns, forever",
+      "approve a waiting account; hold = send an active account back to waiting for approval (it is not told why; approve undoes it); suspend (signs them out now, keeps their projects); reinstate a suspended one; delete the account and everything it owns, forever",
     ),
   ids: z
     .array(z.string().min(1).max(80))

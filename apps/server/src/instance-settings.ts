@@ -57,7 +57,7 @@ export const RUNTIME_SETTINGS = {
   SIGNUP_MODE: def(
     "access",
     z.enum(["open", "approval", "closed"]),
-    "Who may sign up: open (anyone, right for a public instance with email confirmation), approval (new accounts wait for an admin; a private box) or closed (nobody). The first account is always the admin.",
+    "Who may sign up: open (anyone, right for a public instance with email confirmation), approval (new accounts wait for an admin; a private box) or closed (nobody). The first account is always the admin. Sign-up rules (below) hold, block or allow particular addresses, emails, domains and abuse flags in front of this, so an open instance can still send the suspicious ones to approval.",
   ),
   REQUIRE_EMAIL_VERIFICATION: def(
     "access",

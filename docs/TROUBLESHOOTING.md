@@ -59,8 +59,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
-| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
-| `reelsaw users-bulk <approve\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); filter flags as for `users`; delete is forever |
+| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--held rule] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
+| `reelsaw users-bulk <approve\|hold\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); hold sends active ones back to approval; filter flags as for `users` (--held "ip 203.0.113.0/24": accounts that sign-up rule held); delete is forever |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
 | `reelsaw set-password <email> [--must-change]` | set an account's password from a prompt (or two stdin lines); `--must-change` requires a new one at next sign-in. Do not put the secret on the command line |
@@ -134,6 +134,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
+| `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
 | `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |

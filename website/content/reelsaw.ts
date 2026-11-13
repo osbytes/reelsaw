@@ -56,7 +56,7 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
     reelsaw: "MCP server (Streamable HTTP, OAuth optional), signed webhooks and an operator CLI, on every plan including hosted Free",
   },
   { key: "cap", label: "Usage cap", reelsaw: "None self-hosted. Hosted plans meter minutes of source video per month, never per-clip credits" },
-  { key: "accounts", label: "Accounts and teams", reelsaw: "Multi-user with admin approval, per-user quotas and usage" },
+  { key: "accounts", label: "Accounts and teams", reelsaw: "Multi-user with admin approval, sign-up rules, per-user quotas and usage" },
 ];
 
 export const REELSAW_COST = {
