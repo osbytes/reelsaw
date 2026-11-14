@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.36.1
+
+### Patch Changes
+
+- [#271](https://github.com/osbytes/reelsaw/pull/271) [`812e5b3`](https://github.com/osbytes/reelsaw/commit/812e5b310fea26c553b00c98361c490fbb999849) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A zip export that you cancel, or that drops mid-download, now stops fetching the remaining clips and frees its temporary copies right away, instead of downloading every clip to the server and keeping them until the next day's cleanup. Cancelled exports are logged as cancelled rather than as failures.
+
 ## 0.36.0
 
 ### Minor Changes
