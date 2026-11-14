@@ -137,8 +137,8 @@ export function createModelCatalog(
   config: Config,
   log: Logger,
   credentials: CredentialSource = envCredentialSource(config),
-  /** the stored word-timestamp test result for a transcription model id (AiService.wordTimestampVerdict) */
-  verdictOf: (id: string) => Promise<WordTimestampVerdict | undefined> = async () => undefined,
+  /** the stored word-timestamp test results for transcription model ids, in one read (AiService.wordTimestampVerdicts) */
+  verdictsOf: (ids: string[]) => Promise<Map<string, WordTimestampVerdict>> = async () => new Map(),
 ): ModelCatalog {
   const compat = config.OPENAI_COMPATIBLE_NAME;
   const cache = new Map<string, { at: number; value: CatalogProvider }>();
@@ -387,22 +387,14 @@ export function createModelCatalog(
         }),
       );
       // what the word-timestamp test said, for models that took it (not cached: a Test press changes it)
-      if (kind === "transcription")
-        return (
-          await Promise.all(
-            out.map(async (p) => ({
-              ...p,
-              models: await Promise.all(
-                p.models.map(async (m) => {
-                  const v = await verdictOf(m.id).catch(() => undefined);
-                  if (!v) return m;
-                  const tag = v.wordLevel ? "word timestamps: passed" : "no word timestamps";
-                  return { ...m, note: [m.note, tag].filter(Boolean).join(" · ") };
-                }),
-              ),
-            })),
-          )
-        ).sort(byShown);
+      if (kind === "transcription") {
+        const verdicts = await verdictsOf(out.flatMap((p) => p.models.map((m) => m.id))).catch(() => new Map<string, WordTimestampVerdict>());
+        const note = (m: CatalogModel) => {
+          const v = verdicts.get(m.id);
+          return v ? { ...m, note: [m.note, v.wordLevel ? "word timestamps: passed" : "no word timestamps"].filter(Boolean).join(" · ") } : m;
+        };
+        return out.map((p) => ({ ...p, models: p.models.map(note) })).sort(byShown);
+      }
       return out.sort(byShown);
     },
     async probe(provider, creds) {

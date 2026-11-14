@@ -114,6 +114,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
 | `reelsaw cuts <clipId> [--save <dir>] [--fixture <dir>]` | dry-run the disfluency cut search for a clip and print every candidate verdict; can save the removed and context audio, and export each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align <projectId> <start> <end>` | word timestamps from the align model for a source window |
+| `reelsaw test-model <language\|transcription> <provider:model> [--json]` | one real call to check a model works here; transcription re-runs the word-timestamp test clip (same as Test under Settings → Models, test_model) |
 | `reelsaw hear <clipId> [start] [dur]` | transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags <projectId> [from] [to]` | transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
@@ -660,8 +661,12 @@ It looked frozen and the evidence was gone with the container's logs. What chang
   A transcription model without word timestamps (for example `openai:gpt-4o-transcribe`) is rejected at boot too:
   the first boot with a new transcription model transcribes a 5-second test clip
   (`apps/server/assets/probe/word-timestamps.mp3`) and refuses the model if the answer is not word by word.
-  The result is kept for 30 days in `instance_settings` (key `transcription_probes`); Test under Settings → Models
-  runs the clip again. "failed a test transcription" means the call itself failed (key, URL, rate limit), not the model.
+  A server that refuses the request for word timestamps outright (HTTP 400) counts as "no". The result is kept for
+  30 days in `instance_settings` (key `transcription_probes`), shared by every process, and one process tests a
+  model at a time. When the 30 days are up and the re-test only fails to get through (key, network, rate limit),
+  the last result stays in force with a warning in the log, so an outage does not stop boot. Test under
+  Settings → Models, MCP `test_model` and `reelsaw test-model transcription <provider:model>` run the clip again
+  and report the failure. "failed a test transcription" means the call itself failed, not the model.
 
 ## 7. Improvements: done and next
 

@@ -49,6 +49,7 @@ import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import { looksWordLevel } from "../pipeline/transcript.js";
 import { bundledAssetPath } from "../lib/assets.js";
+import { takeTxLock, txLock } from "../locks.js";
 
 /** 5 s of synthetic speech (flite, voice "slt"), 13 words: "Reelsaw checks that this speech model returns a time for every single word." */
 export const PROBE_CLIP = bundledAssetPath("probe/word-timestamps.mp3");
@@ -68,7 +69,11 @@ export interface WordTimestampVerdict {
 /** Where verdicts live. Keys come from `verdictKey`. */
 export interface VerdictStore {
   get(key: string): Promise<WordTimestampVerdict | undefined>;
+  /** every stored verdict by key, in one read */
+  all(): Promise<Record<string, WordTimestampVerdict>>;
   set(key: string, verdict: WordTimestampVerdict): Promise<void>;
+  /** Run `fn` while no other process tests the same model (one clip per model however many processes boot together). */
+  exclusive<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }
 
 /** The same model id on another server (OPENAI_BASE_URL, the compatible provider) is another model. Pass the base URL redacted (`redactUrl`): keys are stored. */
@@ -84,7 +89,12 @@ export function isStale(v: WordTimestampVerdict, now = Date.now()): boolean {
 /** Evals, tests, the CLI before the database is attached: verdicts last for the process. */
 export function memoryVerdictStore(): VerdictStore {
   const m = new Map<string, WordTimestampVerdict>();
-  return { get: async (k) => m.get(k), set: async (k, v) => void m.set(k, v) };
+  return {
+    get: async (k) => m.get(k),
+    all: async () => Object.fromEntries(m),
+    set: async (k, v) => void m.set(k, v),
+    exclusive: (_k, fn) => fn(),
+  };
 }
 
 const KEY = "transcription_probes";
@@ -99,8 +109,27 @@ export function dbVerdictStore(): VerdictStore & { attach(db: Db): void } {
     },
     async get(k) {
       if (!db) return mem.get(k);
-      const row = await db.query.instanceSettings.findFirst({ where: (t, { eq }) => eq(t.key, KEY) });
-      return parseVerdict((row?.value as Record<string, unknown> | undefined)?.[k]);
+      return parseVerdict((await readAll(db))[k]);
+    },
+    async all() {
+      if (!db) return mem.all();
+      const out: Record<string, WordTimestampVerdict> = {};
+      for (const [k, raw] of Object.entries(await readAll(db))) {
+        const v = parseVerdict(raw);
+        if (v) out[k] = v;
+      }
+      return out;
+    },
+    async exclusive(k, fn) {
+      const d = db;
+      if (!d) return mem.exclusive(k, fn);
+      // a transaction that only holds the lock: released at commit, or with the connection if the process dies.
+      // The test call runs while it is open (seconds; once per model per PROBE_TTL_MS), and the verdict is written
+      // on another connection before it ends, so the next process to get the lock reads it.
+      return d.transaction(async (tx) => {
+        await takeTxLock(tx, txLock.transcriptionProbe(k));
+        return fn();
+      });
     },
     async set(k, v) {
       await mem.set(k, v);
@@ -116,6 +145,11 @@ export function dbVerdictStore(): VerdictStore & { attach(db: Db): void } {
         });
     },
   };
+}
+
+async function readAll(db: Db): Promise<Record<string, unknown>> {
+  const row = await db.query.instanceSettings.findFirst({ where: (t, { eq }) => eq(t.key, KEY) });
+  return (row?.value as Record<string, unknown> | undefined) ?? {};
 }
 
 function parseVerdict(v: unknown): WordTimestampVerdict | undefined {

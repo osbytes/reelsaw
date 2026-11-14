@@ -200,7 +200,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     // reachability is checked below, against the models that will really run (after the admin override loads)
     return a;
   });
-  const catalog = createModelCatalog(config, log.child({ module: "models" }), providers, (id) => ai.wordTimestampVerdict(id));
+  const catalog = createModelCatalog(config, log.child({ module: "models" }), providers, (ids) => ai.wordTimestampVerdicts(ids));
 
   // The on-device detectors serve pipeline stages, which only run in worker processes: a process with RUN_WORKERS=false
   // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the

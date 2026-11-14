@@ -21,7 +21,7 @@ import {
   withoutPrompt,
   type LoopRun,
 } from "./asr-loops.js";
-import { providerOf } from "../ai/registry.js";
+import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { enqueueRefine } from "./refine.js";
 
 /**
@@ -98,7 +98,7 @@ export async function transcribe(ctx: StageContext) {
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
   }
 
-  const selfHosted = providerOf(transcriptionModel) === "openai" && !!svc.providers.get("openai").baseUrl;
+  const selfHosted = isSelfHostedModel({ AI_MODEL: transcriptionModel, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
   ctx.log.info(
     {

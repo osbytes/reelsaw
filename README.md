@@ -611,6 +611,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
 | `list_releases` | Published Reelsaw versions from GitHub (reelsaw.com/releases): tag, date, a short summary and the change notes. |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
+| `test_model` | Admins only: check that a model id works on this instance with one real call (same as Test under Settings → Models). |
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
@@ -713,6 +714,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
 | `reelsaw cuts <clipId> [--save <dir>] [--fixture <dir>]` | dry-run the disfluency cut search for a clip and print every candidate verdict; can save the removed and context audio, and export each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align <projectId> <start> <end>` | word timestamps from the align model for a source window |
+| `reelsaw test-model <language\|transcription> <provider:model> [--json]` | one real call to check a model works here; transcription re-runs the word-timestamp test clip (same as Test under Settings → Models, test_model) |
 | `reelsaw hear <clipId> [start] [dur]` | transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags <projectId> [from] [to]` | transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |

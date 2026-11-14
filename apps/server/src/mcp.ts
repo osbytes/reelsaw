@@ -596,6 +596,8 @@ export function createMcpServer(
 
   server.registerTool("get_instance_settings", TOOLS.get_instance_settings, () => run(() => api.admin.settings.get()));
 
+  server.registerTool("test_model", TOOLS.test_model, (input) => run(() => api.admin.models.test(input)));
+
   server.registerTool("list_workers", TOOLS.list_workers, () => run(() => api.admin.workers.list()));
 
   server.registerTool("get_failure", TOOLS.get_failure, (input) => run(() => api.admin.failures.get(input)));

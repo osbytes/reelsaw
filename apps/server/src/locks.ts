@@ -30,6 +30,8 @@ export const txLock = {
   diskVolume: (volume: string) => `disk:${volume}`,
   /** the instance's sign-up rules, counted against MAX_SIGNUP_RULES when some are added (signup-rules.ts) */
   signupRules: () => "signup-rules",
+  /** one word-timestamp test transcription of a model at a time, instance-wide (ai/word-timestamps.ts) */
+  transcriptionProbe: (verdictKey: string) => `transcription-probe:${verdictKey}`,
 } as const;
 
 /** The one lock with no subject: "which sign-up becomes the first admin" (auth.ts). Arbitrary constant. */

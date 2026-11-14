@@ -168,7 +168,7 @@ import { reportCapabilities } from "../report/capabilities.js";
 import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
-import { generateText } from "ai";
+import { testModel } from "../ai/model-test.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
 
@@ -1175,25 +1175,9 @@ const restRouter = router({
           }
         }),
       /** One tiny real call, so "saved" also means "answers". Transcription re-runs the word-timestamp test clip (ai/word-timestamps.ts). */
-      test: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), id: modelId })).mutation(async ({ ctx, input }) => {
-        const t0 = Date.now();
-        try {
-          await ctx.svc.ai.verify(input.kind, input.id, { fresh: true });
-          if (input.kind === "language") {
-            const r = await generateText({
-              model: await ctx.svc.ai.languageModel(input.id),
-              prompt: "Reply with the single word: ready",
-              maxOutputTokens: 8,
-              abortSignal: AbortSignal.timeout(60_000),
-              telemetry: { functionId: "admin.models.test" },
-            });
-            return { ok: true as const, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };
-          }
-          return { ok: true as const, ms: Date.now() - t0, reply: (await ctx.svc.ai.wordTimestampVerdict(input.id))?.text.slice(0, 40) ?? null };
-        } catch (err) {
-          return { ok: false as const, ms: Date.now() - t0, error: (err as Error).message };
-        }
-      }),
+      test: adminProcedure
+        .input(z.object({ kind: z.enum(["language", "transcription"]), id: modelId }))
+        .mutation(({ ctx, input }) => testModel(ctx.svc.ai, input)),
       /** Download onto Ollama / Speaches; progress through `get().pulls`. */
       pull: adminProcedure.input(z.object({ id: modelId })).mutation(async ({ ctx, input }) => {
         const provider = providerOf(input.id);

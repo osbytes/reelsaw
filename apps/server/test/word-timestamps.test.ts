@@ -9,7 +9,10 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAi } from "../src/ai/registry.js";
 import { createModelCatalog, looksLikeSpeechModel } from "../src/ai/catalog.js";
-import { PROBE_TTL_MS, isStale, memoryVerdictStore, verdictKey } from "../src/ai/word-timestamps.js";
+import { PROBE_TTL_MS, isStale, memoryVerdictStore, verdictKey, type VerdictStore } from "../src/ai/word-timestamps.js";
+import { compatTranscriptionModel, segmentsOf } from "../src/ai/compat-transcription.js";
+import type { ProviderGate } from "../src/ai/gate.js";
+import { transcribe } from "ai";
 import type { Config } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 
@@ -17,15 +20,17 @@ const log = { info() {}, warn() {}, error() {}, debug() {}, child: () => log } a
 
 const WORDS = "Reelsaw checks that this speech model returns a time for every single word".split(" ");
 /** what each model id answers: word-level, phrase-level, or nothing heard */
-const behaviour: Record<string, "words" | "segments" | "silent"> = {
+const behaviour: Record<string, "words" | "segments" | "silent" | "refuses" | "unauthorized"> = {
   "openai/whisper-large-v3-turbo": "words",
   "openai/gpt-4o-transcribe": "segments",
   "acme/deaf": "silent",
+  "microsoft/mai-transcribe-1.5": "refuses",
+  "acme/locked": "unauthorized",
 };
 
 let server: http.Server;
 let base = "";
-let calls: Array<{ model: string; body: string }> = [];
+let calls: Array<{ model: string; body: string; auth: string | undefined }> = [];
 
 before(async () => {
   server = http.createServer((req, res) => {
@@ -43,13 +48,22 @@ before(async () => {
       req.on("end", () => {
         const body = Buffer.concat(chunks).toString("latin1");
         const model = /name="model"\r\n\r\n([^\r]+)/.exec(body)?.[1] ?? "";
-        calls.push({ model, body });
+        calls.push({ model, body, auth: req.headers.authorization });
         const b = behaviour[model];
         if (b === "silent") return json({ text: "" });
+        if (b === "refuses")
+          return void res.writeHead(400, { "content-type": "application/json" }).end('{"error":{"message":"verbose_json is not supported"}}');
+        if (b === "unauthorized") return void res.writeHead(401, { "content-type": "application/json" }).end('{"error":{"message":"bad key"}}');
         // OpenRouter's verbose_json: segments carry only start, end, text, and come along with words
         const segments = [{ start: 0.3, end: 4.8, text: WORDS.join(" ") }];
         if (b === "segments") return json({ text: WORDS.join(" "), segments });
-        return json({ text: WORDS.join(" "), segments, words: WORDS.map((w, i) => ({ word: w, start: 0.3 + i * 0.35, end: 0.6 + i * 0.35 })) });
+        return json({
+          text: WORDS.join(" "),
+          language: "en",
+          duration: 5.2,
+          segments,
+          words: WORDS.map((w, i) => ({ word: w, start: 0.3 + i * 0.35, end: 0.6 + i * 0.35 })),
+        });
       });
       return;
     }
@@ -114,6 +128,38 @@ describe("word-timestamp test transcription", () => {
     assert.equal(await ai.wordTimestampVerdict("openrouter:acme/deaf"), undefined);
   });
 
+  it("stores a refused word-timestamp request as a verdict, not a failure", async () => {
+    const ai = createAi(config(), log);
+    const id = "openrouter:microsoft/mai-transcribe-1.5";
+    await assert.rejects(ai.verify("transcription", id), /does not return word timestamps, .*: the server refused the request .*HTTP 400/);
+    await assert.rejects(ai.verify("transcription", id), /does not return word timestamps/);
+    assert.equal(calls.length, 1);
+    assert.equal((await ai.wordTimestampVerdict(id))?.wordLevel, false);
+  });
+
+  it("keeps the last result when a re-test only fails to call, and stores nothing when there is none", async () => {
+    const id = "openrouter:acme/locked";
+    await assert.rejects(createAi(config(), log).verify("transcription", id), /failed a test transcription: .*401/);
+    const store = memoryVerdictStore();
+    const stale = { wordLevel: true, segments: 13, text: "earlier", checkedAt: new Date(Date.now() - PROBE_TTL_MS - 60_000).toISOString() };
+    await store.set(verdictKey(id, base), stale);
+    const ai = createAi(config(), log, null, undefined, undefined, null, store);
+    await ai.verify("transcription", id);
+    assert.deepEqual(await store.get(verdictKey(id, base)), stale);
+    // Test (fresh) reports the failure instead
+    await assert.rejects(ai.verify("transcription", id, { fresh: true }), /failed a test transcription/);
+  });
+
+  it("holds the cross-process lock and waits for a provider slot while testing", async () => {
+    const ran: string[] = [];
+    const gate = { run: async (p: string, fn: () => PromiseLike<unknown>) => (ran.push(`gate:${p}`), fn()) } as unknown as ProviderGate;
+    const mem = memoryVerdictStore();
+    const store: VerdictStore = { ...mem, exclusive: async (k, fn) => (ran.push(`lock:${k}`), fn()) };
+    const ai = createAi(config(), log, null, undefined, undefined, gate, store);
+    await ai.verify("transcription", "openrouter:openai/whisper-large-v3-turbo");
+    assert.deepEqual(ran, [`lock:${verdictKey("openrouter:openai/whisper-large-v3-turbo", base)}`, "gate:openrouter"]);
+  });
+
   it("keys verdicts by model and server, without credentials, and expires them", () => {
     assert.equal(verdictKey("openai:whisper-1"), "openai:whisper-1");
     assert.equal(verdictKey("openai:x", "http://speaches:8000/v1"), "openai:x @ http://speaches:8000/v1");
@@ -136,12 +182,42 @@ describe("word-timestamp test transcription", () => {
   });
 });
 
+describe("compatible transcription model", () => {
+  it("prefers words over segments, sends the key and OpenAI's options, reads language and duration", async () => {
+    const model = compatTranscriptionModel({ provider: "openrouter", baseURL: `${base}/`, apiKey: "sk-or-test" }, "openai/whisper-large-v3-turbo");
+    const r = await transcribe({
+      model,
+      audio: new Uint8Array([1, 2, 3]),
+      providerOptions: { openai: { timestampGranularities: ["word"], prompt: "Reelsaw", language: "en" } },
+    });
+    assert.equal(r.segments.length, WORDS.length);
+    assert.equal(r.segments[0]!.text, "Reelsaw");
+    assert.equal(r.language, "en");
+    assert.equal(r.durationInSeconds, 5.2);
+    assert.equal(calls[0]!.auth, "Bearer sk-or-test");
+    assert.match(calls[0]!.body, /name="prompt"\r\n\r\nReelsaw/);
+  });
+
+  it("falls back to segments, and drops entries without numeric times", () => {
+    assert.deepEqual(
+      segmentsOf({
+        words: [],
+        segments: [
+          { text: "a b", start: 0, end: 1 },
+          { text: "x", start: "1" },
+        ],
+      }),
+      [{ text: "a b", startSecond: 0, endSecond: 1 }],
+    );
+  });
+});
+
 describe("model picker for a compatible router", () => {
   it("files models by the modalities the server reports and notes test results", async () => {
     const ai = createAi(config(), log);
     await ai.verify("transcription", "openrouter:openai/whisper-large-v3-turbo");
     await ai.verify("transcription", "openrouter:openai/gpt-4o-transcribe").catch(() => {});
-    const catalog = createModelCatalog(config(), log, undefined, (id) => ai.wordTimestampVerdict(id));
+    const catalog = createModelCatalog(config(), log, undefined, (ids) => ai.wordTimestampVerdicts(ids));
     const stt = (await catalog.list("transcription")).find((p) => p.provider === "openrouter")!;
     assert.deepEqual(
       stt.models.map((m) => [m.id, m.note]),
@@ -149,6 +225,8 @@ describe("model picker for a compatible router", () => {
         ["openrouter:openai/whisper-large-v3-turbo", "word timestamps: passed"],
         ["openrouter:openai/gpt-4o-transcribe", "no word timestamps"],
         ["openrouter:acme/deaf", undefined],
+        ["openrouter:microsoft/mai-transcribe-1.5", undefined],
+        ["openrouter:acme/locked", undefined],
       ],
     );
     const lang = (await catalog.list("language")).find((p) => p.provider === "openrouter")!;
