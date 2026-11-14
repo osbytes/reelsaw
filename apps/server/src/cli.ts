@@ -107,6 +107,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           audio, and export each flagged span as an offline
  *                                           regression case for `pnpm eval:cuts`
  *   align <projectId> <start> <end>         word timestamps from the align model for a source window
+ *   test-model <language|transcription> <provider:model> [--json]
+ *                                           one real call to check a model works here; transcription re-runs the
+ *                                           word-timestamp test clip (same as Test under Settings → Models, test_model)
  *   hear <clipId> [start] [dur]             transcribe a range of the RENDERED clip (what viewers hear)
  *   flags <projectId> [from] [to]           transcript flags (entities / disfluencies / collapsed loops) with status
  *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes;
@@ -206,6 +209,7 @@ import { approveUser, bulkUsers, setUserPassword, setUserRole, setUserWatermark 
 import { listUsers } from "./accounts-list.js";
 import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
+import { testModel } from "./ai/model-test.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState, reclaimScratch } from "./storage/sweep.js";
@@ -1824,6 +1828,20 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     }
   },
 
+  /** Settings → Models Test / test_model (ai/model-test.ts). */
+  async "test-model"(svc) {
+    const [kind, id] = pos;
+    if ((kind !== "language" && kind !== "transcription") || !id?.includes(":"))
+      throw new Error("usage: reelsaw test-model <language|transcription> <provider:model>");
+    const r = await testModel(svc.ai, { kind, id });
+    if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
+    console.log(r.ok ? `ok        ${id} answered in ${r.ms} ms${r.reply ? `: "${r.reply}"` : ""}` : `failed    ${id}: ${r.error}`);
+    if (r.wordTimestamps)
+      console.log(
+        `word timestamps  ${r.wordTimestamps.wordLevel ? "yes" : "no"} (${r.wordTimestamps.segments} segment(s), checked ${r.wordTimestamps.checkedAt})`,
+      );
+    if (!r.ok) process.exitCode = 1;
+  },
   async align(svc) {
     const [projectId, a, b] = pos;
     const start = Number(a);
@@ -2703,7 +2721,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

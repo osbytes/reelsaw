@@ -8,7 +8,8 @@
  */
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
-import { providerKeyEnv, supportsWordTimestamps, envCredentialSource, type CredentialSource } from "./registry.js";
+import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./registry.js";
+import type { WordTimestampVerdict } from "./word-timestamps.js";
 
 export type CatalogKind = "language" | "transcription";
 
@@ -70,6 +71,10 @@ export interface ModelCatalog {
 
 const CACHE_MS = 5 * 60_000;
 
+/** self-hosted and available providers first, then the ones that need a key */
+const byShown = (a: CatalogProvider, b: CatalogProvider) =>
+  Number(!!b.selfHosted) - Number(!!a.selfHosted) || Number(b.available) - Number(a.available) || a.title.localeCompare(b.title);
+
 /** Ollama models worth suggesting when the server has none of them yet (sizes are the default quantisation). */
 const OLLAMA_SUGGESTIONS: Array<[string, string]> = [
   ["qwen2.5:14b", "9.0 GB · strong at JSON; what the local benchmark used"],
@@ -82,7 +87,7 @@ const OLLAMA_SUGGESTIONS: Array<[string, string]> = [
 
 const STATIC: Record<string, Array<[string, string, CatalogKind]>> = {
   deepgram: [
-    ["nova-3", "word timestamps, smart formatting", "transcription"],
+    ["nova-3", "smart formatting", "transcription"],
     ["nova-2", "previous generation", "transcription"],
   ],
   assemblyai: [
@@ -105,13 +110,36 @@ function fmtBytes(n: number) {
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
 }
 
+/**
+ * Fallback for model lists that say nothing about what a model does (OpenAI, Groq, a plain
+ * OpenAI-compatible server): guess speech-to-text from the id, so the picker can file it under
+ * Transcription. Listing only: whether a model actually works here (word timestamps) is tested, never
+ * guessed (ai/word-timestamps.ts), and servers that report modalities or tasks (OpenRouter, Speaches,
+ * the AI Gateway) are taken at their word instead.
+ */
+export function looksLikeSpeechModel(id: string): boolean {
+  return /whisper|transcri|speech-to-text|(^|[-_/])(stt|asr)([-_.]|$)/i.test(id);
+}
+
+/** What an OpenAI-compatible /models entry says it outputs (OpenRouter: architecture.output_modalities); undefined when it says nothing. */
+function outputModalities(m: { architecture?: { output_modalities?: unknown } }): string[] | undefined {
+  const o = m.architecture?.output_modalities;
+  return Array.isArray(o) ? o.map(String) : undefined;
+}
+
 /** Keep the chat-capable OpenAI models out of a /v1/models dump that also lists TTS, embeddings, images. */
 function isOpenAiLanguageModel(id: string) {
   if (!/^(gpt-|o[1-9]|chatgpt-)/.test(id)) return false;
   return !/(realtime|audio|tts|transcribe|embedding|image|search|instruct|moderation|dall-e|whisper)/.test(id);
 }
 
-export function createModelCatalog(config: Config, log: Logger, credentials: CredentialSource = envCredentialSource(config)): ModelCatalog {
+export function createModelCatalog(
+  config: Config,
+  log: Logger,
+  credentials: CredentialSource = envCredentialSource(config),
+  /** the stored word-timestamp test results for transcription model ids, in one read (AiService.wordTimestampVerdicts) */
+  verdictsOf: (ids: string[]) => Promise<Map<string, WordTimestampVerdict>> = async () => new Map(),
+): ModelCatalog {
   const compat = config.OPENAI_COMPATIBLE_NAME;
   const cache = new Map<string, { at: number; value: CatalogProvider }>();
   const jobs = new Map<string, PullJob & { abort: AbortController }>();
@@ -139,7 +167,9 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
       models: [],
     };
     try {
-      const installed = ((await get(`${base}/models`, headers)) as { data?: Array<{ id: string }> }).data?.map((m) => m.id) ?? [];
+      type Listed = { id: string; architecture?: { output_modalities?: unknown } };
+      const listed = ((await get(`${base}/models`, headers)) as { data?: Listed[] }).data ?? [];
+      const installed = listed.map((m) => m.id);
       // Ollama: native API has sizes and can pull
       const ollama = await get(`${root(base)}/api/tags`, headers, 5000).catch(() => null);
       if (ollama?.models) {
@@ -166,7 +196,7 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
         }
         return out;
       }
-      // Speaches: a registry of downloadable whisper models next to the installed ones
+      // Speaches: a registry of downloadable speech-recognition models next to the installed ones
       const registry = await get(`${base}/registry?task=automatic-speech-recognition`, headers, 5000).catch(() => null);
       if (registry?.data) {
         out.selfHosted = { baseUrl: base, server: "speaches", canPull: true };
@@ -174,13 +204,25 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
           const have = new Set(installed);
           for (const id of installed) out.models.push({ id: `${provider}:${id}`, label: id, installed: true });
           for (const m of registry.data as Array<{ id: string }>)
-            if (!have.has(m.id) && /whisper/i.test(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: false, note: "not installed" });
+            if (!have.has(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: false, note: "not installed" });
         }
         return out;
       }
       out.selfHosted = { baseUrl: base, server: "openai-compatible", canPull: false };
-      for (const id of installed)
-        if (kind === "language" ? !/whisper|embed/i.test(id) : /whisper/i.test(id)) out.models.push({ id: `${provider}:${id}`, label: id, installed: true });
+      // routers that describe their models (OpenRouter) list speech models only under the modality filter;
+      // other servers ignore the parameter and answer the plain list again
+      const speechListed =
+        kind === "transcription"
+          ? (((await get(`${base}/models?output_modalities=transcription`, headers).catch(() => null)) as { data?: Listed[] } | null)?.data ?? [])
+          : [];
+      const seen = new Set<string>();
+      for (const m of [...speechListed, ...listed]) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        const outputs = outputModalities(m);
+        const speech = outputs ? outputs.includes("transcription") : looksLikeSpeechModel(m.id);
+        if (kind === "transcription" ? speech : !speech && !/embed/i.test(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: true });
+      }
       return out;
     } catch (err) {
       out.error = `cannot list ${base}: ${(err as Error).message}`;
@@ -208,8 +250,7 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
         const data = ((await get("https://api.openai.com/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string }> }).data;
         const ids = data.map((m) => m.id).sort();
         if (kind === "language") for (const id of ids) if (isOpenAiLanguageModel(id)) out.models.push({ id: `openai:${id}`, label: id });
-        if (kind === "transcription")
-          for (const id of ids) if (supportsWordTimestamps(`openai:${id}`)) out.models.push({ id: `openai:${id}`, label: id, note: "word timestamps" });
+        if (kind === "transcription") for (const id of ids) if (looksLikeSpeechModel(id)) out.models.push({ id: `openai:${id}`, label: id });
       } else if (provider === "anthropic") {
         if (kind === "language") {
           const data = (
@@ -236,38 +277,31 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
           (await get("https://api.groq.com/openai/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string; owned_by?: string }> }
         ).data;
         for (const m of data.sort((a, b) => a.id.localeCompare(b.id))) {
-          const stt = /whisper/i.test(m.id);
+          const stt = looksLikeSpeechModel(m.id);
           if ((kind === "transcription") !== stt) continue;
           if (kind === "language" && /tts|guard|embed/i.test(m.id)) continue;
           out.models.push({ id: `groq:${m.id}`, label: m.id, note: m.owned_by });
         }
       } else if (provider === "gateway") {
-        if (kind === "language") {
-          const { createGateway } = await import("@ai-sdk/gateway");
-          const gw = createGateway({ apiKey: key });
-          // the model listing is public; only an authenticated call proves the key
-          await gw.getCredits().catch((err) => {
-            throw new Error(
-              /40[13]|unauthori|forbidden|invalid/i.test(String((err as Error).message))
-                ? `the gateway rejected the key (${(err as Error).message})`
-                : (err as Error).message,
-            );
-          });
-          const { models } = await gw.getAvailableModels();
-          for (const m of models) {
-            if (m.modelType && m.modelType !== "language") continue;
-            const price = m.pricing
+        const { createGateway } = await import("@ai-sdk/gateway");
+        const gw = createGateway({ apiKey: key });
+        // the model listing is public; only an authenticated call proves the key
+        await gw.getCredits().catch((err) => {
+          throw new Error(
+            /40[13]|unauthori|forbidden|invalid/i.test(String((err as Error).message))
+              ? `the gateway rejected the key (${(err as Error).message})`
+              : (err as Error).message,
+          );
+        });
+        const { models } = await gw.getAvailableModels();
+        for (const m of models) {
+          // the gateway types its models; untyped ones predate the field and are language models
+          if ((m.modelType ?? "language") !== kind) continue;
+          const price =
+            kind === "language" && m.pricing
               ? `$${(Number(m.pricing.input) * 1e6).toFixed(2)} / $${(Number(m.pricing.output) * 1e6).toFixed(2)} per 1M tokens`
               : undefined;
-            out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
-          }
-        } else {
-          out.source = "static";
-          out.models.push({
-            id: "gateway:openai/whisper-1",
-            label: "openai/whisper-1",
-            note: "word timestamps; the gateway's other transcription models return segments only",
-          });
+          out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
         }
       }
     } catch (err) {
@@ -352,8 +386,16 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
           return v;
         }),
       );
-      // self-hosted and available providers first, then the ones that need a key
-      return out.sort((a, b) => Number(!!b.selfHosted) - Number(!!a.selfHosted) || Number(b.available) - Number(a.available) || a.title.localeCompare(b.title));
+      // what the word-timestamp test said, for models that took it (not cached: a Test press changes it)
+      if (kind === "transcription") {
+        const verdicts = await verdictsOf(out.flatMap((p) => p.models.map((m) => m.id))).catch(() => new Map<string, WordTimestampVerdict>());
+        const note = (m: CatalogModel) => {
+          const v = verdicts.get(m.id);
+          return v ? { ...m, note: [m.note, v.wordLevel ? "word timestamps: passed" : "no word timestamps"].filter(Boolean).join(" · ") } : m;
+        };
+        return out.map((p) => ({ ...p, models: p.models.map(note) })).sort(byShown);
+      }
+      return out.sort(byShown);
     },
     async probe(provider, creds) {
       const [l, t] = await Promise.all([providerFor(provider, "language", creds), providerFor(provider, "transcription", creds)]);

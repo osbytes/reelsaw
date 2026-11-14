@@ -2,7 +2,7 @@
 import { transcribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
 import type { Word } from "@reelsaw/shared";
-import { underlyingProvider, type AiService } from "../ai/registry.js";
+import type { AiService } from "../ai/registry.js";
 import { toWords } from "../pipeline/transcript.js";
 import type { EvalContext } from "./framework.js";
 import { reportedCost } from "./meter.js";
@@ -19,8 +19,8 @@ export async function transcribeCached(
   extraOptions: Record<string, unknown> = {},
 ): Promise<{ text: string; words: Word[] }> {
   const a = ctx.ai;
-  // options go under the vendor key: "gateway:openai/whisper-1" still speaks OpenAI options
-  const provider = underlyingProvider(modelId);
+  // options go under the key the model reads: "gateway:openai/whisper-1" and the compatible provider speak OpenAI options
+  const provider = a.transcriptionOptionsKey(modelId);
   const providerOptions = { [provider]: { ...(a.transcriptionOptions(modelId)[provider] ?? {}), ...extraOptions } } as Record<string, JSONObject>;
   return ctx.cached(["asr", modelId, providerOptions, audio], async () => {
     const t0 = Date.now();

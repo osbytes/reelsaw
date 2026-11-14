@@ -3,36 +3,43 @@ import { createProviderRegistry, customProvider, type LanguageModel, type Transc
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ProviderGate } from "./gate.js";
+import { APICallError } from "@ai-sdk/provider";
+import { compatTranscriptionModel } from "./compat-transcription.js";
+import { isStale, memoryVerdictStore, probeWordTimestamps, verdictKey, type VerdictStore, type WordTimestampVerdict } from "./word-timestamps.js";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
  *   AI_MODEL=anthropic:claude-sonnet-4-5   TRANSCRIPTION_MODEL=deepgram:nova-3
- * Language: openai, anthropic, google, groq, gateway, <compat>   Transcription: openai, groq, deepgram, assemblyai, gateway
+ * Language: openai, anthropic, google, groq, gateway, <compat>   Transcription: openai, groq, deepgram, assemblyai, gateway, <compat>
  */
 export interface AiService {
   languageModel(id?: string): Promise<LanguageModel>;
   transcriptionModel(id?: string): Promise<TranscriptionModel>;
   /**
    * Provider-specific options that request word-level timestamps for a transcription model id,
-   * keyed by the vendor the options belong to (see `underlyingProvider`).
+   * keyed by `transcriptionOptionsKey`.
    */
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
+  /**
+   * The `providerOptions` key the transcription model reads: the vendor for direct and gateway models
+   * (`underlyingProvider`), "openai" for the compatible provider, which speaks OpenAI's
+   * `/audio/transcriptions` whatever the model id says ("openrouter:deepgram/nova-3" included).
+   */
+  transcriptionOptionsKey(id?: string): string;
   /** Static validation of configured models + required keys, and for a self-hosted server a `GET /models` reachability and installed-model check (see `verify`). */
   check(effective?: { language: string; transcription: string }): Promise<void>;
   /**
    * Can `id` run here? Resolves it against the configured providers, checks the vendor's key is set
    * and, for a self-hosted server, that it is reachable and has the model installed (Speaches pulls
-   * missing whisper models itself). Throws a sentence that says what to do.
+   * missing models itself). A transcription model must also return word timestamps, which a short
+   * test transcription decides (ai/word-timestamps.ts); `fresh` repeats that test instead of using
+   * the stored verdict. Throws a sentence that says what to do.
    */
-  verify(kind: "language" | "transcription", id: string): Promise<void>;
-}
-
-/** Transcription models known to return word timestamps, which the pipeline needs; others fail at "no words". */
-export function supportsWordTimestamps(id: string): boolean {
-  const vendor = underlyingProvider(id);
-  const model = id.slice(providerOf(id).length + 1).replace(/^[^/]+\//, "");
-  if (vendor === "openai") return /whisper/i.test(model); // whisper-1 and Speaches' faster-whisper-*; gpt-4o-transcribe gives segments only
-  return ["groq", "deepgram", "assemblyai"].includes(vendor);
+  verify(kind: "language" | "transcription", id: string, opts?: { fresh?: boolean }): Promise<void>;
+  /** The stored word-timestamp verdict for a transcription model, if it was tested. */
+  wordTimestampVerdict(id: string): Promise<WordTimestampVerdict | undefined>;
+  /** The stored verdicts for many model ids in one read (the model picker's notes). */
+  wordTimestampVerdicts(ids: string[]): Promise<Map<string, WordTimestampVerdict>>;
 }
 
 /** Keys and base URLs in force, and a version that changes when they do (ai/providers.ts). */
@@ -67,6 +74,10 @@ export const providerKeyEnv: Record<string, string[]> = {
   gateway: ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"],
 };
 
+/**
+ * How to ask each API for word timestamps. These are request options, not claims that a model
+ * honours them: whether it does is tested (ai/word-timestamps.ts).
+ */
 const wordTimestampOptions: Record<string, Record<string, unknown>> = {
   openai: { timestampGranularities: ["word"] },
   groq: { timestampGranularities: ["word", "segment"], responseFormat: "verbose_json" },
@@ -114,6 +125,8 @@ export function createAi(
   credentials: CredentialSource = envCredentialSource(config),
   /** per-provider concurrency gate (ai/gate.ts); none in evals and tests */
   gate?: ProviderGate | null,
+  /** word-timestamp verdicts (ai/word-timestamps.ts); shared through the database in the app, per process otherwise */
+  verdicts: VerdictStore = memoryVerdictStore(),
 ): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
   let registry: { version: number; value: Promise<Registry> } | undefined;
@@ -162,13 +175,24 @@ export function createAi(
     const compatCreds = c(compat);
     if (compatCreds.baseUrl) {
       const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
-      providers[compat] = createOpenAICompatible({
+      const chat = createOpenAICompatible({
         name: compat,
         baseURL: compatCreds.baseUrl,
         apiKey: compatCreds.apiKey ?? "none",
         // send response_format json_schema (Ollama, vLLM, LM Studio all support it); without this the
         // schema is silently dropped and small models answer in whatever shape they like
         supportsStructuredOutputs: config.OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS,
+      });
+      // @ai-sdk/openai-compatible has no transcription models; ai/compat-transcription.ts speaks the
+      // /audio/transcriptions compatible servers implement (OpenRouter, Speaches, vLLM, LocalAI)
+      const speech = { provider: compat, baseURL: compatCreds.baseUrl, apiKey: compatCreds.apiKey };
+      providers[compat] = customProvider({
+        fallbackProvider: chat,
+        // customProvider does `modelId in transcriptionModels`, so the proxy must answer `has` as well
+        transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, {
+          has: () => true,
+          get: (_t, id: string) => compatTranscriptionModel(speech, id),
+        }),
       });
     }
     return createProviderRegistry(providers);
@@ -217,7 +241,7 @@ export function createAi(
    * and can download on demand, so missing whisper models are pulled automatically; Ollama models must
    * be pulled by the operator, which the error says.
    */
-  async function checkSelfHosted(id: string) {
+  async function checkSelfHosted(kind: "language" | "transcription", id: string) {
     const provider = providerOf(id);
     const modelId = id.slice(provider.length + 1);
     if (provider !== "openai" && provider !== compat) return;
@@ -239,6 +263,13 @@ export function createAi(
     const body = (await res.json().catch(() => ({}))) as { data?: Array<{ id: string }> };
     const installed = (body.data ?? []).map((m) => m.id);
     if (installed.includes(modelId)) return;
+    if (kind === "transcription") {
+      // OpenRouter lists only text models in a plain /models; speech models need the modality filter.
+      // Servers without the filter ignore the parameter and answer the same list.
+      const speech = await get("/models?output_modalities=transcription").catch(() => undefined);
+      const ids = speech?.ok ? (((await speech.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data ?? []).map((m) => m.id) : [];
+      if (ids.includes(modelId)) return;
+    }
 
     // Speaches: pull from its registry on demand
     const reg = await get(`/registry?task=automatic-speech-recognition`).catch(() => undefined);
@@ -274,14 +305,81 @@ export function createAi(
     throw new Error(`model "${modelId}" is not installed on ${shown}. Installed: ${installed.join(", ") || "(none)"}.${hint}`);
   }
 
-  async function verify(kind: "language" | "transcription", id: string) {
+  const optionsKey = (id: string) => (providerOf(id) === compat ? "openai" : underlyingProvider(id));
+  const transcriptionOptions = (id: string) => {
+    const k = optionsKey(id);
+    return { [k]: { ...(wordTimestampOptions[k] ?? {}) } };
+  };
+  const keyOf = (id: string) => {
+    const baseUrl = credentials.get(providerOf(id)).baseUrl;
+    return verdictKey(id, baseUrl ? redactUrl(baseUrl) : undefined);
+  };
+  /** one test transcription per model at a time in this process; `verdicts.exclusive` does the same across processes */
+  const probing = new Map<string, Promise<WordTimestampVerdict>>();
+
+  /**
+   * Word timestamps are tested, not looked up: see ai/word-timestamps.ts for why and what would let this go.
+   * A stored verdict younger than PROBE_TTL_MS is used as is unless `fresh` (the Test button).
+   */
+  async function checkWordTimestamps(id: string, fresh: boolean) {
+    const key = keyOf(id);
+    const current = (v: WordTimestampVerdict | undefined) => (v && !fresh && !isStale(v) ? v : undefined);
+    let v = current(await verdicts.get(key));
+    if (!v) {
+      let p = probing.get(key);
+      if (!p) {
+        p = verdicts
+          .exclusive(key, async () => {
+            // another process may have run the test while this one waited for the lock
+            const stored = await verdicts.get(key);
+            return current(stored) ?? testModel(id, key, stored, fresh);
+          })
+          .finally(() => probing.delete(key));
+        probing.set(key, p);
+      }
+      v = await p;
+    }
+    if (!v.wordLevel)
+      throw new Error(
+        `"${id}" does not return word timestamps, which cuts and captions need: ${v.segments ? `a test clip came back as ${v.segments} segment(s) ("${v.text}")` : v.text}. Pick another transcription model; Settings → Models shows which ones passed.`,
+      );
+  }
+
+  /** Send the clip and store what it says. `previous` is the stale verdict, kept when only the call failed. */
+  async function testModel(id: string, key: string, previous: WordTimestampVerdict | undefined, fresh: boolean): Promise<WordTimestampVerdict> {
+    const model = (await resolve("transcription", id)) as TranscriptionModel;
+    const run = () => probeWordTimestamps(model, transcriptionOptions(id));
+    let verdict: WordTimestampVerdict;
+    try {
+      // the clip waits for a slot like any other call: a self-hosted whisper is one machine shared by every job (ai/gate.ts)
+      verdict = gate ? await gate.run(providerOf(id), run) : await run();
+    } catch (err) {
+      const status = httpStatusOf(err);
+      const msg = (err as Error).message ?? String(err);
+      // a request the server refuses outright (a model that rejects verbose_json or word granularity) is an answer
+      if (status === 400 || status === 422)
+        verdict = {
+          wordLevel: false,
+          segments: 0,
+          text: `the server refused the request for word timestamps (HTTP ${status}: ${msg.slice(0, 160)})`,
+          checkedAt: new Date().toISOString(),
+        };
+      // a key, network or rate-limit failure says nothing new: keep the last result rather than refuse a model that worked
+      else if (previous && !fresh) {
+        log.warn({ model: id, err: msg, lastCheckedAt: previous.checkedAt }, "word-timestamp re-test failed; keeping the last result");
+        return previous;
+      } else throw new Error(`"${id}" failed a test transcription: ${msg}`);
+    }
+    await verdicts.set(key, verdict);
+    log.info({ model: id, wordLevel: verdict.wordLevel, segments: verdict.segments, heard: verdict.text }, "transcription model tested for word timestamps");
+    return verdict;
+  }
+
+  async function verify(kind: "language" | "transcription", id: string, opts: { fresh?: boolean } = {}) {
     await resolve(kind, id);
     requireKeys(id);
-    if (kind === "transcription" && !supportsWordTimestamps(id))
-      throw new Error(
-        `"${id}" does not return word timestamps, which cuts and captions need. Use whisper-1 (also through the gateway), a Speaches faster-whisper model, deepgram:nova-3, assemblyai:best or groq:whisper-large-v3-turbo.`,
-      );
-    await checkSelfHosted(id);
+    await checkSelfHosted(kind, id);
+    if (kind === "transcription") await checkWordTimestamps(id, !!opts.fresh);
   }
 
   return {
@@ -294,11 +392,19 @@ export function createAi(
       return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: chain }) as LanguageModel;
     },
     transcriptionModel: async (id = current().transcription) => (await resolve("transcription", id)) as TranscriptionModel,
-    transcriptionOptions: (id = current().transcription) => {
-      const p = underlyingProvider(id);
-      return { [p]: wordTimestampOptions[p] ?? {} };
-    },
+    transcriptionOptions: (id = current().transcription) => transcriptionOptions(id),
+    transcriptionOptionsKey: (id = current().transcription) => optionsKey(id),
     verify,
+    wordTimestampVerdict: (id) => verdicts.get(keyOf(id)),
+    async wordTimestampVerdicts(ids) {
+      const all = await verdicts.all();
+      const out = new Map<string, WordTimestampVerdict>();
+      for (const id of ids) {
+        const v = all[keyOf(id)];
+        if (v) out.set(id, v);
+      }
+      return out;
+    },
     /**
      * Boot check of the models that will actually run (the environment's, or the admin override that
      * `models.attach` loaded). Same rules as `verify`, so a model that cannot work fails here, not at
@@ -320,6 +426,13 @@ export function createAi(
       if (errors.length) throw new Error(errors.join("\n"));
     },
   };
+}
+
+/** The HTTP status behind a provider error, through the SDK's retry wrapper. */
+function httpStatusOf(err: unknown): number | undefined {
+  if (APICallError.isInstance(err)) return err.statusCode;
+  const last = (err as { lastError?: unknown } | null)?.lastError;
+  return last && APICallError.isInstance(last) ? last.statusCode : undefined;
 }
 
 /** Label for an error: the env var when the environment's model is in force, else say it is an admin override. */

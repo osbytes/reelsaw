@@ -164,7 +164,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   TRANSCRIPTION_MODEL: [
     "models",
-    "Default speech-to-text model as `provider:model`. It must return word timestamps: `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, or a Speaches model through OPENAI_BASE_URL. `openai:gpt-4o-transcribe` returns none and does not work.",
+    "Default speech-to-text model as `provider:model`, e.g. `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, a Speaches model through OPENAI_BASE_URL, or a compatible router's model (`openrouter:openai/whisper-large-v3-turbo`). It must return word timestamps; boot transcribes a 5-second test clip once to check, and refuses a model that does not (e.g. `openai:gpt-4o-transcribe`).",
   ],
   TRANSCRIPT_ALIGN_MODEL: [
     "models",
@@ -189,7 +189,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   VERCEL_OIDC_TOKEN: ["providers", "Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform)."],
   OPENAI_COMPATIBLE_BASE_URL: [
     "providers",
-    "Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`).",
+    "Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`).",
   ],
   OPENAI_COMPATIBLE_API_KEY: ["providers", "Key for the compat server (`ollama` for Ollama)."],
   OPENAI_COMPATIBLE_NAME: [

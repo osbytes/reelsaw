@@ -18,7 +18,6 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { extractEntities, biasProviderOptions, correctTranscript } from "../../pipeline/entities.js";
-import { underlyingProvider } from "../../ai/registry.js";
 import { isUnavailable, materialize, type CaseResult, type MediaSource, type Suite, type SummaryMetric } from "../framework.js";
 import { evalAi, transcribeCached } from "../asr.js";
 
@@ -211,7 +210,7 @@ export const transcriptionSuite: Suite = {
           }
           const audio = new Uint8Array(await fs.readFile(file));
           const entities = extractEntities(c.meta, c.vocabulary);
-          const bias = cfg.TRANSCRIPT_BIAS ? biasProviderOptions(underlyingProvider(modelId), entities) : {};
+          const bias = cfg.TRANSCRIPT_BIAS ? biasProviderOptions(evalAi(ctx).transcriptionOptionsKey(modelId), entities) : {};
           const heard = await transcribeCached(ctx, modelId, audio, bias as Record<string, unknown>);
           let words = heard.words;
           let applied = 0;

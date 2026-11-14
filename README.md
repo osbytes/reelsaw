@@ -172,9 +172,13 @@ The language model and the transcription model are independent; mix vendors free
 | Env | Example values |
 |---|---|
 | `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:qwen2.5:14b` |
-| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `openrouter:openai/whisper-large-v3-turbo` |
 
-The transcription model must return word timestamps (captions and cuts need them), so `openai:gpt-4o-transcribe`, which returns none, is not supported.
+The transcription model must return word timestamps (captions and cuts need them). Reelsaw does not
+guess which models do from their names: the first time it meets a model it transcribes a bundled
+5-second clip and checks the answer, then remembers the result for 30 days (Test under Settings →
+Models checks again). A model that returns none, such as `openai:gpt-4o-transcribe`, is refused with
+that reason.
 
 ### Fully local (no API keys)
 
@@ -201,23 +205,26 @@ Notes: the app requests `response_format: json_schema` from the compat server (`
 
 ### OpenRouter and other OpenAI-compatible cloud APIs
 
-Routers such as [OpenRouter](https://openrouter.ai) go through the `compat` provider too. Name it so
-model ids read naturally, and keep transcription on a vendor that returns word timestamps (OpenRouter
-has no Whisper endpoint):
+Routers such as [OpenRouter](https://openrouter.ai) go through the `compat` provider too, for the
+language model and for transcription (its `/audio/transcriptions`). Name it so model ids read
+naturally:
 
 ```
 OPENAI_COMPATIBLE_NAME=openrouter
 OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_COMPATIBLE_API_KEY=sk-or-v1-...
-AI_MODEL=openrouter:anthropic/claude-sonnet-4.5   # any id from openrouter.ai/models after "openrouter:"
-TRANSCRIPTION_MODEL=groq:whisper-large-v3-turbo   # or openai:whisper-1, deepgram:nova-3, assemblyai:best
-GROQ_API_KEY=...
+AI_MODEL=openrouter:anthropic/claude-sonnet-4.5            # any id from openrouter.ai/models after "openrouter:"
+TRANSCRIPTION_MODEL=openrouter:openai/whisper-large-v3-turbo
 ```
 
+Not every OpenRouter speech model returns word timestamps, and OpenRouter's model list doesn't say
+which do, so boot checks the one you pick with a short test clip (see above) and names the problem if
+it fails. Any other vendor works for transcription too, e.g.
+`TRANSCRIPTION_MODEL=groq:whisper-large-v3-turbo` with `GROQ_API_KEY`.
+
 Only the first `:` separates the provider, so `vendor/model` ids (and OpenRouter's `:free` suffixes)
-pass through unchanged. Don't point `OPENAI_BASE_URL` at OpenRouter: that moves `openai:` transcription
-there as well, and the boot check then looks for `whisper-1` and bare model names that OpenRouter
-doesn't list. The compat server is capped at 2 model calls in flight, sized for a local machine; a
+pass through unchanged. Don't point `OPENAI_BASE_URL` at OpenRouter: that sends every `openai:` call
+there and treats it as a self-hosted server. The compat server is capped at 2 model calls in flight, sized for a local machine; a
 cloud router takes more, so raise it with `PROVIDER_CONCURRENCY=openrouter=8`.
 
 ### Using a GPU
@@ -284,8 +291,9 @@ first: pick a provider and, if it has no key or server URL yet, enter it right t
 then appear. Cloud vendors are asked live, a self-hosted Ollama or Speaches shows what is installed
 and downloads anything else with a progress bar, and the search box filters every provider at once.
 Saving a key tries it first (the provider's models are listed with it) and a wrong one is refused;
-saving a model checks it too (key present, server reachable and model installed, transcription
-returns word timestamps). Keys are stored encrypted in the database with a key derived from
+saving a model checks it too (key present, server reachable and model installed, and for
+transcription a 5-second test clip that must come back with word timestamps; the picker notes which
+models passed). Keys are stored encrypted in the database with a key derived from
 `BETTER_AUTH_SECRET` and never shown again (the UI sees the last four characters); rotating that
 secret makes stored keys unreadable, and the UI asks for them again. Changes survive restarts and
 reach worker processes within seconds; a stage already running finishes with the model it started
@@ -603,6 +611,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
 | `list_releases` | Published Reelsaw versions from GitHub (reelsaw.com/releases): tag, date, a short summary and the change notes. |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
+| `test_model` | Admins only: check that a model id works on this instance with one real call (same as Test under Settings → Models). |
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
@@ -705,6 +714,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
 | `reelsaw cuts <clipId> [--save <dir>] [--fixture <dir>]` | dry-run the disfluency cut search for a clip and print every candidate verdict; can save the removed and context audio, and export each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align <projectId> <start> <end>` | word timestamps from the align model for a source window |
+| `reelsaw test-model <language\|transcription> <provider:model> [--json]` | one real call to check a model works here; transcription re-runs the word-timestamp test clip (same as Test under Settings → Models, test_model) |
 | `reelsaw hear <clipId> [start] [dur]` | transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags <projectId> [from] [to]` | transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |

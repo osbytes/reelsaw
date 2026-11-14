@@ -72,7 +72,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `AI_MODEL` | `openai:gpt-4o-mini` | Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models. |
-| `TRANSCRIPTION_MODEL` | `openai:whisper-1` | Default speech-to-text model as `provider:model`. It must return word timestamps: `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, or a Speaches model through OPENAI_BASE_URL. `openai:gpt-4o-transcribe` returns none and does not work. |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1` | Default speech-to-text model as `provider:model`, e.g. `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, a Speaches model through OPENAI_BASE_URL, or a compatible router's model (`openrouter:openai/whisper-large-v3-turbo`). It must return word timestamps; boot transcribes a 5-second test clip once to check, and refuses a model that does not (e.g. `openai:gpt-4o-transcribe`). |
 | `TRANSCRIPT_ALIGN_MODEL` | unset | Model that re-aligns cut boundaries on short windows. Unset: TRANSCRIPTION_MODEL. A bigger whisper here is cheap and pays off. |
 
 ### Provider keys
@@ -89,7 +89,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `ASSEMBLYAI_API_KEY` | unset | AssemblyAI key (transcription). |
 | `AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports. |
 | `VERCEL_OIDC_TOKEN` | unset | Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform). |
-| `OPENAI_COMPATIBLE_BASE_URL` | unset | Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`). |
+| `OPENAI_COMPATIBLE_BASE_URL` | unset | Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`). |
 | `OPENAI_COMPATIBLE_API_KEY` | unset | Key for the compat server (`ollama` for Ollama). |
 | `OPENAI_COMPATIBLE_NAME` | `compat` | Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>` (`openrouter` gives `openrouter:anthropic/claude-sonnet-4.5`). |
 | `OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS` | `true` | Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient. |

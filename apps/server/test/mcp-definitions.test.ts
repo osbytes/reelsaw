@@ -95,6 +95,7 @@ const EXPECTED = [
   "set_project_bumpers",
   "set_project_defaults",
   "set_project_source_text",
+  "test_model",
   "test_webhook",
   "update_asset",
   "update_clip",

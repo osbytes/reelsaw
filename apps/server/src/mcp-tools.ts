@@ -769,6 +769,16 @@ export const TOOLS = {
       'Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. Returns { values, env, override, source: { KEY: "env" | "db" }, ignored: { KEY: reason }, groups, help, updatedAt, updatedBy }; secrets are masked.',
     annotations: { readOnlyHint: true },
   },
+  test_model: {
+    title: "Test a model",
+    description:
+      "Admins only: check that a model id works on this instance with one real call (same as Test under Settings → Models). language: the model must answer a one-word prompt. transcription: a 5-second test clip is transcribed again and must come back with word timestamps, which cuts and captions need; the result is stored and shown in the model picker. Changes nothing else. Returns { ok, ms, reply, error?, wordTimestamps: { wordLevel, segments, text, checkedAt } | null }.",
+    inputSchema: {
+      kind: z.enum(["language", "transcription"]).describe("language = AI_MODEL / the judge; transcription = TRANSCRIPTION_MODEL or the align model"),
+      id: z.string().min(3).max(200).describe("provider:model, e.g. openrouter:openai/whisper-large-v3-turbo"),
+    },
+    annotations: { idempotentHint: true },
+  },
   list_workers: {
     title: "List workers",
     description:
