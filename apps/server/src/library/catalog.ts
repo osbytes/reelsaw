@@ -10,14 +10,13 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
 import Fuse from "fuse.js";
 import { z } from "zod";
 import { ASSET_KINDS, type AssetKind } from "@reelsaw/shared";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ItemLicense, ProviderItem } from "./providers/types.js";
+import { bundledAssetPath } from "../lib/assets.js";
 
 export const catalogItemSchema = z.object({
   id: z.string().min(1).max(100),
@@ -83,17 +82,7 @@ const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
  * in the image (where the process runs from `/app`, so the working directory cannot be relied on). Resolved from this module
  * like the migrations folder in db/index.ts: the bundle lives in `dist/` (or `dist/chunks/`), the sources in `src/library/`.
  */
-export const DEFAULT_BUNDLED_DIR = (() => {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(here, "../assets/catalog"),
-    path.resolve(here, "../../assets/catalog"),
-    path.resolve(here, "../../../assets/catalog"),
-    path.resolve(process.cwd(), "assets/catalog"),
-    path.resolve(process.cwd(), "apps/server/assets/catalog"),
-  ];
-  return candidates.find((d) => existsSync(path.join(d, "index.json"))) ?? candidates[0]!;
-})();
+export const DEFAULT_BUNDLED_DIR = path.dirname(bundledAssetPath("catalog/index.json"));
 
 async function readManifest(file: string): Promise<Manifest | null> {
   try {

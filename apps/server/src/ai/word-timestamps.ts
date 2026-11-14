@@ -42,16 +42,16 @@
  * Until then the cost is one ~5 s transcription per model per PROBE_TTL_MS.
  */
 import fs from "node:fs/promises";
-import path from "node:path";
 import { sql } from "drizzle-orm";
 import { transcribe, type TranscriptionModel } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
 import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import { looksWordLevel } from "../pipeline/transcript.js";
+import { bundledAssetPath } from "../lib/assets.js";
 
 /** 5 s of synthetic speech (flite, voice "slt"), 13 words: "Reelsaw checks that this speech model returns a time for every single word." */
-export const PROBE_CLIP = path.resolve(process.cwd(), "assets/probe/word-timestamps.mp3");
+export const PROBE_CLIP = bundledAssetPath("probe/word-timestamps.mp3");
 /** How long a verdict stands before the clip is sent again (providers change what they return). */
 export const PROBE_TTL_MS = 30 * 24 * 3600_000;
 const PROBE_TIMEOUT_MS = 5 * 60_000; // a self-hosted server may load the model into memory first
