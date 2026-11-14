@@ -57,7 +57,7 @@ export function compatTranscriptionModel(settings: CompatTranscriptionSettings, 
       const ext = options.mediaType.split("/")[1]?.replace("mpeg", "mp3") || "bin";
       const form = new FormData();
       form.append("model", modelId);
-      form.append("file", new Blob([bytes], { type: options.mediaType }), `audio.${ext}`);
+      form.append("file", new Blob([new Uint8Array(bytes)], { type: options.mediaType }), `audio.${ext}`);
       form.append("response_format", typeof o.responseFormat === "string" ? o.responseFormat : "verbose_json");
       for (const g of Array.isArray(o.timestampGranularities) ? o.timestampGranularities : []) form.append("timestamp_granularities[]", String(g));
       for (const k of ["language", "prompt", "temperature"] as const) if (o[k] != null) form.append(k, String(o[k]));
