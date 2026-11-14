@@ -418,7 +418,7 @@ LINKING SHORTS TO THE PARENT VIDEO
 /**
  * Stream a zip of all rendered clips with metadata. Resolves to a Node readable; the caller is
  * responsible for piping it. Temp copies pulled from remote storage are removed when the archive
- * finishes or errors.
+ * finishes or errors; when the reader goes away mid-download, no further clip is pulled.
  */
 export async function createExportZip(
   deps: { storage: Storage; paths: Paths; log?: Logger },
@@ -429,24 +429,39 @@ export async function createExportZip(
   const tmpDir = path.join(deps.paths.tmp, `export-${randomUUID()}`);
   await fsp.mkdir(tmpDir, { recursive: true });
 
+  // Once the reader is gone (`stopped`: the browser cancelled or the connection dropped) no further clip is pulled.
+  // A pull in flight is writing into tmpDir, so the folder is removed when that pull settles, not under it.
+  let stopped = false;
+  let pulling = false;
+  const cleanup = () => void fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  const stop = () => {
+    stopped = true;
+    if (!pulling) cleanup();
+  };
   const localFile = async (key: string, name: string) => {
     const loc = await deps.storage.resolve(key);
     if ("file" in loc) return loc.file;
-    return deps.storage.ensureLocal(key, path.join(tmpDir, name));
+    pulling = true;
+    try {
+      return await deps.storage.ensureLocal(key, path.join(tmpDir, name));
+    } finally {
+      pulling = false;
+      if (stopped) cleanup();
+    }
   };
 
   const archive = new ZipArchive({ zlib: { level: 1 } });
-  const cleanup = () => void fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   const log = deps.log?.child({ module: "export", projectId: input.project.id });
   archive.on("end", () => {
-    cleanup();
+    stop();
     log?.info({ clips: manifest.clips.length, bytes: archive.pointer() }, "export sent");
   });
   archive.on("error", (err) => {
-    cleanup();
-    log?.warn({ err, clips: manifest.clips.length }, "export failed");
+    stop();
+    if (isAbort(err)) log?.info({ clips: manifest.clips.length, bytes: archive.pointer() }, "export cancelled");
+    else log?.warn({ err, clips: manifest.clips.length }, "export failed");
   });
-  archive.on("close", cleanup);
+  archive.on("close", stop);
 
   (async () => {
     try {
@@ -455,9 +470,14 @@ export async function createExportZip(
       archive.append(buildCsv(manifest), { name: "clips.csv" });
       for (const c of manifest.clips) {
         const clip = byIndex.get(c.index)!;
-        archive.file(await localFile(clip.outputKey!, c.video), { name: `clips/${c.video}`, store: true } as ZipEntryData);
-        if (clip.thumbnailKey && c.thumbnail)
-          archive.file(await localFile(clip.thumbnailKey, c.thumbnail), { name: `clips/${c.thumbnail}`, store: true } as ZipEntryData);
+        const video = await localFile(clip.outputKey!, c.video);
+        if (stopped) return;
+        archive.file(video, { name: `clips/${c.video}`, store: true } as ZipEntryData);
+        if (clip.thumbnailKey && c.thumbnail) {
+          const thumb = await localFile(clip.thumbnailKey, c.thumbnail);
+          if (stopped) return;
+          archive.file(thumb, { name: `clips/${c.thumbnail}`, store: true } as ZipEntryData);
+        }
         archive.append(c.text, { name: `clips/${c.base}.txt` });
         archive.append(JSON.stringify(c.youtube, null, 2), { name: `clips/${c.base}.youtube.json` });
         archive.append(JSON.stringify(c.tiktok, null, 2), { name: `clips/${c.base}.tiktok.json` });
@@ -467,11 +487,18 @@ export async function createExportZip(
           archive.append(toVtt(clip.captions.lines), { name: `clips/${c.base}.vtt` });
         }
       }
+      if (stopped) return;
       await archive.finalize();
     } catch (err) {
-      archive.destroy(err as Error);
+      if (!stopped) archive.destroy(err as Error);
     }
   })();
 
   return { stream: archive, filename: `${slugify(input.project.title, 80)}-clips.zip`, manifest };
+}
+
+/** The reader cancelled the stream (Readable.toWeb destroys it with an AbortError when the client disconnects). */
+function isAbort(err: unknown): boolean {
+  const e = err as { name?: unknown; code?: unknown } | null;
+  return e?.name === "AbortError" || e?.code === "ABORT_ERR";
 }
