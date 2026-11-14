@@ -1174,11 +1174,11 @@ const restRouter = router({
             throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
           }
         }),
-      /** One tiny real call, so "saved" also means "answers". Transcription is checked statically (word timestamps, installed). */
+      /** One tiny real call, so "saved" also means "answers". Transcription re-runs the word-timestamp test clip (ai/word-timestamps.ts). */
       test: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), id: modelId })).mutation(async ({ ctx, input }) => {
         const t0 = Date.now();
         try {
-          await ctx.svc.ai.verify(input.kind, input.id);
+          await ctx.svc.ai.verify(input.kind, input.id, { fresh: true });
           if (input.kind === "language") {
             const r = await generateText({
               model: await ctx.svc.ai.languageModel(input.id),
@@ -1189,7 +1189,7 @@ const restRouter = router({
             });
             return { ok: true as const, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };
           }
-          return { ok: true as const, ms: Date.now() - t0, reply: null };
+          return { ok: true as const, ms: Date.now() - t0, reply: (await ctx.svc.ai.wordTimestampVerdict(input.id))?.text.slice(0, 40) ?? null };
         } catch (err) {
           return { ok: false as const, ms: Date.now() - t0, error: (err as Error).message };
         }

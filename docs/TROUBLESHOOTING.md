@@ -657,7 +657,11 @@ It looked frozen and the evidence was gone with the container's logs. What chang
   with a host Ollama, the container reaches it through `host.docker.internal`, so Ollama must listen on
   `0.0.0.0` (`OLLAMA_HOST=0.0.0.0`), not only 127.0.0.1; test with
   `docker run --rm --add-host host.docker.internal:host-gateway busybox:1.36 wget -qO- http://host.docker.internal:11434/api/tags`.
-  A transcription model without word timestamps (for example `openai:gpt-4o-transcribe`) is rejected at boot too.
+  A transcription model without word timestamps (for example `openai:gpt-4o-transcribe`) is rejected at boot too:
+  the first boot with a new transcription model transcribes a 5-second test clip
+  (`apps/server/assets/probe/word-timestamps.mp3`) and refuses the model if the answer is not word by word.
+  The result is kept for 30 days in `instance_settings` (key `transcription_probes`); Test under Settings → Models
+  runs the clip again. "failed a test transcription" means the call itself failed (key, URL, rate limit), not the model.
 
 ## 7. Improvements: done and next
 

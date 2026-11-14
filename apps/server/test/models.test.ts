@@ -2,7 +2,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createModelSettings, parseOverride, resolveModels } from "../src/ai/models.js";
-import { supportsWordTimestamps } from "../src/ai/registry.js";
 import type { Config } from "../src/config.js";
 import type { Db } from "../src/db/index.js";
 import type { Logger } from "../src/log.js";
@@ -52,22 +51,6 @@ describe("resolveModels", () => {
       language: "anthropic:claude-haiku-4.5",
     });
     assert.deepEqual(parseOverride(null), {});
-  });
-});
-
-describe("supportsWordTimestamps", () => {
-  it("whisper everywhere, deepgram/assemblyai/groq; not gpt-4o-transcribe", () => {
-    for (const id of [
-      "openai:whisper-1",
-      "gateway:openai/whisper-1",
-      "openai:Systran/faster-whisper-small",
-      "deepgram:nova-3",
-      "assemblyai:best",
-      "groq:whisper-large-v3-turbo",
-    ])
-      assert.equal(supportsWordTimestamps(id), true, id);
-    for (const id of ["openai:gpt-4o-transcribe", "gateway:openai/gpt-4o-mini-transcribe", "gateway:google/gemini-3.5-transcribe"])
-      assert.equal(supportsWordTimestamps(id), false, id);
   });
 });
 

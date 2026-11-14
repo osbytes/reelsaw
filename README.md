@@ -172,9 +172,13 @@ The language model and the transcription model are independent; mix vendors free
 | Env | Example values |
 |---|---|
 | `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:qwen2.5:14b` |
-| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `openrouter:openai/whisper-large-v3-turbo` |
 
-The transcription model must return word timestamps (captions and cuts need them), so `openai:gpt-4o-transcribe`, which returns none, is not supported.
+The transcription model must return word timestamps (captions and cuts need them). Reelsaw does not
+guess which models do from their names: the first time it meets a model it transcribes a bundled
+5-second clip and checks the answer, then remembers the result for 30 days (Test under Settings →
+Models checks again). A model that returns none, such as `openai:gpt-4o-transcribe`, is refused with
+that reason.
 
 ### Fully local (no API keys)
 
@@ -201,23 +205,26 @@ Notes: the app requests `response_format: json_schema` from the compat server (`
 
 ### OpenRouter and other OpenAI-compatible cloud APIs
 
-Routers such as [OpenRouter](https://openrouter.ai) go through the `compat` provider too. Name it so
-model ids read naturally, and keep transcription on a vendor that returns word timestamps (OpenRouter
-has no Whisper endpoint):
+Routers such as [OpenRouter](https://openrouter.ai) go through the `compat` provider too, for the
+language model and for transcription (its `/audio/transcriptions`). Name it so model ids read
+naturally:
 
 ```
 OPENAI_COMPATIBLE_NAME=openrouter
 OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_COMPATIBLE_API_KEY=sk-or-v1-...
-AI_MODEL=openrouter:anthropic/claude-sonnet-4.5   # any id from openrouter.ai/models after "openrouter:"
-TRANSCRIPTION_MODEL=groq:whisper-large-v3-turbo   # or openai:whisper-1, deepgram:nova-3, assemblyai:best
-GROQ_API_KEY=...
+AI_MODEL=openrouter:anthropic/claude-sonnet-4.5            # any id from openrouter.ai/models after "openrouter:"
+TRANSCRIPTION_MODEL=openrouter:openai/whisper-large-v3-turbo
 ```
 
+Not every OpenRouter speech model returns word timestamps, and OpenRouter's model list doesn't say
+which do, so boot checks the one you pick with a short test clip (see above) and names the problem if
+it fails. Any other vendor works for transcription too, e.g.
+`TRANSCRIPTION_MODEL=groq:whisper-large-v3-turbo` with `GROQ_API_KEY`.
+
 Only the first `:` separates the provider, so `vendor/model` ids (and OpenRouter's `:free` suffixes)
-pass through unchanged. Don't point `OPENAI_BASE_URL` at OpenRouter: that moves `openai:` transcription
-there as well, and the boot check then looks for `whisper-1` and bare model names that OpenRouter
-doesn't list. The compat server is capped at 2 model calls in flight, sized for a local machine; a
+pass through unchanged. Don't point `OPENAI_BASE_URL` at OpenRouter: that sends every `openai:` call
+there and treats it as a self-hosted server. The compat server is capped at 2 model calls in flight, sized for a local machine; a
 cloud router takes more, so raise it with `PROVIDER_CONCURRENCY=openrouter=8`.
 
 ### Using a GPU
@@ -284,8 +291,9 @@ first: pick a provider and, if it has no key or server URL yet, enter it right t
 then appear. Cloud vendors are asked live, a self-hosted Ollama or Speaches shows what is installed
 and downloads anything else with a progress bar, and the search box filters every provider at once.
 Saving a key tries it first (the provider's models are listed with it) and a wrong one is refused;
-saving a model checks it too (key present, server reachable and model installed, transcription
-returns word timestamps). Keys are stored encrypted in the database with a key derived from
+saving a model checks it too (key present, server reachable and model installed, and for
+transcription a 5-second test clip that must come back with word timestamps; the picker notes which
+models passed). Keys are stored encrypted in the database with a key derived from
 `BETTER_AUTH_SECRET` and never shown again (the UI sees the last four characters); rotating that
 secret makes stored keys unreadable, and the UI asks for them again. Changes survive restarts and
 reach worker processes within seconds; a stage already running finishes with the model it started

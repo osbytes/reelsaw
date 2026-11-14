@@ -8,6 +8,7 @@ import { createDiskLeaser, LEASE_STALE_MS, releaseWorkerLeases, volumeId } from 
 import { claimWorkerId } from "./ops/workers.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
+import { dbVerdictStore } from "./ai/word-timestamps.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
 import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
 import { createAsr, type Asr } from "./ai/asr.js";
@@ -191,13 +192,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     ),
   );
   let models!: ReturnType<typeof createModelSettings>;
+  // word-timestamp test results (ai/word-timestamps.ts), shared by every process once the database is attached
+  const verdicts = dbVerdictStore();
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
-    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers, gate);
+    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers, gate, verdicts);
     models = createModelSettings(config, log.child({ module: "models" }), a.verify);
     // reachability is checked below, against the models that will really run (after the admin override loads)
     return a;
   });
-  const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
+  const catalog = createModelCatalog(config, log.child({ module: "models" }), providers, (id) => ai.wordTimestampVerdict(id));
 
   // The on-device detectors serve pipeline stages, which only run in worker processes: a process with RUN_WORKERS=false
   // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the
@@ -285,6 +288,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   await step("model settings", async () => {
     await providers.attach(database.db);
+    verdicts.attach(database.db);
     const s = await models.attach(database.db);
     if (Object.keys(s.override).length)
       log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
