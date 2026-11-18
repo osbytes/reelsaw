@@ -30,10 +30,17 @@ export async function peekUrlMeta(url: string): Promise<{ title?: string | undef
 
 /**
  * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (live streams, some
- * sites). Throws when the lookup itself fails. Used before a project is created (a refusal with the upgrade offer instead of
- * a failed project) and again before ingest downloads; the binding check still runs on the probed file.
+ * sites). Throws when the lookup itself fails. Used when a link is checked (check_source, the New project form), when the
+ * project is created (a refusal with the upgrade offer instead of a failed project) and again before ingest downloads; the
+ * binding check still runs on the probed file.
+ *
+ * Those three ask about the same link within seconds of each other, and each lookup is a yt-dlp run of a few seconds
+ * (through the download proxies, when set), so an answer is reused for `LENGTH_REUSE_MS`. A failed lookup is not kept:
+ * the next caller tries again.
  */
 export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: string, signal?: AbortSignal): Promise<number | null> {
+  const known = lengths.get(url);
+  if (known && Date.now() - known.at < LENGTH_REUSE_MS) return known.sec;
   const { stdout } = await media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], {
     signal,
   });
@@ -41,7 +48,25 @@ export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: s
     .split("\n")
     .reverse()
     .find((l) => l.trim().startsWith("{"));
-  if (!jsonLine) return null;
-  const duration = z.object({ duration: z.number().positive() }).safeParse(JSON.parse(jsonLine));
-  return duration.success ? duration.data.duration : null;
+  const duration = jsonLine ? z.object({ duration: z.number().positive() }).safeParse(JSON.parse(jsonLine)) : null;
+  const sec = duration?.success ? duration.data.duration : null;
+  remember(url, sec);
+  return sec;
+}
+
+/** How long a link's looked-up length is reused: long enough to span checking a link, creating it and ingest starting. */
+export const LENGTH_REUSE_MS = 10 * 60_000;
+/** Links remembered at once; the oldest answer goes first. */
+const LENGTHS_KEPT = 500;
+const lengths = new Map<string, { at: number; sec: number | null }>();
+
+function remember(url: string, sec: number | null) {
+  lengths.delete(url); // re-inserted last, so the map's order is oldest answer first
+  lengths.set(url, { at: Date.now(), sec });
+  while (lengths.size > LENGTHS_KEPT) lengths.delete(lengths.keys().next().value!);
+}
+
+/** Drop every remembered length (tests). */
+export function forgetAnnouncedDurations() {
+  lengths.clear();
 }
