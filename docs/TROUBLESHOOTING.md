@@ -100,6 +100,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw media-links <email> [--project id] [--json] [--active]` | the account's share links: target, state, expiry, last use (Settings → Share links / list_media_links) |
 | `reelsaw media-links create <projectId> [clipId…] [--kind clip\|thumb\|srt\|vtt\|export] [--ttl days] [--label text]` | a share link per clip (or one for the zip) that needs no sign-in (get_media_links); reuses the active one unless --ttl or --label |
 | `reelsaw media-links revoke <linkId> \| --project <id> \| --clip <id> \| --all <email>` | turn share links off now (revoke_media_link) |
+| `reelsaw media-links clear <email>` | delete the account's revoked and expired share links (clear_media_links) |
 | `reelsaw webhooks <email> [--json]` | the account's webhook endpoints: masked URL, events, status, last delivery (Settings → Webhooks / list_webhooks) |
 | `reelsaw webhooks deliveries <endpointId> [--status failed] [--json]` | an endpoint's delivery log (list_webhook_deliveries) |
 | `reelsaw webhooks resend <deliveryId> \| test <endpointId> \| enable <endpointId> \| disable <endpointId>` | send one again, send a test now, or turn an endpoint on / off (resend_webhook_delivery, test_webhook, update_webhook) |

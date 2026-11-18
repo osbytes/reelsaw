@@ -1,6 +1,12 @@
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 import type { ComponentProps } from "react";
 
+/**
+ * The height cap for a list inside a Settings card (share links, deliveries, keys, failures, rules): past it the list
+ * scrolls in place, so a card never grows with its rows and the sections below stay reachable (docs/UI.md).
+ */
+export const SECTION_LIST_MAX_H = "max-h-[min(28rem,55dvh)]";
+
 /** Radix ScrollArea with themed scrollbars. Use this instead of `overflow-auto`. */
 export function ScrollArea({
   className = "",

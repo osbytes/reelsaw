@@ -6,7 +6,7 @@ import { copyText } from "../lib/clipboard";
 import { useTRPC } from "../lib/trpc";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "./ui";
-import { ScrollArea } from "./scroll-area";
+import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 
 const EVENT_LABEL: Record<string, string> = {
   "project.created": "Project created",
@@ -228,68 +228,71 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
       {list.error && <span className="text-[13px] text-err">✕ {list.error.message}</span>}
       {list.data && !items.length && <span className="text-[13px] text-ink3">Nothing sent yet. Send a test, or wait for the next event.</span>}
       {items.length > 0 && (
-        <ul className="divide-y divide-line text-[13px]">
-          {items.map((d) => (
-            <li key={d.id} className="py-1.5">
-              <button
-                className="grid w-full grid-cols-[6rem_minmax(0,1fr)_2.5rem] items-center gap-x-3 text-left md:grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem]"
-                onClick={() => setOpen(open === d.id ? null : d.id)}
-                aria-expanded={open === d.id}
-              >
-                <span className={`text-xs ${DELIVERY[d.status].cls}`}>
-                  {DELIVERY[d.status].glyph} <span className="text-ink2">{DELIVERY[d.status].word}</span>
-                </span>
-                <span className="truncate font-mono text-xs">{d.type}</span>
-                <span className="text-right text-xs tabular-nums text-ink2">{d.lastStatusCode ?? "–"}</span>
-                <span className="col-span-2 col-start-2 text-xs text-ink3 md:col-span-1 md:col-start-auto md:text-right">{when(d.createdAt)}</span>
-              </button>
-              {open === d.id && (
-                <div className="mt-2 flex flex-col gap-2 text-xs">
-                  <span className="text-ink2">
-                    {d.attempt} attempt{d.attempt === 1 ? "" : "s"}
-                    {d.lastError ? ` · ${d.lastError}` : ""}
-                    {d.nextAttemptAt && d.status === "pending" ? ` · next try ${when(d.nextAttemptAt)}` : ""}
-                    {d.deliveredAt ? ` · delivered ${when(d.deliveredAt)}` : ""}
-                    {` · ${d.eventId}`}
+        <ScrollArea className={SECTION_LIST_MAX_H}>
+          <ul className="divide-y divide-line text-[13px]">
+            {items.map((d) => (
+              <li key={d.id} className="py-1.5">
+                <button
+                  className="grid w-full grid-cols-[6rem_minmax(0,1fr)_2.5rem] items-center gap-x-3 text-left md:grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem]"
+                  onClick={() => setOpen(open === d.id ? null : d.id)}
+                  aria-expanded={open === d.id}
+                >
+                  <span className={`text-xs ${DELIVERY[d.status].cls}`}>
+                    {DELIVERY[d.status].glyph} <span className="text-ink2">{DELIVERY[d.status].word}</span>
                   </span>
-                  {d.body && (
-                    <ScrollArea className="max-h-48 rounded-[8px] bg-panel">
-                      <pre className="w-max p-2 font-mono text-[11px] leading-4">{JSON.stringify(JSON.parse(d.body), null, 2)}</pre>
-                    </ScrollArea>
-                  )}
-                  {d.lastResponse && (
-                    <ScrollArea className="max-h-24 rounded-[8px] bg-panel">
-                      <pre className="w-max p-2 font-mono text-[11px] leading-4">{d.lastResponse}</pre>
-                    </ScrollArea>
-                  )}
-                  <div>
-                    <button
-                      className="btn-ghost min-w-[5.5rem] text-xs"
-                      disabled={resend.isPending || d.status === "pending" || d.status === "sending" || !endpoint.enabled}
-                      title={
-                        !endpoint.enabled
-                          ? "Turn the webhook on first"
-                          : d.status === "pending" || d.status === "sending"
-                            ? "Still being sent"
-                            : "Send it again"
-                      }
-                      onClick={() => resend.mutate({ deliveryId: d.id })}
-                    >
-                      Resend
-                    </button>
+                  <span className="truncate font-mono text-xs">{d.type}</span>
+                  <span className="text-right text-xs tabular-nums text-ink2">{d.lastStatusCode ?? "–"}</span>
+                  <span className="col-span-2 col-start-2 text-xs text-ink3 md:col-span-1 md:col-start-auto md:text-right">{when(d.createdAt)}</span>
+                </button>
+                {open === d.id && (
+                  <div className="mt-2 flex flex-col gap-2 text-xs">
+                    <span className="text-ink2">
+                      {d.attempt} attempt{d.attempt === 1 ? "" : "s"}
+                      {d.lastError ? ` · ${d.lastError}` : ""}
+                      {d.nextAttemptAt && d.status === "pending" ? ` · next try ${when(d.nextAttemptAt)}` : ""}
+                      {d.deliveredAt ? ` · delivered ${when(d.deliveredAt)}` : ""}
+                      {` · ${d.eventId}`}
+                    </span>
+                    {d.body && (
+                      <ScrollArea className="max-h-48 rounded-[8px] bg-panel">
+                        <pre className="w-max p-2 font-mono text-[11px] leading-4">{JSON.stringify(JSON.parse(d.body), null, 2)}</pre>
+                      </ScrollArea>
+                    )}
+                    {d.lastResponse && (
+                      <ScrollArea className="max-h-24 rounded-[8px] bg-panel">
+                        <pre className="w-max p-2 font-mono text-[11px] leading-4">{d.lastResponse}</pre>
+                      </ScrollArea>
+                    )}
+                    <div>
+                      <button
+                        className="btn-ghost min-w-[5.5rem] text-xs"
+                        disabled={resend.isPending || d.status === "pending" || d.status === "sending" || !endpoint.enabled}
+                        title={
+                          !endpoint.enabled
+                            ? "Turn the webhook on first"
+                            : d.status === "pending" || d.status === "sending"
+                              ? "Still being sent"
+                              : "Send it again"
+                        }
+                        onClick={() => resend.mutate({ deliveryId: d.id })}
+                      >
+                        Resend
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+          {/* inside the scroll area, so the next page loads as the log (not the page) scrolls to its end */}
+          <div ref={more} />
+        </ScrollArea>
       )}
       {items.length > 0 && (
         <span className="text-xs text-ink3">
           Showing {items.length} of {total}
         </span>
       )}
-      <div ref={more} />
     </div>
   );
 }

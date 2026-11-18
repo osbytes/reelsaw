@@ -24,6 +24,7 @@ const EXPECTED = [
   "billing_portal_url",
   "check_for_update",
   "check_source",
+  "clear_media_links",
   "create_clip",
   "create_project",
   "create_webhook",

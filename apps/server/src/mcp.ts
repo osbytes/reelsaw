@@ -467,6 +467,8 @@ export function createMcpServer(
     }),
   );
 
+  server.registerTool("clear_media_links", TOOLS.clear_media_links, () => run(() => api.mediaLinks.clear()));
+
   const endpointSummary = (e: Awaited<ReturnType<typeof api.webhooks.list>>[number]) => {
     const { url: _full, ...rest } = e;
     return { ...rest, url: e.urlMasked };

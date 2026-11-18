@@ -143,3 +143,14 @@ Desktop device mode did not reproduce it. The shell is `h-dvh`; the bar stayed s
 | [MDN viewport-percentage lengths](https://developer.mozilla.org/en-US/docs/Web/CSS/length#relative_length_units_based_on_viewport) | `vh` vs `svh` / `lvh` / `dvh`. `vh` is the large viewport. |
 | [CSS values: large, small and dynamic viewport](https://drafts.csswg.org/css-values/#viewport-relative-lengths) | The spec: UA chrome changes the *visual* viewport; `vh` does not follow it. |
 | [The large, small and dynamic viewports (Bramus)](https://www.bram.us/2021/07/08/the-large-small-and-dynamic-viewports/) | Why `100vh` overflowed mobile browsers for a decade, and what the new units are for. |
+
+## Lists inside a card grow with their data
+
+A list in a Settings card that grows with use (share links, a webhook's deliveries, API keys,
+failed work, sign-up rules) sits in a `ScrollArea` capped at `SECTION_LIST_MAX_H`
+(`scroll-area.tsx`), with its column header `sticky top-0 bg-panel`. Without it, the card grows
+with every row and pushes the sections below out of reach (Settings → Share links reached hundreds of
+rows). Infinite lists put their `useLoadMoreSentinel` element inside that `ScrollArea`, so the next
+page loads when the list scrolls to its end, and keep "Showing n of m" below it. A list that only
+holds what accumulated with no use (stopped links, old deliveries) also needs a way to clear it, or a
+retention that does.

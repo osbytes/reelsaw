@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { copyText, showTextToCopy } from "../lib/clipboard";
 import { useTRPC } from "../lib/trpc";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
+import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Skeleton, SkeletonRegion } from "./ui";
 
 type LinkInput =
@@ -136,22 +137,37 @@ const STATE = {
   active: { glyph: "●", word: "Active", cls: "text-ok" },
   expired: { glyph: "○", word: "Expired", cls: "text-ink3" },
   revoked: { glyph: "✕", word: "Revoked", cls: "text-ink3" },
+  trashed: { glyph: "◌", word: "In trash", cls: "text-ink3" },
 } as const;
 
-/** Settings → Share links: every link of the account, what it points at, its expiry and use, with Copy and Revoke. */
+/**
+ * Settings → Share links: every link of the account, what it points at, its expiry and use, with Copy and Revoke. The
+ * list scrolls inside the card; Clear deletes the revoked and expired rows (the pruner would after a retention window).
+ */
 export function ShareLinksSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [confirmAll, setConfirmAll] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [confirmOne, setConfirmOne] = useState<{ id: string; title: string } | null>(null);
   const list = useInfiniteQuery(
     trpc.mediaLinks.list.infiniteQueryOptions({ limit: PAGE }, { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData }),
   );
   const items = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
   const total = list.data?.pages[0]?.total ?? 0;
+  const stopped = list.data?.pages[0]?.stopped ?? 0;
   const more = useLoadMoreSentinel(() => void list.fetchNextPage(), !!list.hasNextPage && !list.isFetching);
   const revoke = useMutation(
     trpc.mediaLinks.revoke.mutationOptions({
+      onSuccess: (r) => {
+        toast(r.message);
+        void qc.invalidateQueries({ queryKey: trpc.mediaLinks.list.pathKey() });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const clear = useMutation(
+    trpc.mediaLinks.clear.mutationOptions({
       onSuccess: (r) => {
         toast(r.message);
         void qc.invalidateQueries({ queryKey: trpc.mediaLinks.list.pathKey() });
@@ -165,16 +181,29 @@ export function ShareLinksSection() {
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[15px] font-bold">Share links</h2>
-        {/* kept in place but hidden while nothing is active, so the header does not move when links appear */}
-        <button
-          className={`btn-danger min-w-[10rem] text-xs ${active ? "" : "invisible"}`}
-          aria-hidden={!active}
-          tabIndex={active ? undefined : -1}
-          disabled={!active || revoke.isPending}
-          onClick={() => setConfirmAll(true)}
-        >
-          Revoke all share links
-        </button>
+        {/* kept in place but hidden while there is nothing to act on, so the header does not move when links appear; on a
+            phone, where the buttons wrap below the title anyway, a hidden Clear takes no room instead of leaving a gap */}
+        <span className="flex flex-wrap gap-2">
+          <button
+            className={`btn-ghost min-w-[8.5rem] text-xs ${stopped ? "" : "invisible max-sm:hidden"}`}
+            aria-hidden={!stopped}
+            tabIndex={stopped ? undefined : -1}
+            disabled={!stopped || clear.isPending}
+            title="Delete revoked and expired links from this list"
+            onClick={() => setConfirmClear(true)}
+          >
+            Clear {stopped || ""} stopped
+          </button>
+          <button
+            className={`btn-danger min-w-[10rem] text-xs ${active ? "" : "invisible"}`}
+            aria-hidden={!active}
+            tabIndex={active ? undefined : -1}
+            disabled={!active || revoke.isPending}
+            onClick={() => setConfirmAll(true)}
+          >
+            Revoke all share links
+          </button>
+        </span>
       </div>
       <p className="text-[13px] text-ink2">
         Links that download a clip, its captions or a project’s zip without signing in, for schedulers (Buffer, Metricool), Instagram, Zapier or a person. Copy
@@ -196,68 +225,86 @@ export function ShareLinksSection() {
         {list.data && items.length === 0 && <span className="text-ink3">No share links yet. Copy one from a clip’s menu.</span>}
         {items.length > 0 && (
           <>
-            <ul className="divide-y divide-line">
-              <li aria-hidden className="hidden grid-cols-[minmax(0,1fr)_6.5rem_7.5rem_4rem_9.5rem] items-center gap-x-3 pb-1 text-xs text-ink3 md:grid">
-                <span>Link</span>
-                <span>Status</span>
-                <span>Expires</span>
-                <span className="text-right">Uses</span>
-                <span />
-              </li>
-              {items.map((l) => (
+            <ScrollArea className={SECTION_LIST_MAX_H}>
+              <ul className="divide-y divide-line">
                 <li
-                  key={l.id}
-                  className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_9.5rem] items-center gap-x-3 py-2 md:grid-cols-[minmax(0,1fr)_6.5rem_7.5rem_4rem_9.5rem]"
+                  aria-hidden
+                  className="sticky top-0 z-[1] hidden grid-cols-[minmax(0,1fr)_6.5rem_7.5rem_4rem_9.5rem] items-center gap-x-3 bg-panel pb-1 text-xs text-ink3 md:grid"
                 >
-                  <span className="flex min-w-0 flex-col">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-semibold">{l.clipTitle ?? l.projectTitle}</span>
-                      {l.label ? (
-                        <span className="max-w-[45%] shrink-0 truncate rounded-[6px] bg-sunk px-1.5 py-0.5 text-[11px] text-ink2" title={l.label}>
-                          {l.label}
+                  <span>Link</span>
+                  <span>Status</span>
+                  <span>Expires</span>
+                  <span className="text-right">Uses</span>
+                  <span />
+                </li>
+                {items.map((l) => (
+                  <li
+                    key={l.id}
+                    className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_9.5rem] items-center gap-x-3 py-2 md:grid-cols-[minmax(0,1fr)_6.5rem_7.5rem_4rem_9.5rem]"
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-semibold">{l.clipTitle ?? l.projectTitle}</span>
+                        {l.label ? (
+                          <span className="max-w-[45%] shrink-0 truncate rounded-[6px] bg-sunk px-1.5 py-0.5 text-[11px] text-ink2" title={l.label}>
+                            {l.label}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs text-ink3 md:truncate">
+                        {KIND_LABEL[l.kind]} · by {SOURCE_LABEL[l.source]}
+                        {l.lastUsedAt ? ` · last used ${day(l.lastUsedAt)}` : " · not used yet"}
+                        <span className="md:hidden">
+                          {" "}
+                          · <span className={STATE[l.state].cls}>{STATE[l.state].word.toLowerCase()}</span>
+                          {l.revokedAt ? "" : l.expiresAt ? ` until ${day(l.expiresAt)}` : ", never expires"} · {l.useCount} use{l.useCount === 1 ? "" : "s"}
                         </span>
-                      ) : null}
-                    </span>
-                    <span className="text-xs text-ink3 md:truncate">
-                      {KIND_LABEL[l.kind]} · by {SOURCE_LABEL[l.source]}
-                      {l.lastUsedAt ? ` · last used ${day(l.lastUsedAt)}` : " · not used yet"}
-                      <span className="md:hidden">
-                        {" "}
-                        · <span className={STATE[l.state].cls}>{STATE[l.state].word.toLowerCase()}</span>
-                        {l.revokedAt ? "" : l.expiresAt ? ` until ${day(l.expiresAt)}` : ", never expires"} · {l.useCount} use{l.useCount === 1 ? "" : "s"}
                       </span>
                     </span>
-                  </span>
-                  <span className={`hidden text-xs md:block ${STATE[l.state].cls}`}>
-                    {STATE[l.state].glyph} <span className="text-ink2">{STATE[l.state].word}</span>
-                  </span>
-                  <span className="hidden text-xs text-ink2 md:block">{l.revokedAt ? `revoked ${day(l.revokedAt)}` : (day(l.expiresAt) ?? "never")}</span>
-                  <span className="hidden text-right text-xs tabular-nums text-ink2 md:block">{l.useCount}</span>
-                  <span className="flex justify-end gap-1.5">
-                    <button
-                      className="btn-ghost w-[4.25rem] text-xs"
-                      disabled={l.state !== "active"}
-                      title={l.state === "active" ? "Copy the link" : "This link no longer works"}
-                      onClick={() => copyText(l.url, "Link copied")}
-                    >
-                      Copy
-                    </button>
-                    <button
-                      className="btn-danger w-[4.5rem] text-xs"
-                      disabled={l.state !== "active" || revoke.isPending}
-                      title={l.state === "active" ? "Turn this link off now" : "Already off"}
-                      onClick={() => setConfirmOne({ id: l.id, title: l.clipTitle ?? l.projectTitle })}
-                    >
-                      Revoke
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    <span className={`hidden text-xs md:block ${STATE[l.state].cls}`}>
+                      {STATE[l.state].glyph} <span className="text-ink2">{STATE[l.state].word}</span>
+                    </span>
+                    <span className="hidden text-xs text-ink2 md:block">{l.revokedAt ? `revoked ${day(l.revokedAt)}` : (day(l.expiresAt) ?? "never")}</span>
+                    <span className="hidden text-right text-xs tabular-nums text-ink2 md:block">{l.useCount}</span>
+                    <span className="flex justify-end gap-1.5">
+                      <button
+                        className="btn-ghost w-[4.25rem] text-xs"
+                        disabled={l.state !== "active"}
+                        title={
+                          l.state === "active"
+                            ? "Copy the link"
+                            : l.state === "trashed"
+                              ? "Restore its project to use this link again"
+                              : "This link no longer works"
+                        }
+                        onClick={() => copyText(l.url, "Link copied")}
+                      >
+                        Copy
+                      </button>
+                      <button
+                        className="btn-danger w-[4.5rem] text-xs"
+                        disabled={(l.state !== "active" && l.state !== "trashed") || revoke.isPending}
+                        title={
+                          l.state === "active"
+                            ? "Turn this link off now"
+                            : l.state === "trashed"
+                              ? "Off while its project is in the trash; revoking keeps it off after a restore"
+                              : "Already off"
+                        }
+                        onClick={() => setConfirmOne({ id: l.id, title: l.clipTitle ?? l.projectTitle })}
+                      >
+                        Revoke
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {/* inside the scroll area, so the next page loads as the list (not the page) scrolls to its end */}
+              <div ref={more} />
+            </ScrollArea>
             <div className="flex h-8 items-center text-xs text-ink3">
               Showing {items.length} of {total}
             </div>
-            <div ref={more} />
           </>
         )}
       </div>
@@ -269,6 +316,14 @@ export function ShareLinksSection() {
         confirm="Revoke"
         danger
         onConfirm={() => (confirmOne ? revoke.mutateAsync({ linkId: confirmOne.id }) : Promise.resolve())}
+      />
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear stopped share links?"
+        body={`Deletes ${stopped} revoked or expired link${stopped === 1 ? "" : "s"} from this list; they already don’t work. Active links and links of projects in the trash stay.`}
+        confirm="Clear"
+        onConfirm={() => clear.mutateAsync()}
       />
       <ConfirmDialog
         open={confirmAll}
