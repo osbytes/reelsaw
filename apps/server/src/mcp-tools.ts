@@ -23,7 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
-import { emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
+import { FAILURE_CAUSES, emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { BULK_USERS, bulkUsersShape, userListToolInput } from "./accounts-schema.js";
 import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
@@ -842,7 +842,7 @@ export const TOOLS = {
       q: z.string().max(200).optional().describe("Case-insensitive substring of the recorded error (e.g. disk, encoder, model)"),
       stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Pipeline stage that failed"),
       cause: z
-        .enum(["platform", "input", "quota"])
+        .enum(FAILURE_CAUSES)
         .optional()
         .describe(
           "platform = this instance's fault (disk, model, encoder, timeout), retry after the fix; input = the video, link or settings (gone, private, no audio, no usable clips), retrying fails the same way; quota = the owner's plan refused it, retried by itself when their plan or limits change",
@@ -861,7 +861,7 @@ export const TOOLS = {
     inputSchema: {
       q: z.string().max(200).optional().describe("Same error substring as list_failures"),
       stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Same stage filter as list_failures"),
-      cause: z.enum(["platform", "input", "quota"]).optional().describe("Same cause filter as list_failures; default platform"),
+      cause: z.enum(FAILURE_CAUSES).optional().describe("Same cause filter as list_failures; default platform"),
       since: z.string().max(40).optional().describe("Same since filter as list_failures"),
       ids: z
         .array(
@@ -883,7 +883,7 @@ export const TOOLS = {
     inputSchema: {
       q: z.string().max(200).optional().describe("Same error substring as list_failures"),
       stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Same stage filter as list_failures"),
-      cause: z.enum(["platform", "input", "quota"]).optional().describe("Same cause filter as list_failures"),
+      cause: z.enum(FAILURE_CAUSES).optional().describe("Same cause filter as list_failures"),
       since: z.string().max(40).optional().describe("Same since filter as list_failures"),
       ids: z
         .array(

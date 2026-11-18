@@ -5,8 +5,18 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
-import { clipFailureStage, dismissFailures, errorSnippet, getFailure, listFailures, retryFailures, retryQuotaRefusals } from "../src/ops/failures.js";
-import { NonRetryableError, SourceUnavailableError, failedRow, failureCause } from "../src/pipeline/common.js";
+import {
+  clipFailureStage,
+  dismissFailures,
+  errorSnippet,
+  getFailure,
+  listFailures,
+  retryFailures,
+  retryQuotaRefusals,
+  retryRefusedWork,
+} from "../src/ops/failures.js";
+import type { Services } from "../src/services.js";
+import { NonRetryableError, SourceExpiredError, SourceUnavailableError, failedRow, failureCause } from "../src/pipeline/common.js";
 import { QuotaExceededError } from "../src/quota.js";
 import { QUEUES } from "../src/queue/boss.js";
 import { eq } from "drizzle-orm";
@@ -31,6 +41,9 @@ describe("failureCause / failedRow", () => {
     assert.equal(failureCause(new SourceUnavailableError("Could not download: the link no longer exists")), "input");
     assert.equal(failureCause(new NonRetryableError("Source has no audio track")), "input");
     assert.equal(failureCause(new Error("disk full")), "platform");
+    // the project's Retry fetches an expired source again: not the source's fault
+    assert.equal(failureCause(new SourceExpiredError(7)), "platform");
+    assert.equal(failureCause(new NonRetryableError("No usable clips were found.", "platform")), "platform");
     assert.equal(failureCause("boom"), "platform");
   });
   it("writes the reason, the cause and clears an earlier dismissal", () => {
@@ -210,5 +223,65 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
       [recent],
     );
     assert.equal((await retryQuotaRefusals(h.svc, owner)).retried, 0);
+  });
+
+  it("follows a plan or limits change: only for the minutes limits, and not when nothing would fit", async () => {
+    const owner = await h.makeUser();
+    const tag = `handler-${Date.now()}`;
+    const refused = await failProject("ingest", `${tag} too long`, 0, "quota", owner);
+    const handler = retryRefusedWork<"user.limits_changed">();
+    const event = (changed: string[]) => ({
+      id: 1,
+      type: "user.limits_changed" as const,
+      actorId: null,
+      payload: { userId: owner, email: `${owner}@example.test`, limits: {}, changed },
+    });
+    const keyOf = (changed: string[]) => handler.key!({ event: event(changed), db: h.svc.database.db, deps: h.svc as Pick<Services, "email" | "settings"> });
+    assert.equal(await keyOf(["MAX_STORAGE_MB"]), null);
+    assert.equal(await keyOf(["MAX_SOURCE_MINUTES_PER_MONTH"]), `quota-retry:${owner}`);
+    assert.equal(
+      await retryRefusedWork<"user.limits_changed">().key!({ event: event(["MAX_SOURCE_MINUTES_PER_DAY"]), db: h.svc.database.db, deps: h.svc as never }),
+      `quota-retry:${owner}`,
+    );
+
+    // a day cap already used up: even a minute would be refused, so nothing is fetched again
+    await h.pool.query(`insert into user_settings (user_id, limits) values ($1, '{"MAX_SOURCE_MINUTES_PER_DAY": 10}'::jsonb)`, [owner]);
+    const used = await h.makeProject(owner, "done");
+    await h.pool.query(`insert into source_usage (user_id, project_id, created_at, duration_sec) values ($1, $2, now(), 6000)`, [owner, used]);
+    await handler.handle({ event: event(["MAX_SOURCE_MINUTES_PER_DAY"]), key: `quota-retry:${owner}`, svc: h.svc, signal: new AbortController().signal });
+    assert.equal((await h.pool.query(`select status from projects where id = $1`, [refused])).rows[0].status, "failed");
+
+    // the cap raised: the refusal resumes
+    await h.pool.query(`update user_settings set limits = '{"MAX_SOURCE_MINUTES_PER_DAY": 1000}'::jsonb where user_id = $1`, [owner]);
+    await handler.handle({ event: event(["MAX_SOURCE_MINUTES_PER_DAY"]), key: `quota-retry:${owner}`, svc: h.svc, signal: new AbortController().signal });
+    assert.notEqual((await h.pool.query(`select status from projects where id = $1`, [refused])).rows[0].status, "failed");
+  });
+
+  it("retries a failed clip of a project whose source expired through the project, which fetches it again", async () => {
+    const projectId = await h.makeProject(userId, "done");
+    await h.pool.query(`update projects set source_expired_at = now() where id = $1`, [projectId]);
+    const clipId = await h.makeClip(projectId, 0, "failed");
+    await h.pool.query(`update clips set error = 'source removed', failure_cause = 'platform' where id = $1`, [clipId]);
+    const r = await retryFailures(h.svc, {}, { id: userId, email }, { ids: [{ kind: "clip", id: clipId }] });
+    assert.equal(r.retried, 1);
+    const jobs = await h.jobsFor([projectId, clipId]);
+    assert.ok(jobs.some((j) => j.name === QUEUES.ingest && j.singleton_key === projectId));
+  });
+
+  it("starts one run when two retries of the same failed project race", async () => {
+    const id = await failProject("ingest", `race-${Date.now()}`);
+    const [a, b] = await Promise.all([
+      retryFailures(h.svc, {}, null, { ids: [{ kind: "project", id }] }),
+      retryFailures(h.svc, {}, null, { ids: [{ kind: "project", id }] }),
+    ]);
+    assert.equal(a.retried + b.retried, 1);
+    assert.equal((await h.pool.query(`select run_seq from projects where id = $1`, [id])).rows[0].run_seq, 2);
+  });
+
+  it("writes no audit event when a dismiss changes nothing", async () => {
+    const before = (await h.pool.query(`select count(*)::int as n from events where type = 'failures.dismissed'`)).rows[0].n;
+    const r = await dismissFailures(h.svc, { q: `nothing-matches-${Date.now()}` }, { id: userId, email });
+    assert.equal(r.changed, 0);
+    assert.equal((await h.pool.query(`select count(*)::int as n from events where type = 'failures.dismissed'`)).rows[0].n, before);
   });
 });

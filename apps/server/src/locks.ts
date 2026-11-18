@@ -29,6 +29,8 @@ export const txLock = {
   mediaLinks: (userId: string) => `media-links:${userId}`,
   /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
   diskVolume: (volume: string) => `disk:${volume}`,
+  /** one retry of a project at a time, so an owner's Retry and an automatic one never both start a run (projects/service.ts retryProject) */
+  retry: (projectId: string) => `retry:${projectId}`,
   /** the instance's sign-up rules, counted against MAX_SIGNUP_RULES when some are added (signup-rules.ts) */
   signupRules: () => "signup-rules",
   /** one word-timestamp test transcription of a model at a time, instance-wide (ai/word-timestamps.ts) */

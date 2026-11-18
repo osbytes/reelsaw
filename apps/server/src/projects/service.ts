@@ -105,9 +105,17 @@ export function retryQueueFor(s: {
 /**
  * Resume a project from the furthest completed stage (each stage skips work that already exists).
  * Same path as the owner's Retry button; admin bulk retry and MCP retry_project call this too.
- * Lock order is transcript → clip → project. Returns null when the project is gone or deleted.
+ * The project's retry lock comes first (advisory, before any row lock), then transcript → clip → project. Returns
+ * null when the project is gone or deleted, or, with `onlyIfFailed` (admin and automatic retries), when it is no
+ * longer failed: a retry that waited on the lock sees the run the other one started and leaves it alone.
  */
-export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
+export async function retryProject(
+  svc: Services,
+  u: UnitOfWork,
+  projectId: string,
+  opts: { onlyIfFailed?: boolean } = {},
+): Promise<{ ok: true; queue: QueueName } | null> {
+  await takeTxLock(u.db, txLock.retry(projectId));
   const [p] = await u.db
     .select({
       id: schema.projects.id,
@@ -118,7 +126,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
-  if (!p) return null;
+  if (!p || (opts.onlyIfFailed && p.status !== "failed")) return null;
   const [transcript] = await u.db
     .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine })
     .from(schema.transcripts)

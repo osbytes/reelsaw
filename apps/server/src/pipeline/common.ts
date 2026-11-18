@@ -20,11 +20,18 @@ import {
 } from "./steps.js";
 
 /**
- * A failure that trying again cannot fix (the source is gone, a quota refuses the video). Workers end the run at
- * once instead of spending retries on it. `failureCause` is recorded on the row (input unless a subclass says quota).
+ * A failure that another attempt of the same job cannot fix (the source is gone, a quota refuses the video). Workers
+ * end the run at once instead of spending retries on it. `failureCause` is recorded on the row: input by default;
+ * quota for a plan refusal; platform when the job cannot fix it but a Retry of the project or a fix to the instance
+ * can (an expired source, a model that found nothing).
  */
 export class NonRetryableError extends Error {
-  readonly failureCause: Exclude<FailureCause, "platform"> = "input";
+  constructor(
+    message?: string,
+    readonly failureCause: FailureCause = "input",
+  ) {
+    super(message);
+  }
 }
 
 /** The cause a thrown error records: a NonRetryableError says its own, anything else is the platform's. */
@@ -74,7 +81,11 @@ export class StageTimeoutError extends Error {
  */
 export class SourceExpiredError extends NonRetryableError {
   constructor(days: number) {
-    super(`The source video was removed after ${days} days of inactivity (SOURCE_RETENTION_DAYS). Use Retry on the project to fetch it again, then re-render.`);
+    // platform, not input: the project's Retry fetches it again (retryFailures does that for a clip of such a project)
+    super(
+      `The source video was removed after ${days} days of inactivity (SOURCE_RETENTION_DAYS). Use Retry on the project to fetch it again, then re-render.`,
+      "platform",
+    );
   }
 }
 

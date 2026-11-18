@@ -216,7 +216,6 @@ export function refusalEvent(key: string, surface: string, quota: QuotaRefusal |
  * worker fails the project at once instead of downloading the same video again.
  */
 export class QuotaExceededError extends NonRetryableError {
-  override readonly failureCause = "quota" as const;
   constructor(
     message: string,
     /** the limit that refused, for `quota.refused` */
@@ -224,7 +223,7 @@ export class QuotaExceededError extends NonRetryableError {
     readonly quota?: QuotaRefusal,
     readonly props: RefusalProps = {},
   ) {
-    super(message);
+    super(message, "quota");
     this.name = "QuotaExceededError";
   }
 }

@@ -17,6 +17,7 @@ import type { EventHandler, ReadDb } from "../event-handlers.js";
 import type { AccountEventType } from "../event-types.js";
 import { decodeCursor, escapeLike, pageOf } from "../pagination.js";
 import { retryProject } from "../projects/service.js";
+import { sourceMinutesExceeded } from "../quota.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare, requestRender } from "../pipeline/lifecycle.js";
 
@@ -303,10 +304,14 @@ export async function retryFailures(
                   origin: schema.clips.origin,
                   reasoning: schema.clips.reasoning,
                   scores: schema.clips.scores,
+                  sourceExpiredAt: schema.projects.sourceExpiredAt,
                 })
                 .from(schema.clips)
+                .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
                 .where(and(eq(schema.clips.id, item.id), eq(schema.clips.status, "failed"), isNull(schema.clips.deletedAt)));
               if (!c) return false;
+              // the source aged out: rendering again fails the same way, the project's Retry fetches it and resumes the clip
+              if (c.sourceExpiredAt) return !!(await retryProject(svc, u, c.projectId));
               if (needsPrepare(c)) return requestPrepare(svc, u, c.projectId, c.id, { reason: "retry" });
               return (await requestRender(svc, u, c.projectId, c.id, {}, "retry")) !== null;
             });
@@ -333,16 +338,13 @@ export async function retryFailures(
   return { retried, skipped, nextCursor };
 }
 
-/** Resume one failed project, in its own transaction; false when it is no longer failed (retried meanwhile, deleted). */
+/**
+ * Resume one failed project, in its own transaction; false when it is no longer failed (retried meanwhile, deleted).
+ * retryProject takes the project's retry lock before `onlyIfFailed` reads the status, so this and an owner's Retry
+ * (or the plan-change retry) never both start a run.
+ */
 async function retryFailedProject(svc: Services, projectId: string): Promise<boolean> {
-  return svc.tx(async (u) => {
-    const [p] = await u.db
-      .select({ status: schema.projects.status })
-      .from(schema.projects)
-      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.status, "failed"), isNull(schema.projects.deletedAt)));
-    if (!p) return false;
-    return !!(await retryProject(svc, u, projectId));
-  });
+  return svc.tx(async (u) => !!(await retryProject(svc, u, projectId, { onlyIfFailed: true })));
 }
 
 function filterPayload(filter: FailureFilter) {
@@ -384,6 +386,7 @@ export async function dismissFailures(
           ).length
         : 0;
     const n = (await mark(schema.projects, ids("project"))) + (await mark(schema.clips, ids("clip")));
+    if (!n) return 0; // nothing changed: no audit event for a no-op
     await u.emit(
       "failures.dismissed",
       {
@@ -412,8 +415,10 @@ function quotaRefusedWhere(userId: string) {
 }
 
 /**
- * Resume the owner's recent plan refusals after their plan or limits changed, newest first, up to a page. Ingest
- * checks the minutes again, so a change that still does not cover a video fails it the same way, once.
+ * Resume the owner's recent plan refusals after their plan or limits changed, newest first, up to a page. Nothing
+ * when the account has no minutes left at all now (a downgrade, a limit lowered): retrying would only fetch or probe
+ * each video to refuse it again. Ingest still checks each video's length, so one the change does not cover fails
+ * the same way, once.
  */
 export async function retryQuotaRefusals(svc: Services, userId: string): Promise<{ retried: number }> {
   const rows = await svc.database.db
@@ -422,6 +427,8 @@ export async function retryQuotaRefusals(svc: Services, userId: string): Promise
     .where(quotaRefusedWhere(userId))
     .orderBy(desc(schema.projects.updatedAt))
     .limit(FAILURE_PAGE);
+  // would even a one-minute video fit now (each refused project is left out of the counts, as ingest leaves it)?
+  if (rows[0] && (await sourceMinutesExceeded(svc.database.db, svc.settings.get(), userId, rows[0].id, 60, svc.entitlements))) return { retried: 0 };
   let retried = 0;
   for (const r of rows) if (await retryFailedProject(svc, r.id)) retried++;
   if (retried) svc.log.child({ module: "ops", userId }).info({ retried }, "retried plan refusals after a plan or limits change");
@@ -430,15 +437,22 @@ export async function retryQuotaRefusals(svc: Services, userId: string): Promise
 
 type PlanChange = Extract<AccountEventType, "user.limits_changed" | "billing.subscribed" | "billing.changed" | "billing.complimentary">;
 
+/** Limits whose change can let a refused video through; another override changing (storage, projects) cannot. */
+const MINUTE_LIMITS: readonly string[] = ["MAX_SOURCE_MINUTES_PER_DAY", "MAX_SOURCE_MINUTES_PER_MONTH"];
+
 /**
  * The handler that follows a plan or limits change: resumes the account's plan refusals (retryQuotaRefusals).
- * Skipped at emit when there are none, one job per account at a time.
+ * Skipped at emit when there are none, or when an admin changed only limits other than the minutes; one job per
+ * account at a time.
  */
 export function retryRefusedWork<T extends PlanChange>(): EventHandler<T> {
   const userOf = (payload: unknown) => (payload as { userId: string }).userId;
   return {
     key: async ({ event, db }: { event: { payload: unknown }; db: ReadDb }) => {
       const userId = userOf(event.payload);
+      // user.limits_changed names the limits it changed (accounts.ts setUserLimits); older events do not
+      const changed = (event.payload as { changed?: unknown }).changed;
+      if (Array.isArray(changed) && !changed.some((k) => MINUTE_LIMITS.includes(String(k)))) return null;
       const [hit] = await db.select({ id: schema.projects.id }).from(schema.projects).where(quotaRefusedWhere(userId)).limit(1);
       return hit ? `quota-retry:${userId}` : null;
     },

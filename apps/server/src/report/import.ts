@@ -469,6 +469,8 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         // never leave work queued: only clips whose render came along stay "done"
         status: (rendered ? "done" : "failed") as "done" | "failed",
         error: rendered ? null : c.status === "failed" ? c.error : "Render not included in the report: re-render to reproduce",
+        // a copy for an investigation: the reporter's failure reads as platform, so Retry stays on offer here
+        failureCause: rendered ? null : "platform",
       });
     }
     summary.media.push(
@@ -505,6 +507,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         },
         status: (terminal ? project.status : "failed") as "done" | "failed",
         error: terminal ? project.error : `Imported mid-run (was ${project.status})`,
+        failureCause: terminal && project.status !== "failed" ? null : "platform",
         settings: project.settings as never,
       } as never);
       if (transcript) {
