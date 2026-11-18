@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SourceQualityOffer } from "../components/SourceQualityOffer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { Check, ChevronDown, ChevronRight, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
@@ -758,6 +759,9 @@ export function ProjectPage() {
             {...playback.videoProps}
             onClick={togglePlay}
           />
+        )}
+        {p.sourceVideoUrl && p.sourcePreviewHeight && (
+          <SourceQualityOffer height={p.sourcePreviewHeight} offer={me.data?.sourceQuality?.upgrade} projectId={p.id} variant="overlay" />
         )}
         {p.sourceVideoUrl ? (
           !playing && (

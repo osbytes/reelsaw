@@ -35,6 +35,8 @@ export const PRICING: PricingPlan[] = [
       "2 GB of storage, 10 projects",
       "Every layout, caption style and the MCP server",
       "A small watermark on the clips",
+      "Clips render in HD from a 240p editing preview",
+      "One clip of your own, on top of the ones Reelsaw finds",
     ],
   },
   {
@@ -47,7 +49,15 @@ export const PRICING: PricingPlan[] = [
     watermark: false,
     firstVideoFreeMinutes: 0,
     blurb: "For getting started, without a watermark.",
-    bullets: ["100 minutes of source video a month", "10 GB of storage, 50 projects", "No watermark", "MCP and API access for agents", "4 jobs at once"],
+    bullets: [
+      "100 minutes of source video a month",
+      "10 GB of storage, 50 projects",
+      "No watermark",
+      "Full-quality source in the editor",
+      "Unlimited clips of your own",
+      "MCP and API access for agents",
+      "4 jobs at once",
+    ],
   },
   {
     name: "creator",
@@ -59,7 +69,15 @@ export const PRICING: PricingPlan[] = [
     watermark: false,
     firstVideoFreeMinutes: 0,
     blurb: "A show a week, clipped and posted.",
-    bullets: ["300 minutes of source video a month", "30 GB of storage, 200 projects", "No watermark", "MCP and API access for agents", "6 jobs at once"],
+    bullets: [
+      "300 minutes of source video a month",
+      "30 GB of storage, 200 projects",
+      "No watermark",
+      "Full-quality source in the editor",
+      "Unlimited clips of your own",
+      "MCP and API access for agents",
+      "6 jobs at once",
+    ],
   },
   {
     name: "pro",

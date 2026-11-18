@@ -87,6 +87,11 @@ export const RUNTIME_SETTINGS = {
   MAX_NEW_PROJECTS_PER_HOUR: def("limits", int0, "Projects an account may create per hour. 0 = unlimited."),
   MAX_LIVE_JOBS_PER_USER: def("limits", int0, "Queued plus running jobs an account's own requests may add to. 0 = unlimited."),
   MAX_RERENDERS_PER_HOUR: def("limits", int0, "Re-renders, hand-made clips and re-runs (re-analyze, refine) an account may ask for per hour. 0 = unlimited."),
+  MAX_MANUAL_CLIPS_PER_USER: def(
+    "limits",
+    int0,
+    "Clips an account may add by hand (a time range of its own) in total; deleted ones still count. 0 = unlimited.",
+  ),
   MAX_STORAGE_MB: def(
     "limits",
     int0,

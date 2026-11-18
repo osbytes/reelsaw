@@ -154,3 +154,26 @@ rows). Infinite lists put their `useLoadMoreSentinel` element inside that `Scrol
 page loads when the list scrolls to its end, and keep "Showing n of m" below it. A list that only
 holds what accumulated with no use (stopped links, old deliveries) also needs a way to clear it, or a
 retention that does.
+
+## Seeing a state without producing it (scenarios)
+
+Screenshots and UI review need projects in states that are slow or awkward to reach for real: a Free account's
+240p preview source, a used manual-clip allowance, a video that vanished before its clip's full-quality window was
+fetched, a failed link. `reelsaw scenario` writes such a project in a few seconds, with no
+download, model or pipeline. It writes the project, transcript, clips with rendered files, and the events the
+activity log reads, all the way the pipeline would leave them (`apps/server/src/dev/scenarios.ts`):
+
+```bash
+docker compose exec app reelsaw scenario list
+docker compose exec app reelsaw scenario preview-manual-used --user free@example.test --plan free
+docker compose exec app reelsaw scenario full-done --user paid@example.test --plan starter --source /data/tmp/talk.mp4
+```
+
+`--plan` sets the account's plan the way a Stripe sync would: an active subscription row for a paid plan, none for
+free. The billing UI therefore needs `REELSAW_EE=true`, which the Stripe stand-in makes possible locally
+(`pnpm stripe:mock`, `STRIPE_API_BASE`). `--source` cuts a real video to the scenario's height. Without it the
+source is an ffmpeg test pattern. The command refuses to run unless `APP_URL` is a local address. The first account
+on an instance is an admin, and admins always get full-quality sources, so seed Free scenarios into a second account.
+Scenarios are finished or failed states only: a working state has no job behind it, so the
+reconciler resumes it and it moves on. Add a scenario next to the others when a feature has a state worth seeing. That keeps it one command away for the
+next screenshot.

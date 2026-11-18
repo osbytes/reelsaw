@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { QuotaNotice, quotaFromError } from "./QuotaNotice";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
 import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2, Link2 } from "lucide-react";
@@ -932,7 +933,14 @@ export function TranscriptPanel({
               {pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}
             </p>
           )}
-          {createClip.error && <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>}
+          {createClip.error &&
+            (quotaFromError(createClip.error) ? (
+              <div className="max-w-[420px] whitespace-normal px-2 pb-1">
+                <QuotaNotice message={createClip.error.message} quota={quotaFromError(createClip.error)} />
+              </div>
+            ) : (
+              <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>
+            ))}
           {addCorrection.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCorrection.error.message}</p>}
           {addCut.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCut.error.message}</p>}
         </div>

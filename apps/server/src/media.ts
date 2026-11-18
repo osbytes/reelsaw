@@ -5,7 +5,7 @@ import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
 import type { Logger } from "./log.js";
 import { parseSceneScores, pickSceneCuts } from "./pipeline/scenes.js";
-import { createYtdlpProxyPool, parseYtdlpProxies, type ProxySnapshot } from "./ytdlp-proxy.js";
+import { createYtdlpProxyPool, ffmpegCanUse, parseYtdlpProxies, type ProxySnapshot } from "./ytdlp-proxy.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,7 +106,8 @@ export interface MediaTools {
   videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
   /** `proxyId`: the YTDLP_PROXY candidate that served it, "direct" with no pool, "explicit" when `args` carry `--proxy` */
-  ytdlp(args: string[], opts?: RunOptions): Promise<RunResult & { proxyId: string }>;
+  /** `sections`: the download uses `--download-sections` (ffmpeg fetches it), so only HTTP proxies or direct can serve it */
+  ytdlp(args: string[], opts?: RunOptions & { sections?: boolean }): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
@@ -270,6 +271,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const { value, id } = await ytdlpPool.run(
         (choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }),
         opts?.signal,
+        opts?.sections ? { accept: ffmpegCanUse } : undefined,
       );
       return { ...value, proxyId: id };
     },

@@ -23,6 +23,11 @@ export interface QuotaRefusal {
   /** Upgrade when a next plan exists; request more capacity on the top plan; free space for storage. */
   primary?: QuotaAction | undefined;
   secondary?: QuotaAction | undefined;
+  /**
+   * The refusal without the offer the error message ends with ("Starter gives …: <link>", for MCP and the CLI, which
+   * have no buttons). A screen that shows `primary` as a button shows this instead of the message.
+   */
+  sentence?: string | undefined;
 }
 
 export function formatBytes(n: number): string {

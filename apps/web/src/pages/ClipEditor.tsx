@@ -8,6 +8,7 @@ import { NotFound } from "../components/NotFound";
 import { ClipEditorSkeleton } from "../components/PageSkeletons";
 import { LiveStatusPill } from "../components/LiveStatusPill";
 import { masksSourceText } from "@reelsaw/shared";
+import { useMe } from "../lib/account";
 
 /** Full-screen editor route: /p/:id/clips/:clipId. Live render progress comes from the project's event stream. */
 export function ClipEditorPage() {
@@ -15,6 +16,7 @@ export function ClipEditorPage() {
   const trpc = useTRPC();
   const nav = useNavigate();
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
+  const me = useMe();
   const tq = useQuery(trpc.transcripts.get.queryOptions({ projectId: id }));
   const t = tq.data;
   const [progress, setProgress] = useState<number | undefined>(undefined);
@@ -62,6 +64,8 @@ export function ClipEditorPage() {
         projectTitle={p.title}
         clipCount={p.clips.length}
         sourceVideoUrl={p.sourceVideoUrl}
+        sourcePreviewHeight={p.sourcePreviewHeight}
+        sourceUpgrade={me.data?.sourceQuality?.upgrade}
         durationSec={p.durationSec ?? 0}
         srcW={p.width ?? 1920}
         srcH={p.height ?? 1080}

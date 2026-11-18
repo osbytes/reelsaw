@@ -70,7 +70,7 @@ export function QuotaNotice({
 }) {
   return (
     <div className={`flex min-w-0 flex-col gap-2 ${className ?? ""}`}>
-      <p className={`text-[13px] leading-snug ${placement === "precheck" ? "text-warn" : "text-err"}`}>{message}</p>
+      <p className={`text-[13px] leading-snug ${placement === "precheck" ? "text-warn" : "text-err"}`}>{quota?.sentence ?? message}</p>
       {(quota?.primary || quota?.secondary) && (
         <div className="flex flex-wrap items-center gap-2">
           {quota.primary && <Action action={quota.primary} quota={quota} placement={placement} />}

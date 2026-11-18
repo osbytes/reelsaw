@@ -81,6 +81,7 @@ export const LIMIT_FIELDS: Field[] = [
   { key: "MAX_NEW_PROJECTS_PER_HOUR", label: "New projects per hour", kind: "int", unit: "projects", zero: "unlimited" },
   { key: "MAX_LIVE_JOBS_PER_USER", label: "Jobs at once", kind: "int", unit: "jobs", zero: "unlimited" },
   { key: "MAX_RERENDERS_PER_HOUR", label: "Renders asked for per hour", kind: "int", unit: "renders", zero: "unlimited" },
+  { key: "MAX_MANUAL_CLIPS_PER_USER", label: "Clips made by hand", kind: "int", unit: "clips", zero: "unlimited" },
   { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: "Minutes of video per month", kind: "int", unit: "minutes", zero: "unlimited" },
   { key: "MAX_STORAGE_MB", label: "Storage per account", kind: "int", unit: "MB", zero: "unlimited" },
   { key: "WATERMARK_NON_ADMINS", label: "Watermark for non-admins", kind: "bool", on: "On", off: "Off" },

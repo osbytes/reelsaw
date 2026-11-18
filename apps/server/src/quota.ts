@@ -28,6 +28,7 @@ export const LIMIT_KEYS = [
   "MAX_REQUESTS_PER_MINUTE",
   "MAX_REQUESTS_PER_HOUR",
   "MAX_WEBHOOKS_PER_USER",
+  "MAX_MANUAL_CLIPS_PER_USER",
 ] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
@@ -45,6 +46,8 @@ export interface Grants {
   firstVideoFreeMinutes?: number;
   /** added to the fair-share priority of the account's jobs (0 = none) */
   queuePriority?: number;
+  /** a link's source is downloaded at most this tall, clips render from full-quality windows (null/absent = full download) */
+  sourceHeight?: number | null;
   /** the billing period, when the account has one; monthly allowances count inside it */
   period: { start: Date; end: Date } | null;
   /** appended to a refusal: "Pro gives 1,200 minutes a month" and where to go; `plan`/`limits` drive the upgrade CTA */
@@ -58,6 +61,8 @@ export interface Grants {
     monthlyPrice?: number | undefined;
     /** false = that plan renders without the watermark (the "Remove watermark" offer) */
     watermark?: boolean | null | undefined;
+    /** that plan's source cap; null = it downloads links at full quality (the "full-quality video" offer) */
+    sourceHeight?: number | null | undefined;
   };
 }
 export interface Entitlements {
@@ -93,6 +98,48 @@ export async function limitsDetail(db: Db, instance: InstanceLimits, userId: str
 
 export async function limitsFor(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null): Promise<Limits> {
   return (await limitsDetail(db, instance, userId, ent)).limits;
+}
+
+/**
+ * How tall a link's source is downloaded for this account: the plan's cap (Free: 240p, the editor's and analysis's
+ * copy; clips still render from full-quality windows, pipeline/sections.ts), or null for the full download.
+ * Admins and instances without plans always get the full download.
+ */
+export async function sourceHeightFor(db: Db, userId: string, ent?: Entitlements | null): Promise<number | null> {
+  if (!ent) return null;
+  const [owner, grants] = await Promise.all([
+    db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { role: true } }),
+    ent.grantsFor(db, userId),
+  ]);
+  return sourceHeightOf(owner?.role, grants);
+}
+
+/** The cap from what is already read: admins and accounts without a plan get the full download. */
+function sourceHeightOf(role: UserRole | undefined, grants: Grants | null): number | null {
+  if (role === "admin") return null;
+  const h = grants?.sourceHeight;
+  return typeof h === "number" && h > 0 ? h : null;
+}
+
+/**
+ * The source quality this account's links get, and the plan that gives full quality: what the project page and the
+ * editor show on a preview-sized video. `upgrade` only when the next plan lifts the cap.
+ */
+export async function sourceQualityFor(
+  db: Db,
+  user: { id: string; role: UserRole },
+  ent?: Entitlements | null,
+): Promise<{ height: number | null; upgrade?: { label: string; href: string } }> {
+  if (!ent || user.role === "admin") return { height: null };
+  const grants = await ent.grantsFor(db, user.id);
+  const height = sourceHeightOf(user.role, grants);
+  if (!height) return { height };
+  const u = grants?.upgrade;
+  if (!u || (typeof u.sourceHeight === "number" && u.sourceHeight > 0)) return { height };
+  const label = u.monthlyPrice
+    ? `${u.planLabel}: full-quality video for $${u.monthlyPrice.toLocaleString("en-US")} a month`
+    : `${u.planLabel}: full-quality video`;
+  return { height, upgrade: { label, href: u.url } };
 }
 
 /**
@@ -200,6 +247,10 @@ export function upgradeCapacityLabel(upgrade: NonNullable<Grants["upgrade"]>, ke
       : `Upgrade to ${upgrade.planLabel}`;
   if (key === "MAX_PROJECTS_PER_USER")
     return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} projects` : `Upgrade to ${upgrade.planLabel}`;
+  if (key === "MAX_MANUAL_CLIPS_PER_USER")
+    return typeof n === "number" && n > 0
+      ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} clips of your own`
+      : `${upgrade.planLabel}: make clips of your own`;
   return `Upgrade to ${upgrade.planLabel}`;
 }
 
@@ -211,7 +262,11 @@ function kindOf(key: LimitKey): "storage" | "other" {
  * Primary CTA is upgrade when a next plan exists; on the top paid plan (or complimentary Pro) it is a
  * request for more capacity (feedback). Storage refusals always offer free space as the other action.
  */
-export function quotaRefusal(d: LimitsDetail, key: LimitKey): QuotaRefusal {
+export function quotaRefusal(d: LimitsDetail, key: LimitKey, sentence?: string): QuotaRefusal {
+  return { ...refusalActions(d, key), ...(sentence ? { sentence } : {}) };
+}
+
+function refusalActions(d: LimitsDetail, key: LimitKey): QuotaRefusal {
   const upgrade = d.grants?.upgrade;
   const billing = d.grants != null;
   const freeSpace: QuotaAction = { kind: "free_space", label: "Free space", href: deletedProjectsPath() };
@@ -232,6 +287,11 @@ export function quotaRefusal(d: LimitsDetail, key: LimitKey): QuotaRefusal {
 
 function refuse(d: LimitsDetail, key: LimitKey, message: string, props: RefusalProps = {}): never {
   throw new QuotaError(message, quotaRefusal(d, key), key, props);
+}
+
+/** `refuse`, with the plan's offer and its link after the sentence for text-only readers; the refusal keeps the sentence alone. */
+function refuseOffering(d: LimitsDetail, key: LimitKey, sentence: string, props: RefusalProps = {}): never {
+  throw new QuotaError(`${sentence}${hint(d, key)}`, quotaRefusal(d, key, sentence), key, props);
 }
 
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
@@ -296,12 +356,40 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
     const m = await monthlyMinutes(db, userId, period.start, d.grants);
     // a first video on the house is checked for real once its length is known (sourceMinutesExceeded)
     if (m.used >= l.MAX_SOURCE_MINUTES_PER_MONTH && !m.firstPending)
-      refuse(
+      refuseOffering(
         d,
         "MAX_SOURCE_MINUTES_PER_MONTH",
-        `Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${dayOf(period.end)}.${hint(d, "MAX_SOURCE_MINUTES_PER_MONTH")}`,
+        `Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${dayOf(period.end)}.`,
       );
   }
+}
+
+/** Clips the account has added by hand (create_clip, "manual" or "manual-ai"), deleted ones included: deleting one does not give it back. */
+export async function manualClipsMade(db: Db, userId: string): Promise<number> {
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.clips)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
+    .where(and(eq(schema.projects.userId, userId), inArray(schema.clips.origin, ["manual", "manual-ai"])));
+  return n;
+}
+
+/**
+ * Before adding a clip by hand. Call inside the creating unit of work: the account's quota lock makes two
+ * parallel creates count each other. The refusal carries the upgrade CTA (create_clip, the editor, the CLI).
+ */
+export async function checkManualClipQuota(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null) {
+  await takeTxLock(db, txLock.quota(userId));
+  const d = await limitsDetail(db, instance, userId, ent);
+  const max = d.limits.MAX_MANUAL_CLIPS_PER_USER;
+  if (max <= 0) return;
+  const made = await manualClipsMade(db, userId);
+  if (made >= max)
+    refuseOffering(
+      d,
+      "MAX_MANUAL_CLIPS_PER_USER",
+      `${max === 1 ? "Your free clip of your own is used" : `You have made ${made} clips of your own, the most this account may (${max})`}. The clips Reelsaw found stay yours to edit.`,
+    );
 }
 
 /**
@@ -406,10 +494,10 @@ function checkStorage(d: LimitsDetail, bytes: number) {
   if (l.MAX_STORAGE_MB <= 0) return;
   const mb = Math.round(bytes / 1_048_576);
   if (mb >= l.MAX_STORAGE_MB)
-    refuse(
+    refuseOffering(
       d,
       "MAX_STORAGE_MB",
-      `This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Removed projects still count until you delete them forever.${hint(d, "MAX_STORAGE_MB")}`,
+      `This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Removed projects still count until you delete them forever.`,
     );
 }
 
@@ -474,7 +562,7 @@ async function minutesOver(
   projectId: string | null,
   durationSec: number,
   ent?: Entitlements | null,
-): Promise<{ d: LimitsDetail; key: LimitKey; message: string; firstVideo: boolean } | null> {
+): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const mins = Math.round(durationSec / 60);
@@ -486,6 +574,7 @@ async function minutesOver(
         d,
         key: "MAX_SOURCE_MINUTES_PER_DAY",
         message: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
+        sentence: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
         firstVideo: false,
       };
   }
@@ -498,10 +587,10 @@ async function minutesOver(
       const upgrade = hint(d, "MAX_SOURCE_MINUTES_PER_MONTH");
       // a new account has used nothing: "0 already used passes the limit" read like a fault, so say what does fit
       const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
-      const message = m.firstPending
-        ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.${upgrade}`
-        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${dayOf(period.end)}.${upgrade}`;
-      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message, firstVideo: m.firstPending };
+      const sentence = m.firstPending
+        ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.`
+        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${dayOf(period.end)}.`;
+      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${upgrade}`, sentence, firstVideo: m.firstPending };
     }
   }
   return null;
@@ -520,7 +609,7 @@ export async function sourceMinutesExceeded(
   ent?: Entitlements | null,
 ): Promise<QuotaExceededError | null> {
   const over = await minutesOver(db, instance, userId, projectId, durationSec, ent);
-  return over ? new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key), { firstVideo: over.firstVideo }) : null;
+  return over ? new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo }) : null;
 }
 
 /** `quota.refused` for a video refused by ingest (its length was only known after the project was created). */
@@ -552,7 +641,7 @@ export async function sourceMinutesRefusal(
   ent?: Entitlements | null,
 ): Promise<QuotaError | null> {
   const over = await minutesOver(db, instance, userId, null, durationSec, ent);
-  return over ? new QuotaError(over.message, quotaRefusal(over.d, over.key), over.key, { firstVideo: over.firstVideo }) : null;
+  return over ? new QuotaError(over.message, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }) : null;
 }
 
 /** The monthly minutes allowance as the New Project form states it; null when no minutes limit applies. */
@@ -625,6 +714,7 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
     MAX_RERENDERS_PER_HOUR: Number(jobs?.renders ?? 0),
     MAX_STORAGE_MB: Math.round((await storedBytes(db, userId)) / 1_048_576),
     MAX_WEBHOOKS_PER_USER: await db.$count(schema.webhookEndpoints, eq(schema.webhookEndpoints.userId, userId)),
+    MAX_MANUAL_CLIPS_PER_USER: await manualClipsMade(db, userId),
   };
 }
 

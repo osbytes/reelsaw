@@ -94,8 +94,21 @@ export interface YtdlpProxyPool {
    * Run `fn` through the highest-priority healthy candidate, then the next, and so on.
    * Proxy faults cool that candidate and continue; content errors and abort stop the walk.
    */
-  run<T>(fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<{ value: T; id: string }>;
+  run<T>(
+    fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+    opts?: { accept?: (c: ProxyCandidate) => boolean },
+  ): Promise<{ value: T; id: string }>;
 }
+
+/**
+ * Whether yt-dlp can hand this candidate to ffmpeg, which fetches `--download-sections` itself and speaks only
+ * HTTP proxies (`-http_proxy`): a SOCKS exit would be ignored and the download would leave from this server's IP.
+ */
+export const ffmpegCanUse = (c: ProxyCandidate) => c.url === null || /^https?:/i.test(c.url);
+
+/** No candidate in the pool may serve this download (`accept` refused them all): a configuration answer, not a fault. */
+export class NoEligibleProxyError extends Error {}
 
 /** Hostname for logs and the CLI; never the URL (it may carry a password). */
 export function proxyHost(url: string | null): string {
@@ -315,13 +328,16 @@ export function createYtdlpProxyPool(
       const next = walk.find(healthy) ?? walk[0];
       return { next: next?.candidate.id ?? null, candidates: slots.map(snapOf) };
     },
-    async run(fn, signal) {
+    async run(fn, signal, opts) {
       const t0 = performance.now();
       const state = { fallback: false };
       let proxy = "none";
       let outcome = "ok";
       try {
-        const out = await walk(fn, signal, state);
+        const skip = opts?.accept ? slots.filter((s) => !opts.accept!(s.candidate)).map((s) => s.candidate.id) : [];
+        if (skip.length === slots.length)
+          throw new NoEligibleProxyError("YTDLP_PROXY: no candidate can serve this download (section downloads need an HTTP proxy or direct)");
+        const out = await walk(fn, signal, state, skip);
         proxy = out.id;
         return out;
       } catch (err) {
@@ -343,8 +359,9 @@ export function createYtdlpProxyPool(
     fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
     signal: AbortSignal | undefined,
     state: { fallback: boolean },
+    skip: string[] = [],
   ): Promise<{ value: T; id: string }> {
-    const exclude = new Set<string>();
+    const exclude = new Set<string>(skip);
     let lastErr: unknown;
     let usedFallback = false;
     for (;;) {

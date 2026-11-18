@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { SourceQualityOffer } from "./SourceQualityOffer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -170,6 +171,9 @@ interface Props {
   projectTitle: string;
   clipCount: number;
   sourceVideoUrl: string;
+  /** the source is a small preview this tall (a plan's cap); the canvas says so, with the plan that lifts it */
+  sourcePreviewHeight?: number | null;
+  sourceUpgrade?: { label: string; href: string } | undefined;
   durationSec: number;
   srcW: number;
   srcH: number;
@@ -705,6 +709,8 @@ export function ClipEditor(props: Props) {
     projectTitle,
     clipCount,
     sourceVideoUrl,
+    sourcePreviewHeight,
+    sourceUpgrade,
     durationSec,
     srcW,
     srcH,
@@ -2634,6 +2640,7 @@ export function ClipEditor(props: Props) {
         </button>
       </span>
       <span className="flex-1" />
+      {sourcePreviewHeight ? <SourceQualityOffer height={sourcePreviewHeight} offer={sourceUpgrade} projectId={projectId} variant="chip" /> : null}
       <Popover.Root>
         <Popover.Trigger asChild>
           <button className={chip} title="Safe zones, platform, burned-in text" aria-label="Preview options">

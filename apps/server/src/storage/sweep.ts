@@ -60,10 +60,11 @@ export interface DbView {
   clips: Map<string, { projectId: string; renderGen: number; referenced: Set<string> }>;
 }
 /** Scratch files that are a cache of a store object: evictable, `ensureLocal` brings them back. */
-export type CacheKind = "cache-source" | "cache-clip";
-export const CACHE_KINDS: ReadonlySet<Removal["kind"]> = new Set<Removal["kind"]>(["cache-source", "cache-clip"]);
+export type CacheKind = "cache-source" | "cache-clip" | "cache-section";
+export const CACHE_KINDS: ReadonlySet<Removal["kind"]> = new Set<Removal["kind"]>(["cache-source", "cache-clip", "cache-section"]);
 export interface Removal {
-  kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp" | CacheKind;
+  /** `section-scratch`: a downloaded piece or a stitch output of a full-quality window (pipeline/sections.ts), done with */
+  kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp" | "section-scratch" | CacheKind;
   /** Relative to DATA_DIR. */
   path: string;
   bytes: number;
@@ -77,6 +78,9 @@ export interface Removal {
 const CLIP_FILE = /^([^./]+)(?:\.(\d+))?\.(mp4|jpg)$/;
 /** The scratch copy of a project's source at the project root (`source.mp4`, a CLI's `source.cli`, a crashed download's `source.mp4.part`). */
 const SOURCE_FILE = /^source\.[^/]+$/;
+/** A full-quality window's scratch copy (`sections/<startMs>-<endMs>.mp4`, a cache of the store), or a piece / stitch output on the way to one. */
+const SECTION_FILE = /^sections\/([^/]+)$/;
+const SECTION_SCRATCH = /^(piece|stitch)-/;
 
 /** "clips/<clip>.<gen>.<mp4|jpg>" (gen 0 has no number), or null for any other file. */
 export function parseClipFile(rel: string): { clipId: string; gen: number; name: string } | null {
@@ -111,6 +115,14 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
       if (SOURCE_FILE.test(f.rel)) {
         // the store has the source (ingest put it there before it committed; a retry of a failed ingest re-fetches)
         if (idle(f.mtimeMs)) out.push({ kind: "cache-source", path: at, bytes: f.bytes, projectId: p.id });
+        continue;
+      }
+      const section = SECTION_FILE.exec(f.rel);
+      if (section) {
+        // pieces and stitch outputs are renamed to the window's name once stored: a leftover is a crashed fetch
+        if (SECTION_SCRATCH.test(section[1]!)) {
+          if (settled(f.mtimeMs)) out.push({ kind: "section-scratch", path: at, bytes: f.bytes, projectId: p.id });
+        } else if (idle(f.mtimeMs)) out.push({ kind: "cache-section", path: at, bytes: f.bytes, projectId: p.id });
         continue;
       }
       const clip = parseClipFile(f.rel);
@@ -418,6 +430,11 @@ export async function reclaimScratch(
 /** Delete one clip render (mp4 or jpg) from scratch, given its store key. The store copy is separate. */
 export async function removeScratchClip(svc: Services, projectId: string, key: string) {
   await fs.rm(path.join(svc.paths.project(projectId), "clips", path.posix.basename(key)), { force: true }).catch(() => {});
+}
+
+/** Delete the scratch copies of a project's full-quality windows (`sections/`), when the windows themselves go. */
+export async function removeScratchSections(svc: Services, projectId: string) {
+  await fs.rm(path.join(svc.paths.project(projectId), "sections"), { recursive: true, force: true }).catch(() => {});
 }
 
 /** Delete the scratch copy of a project's source (`source.*`). */

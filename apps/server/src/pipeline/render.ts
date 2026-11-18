@@ -8,6 +8,7 @@ import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { errorKind, type StageContext } from "./common.js";
+import { renderSource } from "./sections.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";
@@ -16,10 +17,10 @@ import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
 import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, tightenOverlays, dropFaceOverlaps, mergeRegions } from "./overlays.js";
-import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
+import { speechSegments, pauseCuts } from "../audio/vad.js";
+import { clipPcm } from "../audio/pcm.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
-import { spawn } from "node:child_process";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
@@ -296,7 +297,11 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     return;
   }
   await ctx.acquire("render", 512, { clipId });
-  const sourcePath = await ctx.ensureSource(project);
+  // a preview-sized source (a plan's sourceHeight) renders from a full-quality window of the clip (sections.ts)
+  const src = await renderSource(ctx, project, clip);
+  const sourcePath = src.path;
+  /** the clip's start on the render file's clock: everything that reads pixels or sound from `sourcePath` uses it */
+  const at = clip.startSec - src.offsetSec;
   const clipsDir = path.join(await ctx.dir(), "clips");
   await fs.mkdir(clipsDir, { recursive: true });
   // per-generation scratch names: an overlapping stale render never touches these files
@@ -324,8 +329,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     { gen, index: clip.index, startSec: clip.startSec, endSec: clip.endSec, durationSec: Number(duration.toFixed(2)), origin: clip.origin },
     "render start",
   );
-  const srcW = project.width ?? 1920;
-  const srcH = project.height ?? 1080;
+  const srcW = src.width;
+  const srcH = src.height;
 
   // framing: user sections (absolute seconds) over a default mode (legacy clip/project override, else auto)
   // (resolveFraming is the same reading get_clip reports; the project's adjustment goes with the project's mode, not with a legacy per-clip override)
@@ -352,12 +357,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // per-clip text scan: grows/times burned-in text regions, and finds slides to show whole in auto framing
   const needsTextScan = !!svc.text && (overlays.length > 0 || timeline.some((pc) => pc.mode === "auto"));
   const frames = needsTextScan
-    ? await sampleClipText({ detector: svc.text!, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, clip.startSec, duration).catch(
-        (err) => {
-          log.warn({ err }, "per-clip text scan failed; using project regions");
-          return [];
-        },
-      )
+    ? await sampleClipText({ detector: svc.text!, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, at, duration).catch((err) => {
+        log.warn({ err }, "per-clip text scan failed; using project regions");
+        return [];
+      })
     : [];
   if (overlays.length && svc.text) {
     // the project scan samples the whole video sparsely; this clip may show a longer line or a
@@ -396,7 +399,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const sceneCuts =
     cutsFrom === "clip"
       ? (
-          await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration }).catch((err: unknown) => {
+          await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: at, duration }).catch((err: unknown) => {
             if (ctx.signal.aborted) throw err;
             log.warn({ err }, "shot changes of the clip not detected, rendering without cuts");
             return [] as number[];
@@ -409,7 +412,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     samples = await sampleFaces(svc.faces, {
       ffmpegPath: svc.config.FFMPEG_PATH,
       source: sourcePath,
-      startSec: clip.startSec,
+      startSec: at,
       durationSec: duration,
       signal: ctx.signal,
       sampleFps: 4,
@@ -447,7 +450,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // clip audio once (16 kHz mono): speaker detection, pause trimming, caption alignment
   let clipAudio: Float32Array | null = null;
   if (svc.vad || svc.aligner) {
-    clipAudio = await clipPcm(svc.config.FFMPEG_PATH, sourcePath, clip.startSec, duration, ctx.signal).catch((err) => {
+    clipAudio = await clipPcm(svc.config.FFMPEG_PATH, sourcePath, at, duration, ctx.signal).catch((err) => {
       if (ctx.signal.aborted) throw err;
       log.warn({ err }, "could not extract clip audio; no speaker detection, pause trimming or caption alignment");
       return null;
@@ -487,7 +490,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         const tl = await activeSpeakers(
           { faces: svc.faces, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal },
           sourcePath,
-          clip.startSec + sg.start,
+          at + sg.start,
           sg.end - sg.start,
           [a, b],
           speechAt(speechProbs, sg.start),
@@ -612,6 +615,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     ctx.signal,
     log,
     (i, n, attempt) => void ctx.progress(0.05, `Verifying disfluency cut ${i + 1}/${n}${attempt > 1 ? ` (try ${attempt})` : ""}`, { clipId }).catch(() => {}),
+    src.offsetSec,
   );
   for (const sk of cutResult.skipped) log.warn({ span: [sk.range.start, sk.range.end], reason: sk.reason }, "disfluency cut skipped");
   for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end], verified: c.verified, manual: c.manual ?? false }, "disfluency cut");
@@ -872,7 +876,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     await svc.media.ffmpeg(
       [
         "-ss",
-        clip.startSec.toFixed(3),
+        at.toFixed(3),
         "-t",
         duration.toFixed(3),
         "-i",
@@ -1604,6 +1608,8 @@ export async function planClipCuts(
   signal?: AbortSignal,
   log?: Logger,
   onProgress?: (cut: number, total: number, attempt: number) => void,
+  /** source seconds at `sourcePath`'s first frame (a full-quality window, sections.ts); 0 for the whole source */
+  sourceOffsetSec = 0,
 ): Promise<ClipCutPlan> {
   const duration = clip.endSec - clip.startSec;
   const requested = cutRanges(transcript?.flags ?? [], clip.startSec, clip.endSec);
@@ -1628,7 +1634,7 @@ export async function planClipCuts(
       },
     },
     sourcePath,
-    clip.startSec,
+    clip.startSec - sourceOffsetSec,
     duration,
     requested,
     clipWords,
@@ -1705,42 +1711,4 @@ export function mergeRanges(ranges: Array<{ start: number; end: number }>): Arra
     else out.push({ ...r });
   }
   return out;
-}
-
-/** 16 kHz mono float PCM of a clip's audio (VAD input). */
-function clipPcm(ffmpegPath: string, source: string, start: number, duration: number, signal?: AbortSignal): Promise<Float32Array> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const p = spawn(
-      ffmpegPath,
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-nostdin",
-        "-ss",
-        start.toFixed(3),
-        "-t",
-        duration.toFixed(3),
-        "-i",
-        source,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        String(VAD_SR),
-        "-f",
-        "f32le",
-        "pipe:1",
-      ],
-      { signal },
-    );
-    p.stdout.on("data", (d: Buffer) => chunks.push(d));
-    p.on("error", reject);
-    p.on("close", (code) => {
-      if (code !== 0) return reject(new Error(`ffmpeg exited ${code} extracting clip audio`));
-      const b = Buffer.concat(chunks);
-      resolve(new Float32Array(b.buffer, b.byteOffset, Math.floor(b.byteLength / 4)));
-    });
-  });
 }

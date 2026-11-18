@@ -33,6 +33,8 @@ export const INVALIDATION: Record<ProjectEventType, Rule> = {
   "clip.bumper_skipped": ["project"],
   "clip.overlay_skipped": ["project"],
   "clip.cut_unverified": ["project"],
+  "source.section_fetched": [],
+  "clip.preview_source": ["project"],
   "job.stalled": [],
   "source.expired": ["project"],
   "clips.expired": ["project", "list"],

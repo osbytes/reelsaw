@@ -115,6 +115,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw clip <clipId>` | everything about one clip incl. render diagnostics |
 | `reelsaw faces <clipId> [a-b] [--json]` | face boxes per sampled frame + split speaker tracks |
 | `reelsaw rerender <clipId…>` | queue a re-render of one or several clips; a clip that never got its AI title is prepared first (same as the UI buttons, clips.rerender / rerenderMany and rerender_clip / rerender_clips) |
+| `reelsaw scenario list \| <name> --user <email> [--plan p] [--source f]` | a project in a known state (screenshots, UI checks); local instances only |
 | `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
 | `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
 | `reelsaw cuts <clipId> [--save <dir>] [--fixture <dir>]` | dry-run the disfluency cut search for a clip and print every candidate verdict; can save the removed and context audio, and export each flagged span as an offline regression case for `pnpm eval:cuts` |
@@ -379,6 +380,23 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   SOCKS5 is port 10000 and `socks5h://`. `sessttl.60` is minutes; keep it as long as a long download.
   Each download already has its own IP, so a modest `concurrency` (2–4) is safe; `concurrency=1`
   is only required on a single home Pi.
+
+  **Clip windows need an HTTP proxy.** On a plan with a source cap (hosted Free: `sourceHeight` 240 in
+  `ee/billing/plans.ts`) a link is downloaded as a small preview, and each clip renders from a 1080p window of the
+  link (`--download-sections`, `pipeline/sections.ts`), stored and reused by later rerenders. Windows are fetched
+  one at a time per project (a session lock), so parallel renders reuse each other's download. The first fetch
+  covers every not-yet-covered clip within 15 s of the one rendering (up to 10 minutes), and a clip that later
+  reaches past its window fetches only the missing stretch, joined to the stored part locally (a short re-encode,
+  no proxy bytes). yt-dlp
+  hands those windows to ffmpeg, which cannot use SOCKS, so the pool skips `socks` candidates for them and they
+  go through the next HTTP candidate (often the paid gateway). Give the Pi an HTTP proxy as well
+  (`tinyproxy`, or `gost -L http://100.x.x.x:8888`) and list it next to the SOCKS one, e.g.
+  `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,pi-http=http://100.64.1.10:8888;priority=19;concurrency=1,...`.
+  The `source.section_fetched` event (with `downloadedSec`, `clips` and `stitched`) and the
+  `reelsaw.source.section_bytes` metric show what the windows cost;
+  `aligned: nominal` means the window's sound could not be matched to the preview (silence) and the requested
+  start was used. A window that cannot be had for good (the video was removed) renders from the preview and logs
+  `clip.preview_source`.
 
 - **"That address points inside this server's network."** Link sources must be public http(s) URLs: ingest resolves
   the host and refuses loopback, private (RFC1918), CGNAT, link-local, unique-local and multicast addresses, plus
