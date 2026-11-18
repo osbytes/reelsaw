@@ -93,6 +93,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   media-links create <projectId> [clipId…] [--kind clip|thumb|srt|vtt|export] [--ttl days] [--label text]
  *                                           a share link per clip (or one for the zip) that needs no sign-in (get_media_links); reuses the active one unless --ttl or --label
  *   media-links revoke <linkId> | --project <id> | --clip <id> | --all <email>   turn share links off now (revoke_media_link)
+ *   media-links clear <email>   delete the account's revoked and expired links (clear_media_links)
  *   webhooks <email> [--json]               the account's webhook endpoints: masked URL, events, status, last delivery (Settings → Webhooks / list_webhooks)
  *   webhooks deliveries <endpointId> [--status failed] [--json]   an endpoint's delivery log (list_webhook_deliveries)
  *   webhooks resend <deliveryId> | test <endpointId> | enable <endpointId> | disable <endpointId>
@@ -204,7 +205,18 @@ import { describeCoverage } from "./library/summary.js";
 import { eq, desc, and, inArray, isNull, or, sql } from "drizzle-orm";
 import { listDeliveries, listEndpoints, resendDelivery, updateEndpoint, WEBHOOK_DELIVERY_STATUSES } from "./webhooks/service.js";
 import { testEndpoint } from "./webhooks/deliver.js";
-import { getOrCreateLink, linkSummary, listLinks, maskLinkUrl, MEDIA_LINK_KINDS, revokeLinks, revokeMessage, type RevokeScope } from "./media-links/service.js";
+import {
+  clearMessage,
+  clearStoppedLinks,
+  getOrCreateLink,
+  linkSummary,
+  listLinks,
+  maskLinkUrl,
+  MEDIA_LINK_KINDS,
+  revokeLinks,
+  revokeMessage,
+  type RevokeScope,
+} from "./media-links/service.js";
 import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
@@ -959,7 +971,7 @@ ${usage}`);
   async "media-links"(svc) {
     const db = svc.database.db;
     const usage =
-      "usage: reelsaw media-links <email> [--project id] [--json] [--active] | create <projectId> [clipId…] [--kind k] [--ttl days] [--label text] | revoke <linkId> | revoke --project <id> | revoke --clip <id> | revoke --all <email>";
+      "usage: reelsaw media-links <email> [--project id] [--json] [--active] | create <projectId> [clipId…] [--kind k] [--ttl days] [--label text] | revoke <linkId> | revoke --project <id> | revoke --clip <id> | revoke --all <email> | clear <email>";
     if (pos[0] === "create") {
       const projectId = pos[1];
       if (!projectId) throw new Error(usage);
@@ -1024,6 +1036,11 @@ ${usage}`);
         scope = { linkId };
       }
       console.log(revokeMessage(await revokeLinks(svc, userId, scope)));
+      return;
+    }
+    if (pos[0] === "clear") {
+      if (!pos[1]) throw new Error(usage);
+      console.log(clearMessage(await clearStoppedLinks(svc, (await userByEmail(svc, pos[1])).id)));
       return;
     }
     if (!pos[0]) throw new Error(usage);

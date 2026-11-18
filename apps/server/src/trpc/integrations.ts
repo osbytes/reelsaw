@@ -7,7 +7,16 @@ import { z } from "zod";
 import { router, protectedProcedure } from "./context.js";
 import type { Context } from "./context.js";
 import { MEDIA_LINK_KINDS } from "../db/schema.js";
-import { getOrCreateLink, LINK_LIST_MAX, listLinks, revokeLinks, revokeMessage, type LinkTarget } from "../media-links/service.js";
+import {
+  clearMessage,
+  clearStoppedLinks,
+  getOrCreateLink,
+  LINK_LIST_MAX,
+  listLinks,
+  revokeLinks,
+  revokeMessage,
+  type LinkTarget,
+} from "../media-links/service.js";
 import type { MediaLinkSource } from "../db/schema.js";
 import {
   createEndpoint,
@@ -66,6 +75,11 @@ export const mediaLinksRouter = router({
       const revoked = await revokeLinks(ctx.svc, ctx.user.id, input);
       return { revoked, message: revokeMessage(revoked) };
     }),
+  /** Delete the revoked and expired links from the list; links of a project in the trash are kept. */
+  clear: protectedProcedure.mutation(async ({ ctx }) => {
+    const cleared = await clearStoppedLinks(ctx.svc, ctx.user.id);
+    return { cleared, message: clearMessage(cleared) };
+  }),
 });
 
 const webhookUrl = z.string().trim().min(1).max(2000);

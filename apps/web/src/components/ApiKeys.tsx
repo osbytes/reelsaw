@@ -5,7 +5,7 @@ import { useTRPC } from "../lib/trpc";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
-import { ScrollArea } from "./scroll-area";
+import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 
 type Key = {
   id: string;
@@ -221,39 +221,44 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         {list.error && <span className="text-err">✕ {list.error.message}</span>}
         {list.data && keys.length === 0 && <span className="text-ink3">No keys yet.</span>}
         {keys.length > 0 && (
-          <ul className="divide-y divide-line">
-            <li aria-hidden className="hidden grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem] items-center gap-x-3 pb-1 text-xs text-ink3 sm:grid">
-              <span>Name</span>
-              <span>Key</span>
-              <span>Created</span>
-              <span>Last used</span>
-              <span />
-            </li>
-            {keys.map((k) => (
+          <ScrollArea className={SECTION_LIST_MAX_H}>
+            <ul className="divide-y divide-line">
               <li
-                key={k.id}
-                className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]"
+                aria-hidden
+                className="sticky top-0 z-[1] hidden grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem] items-center gap-x-3 bg-panel pb-1 text-xs text-ink3 sm:grid"
               >
-                <span className="truncate font-semibold">
-                  {k.name ?? "unnamed"}
-                  {adminLabel(k) && me.data?.role === "admin" ? (
-                    <span className="ml-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
-                  ) : null}
-                </span>
-                <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
-                  <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
-                    Revoke
-                  </button>
-                </span>
-                <span className="hidden font-mono text-xs text-ink2 sm:block">{k.start ?? "rs_"}…</span>
-                <span className="col-span-1 truncate text-xs text-ink3 sm:hidden">
-                  {k.start ?? "rs_"}… · created {when(k.createdAt)} · used {when(k.lastRequest)}
-                </span>
-                <span className="hidden text-xs text-ink3 sm:block">created {when(k.createdAt)}</span>
-                <span className="hidden text-xs text-ink3 sm:block">last used {when(k.lastRequest)}</span>
+                <span>Name</span>
+                <span>Key</span>
+                <span>Created</span>
+                <span>Last used</span>
+                <span />
               </li>
-            ))}
-          </ul>
+              {keys.map((k) => (
+                <li
+                  key={k.id}
+                  className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]"
+                >
+                  <span className="truncate font-semibold">
+                    {k.name ?? "unnamed"}
+                    {adminLabel(k) && me.data?.role === "admin" ? (
+                      <span className="ml-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
+                    ) : null}
+                  </span>
+                  <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
+                    <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
+                      Revoke
+                    </button>
+                  </span>
+                  <span className="hidden font-mono text-xs text-ink2 sm:block">{k.start ?? "rs_"}…</span>
+                  <span className="col-span-1 truncate text-xs text-ink3 sm:hidden">
+                    {k.start ?? "rs_"}… · created {when(k.createdAt)} · used {when(k.lastRequest)}
+                  </span>
+                  <span className="hidden text-xs text-ink3 sm:block">created {when(k.createdAt)}</span>
+                  <span className="hidden text-xs text-ink3 sm:block">last used {when(k.lastRequest)}</span>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
         )}
       </div>
 

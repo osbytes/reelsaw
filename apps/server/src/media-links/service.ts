@@ -2,11 +2,13 @@
  * Share links (docs/specs/media-links.md): a URL anyone can fetch, `/m/<token>/<name>.<ext>`, for a clip's current
  * render, thumbnail or captions, or a project's export zip. One stored row per link: the token's sha256 for lookup
  * and the token sealed so the owner can copy it again. Links expire (MEDIA_LINK_TTL_DAYS, or never where
- * MEDIA_LINK_ALLOW_NEVER) and are revoked one at a time, per clip or project, or all at once. The web app, MCP
- * (get_media_links / list_media_links / revoke_media_link), `reelsaw media-links` and webhook bodies call this module.
+ * MEDIA_LINK_ALLOW_NEVER) and are revoked one at a time, per clip or project, or all at once. Links that stopped
+ * working (revoked, expired) are deleted by the pruner after MEDIA_LINK_RETENTION_DAYS, or by the owner's Clear. The web
+ * app, MCP (get_media_links / list_media_links / revoke_media_link / clear_media_links), `reelsaw media-links` and webhook
+ * bodies call this module.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createSecretBox } from "../ai/crypto.js";
 import { schema, type Db } from "../db/index.js";
@@ -28,6 +30,8 @@ export const LINK_LIST_MAX = 100;
 const USE_WRITE_EVERY_MS = 60_000;
 
 export const EXT: Record<MediaLinkKind, string> = { clip: "mp4", thumb: "jpg", srt: "srt", vtt: "vtt", export: "zip" };
+
+export type MediaLinkState = "active" | "expired" | "revoked" | "trashed";
 
 export type LinkTarget = { kind: Exclude<MediaLinkKind, "export">; clipId: string } | { kind: "export"; projectId: string; clipIds?: string[] | undefined };
 
@@ -56,8 +60,8 @@ export interface MediaLinkView {
   lastUsedAt: Date | null;
   useCount: number;
   createdAt: Date;
-  /** active | expired | revoked */
-  state: "active" | "expired" | "revoked";
+  /** active | expired | revoked | trashed (its project or clip is deleted; restoring it brings the link back) */
+  state: MediaLinkState;
 }
 
 const box = (svc: Pick<Services, "config">) => createSecretBox(svc.config.BETTER_AUTH_SECRET, "media-links");
@@ -81,11 +85,14 @@ export function maskLinkUrl(url: string): string {
   return url.replace(/\/m\/([^/]+)\//, (_m, t: string) => `/m/…${t.slice(-4)}/`);
 }
 
-function stateOf(row: Pick<MediaLinkRow, "revokedAt" | "expiresAt">, now = Date.now()): MediaLinkView["state"] {
+function stateOf(row: Pick<MediaLinkRow, "revokedAt" | "expiresAt">, now = Date.now()): "active" | "expired" | "revoked" {
   if (row.revokedAt) return "revoked";
   if (row.expiresAt && row.expiresAt.getTime() <= now) return "expired";
   return "active";
 }
+
+/** Revoked or expired: what Clear deletes and the pruner deletes after MEDIA_LINK_RETENTION_DAYS. */
+const stopped = () => or(isNotNull(schema.mediaLinks.revokedAt), and(isNotNull(schema.mediaLinks.expiresAt), sql`${schema.mediaLinks.expiresAt} <= now()`))!;
 
 /** The expiry a request gets: the instance ceiling, the caller's shorter choice, or never where the instance allows it. */
 export function expiryFor(svc: Pick<Services, "settings">, ttlDays: number | null | undefined, now = Date.now()): Date | null {
@@ -141,6 +148,7 @@ function view(
   svc: Pick<Services, "config">,
   row: MediaLinkRow,
   names: { projectTitle: string; clipIndex: number | null; clipTitle: string | null },
+  trashed = false,
 ): MediaLinkView {
   const token = box(svc).decrypt(row.tokenSealed);
   return {
@@ -159,7 +167,7 @@ function view(
     lastUsedAt: row.lastUsedAt,
     useCount: row.useCount,
     createdAt: row.createdAt,
-    state: stateOf(row),
+    state: stateOf(row) === "active" && trashed ? "trashed" : stateOf(row),
   };
 }
 
@@ -237,7 +245,7 @@ async function insertLink(
 export interface ListLinksInput {
   projectId?: string | undefined;
   clipId?: string | undefined;
-  /** only links that still work */
+  /** only links that still work (not revoked, expired or in the trash with their project or clip) */
   active?: boolean | undefined;
   /** keyset: the last id of the previous page */
   cursor?: string | undefined;
@@ -251,11 +259,23 @@ export async function listLinks(svc: Services, userId: string, input: ListLinksI
   const filters: SQL[] = [eq(schema.mediaLinks.userId, userId)];
   if (input.projectId) filters.push(eq(schema.mediaLinks.projectId, input.projectId));
   if (input.clipId) filters.push(eq(schema.mediaLinks.clipId, input.clipId));
-  if (input.active) filters.push(isNull(schema.mediaLinks.revokedAt), or(isNull(schema.mediaLinks.expiresAt), sql`${schema.mediaLinks.expiresAt} > now()`)!);
+  if (input.active)
+    filters.push(
+      isNull(schema.mediaLinks.revokedAt),
+      or(isNull(schema.mediaLinks.expiresAt), sql`${schema.mediaLinks.expiresAt} > now()`)!,
+      isNull(schema.projects.deletedAt),
+      isNull(schema.clips.deletedAt),
+    );
   const where = and(...filters);
-  const [rows, [{ total } = { total: 0 }]] = await Promise.all([
+  const [rows, [{ total, stoppedCount } = { total: 0, stoppedCount: 0 }]] = await Promise.all([
     db
-      .select({ link: schema.mediaLinks, projectTitle: schema.projects.title, clipIndex: schema.clips.index, clipTitle: schema.clips.title })
+      .select({
+        link: schema.mediaLinks,
+        projectTitle: schema.projects.title,
+        clipIndex: schema.clips.index,
+        clipTitle: schema.clips.title,
+        trashed: sql<boolean>`(${schema.projects.deletedAt} is not null or ${schema.clips.deletedAt} is not null)`,
+      })
       .from(schema.mediaLinks)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.mediaLinks.projectId))
       .leftJoin(schema.clips, eq(schema.clips.id, schema.mediaLinks.clipId))
@@ -266,13 +286,20 @@ export async function listLinks(svc: Services, userId: string, input: ListLinksI
       )
       .orderBy(desc(schema.mediaLinks.createdAt), desc(schema.mediaLinks.id))
       .limit(limit + 1),
-    db.select({ total: count() }).from(schema.mediaLinks).where(where),
+    db
+      .select({ total: count(), stoppedCount: sql<number>`count(*) filter (where ${stopped()})` })
+      .from(schema.mediaLinks)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.mediaLinks.projectId))
+      .leftJoin(schema.clips, eq(schema.clips.id, schema.mediaLinks.clipId))
+      .where(where),
   ]);
   const page = rows.slice(0, limit);
   return {
-    items: page.map((r) => view(svc, r.link, { projectTitle: r.projectTitle, clipIndex: r.clipIndex, clipTitle: r.clipTitle })),
+    items: page.map((r) => view(svc, r.link, { projectTitle: r.projectTitle, clipIndex: r.clipIndex, clipTitle: r.clipTitle }, r.trashed)),
     nextCursor: rows.length > limit ? (page.at(-1)?.link.id ?? null) : null,
     total: Number(total),
+    /** of `total`, how many are revoked or expired (what Clear deletes) */
+    stopped: Number(stoppedCount),
   };
 }
 
@@ -302,6 +329,24 @@ export async function revokeLinks(svc: Services, userId: string, scope: RevokeSc
   svc.log.child({ module: "media-links" }).info({ userId, scope: Object.keys(scope)[0], revoked: rows.length }, "media link revoked");
   return rows.length;
 }
+
+/**
+ * Delete the owner's links that no longer work (revoked or expired), so the list holds what matters; the pruner does
+ * the same MEDIA_LINK_RETENTION_DAYS after they stopped. Links in the trash with their project are kept: restoring the
+ * project brings them back. Returns how many were deleted.
+ */
+export async function clearStoppedLinks(svc: Services, userId: string): Promise<number> {
+  const m = schema.mediaLinks;
+  const rows = await svc.database.db
+    .delete(m)
+    .where(and(eq(m.userId, userId), stopped()))
+    .returning({ id: m.id });
+  svc.log.child({ module: "media-links" }).info({ userId, cleared: rows.length }, "media links cleared");
+  return rows.length;
+}
+
+export const clearMessage = (n: number) =>
+  n ? `Cleared ${n} revoked or expired share link${n === 1 ? "" : "s"}.` : "No revoked or expired share links to clear.";
 
 export const revokeMessage = (n: number) =>
   n ? `Revoked ${n} share link${n === 1 ? "" : "s"}; ${n === 1 ? "it stops" : "they stop"} working now.` : "No active share links to revoke.";

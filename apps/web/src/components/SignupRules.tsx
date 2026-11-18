@@ -6,7 +6,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { ago } from "../lib/time";
-import { ScrollArea } from "./scroll-area";
+import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { PANEL_FOCUS_CLEARANCE } from "./StickyPanelFooter";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 
@@ -163,7 +163,7 @@ export function SignupRulesSection() {
       ) : rules.length === 0 ? (
         <p className="py-2 text-sm text-ink3">No rules yet: the sign-up mode decides every sign-up.</p>
       ) : (
-        <ScrollArea className="max-h-[26rem]">
+        <ScrollArea className={SECTION_LIST_MAX_H}>
           <table className="w-full table-fixed text-sm">
             <caption className="sr-only">Sign-up rules, oldest first</caption>
             <thead className="sticky top-0 bg-panel text-left text-xs text-ink3">

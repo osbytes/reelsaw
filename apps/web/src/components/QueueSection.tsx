@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { ago, elapsed } from "../lib/time";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
-import { ScrollArea } from "./scroll-area";
+import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
 
@@ -368,7 +368,7 @@ export function QueueSection() {
           </SkeletonRegion>
         ) : items.length > 0 ? (
           <>
-            <ScrollArea className="max-h-[min(28rem,55dvh)]">
+            <ScrollArea className={SECTION_LIST_MAX_H}>
               <table className="w-full min-w-[34rem] table-fixed text-[13px]">
                 <caption className="sr-only">Failed projects and clips, newest first</caption>
                 <colgroup>

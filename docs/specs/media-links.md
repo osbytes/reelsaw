@@ -92,7 +92,9 @@ index (user_id, id), (project_id), (clip_id, kind) where revoked_at is null
 Size: about 300 bytes a row. Links are reused (below), so there are a few per clip, not one per
 read. Retention: revoked and expired rows are deleted
 `MEDIA_LINK_RETENTION_DAYS` (default 30) after they stopped working, by the daily history pruner.
-Until then the list can still say "Revoked on …" when someone asks why a link stopped.
+Until then the list can still say "Revoked on …" when someone asks why a link stopped. The owner can
+delete them sooner with Clear (Settings → Share links, `clear_media_links`, `reelsaw media-links clear`);
+links of a project in the trash are not cleared, since restoring it brings them back.
 
 ### Minting and reuse
 
@@ -157,7 +159,8 @@ The route sits outside `/api` and before the auth middleware. It takes no cookie
 - **One link:** `revoked_at = now()` on that link. The next request gets the 404.
 - **A project's or a clip's links:** a bulk revoke scoped by `project_id` or `clip_id`. Deleting the
   clip or project also stops them (the serve query requires both to exist and not be deleted), and
-  restoring them within the undo window brings the links back.
+  restoring them within the undo window brings the links back. Until then the list shows them as
+  "In trash" (`state: "trashed"`), not active; purging the project or clip deletes the rows (cascade).
 - **Everything:** "Revoke all share links" revokes every active link of the account in one
   statement over the `(user_id, …)` index.
 - Banning or removing an account stops its links through the owner check (removal cascades the rows).
@@ -208,6 +211,7 @@ tRPC, MCP, the CLI and the webhook body builder call it.
 | `get_media_links` | `{ projectId, clipIds?, kinds?: ["clip","thumb","srt","vtt"], export?: boolean, ttlDays?, label? }` → for each clip, its link per kind with `linkId` and `expiresAt` (reusing active links as above); with `export`, the zip link for that subset. Clips not rendered are listed with the reason instead of a link |
 | `list_media_links` | paginated, filter by project, clip, active; masked URLs (`/m/…3f2a/…`) plus `linkId` |
 | `revoke_media_link` | `{ linkId }`, or `{ projectId }`, `{ clipId }` or `{ all: true }`; says how many links stopped working |
+| `clear_media_links` | `{}`; deletes the account's revoked and expired links, says how many |
 
 `get_project` and `get_clip` do not add links on their own: a read tool should not create public URLs
 the caller did not ask for. Their descriptions point at `get_media_links`. Webhook payloads are the
@@ -218,7 +222,8 @@ passes `share: false` (`share: true` gives an API-key caller the same).
 
 **CLI.** `reelsaw media-links <email> [--project <id>] [--active] [--json]`,
 `reelsaw media-links create <projectId> [clipId…] [--kind clip|thumb|srt|vtt|export] [--ttl <days>] [--label …]`,
-`reelsaw media-links revoke <linkId | --project <id> | --all <email>>`.
+`reelsaw media-links revoke <linkId | --project <id> | --all <email>>`,
+`reelsaw media-links clear <email>`.
 
 ## Docs that change with it
 

@@ -375,7 +375,7 @@ export const TOOLS = {
   list_media_links: {
     title: "List share links",
     description:
-      "Your share links, newest first. Returns { items: [{ id, kind, projectId, clipId, title, url (masked), label, source, state (active | expired | revoked), expiresAt, lastUsedAt, useCount }], nextCursor, total }. Use get_media_links for a full URL.",
+      "Your share links, newest first. Returns { items: [{ id, kind, projectId, clipId, title, url (masked), label, source, state (active | expired | revoked | trashed: its project or clip is deleted, back on restore), expiresAt, lastUsedAt, useCount }], nextCursor, total }. Use get_media_links for a full URL.",
     inputSchema: {
       projectId: z.string().optional().describe("Only this project's links"),
       clipId: z.string().optional().describe("Only this clip's links"),
@@ -395,6 +395,13 @@ export const TOOLS = {
       projectId: z.string().optional().describe("Every link to this project's clips and zip"),
       all: z.literal(true).optional().describe("Every share link you have"),
     },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  clear_media_links: {
+    title: "Clear stopped share links",
+    description:
+      "Delete your revoked and expired share links from the list (they are deleted anyway some days after they stopped). Active links and links of a project in the trash are kept. Returns { cleared, message }.",
+    inputSchema: {},
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   list_webhooks: {
