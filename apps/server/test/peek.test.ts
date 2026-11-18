@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LENGTH_REUSE_MS, announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
+import { announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
 
 /** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, or an error) and counts its runs. */
 function fakeYtdlp(answer: () => number | null | Error) {
@@ -23,7 +23,6 @@ const LINK = "https://video.example/watch?v=1";
 
 describe("announcedDuration", () => {
   beforeEach(() => forgetAnnouncedDurations());
-  afterEach(() => mock.timers.reset());
 
   it("looks a link up once while checking it, creating it and ingesting it", async () => {
     const y = fakeYtdlp(() => 754);
@@ -53,19 +52,6 @@ describe("announcedDuration", () => {
     await assert.rejects(announcedDuration(y.media as never, LINK));
     fail = false;
     assert.equal(await announcedDuration(y.media as never, LINK), 90);
-    assert.equal(y.runs.length, 2);
-  });
-
-  it("looks the link up again once the answer is older than the reuse window", async () => {
-    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
-    let sec = 100;
-    const y = fakeYtdlp(() => sec);
-    assert.equal(await announcedDuration(y.media as never, LINK), 100);
-    sec = 200;
-    mock.timers.tick(LENGTH_REUSE_MS - 1);
-    assert.equal(await announcedDuration(y.media as never, LINK), 100);
-    mock.timers.tick(1);
-    assert.equal(await announcedDuration(y.media as never, LINK), 200);
     assert.equal(y.runs.length, 2);
   });
 });

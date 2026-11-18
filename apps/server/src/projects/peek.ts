@@ -1,3 +1,4 @@
+import { LRUCache } from "lru-cache";
 import { z } from "zod";
 import type { MediaTools } from "../media.js";
 
@@ -40,7 +41,7 @@ export async function peekUrlMeta(url: string): Promise<{ title?: string | undef
  */
 export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: string, signal?: AbortSignal): Promise<number | null> {
   const known = lengths.get(url);
-  if (known && Date.now() - known.at < LENGTH_REUSE_MS) return known.sec;
+  if (known) return known.sec;
   const { stdout } = await media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], {
     signal,
   });
@@ -50,21 +51,14 @@ export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: s
     .find((l) => l.trim().startsWith("{"));
   const duration = jsonLine ? z.object({ duration: z.number().positive() }).safeParse(JSON.parse(jsonLine)) : null;
   const sec = duration?.success ? duration.data.duration : null;
-  remember(url, sec);
+  lengths.set(url, { sec });
   return sec;
 }
 
 /** How long a link's looked-up length is reused: long enough to span checking a link, creating it and ingest starting. */
-export const LENGTH_REUSE_MS = 10 * 60_000;
-/** Links remembered at once; the oldest answer goes first. */
-const LENGTHS_KEPT = 500;
-const lengths = new Map<string, { at: number; sec: number | null }>();
-
-function remember(url: string, sec: number | null) {
-  lengths.delete(url); // re-inserted last, so the map's order is oldest answer first
-  lengths.set(url, { at: Date.now(), sec });
-  while (lengths.size > LENGTHS_KEPT) lengths.delete(lengths.keys().next().value!);
-}
+const LENGTH_REUSE_MS = 10 * 60_000;
+/** Each link's answer, boxed so a link that announces no length is kept too (`sec: null`); least recently used goes first. */
+const lengths = new LRUCache<string, { sec: number | null }>({ max: 500, ttl: LENGTH_REUSE_MS });
 
 /** Drop every remembered length (tests). */
 export function forgetAnnouncedDurations() {
