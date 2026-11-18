@@ -4,6 +4,7 @@
  * state through `pipeline/lifecycle.ts` and returns a structured result that says what changed and whether a render
  * was queued. Project-level edits are in `projects/service.ts`.
  */
+import { checkManualClipQuota } from "../quota.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -237,6 +238,8 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
   if (!ai && len > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
+    // the owner's allowance of clips of their own (Free: one), under their quota lock; an admin acting on it counts too
+    await checkManualClipQuota(u.db, svc.settings.get(), p.userId, svc.entitlements);
     if (p.durationSec && input.endSec > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "Selection ends after the video" });
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
     if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });

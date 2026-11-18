@@ -511,6 +511,31 @@ export const projects = pgTable(
   ],
 );
 
+/**
+ * Full-quality windows of a link whose stored source is a small preview (a plan's `sourceHeight`, see
+ * pipeline/sections.ts): a clip renders from the window that covers it, fetched once and reused by every
+ * rerender. `offsetSec` is the source time at the file's first frame, measured against the preview's audio.
+ */
+export const sourceSections = pgTable(
+  "source_sections",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    startSec: real("start_sec").notNull(),
+    endSec: real("end_sec").notNull(),
+    offsetSec: real("offset_sec").notNull(),
+    key: text("key").notNull(),
+    bytes: bigint("bytes", { mode: "number" }).notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("source_sections_project_idx").on(t.projectId, t.startSec)],
+);
+export type SourceSection = typeof sourceSections.$inferSelect;
+
 export const transcriptChunks = pgTable(
   "transcript_chunks",
   {

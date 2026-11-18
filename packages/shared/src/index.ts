@@ -1191,6 +1191,10 @@ export const PROJECT_EVENT_TYPES = [
   "clip.overlay_skipped",
   /** a cut the user made was applied without a seam check (the audio around it couldn't be matched) */
   "clip.cut_unverified",
+  /** a full-quality window of a preview-sized source was fetched for a clip (pipeline/sections.ts) */
+  "source.section_fetched",
+  /** the full-quality window could not be fetched for good (the video is gone): the clip rendered from the preview copy */
+  "clip.preview_source",
   /** no progress for a long time on a running clip/stage (watchdog) */
   "job.stalled",
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
@@ -1286,6 +1290,22 @@ export const projectEventSchemas = {
   /** the clip's overlay or music layers (`layerIds`) and their library assets that were left out */
   "clip.overlay_skipped": event({ ...skipped, layerIds: z.array(z.string()), assetIds: z.array(z.string()) }),
   "clip.cut_unverified": event({ clipId: z.string(), at: z.number(), reason: z.string() }),
+  "source.section_fetched": event({
+    clipId: z.string(),
+    start: z.number(),
+    end: z.number(),
+    bytes: z.number().int(),
+    height: z.number().int(),
+    /** how the file's first frame was placed on the source clock: matched against the preview's audio, or taken as requested */
+    aligned: z.enum(["audio", "nominal"]),
+    /** seconds of video that came through the proxy for it (a stitched window reuses stored ones) */
+    downloadedSec: z.number().optional(),
+    /** clips the window covers when it was stored (nearby clips share one download) */
+    clips: z.number().int().optional(),
+    /** joined from stored windows and the stretches they missed */
+    stitched: z.boolean().optional(),
+  }),
+  "clip.preview_source": event({ clipId: z.string(), height: z.number().int(), reason: z.string() }),
   "job.stalled": event({
     status: z.string(),
     idleMinutes: z.number(),

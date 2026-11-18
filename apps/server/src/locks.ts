@@ -8,6 +8,7 @@
  * per-user locks are taken first, before any row lock.
  */
 import { sql } from "drizzle-orm";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import type { Db } from "./db/index.js";
 
@@ -54,6 +55,8 @@ export async function takeTxLock(db: Pick<Db, "execute">, key: string): Promise<
 export const sessionLock = {
   /** one reconciler tick across all RUN_WORKERS processes (queue/reconcile.ts) */
   reconcile: () => "reconcile",
+  /** one full-quality window download (and stitch) per project at a time, across workers (pipeline/sections.ts) */
+  sourceWindows: (projectId: string) => `source-windows:${projectId}`,
 } as const;
 
 export async function withSessionLock<T>(pool: Pick<Pool, "connect">, key: string, fn: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }> {
@@ -73,5 +76,23 @@ export async function withSessionLock<T>(pool: Pick<Pool, "connect">, key: strin
         )
       : true;
     client.release(released ? undefined : true);
+  }
+}
+
+/**
+ * `withSessionLock`, but waits for the lock instead of skipping: polls every `pollMs` until it is free or `signal`
+ * aborts. For work every caller needs done, where the second caller should reuse what the first produced.
+ */
+export async function waitSessionLock<T>(
+  pool: Pick<Pool, "connect">,
+  key: string,
+  fn: () => Promise<T>,
+  opts: { signal?: AbortSignal; pollMs?: number } = {},
+): Promise<T> {
+  for (;;) {
+    opts.signal?.throwIfAborted();
+    const r = await withSessionLock(pool, key, fn);
+    if (r.ran) return r.value;
+    await delay(opts.pollMs ?? 1000, undefined, { signal: opts.signal });
   }
 }

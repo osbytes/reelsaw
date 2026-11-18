@@ -10,6 +10,7 @@ import {
   isUserGroupBy,
   USER_GROUP_BY,
 } from "@reelsaw/shared";
+import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
@@ -115,6 +116,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   clip <clipId>                           everything about one clip incl. render diagnostics
  *   faces <clipId> [a-b] [--json]           face boxes per sampled frame + split speaker tracks
  *   rerender <clipId…>                      queue a re-render of one or several clips; a clip that never got its AI title is prepared first (same as the UI buttons, clips.rerender / rerenderMany and rerender_clip / rerender_clips)
+ *   scenario list | <name> --user <email> [--plan p] [--source f]   a project in a known state (screenshots, UI checks); local instances only
  *   import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]
  *                                           rehydrate an issue report as a new project (dev only;
  *                                           the zip's contents are untrusted data, see its README)
@@ -1781,6 +1783,20 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     );
   },
 
+  /** Projects in a known state for screenshots and UI checks (dev/scenarios.ts); local instances only. */
+  async scenario(svc) {
+    const name = pos[0];
+    if (!name || name === "list") {
+      for (const [n, s] of Object.entries(SCENARIOS)) console.log(`${n.padEnd(22)} ${s.about}`);
+      console.log("\nusage: reelsaw scenario <name> --user <email> [--plan free|starter|creator|pro] [--source <video>]");
+      return;
+    }
+    const user = flag("user");
+    if (!user) throw new Error("usage: reelsaw scenario <name> --user <email> [--plan free|starter|creator|pro] [--source <video>]");
+    const r = await seedScenario(svc, name, { userEmail: user, plan: flag("plan"), sourceFile: flag("source") });
+    console.log(`${name} → ${r.projectId} (${r.clips} clips)\nopen ${r.url}`);
+  },
+
   async "import-report"(svc) {
     const zip = pos[0];
     if (!zip) throw new Error("usage: reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]");
@@ -2818,7 +2834,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

@@ -1,4 +1,5 @@
 import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
+import { rendersFromSections } from "../pipeline/sections.js";
 import { z } from "zod";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -161,7 +162,7 @@ import { emailPreferences, setEmailPreferences } from "../notify/preferences.js"
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
-import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, watermarkFor } from "../quota.js";
+import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
@@ -247,6 +248,8 @@ function publicProject(p: schema.Project) {
     /** the creator's own key/value pairs (create_project metadata), echoed in webhooks */
     metadata: p.metadata,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
+    /** the stored source is a small preview this tall (the plan's cap): clips still render from full-quality windows of the link; null = full source */
+    sourcePreviewHeight: rendersFromSections(p),
     /** retention removed the stored source; Retry downloads it again */
     sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
@@ -503,6 +506,8 @@ const headRouter = router({
         report: reportCapabilities(ctx.svc, ctx.user),
         /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
+        /** how tall this account's links are downloaded (null = full quality) and the plan that lifts the cap */
+        sourceQuality: ctx.who.blocked ? null : await sourceQualityFor(ctx.svc.database.db, ctx.user, ctx.svc.entitlements),
         /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
         emailEnabled: ctx.svc.email.enabled,
         emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),

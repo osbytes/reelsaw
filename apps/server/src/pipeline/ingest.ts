@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { hasMinuteLimits, recordSourceDuration, sourceMinutesExceeded, trackIngestRefusal } from "../quota.js";
+import { hasMinuteLimits, recordSourceDuration, sourceHeightFor, sourceMinutesExceeded, trackIngestRefusal } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -69,6 +69,11 @@ export async function ingest(ctx: StageContext) {
           throw over;
         }
       }
+      // a plan with a source cap (Free) downloads a small copy for the editor and analysis; each clip's render
+      // fetches its own window at full quality (sections.ts), so the proxy never carries the whole video in HD
+      const cap = await sourceHeightFor(ctx.db, project.userId, svc.entitlements);
+      const { previewHeight: _was, ...rest } = meta;
+      meta = cap ? { ...rest, previewHeight: cap } : rest;
       let stderrTail = "";
       let info: Record<string, unknown> | undefined;
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
@@ -84,7 +89,7 @@ export async function ingest(ctx: StageContext) {
             "--print-json",
             // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
             "-f",
-            "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+            sourceFormat(cap ?? 1080, !!cap),
             "--merge-output-format",
             "mp4",
             "--max-filesize",
@@ -229,6 +234,17 @@ export async function ingest(ctx: StageContext) {
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;
+}
+
+/**
+ * yt-dlp format selector for a link's source, at most `height` tall. H.264 first: it decodes everywhere (browser
+ * preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU. A preview copy (`small`) keeps the same audio stream
+ * as the full download (`ba[ext=m4a]`, ~1 MB a minute): transcription hears it at full quality, and a clip's
+ * full-quality window lines up with it sample for sample (sections.ts). Without a small enough video, the smallest.
+ */
+export function sourceFormat(height: number, small = false): string {
+  const h = `[height<=${height}]`;
+  return [`bv*[vcodec^=avc1]${h}[ext=mp4]+ba[ext=m4a]`, `bv*${h}[ext=mp4]+ba[ext=m4a]`, `b${h}[ext=mp4]`, `bv*${h}+ba`, small ? "wv*+ba/w" : "b"].join("/");
 }
 
 /**

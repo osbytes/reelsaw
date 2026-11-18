@@ -201,6 +201,7 @@ export const envSchema = z.object({
   MAX_NEW_PROJECTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
   MAX_LIVE_JOBS_PER_USER: z.coerce.number().int().min(0).default(0), // queued + running jobs a user's own requests may add to (hosted: e.g. 12)
   MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders, hand-made clips and re-runs of analysis or refinement a user may ask for per hour
+  MAX_MANUAL_CLIPS_PER_USER: z.coerce.number().int().min(0).default(0), // clips an account may add by hand (create_clip), ever; deleted ones count until purged
   MAX_STORAGE_MB: z.coerce.number().int().min(0).default(0), // sources + uploads + renders + intros/outros per user; checked at upload and project creation
   /** Minutes of source video per account per period: the billing period when the account has one, else the UTC calendar month. 0 = unlimited. */
   MAX_SOURCE_MINUTES_PER_MONTH: z.coerce.number().int().min(0).default(0),

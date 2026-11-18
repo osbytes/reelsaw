@@ -96,6 +96,14 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       return { text: `Overlay skipped: ${p.reason}`, tone: "warn" };
     case "clip.cut_unverified":
       return { text: `Applied your cut at ${formatTime(Number(p.at))} without a seam check: the audio around it couldn't be matched`, tone: "warn" };
+    case "source.section_fetched": {
+      const span = `${formatTime(Number(p.start))}–${formatTime(Number(p.end))}`;
+      const n = typeof p.clips === "number" && p.clips > 1 ? ` for ${p.clips} clips` : "";
+      const how = p.stitched ? `, joining ${Number(p.downloadedSec ?? 0).toFixed(0)} s of new video to what was already fetched` : "";
+      return { text: `Fetched ${span} of the source at ${p.height}p${n}${how}`, tone: "ok" };
+    }
+    case "clip.preview_source":
+      return { text: `The full-quality video couldn't be fetched, so a clip rendered from the ${p.height}p preview: ${p.reason}`, tone: "warn" };
     case "project.deleted":
       return { text: `Project deleted (restorable for ${p.days} days)`, tone: "warn" };
     case "project.restored":

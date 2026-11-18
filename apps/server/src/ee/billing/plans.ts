@@ -25,6 +25,12 @@ export interface Plan {
   queuePriority: number;
   /** false = the plan removes the watermark; null = follow the instance setting */
   watermark: boolean | null;
+  /**
+   * Tallest video a link's source is downloaded at (null = the full download, up to 1080p). A capped source is
+   * the editor's and analysis's copy; each clip's render fetches its own window at full quality
+   * (pipeline/sections.ts), so the proxy carries a few minutes of HD instead of the whole video.
+   */
+  sourceHeight: number | null;
   blurb: string;
   /** the plan to suggest when this one's limit is hit */
   next: string | null;
@@ -36,10 +42,11 @@ export const PLANS: Plan[] = [
     label: "Free",
     price: null,
     lookupKeys: null,
-    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 20, MAX_STORAGE_MB: 2048, MAX_PROJECTS_PER_USER: 10, MAX_LIVE_JOBS_PER_USER: 2 },
+    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 20, MAX_STORAGE_MB: 2048, MAX_PROJECTS_PER_USER: 10, MAX_LIVE_JOBS_PER_USER: 2, MAX_MANUAL_CLIPS_PER_USER: 1 },
     firstVideoFreeMinutes: 60,
     queuePriority: 0,
     watermark: null,
+    sourceHeight: 240,
     blurb: "Your first video free up to 60 minutes, then 20 minutes a month, with a small watermark.",
     next: "starter",
   },
@@ -48,10 +55,11 @@ export const PLANS: Plan[] = [
     label: "Starter",
     price: { month: 12, year: 120 },
     lookupKeys: { month: "starter_monthly", year: "starter_yearly" },
-    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 100, MAX_STORAGE_MB: 10240, MAX_PROJECTS_PER_USER: 50, MAX_LIVE_JOBS_PER_USER: 4 },
+    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 100, MAX_STORAGE_MB: 10240, MAX_PROJECTS_PER_USER: 50, MAX_LIVE_JOBS_PER_USER: 4, MAX_MANUAL_CLIPS_PER_USER: 0 },
     firstVideoFreeMinutes: 0,
     queuePriority: 0,
     watermark: false,
+    sourceHeight: null,
     blurb: "100 minutes a month, 10 GB of storage, no watermark.",
     next: "creator",
   },
@@ -60,10 +68,11 @@ export const PLANS: Plan[] = [
     label: "Creator",
     price: { month: 29, year: 290 },
     lookupKeys: { month: "creator_monthly", year: "creator_yearly" },
-    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 300, MAX_STORAGE_MB: 30720, MAX_PROJECTS_PER_USER: 200, MAX_LIVE_JOBS_PER_USER: 6 },
+    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 300, MAX_STORAGE_MB: 30720, MAX_PROJECTS_PER_USER: 200, MAX_LIVE_JOBS_PER_USER: 6, MAX_MANUAL_CLIPS_PER_USER: 0 },
     firstVideoFreeMinutes: 0,
     queuePriority: 0,
     watermark: false,
+    sourceHeight: null,
     blurb: "300 minutes a month, 30 GB of storage, no watermark.",
     next: "pro",
   },
@@ -72,10 +81,11 @@ export const PLANS: Plan[] = [
     label: "Pro",
     price: { month: 59, year: 590 },
     lookupKeys: { month: "pro_monthly", year: "pro_yearly" },
-    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 750, MAX_STORAGE_MB: 102400, MAX_PROJECTS_PER_USER: 0, MAX_LIVE_JOBS_PER_USER: 12 },
+    limits: { MAX_SOURCE_MINUTES_PER_MONTH: 750, MAX_STORAGE_MB: 102400, MAX_PROJECTS_PER_USER: 0, MAX_LIVE_JOBS_PER_USER: 12, MAX_MANUAL_CLIPS_PER_USER: 0 },
     firstVideoFreeMinutes: 0,
     queuePriority: 5,
     watermark: false,
+    sourceHeight: null,
     blurb: "750 minutes a month, 100 GB of storage, unlimited projects, no watermark, priority queue.",
     next: null,
   },
@@ -105,6 +115,7 @@ export const publicPlan = (p: Plan) => ({
   limits: p.limits,
   watermark: p.watermark !== false,
   firstVideoFreeMinutes: p.firstVideoFreeMinutes,
+  sourceHeight: p.sourceHeight,
   priority: p.queuePriority > 0,
   blurb: p.blurb,
 });

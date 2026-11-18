@@ -306,7 +306,7 @@ export const TOOLS = {
   create_clip: {
     title: "Create clip",
     description:
-      'Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip summary { id, status: "preparing", queued: "prepare", hint }; preparation (title, hook, scores) is queued and the render follows by itself (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.',
+      'Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Hosted Free allows one; the refusal names the upgrade. Returns the new clip summary { id, status: "preparing", queued: "prepare", hint }; preparation (title, hook, scores) is queued and the render follows by itself (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.',
     inputSchema: {
       projectId: projectId(),
       startSec: z.number().min(0).describe("Range start, seconds from the start of the source video"),

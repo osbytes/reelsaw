@@ -58,6 +58,13 @@ const proGrants: Grants = {
 };
 
 describe("quotaRefusal", () => {
+  it("keeps the sentence apart from the offer link, so a screen with the button shows it alone", () => {
+    const sentence = "Your free clip of your own is used. The clips Reelsaw found stay yours to edit.";
+    const r = quotaRefusal({ limits, source, plan: "free", grants: freeGrants }, "MAX_MANUAL_CLIPS_PER_USER", sentence);
+    assert.equal(r.sentence, sentence);
+    assert.equal(r.primary?.kind, "upgrade");
+    assert.equal(quotaRefusal({ limits, source, plan: "free", grants: freeGrants }, "MAX_STORAGE_MB").sentence, undefined);
+  });
   it("storage on Free: upgrade is primary, free space is secondary", () => {
     const r = quotaRefusal({ limits, source, plan: "free", grants: freeGrants }, "MAX_STORAGE_MB");
     assert.equal(r.primary?.kind, "upgrade");

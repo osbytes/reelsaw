@@ -96,6 +96,18 @@ describe("planSweep", () => {
     assert.deepEqual(plan([{ id: "p1", files: [f("source.mp4"), f("audio.mp3"), f("clips/c1.ass"), f("chunks/0.mp3")] }]), []);
   });
 
+  it("removes a full-quality window's leftover pieces and stitch outputs once settled, and keeps fresh ones", () => {
+    const r = plan([{ id: "p1", files: [f("sections/piece-1000-9000.mp4"), f("sections/stitch-1000-9000.mp4"), f("sections/piece-2-3.mp4", FRESH)] }]);
+    assert.deepEqual(
+      r.map((x) => [x.kind, x.path]),
+      [
+        ["section-scratch", "projects/p1/sections/piece-1000-9000.mp4"],
+        ["section-scratch", "projects/p1/sections/stitch-1000-9000.mp4"],
+      ],
+    );
+    assert.deepEqual(plan([{ id: "p1", files: [f("sections/1000-9000.mp4", 0)] }]), [], "a window's copy is the store's own file on the local store");
+  });
+
   describe("cache eviction (S3 store)", () => {
     const IDLE = 24 * 3600_000;
     const evict = (projects: ScratchProject[], db = view()) => planSweep({ projects, tmp: [], db, now: NOW, cache: { idleMs: IDLE } });
@@ -112,6 +124,13 @@ describe("planSweep", () => {
       assert.ok(
         r.every((x) => !x.storageKeys),
         "the store copy stays",
+      );
+    });
+    it("evicts an idle full-quality window copy like any other cache of the store", () => {
+      const r = evict([{ id: "p1", files: [f("sections/59000-134000.mp4", NOW - IDLE, 80), f("sections/297000-341000.mp4", NOW - IDLE + 1, 40)] }]);
+      assert.deepEqual(
+        r.map((x) => [x.kind, x.path, x.bytes]),
+        [["cache-section", "projects/p1/sections/59000-134000.mp4", 80]],
       );
     });
     it("keeps a copy used more recently than the idle time (ensureLocal bumps mtime on a hit)", () => {
