@@ -4,8 +4,17 @@ import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ProviderGate } from "./gate.js";
 import { APICallError } from "@ai-sdk/provider";
-import { compatTranscriptionModel } from "./compat-transcription.js";
-import { isStale, memoryVerdictStore, PROBE_READER, probeWordTimestamps, verdictKey, type VerdictStore, type WordTimestampVerdict } from "./word-timestamps.js";
+import { compatTranscriptionModel, wordsFirst } from "./compat-transcription.js";
+import {
+  askedFor,
+  isStale,
+  memoryVerdictStore,
+  PROBE_READER,
+  probeWordTimestamps,
+  verdictKey,
+  type VerdictStore,
+  type WordTimestampVerdict,
+} from "./word-timestamps.js";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
@@ -80,10 +89,19 @@ export const providerKeyEnv: Record<string, string[]> = {
  */
 const wordTimestampOptions: Record<string, Record<string, unknown>> = {
   openai: { timestampGranularities: ["word"] },
-  groq: { timestampGranularities: ["word", "segment"], responseFormat: "verbose_json" },
+  groq: { timestampGranularities: ["word"], responseFormat: "verbose_json" },
   deepgram: { smartFormat: true, punctuate: true },
   assemblyai: {},
 };
+
+/** `provider` with its transcription models made by `make`; everything else is the provider's own. */
+function withTranscription(provider: Parameters<typeof customProvider>[0]["fallbackProvider"], make: (id: string) => TranscriptionModel) {
+  return customProvider({
+    ...(provider ? { fallbackProvider: provider } : {}),
+    // customProvider does `modelId in transcriptionModels`, so the proxy must answer `has` as well
+    transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, { has: () => true, get: (_t, id: string) => make(id) }),
+  });
+}
 
 export function providerOf(id: string): string {
   return id.split(":")[0]!;
@@ -163,22 +181,20 @@ export function createAi(
             languageModels: new Proxy({} as Record<string, LanguageModel>, { has: () => true, get: (_t, id: string) => openai.chat(id) }),
           })
         : openai;
-    // OPENAI_BASE_URL makes "openai" a compatible server (Speaches in the local-ai setup): read its transcriptions
-    // as one (ai/compat-transcription.ts), since @ai-sdk/openai takes segments over the words it asked for
-    const openaiProvider = openaiCreds.baseUrl
-      ? customProvider({
-          fallbackProvider: openaiBase,
-          transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, {
-            has: () => true,
-            get: (_t, id: string) => compatTranscriptionModel({ provider: "openai", baseURL: openaiCreds.baseUrl!, apiKey: openaiCreds.apiKey }, id),
-          }),
-        })
-      : openaiBase;
+    // Every transcription model reads words before segments, whoever parses the answer. OPENAI_BASE_URL makes
+    // "openai" a compatible server (Speaches in the local-ai setup), parsed as one (ai/compat-transcription.ts);
+    // OpenAI and Groq themselves keep their packages, whose `segments ?? words` wordsFirst corrects.
+    const openaiProvider = withTranscription(openaiBase, (id) =>
+      openaiCreds.baseUrl
+        ? compatTranscriptionModel({ provider: "openai", baseURL: openaiCreds.baseUrl, apiKey: openaiCreds.apiKey }, id)
+        : wordsFirst(openai.transcription(id)),
+    );
+    const groq = createGroq(key("groq"));
     const providers: Record<string, any> = {
       openai: openaiProvider,
       anthropic: createAnthropic(key("anthropic")),
       google: createGoogle(key("google")),
-      groq: createGroq(key("groq")),
+      groq: withTranscription(groq, (id) => wordsFirst(groq.transcription(id))),
       deepgram: createDeepgram(key("deepgram")),
       assemblyai: createAssemblyAI(key("assemblyai")),
       gateway: createGateway(key("gateway")),
@@ -197,14 +213,7 @@ export function createAi(
       // @ai-sdk/openai-compatible has no transcription models; ai/compat-transcription.ts speaks the
       // /audio/transcriptions compatible servers implement (OpenRouter, Speaches, vLLM, LocalAI)
       const speech = { provider: compat, baseURL: compatCreds.baseUrl, apiKey: compatCreds.apiKey };
-      providers[compat] = customProvider({
-        fallbackProvider: chat,
-        // customProvider does `modelId in transcriptionModels`, so the proxy must answer `has` as well
-        transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, {
-          has: () => true,
-          get: (_t, id: string) => compatTranscriptionModel(speech, id),
-        }),
-      });
+      providers[compat] = withTranscription(chat, (id) => compatTranscriptionModel(speech, id));
     }
     return createProviderRegistry(providers);
   }
@@ -334,7 +343,9 @@ export function createAi(
    */
   async function checkWordTimestamps(id: string, fresh: boolean) {
     const key = keyOf(id);
-    const current = (v: WordTimestampVerdict | undefined) => (v && !fresh && !isStale(v) ? v : undefined);
+    // a verdict stands for the request that made it: change wordTimestampOptions and every model is tested again
+    const asked = askedFor(transcriptionOptions(id));
+    const current = (v: WordTimestampVerdict | undefined) => (v && !fresh && !isStale(v, { asked }) ? v : undefined);
     let v = current(await verdicts.get(key));
     if (!v) {
       let p = probing.get(key);
@@ -359,7 +370,8 @@ export function createAi(
   /** Send the clip and store what it says. `previous` is the stale verdict, kept when only the call failed. */
   async function testModel(id: string, key: string, previous: WordTimestampVerdict | undefined, fresh: boolean): Promise<WordTimestampVerdict> {
     const model = (await resolve("transcription", id)) as TranscriptionModel;
-    const run = () => probeWordTimestamps(model, transcriptionOptions(id));
+    const options = transcriptionOptions(id);
+    const run = () => probeWordTimestamps(model, options);
     let verdict: WordTimestampVerdict;
     try {
       // the clip waits for a slot like any other call: a self-hosted whisper is one machine shared by every job (ai/gate.ts)
@@ -375,6 +387,7 @@ export function createAi(
           text: `the server refused the request for word timestamps (HTTP ${status}: ${msg.slice(0, 160)})`,
           checkedAt: new Date().toISOString(),
           reader: PROBE_READER,
+          asked: askedFor(options),
         };
       // a key, network or rate-limit failure says nothing new: keep the last result rather than refuse a model that worked
       else if (previous && !fresh) {

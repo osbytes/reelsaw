@@ -667,7 +667,8 @@ It looked frozen and the evidence was gone with the container's logs. What chang
   (`apps/server/assets/probe/word-timestamps.mp3`) and refuses the model if the answer is not word by word.
   A server that refuses the request for word timestamps outright (HTTP 400) counts as "no". The result is kept for
   30 days in `instance_settings` (key `transcription_probes`), shared by every process, and one process tests a
-  model at a time. When the 30 days are up and the re-test only fails to get through (key, network, rate limit),
+  model at a time. A result stands only for the request that made it: an upgrade that changes how Reelsaw asks a
+  provider for word timestamps tests every model again at the next boot. When the 30 days are up and the re-test only fails to get through (key, network, rate limit),
   the last result stays in force with a warning in the log, so an outage does not stop boot. Test under
   Settings → Models, MCP `test_model` and `reelsaw test-model transcription <provider:model>` run the clip again
   and report the failure. "failed a test transcription" means the call itself failed, not the model.
