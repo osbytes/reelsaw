@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.40.2
+
+### Patch Changes
+
+- [#292](https://github.com/osbytes/reelsaw/pull/292) [`cb3f4d6`](https://github.com/osbytes/reelsaw/commit/cb3f4d64dff60a5c2b47ad7a4737bf38446844eb) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Groq transcription models (`groq:whisper-large-v3`, `groq:whisper-large-v3-turbo`) pass the boot word-timestamp check again, and cuts and captions on them get per-word timing instead of times spread over each phrase. Reelsaw asked Groq for word and segment timestamps, and the provider package keeps the segments and drops the words when an answer has both. Reelsaw now asks Groq for words only, and reads words before segments from OpenAI and Groq answers whatever they contain, as it already did for OpenAI-compatible servers. Stored word-timestamp results now record the request that made them, so a model refused under the old request is tested again at the next boot instead of staying refused for 30 days.
+
+- [#289](https://github.com/osbytes/reelsaw/pull/289) [`f9157bd`](https://github.com/osbytes/reelsaw/commit/f9157bdffddf9ae22b2a22f4971a45602e02a646) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Creating a project from a link is quicker on accounts with a monthly minutes limit. The video's length was looked up with yt-dlp when the link was checked, again when the project was created and again before the download; a link's length is now looked up once and reused for ten minutes, so Create no longer waits on a second lookup. A lookup that fails is not kept, and the limit is still enforced on the downloaded file.
+
 ## 0.40.1
 
 ### Patch Changes
