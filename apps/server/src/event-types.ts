@@ -36,6 +36,8 @@ export const ACCOUNT_EVENT_TYPES = [
   /** sign-up rules added or removed (signup-rules.ts), recorded against the admin who did it */
   "signup_rules.changed",
   "failures.retried",
+  /** an admin cleared failures from Failed work, or brought dismissed ones back (ops/failures.ts) */
+  "failures.dismissed",
   // billing (ee/): written by the subscription sync, never by a webhook handler directly
   "billing.subscribed",
   "billing.changed",
@@ -78,6 +80,7 @@ const accountEventSchemas = {
   "settings.changed": loose,
   "signup_rules.changed": loose,
   "failures.retried": loose,
+  "failures.dismissed": loose,
   "billing.subscribed": loose,
   "billing.changed": loose,
   "billing.payment_failed": loose,

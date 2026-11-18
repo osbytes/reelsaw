@@ -154,7 +154,8 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
         },
       })
       .returning({ limits: schema.userSettings.limits });
-    await u.emit("user.limits_changed", { userId, email: user.email, limits: row!.limits }, { actorId });
+    // `changed`: which limits this call set or cleared (the plan-change retry only follows the minutes limits)
+    await u.emit("user.limits_changed", { userId, email: user.email, limits: row!.limits, changed: Object.keys(patch) }, { actorId });
     return { ok: true, overrides: row!.limits };
   });
 }

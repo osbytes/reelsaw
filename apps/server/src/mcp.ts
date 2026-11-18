@@ -609,6 +609,7 @@ export function createMcpServer(
   server.registerTool("list_failures", TOOLS.list_failures, (input) => run(() => api.admin.failures.list(input ?? {})));
 
   server.registerTool("retry_failures", TOOLS.retry_failures, (input) => run(() => api.admin.failures.retry(input ?? {})));
+  server.registerTool("dismiss_failures", TOOLS.dismiss_failures, (input) => run(() => api.admin.failures.dismiss(input ?? {})));
 
   // groupBy: the same filter in sections (accounts-list.ts userGroups); a section is paged with list_users and its filter
   server.registerTool("list_users", TOOLS.list_users, ({ groupBy, cursor, ...input }) =>

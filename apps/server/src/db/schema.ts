@@ -4,6 +4,7 @@ import type { SignupRuleAction, SignupRuleKind } from "../signup-rules-schema.js
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import type {
   EmailPrefSource,
+  FailureCause,
   EmailTopic,
   ProjectSettings,
   UserProjectDefaults,
@@ -481,6 +482,10 @@ export const projects = pgTable(
     /** when the stage now running began; stage.completed / stage.failed durations come from it */
     stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
+    /** why it failed (FailureCause in @reelsaw/shared: platform, input, quota); set with status failed by failedRow (pipeline/common.ts), null on rows from before it was kept */
+    failureCause: text("failure_cause").$type<FailureCause>(),
+    /** an admin cleared this failure from Failed work (ops/failures.ts); a new failure clears it */
+    failureDismissedAt: timestamp("failure_dismissed_at", { withTimezone: true }),
     settings: jsonb("settings").$type<ProjectSettings>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -635,6 +640,10 @@ export const clips = pgTable(
     status: text("status").$type<ClipStatus>().notNull().default("pending"),
     origin: text("origin").$type<ClipOrigin>().notNull().default("ai"),
     error: text("error"),
+    /** as projects.failure_cause */
+    failureCause: text("failure_cause").$type<FailureCause>(),
+    /** as projects.failure_dismissed_at */
+    failureDismissedAt: timestamp("failure_dismissed_at", { withTimezone: true }),
     outputKey: text("output_key"),
     /** size of the rendered file at output_key, for the per-user storage total (null: rendered before it was kept) */
     outputBytes: bigint("output_bytes", { mode: "number" }),

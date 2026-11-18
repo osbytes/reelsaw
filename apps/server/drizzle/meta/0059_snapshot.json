@@ -1,5 +1,5 @@
 {
-  "id": "f61d607f-b0ff-4a64-b43b-99e05b37eb0f",
+  "id": "6ee41333-a4f4-4dd4-8ed8-b758b1623438",
   "prevId": "1ec97f6c-c733-458d-8778-75c1a1a55ed0",
   "version": "7",
   "dialect": "postgresql",
@@ -1067,6 +1067,18 @@
         "error": {
           "name": "error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_cause": {
+          "name": "failure_cause",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_dismissed_at": {
+          "name": "failure_dismissed_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -2365,6 +2377,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "failure_cause": {
+          "name": "failure_cause",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_dismissed_at": {
+          "name": "failure_dismissed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "settings": {
           "name": "settings",
           "type": "jsonb",
@@ -2482,22 +2506,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "projects_upload_id_idx": {
-          "name": "projects_upload_id_idx",
-          "columns": [
-            {
-              "expression": "(\"source_meta\"->>'uploadId')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"projects\".\"source_meta\"->>'uploadId' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}

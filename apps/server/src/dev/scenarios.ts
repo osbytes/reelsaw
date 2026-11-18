@@ -154,6 +154,8 @@ export async function seedScenario(svc: Services, name: string, o: ScenarioOptio
         height: source?.height ?? null,
         status: spec.status,
         error: spec.error ?? null,
+        // the failed scenario is a private link: a source problem, as ingest would record it
+        failureCause: spec.status === "failed" ? "input" : null,
         settings: defaultProjectSettings,
         runSeq: 1,
         runReason: "created",

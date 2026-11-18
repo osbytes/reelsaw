@@ -1,7 +1,7 @@
 /**
  * Settings → System → Queue: only the stages that have work, how long the oldest job has waited, what each
- * job in flight is doing (and why a retry failed), and failed work with Retry. Idle is one line, not a table
- * of dashes. Admins only (admin.queue.summary / admin.failures.*).
+ * job in flight is doing (and why a retry failed), and failed work with its cause, Retry and Dismiss. Idle is
+ * one line, not a table of dashes. Admins only (admin.queue.summary / admin.failures.*).
  */
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
+import type { FailureCause } from "@reelsaw/shared";
 
 const PAGE = 50;
 /** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
@@ -29,6 +30,20 @@ const STAGES = [
   { value: "render", label: "Render" },
   { value: "prepare", label: "Prepare" },
 ];
+
+const CAUSES = [
+  { value: "", label: "Any cause" },
+  { value: "platform", label: "Platform" },
+  { value: "input", label: "Source" },
+  { value: "quota", label: "Plan limit" },
+];
+
+/** A cause as a glyph and a word (never colour alone), and what Retry would do about it. */
+const CAUSE: Record<FailureCause, { glyph: string; word: string; tone: string; title: string }> = {
+  platform: { glyph: "↻", word: "platform", tone: "text-warn", title: "This instance's fault (disk, model, encoder, timeout): retry after the fix" },
+  input: { glyph: "✕", word: "source", tone: "text-ink3", title: "The video, link or settings: retrying the same thing fails the same way" },
+  quota: { glyph: "◷", word: "plan limit", tone: "text-ink3", title: "The owner's plan refused it: retried by itself when their plan or limits change" },
+};
 
 const SINCE = [
   { value: "", label: "Any", title: "Any time" },
@@ -72,18 +87,27 @@ function writeFail(key: FailKey | null) {
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
-function retryHint(row: { kind: string; stage: string }) {
+function retryHint(row: { kind: string; stage: string; cause: FailureCause }) {
+  if (row.cause === "input")
+    return "The source itself failed: retrying the same video fails the same way. Dismiss it, or the owner changes the link or settings.";
+  if (row.cause === "quota") return "The owner's plan refused this video. It is retried by itself when their plan or limits change.";
   if (row.kind === "clip") return row.stage === "prepare" ? "Retry prepares this clip again." : "Retry re-renders this clip.";
   return `Retry resumes this project from ${row.stage}.`;
 }
+
+/** Bulk dismiss pages of 50 until nothing is left; a ceiling keeps one click from looping forever. */
+const DISMISS_ROUNDS = 20;
 
 export function QueueSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [stage, setStage] = useState("");
+  const [cause, setCause] = useState("");
   const [since, setSince] = useState("");
+  const [showDismissed, setShowDismissed] = useState(false);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
   const [sel, setSel] = useState<FailKey | null>(() => readFail());
   const qDebounced = useDebounced(q, 250);
 
@@ -91,22 +115,25 @@ export function QueueSection() {
     () => ({
       q: qDebounced.trim() || undefined,
       stage: (stage || undefined) as "ingest" | "transcribe" | "refine" | "analyze" | "render" | "prepare" | undefined,
+      cause: (cause || undefined) as FailureCause | undefined,
       since: sinceIso(since),
     }),
-    [qDebounced, stage, since],
+    [qDebounced, stage, cause, since],
   );
-  const dirty = !!(q.trim() || stage || since);
-  const filtered = !!(filter.q || filter.stage || filter.since);
+  const dirty = !!(q.trim() || stage || cause || since);
+  const filtered = !!(filter.q || filter.stage || filter.cause || filter.since);
 
   const queue = useQuery({ ...trpc.admin.queue.summary.queryOptions(), refetchInterval: 5000 });
   const workers = useQuery({ ...trpc.admin.workers.list.queryOptions(), refetchInterval: 5000 });
   const failures = useInfiniteQuery(
     trpc.admin.failures.list.infiniteQueryOptions(
-      { ...filter, limit: PAGE },
+      { ...filter, dismissed: showDismissed || undefined, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, refetchInterval: 5000 },
     ),
   );
   const retry = useMutation(trpc.admin.failures.retry.mutationOptions());
+  const dismiss = useMutation(trpc.admin.failures.dismiss.mutationOptions());
+  const acting = retry.isPending || dismiss.isPending;
   const items = useMemo(() => failures.data?.pages.flatMap((p) => p.items) ?? [], [failures.data]);
   const total = failures.data?.pages[0]?.total ?? 0;
   const truncated = failures.data?.pages.some((p) => p.truncated) ?? false;
@@ -151,6 +178,23 @@ export function QueueSection() {
       })
       .catch((err: Error) => void toast.error(err.message));
 
+  /** Dismiss (or restore, in the dismissed view) these rows, or every match of the filter a page at a time. */
+  const onDismiss = async (ids?: Array<{ kind: "project" | "clip"; id: string }>, thenClose = false, restore = showDismissed) => {
+    try {
+      let changed = 0;
+      for (let round = 0; round < (ids ? 1 : DISMISS_ROUNDS); round++) {
+        const r = await dismiss.mutateAsync({ ...filter, ids, restore });
+        changed += r.changed;
+        if (!r.nextCursor || !r.changed) break;
+      }
+      toast.success(changed ? `${restore ? "Restored" : "Dismissed"} ${changed}` : "No matches");
+      invalidate();
+      if (thenClose) closeFail();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const d = queue.data;
   const waiting = d?.queues.reduce((n, r) => n + r.waiting + r.retrying, 0) ?? 0;
   const running = d?.queues.reduce((n, r) => n + r.running, 0) ?? 0;
@@ -176,8 +220,9 @@ export function QueueSection() {
         </span>
       </div>
       <p className="text-[13px] text-ink2">
-        Jobs on this instance by stage, and failed work to retry after a platform fix (disk full, model down, encoder missing). Retry is the owner&apos;s Retry
-        button.
+        Jobs on this instance by stage, and failed work. Platform failures (disk full, model down, encoder missing) are worth a Retry after the fix; a bad
+        source fails the same way again, so dismiss it; plan-limit refusals retry by themselves when the owner&apos;s plan or limits change. Retry is the
+        owner&apos;s Retry button, and Dismiss only clears this list.
       </p>
 
       {!d && !queue.error ? (
@@ -308,13 +353,18 @@ export function QueueSection() {
       <div className="flex flex-col gap-3 border-t border-line/60 pt-4">
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
           <h3 className="text-[13px] font-bold">
-            Failed work
+            {showDismissed ? "Dismissed failures" : "Failed work"}
             {failures.data && total ? <span className="ml-1.5 font-normal text-ink3">{`${total}${truncated ? "+" : ""}`}</span> : null}
           </h3>
-          <div className="flex min-h-8 min-w-[10.5rem] items-center justify-end">
-            {filtered && items.length > 0 ? (
-              <button type="button" className="btn-ghost h-8 text-xs" disabled={retry.isPending} onClick={() => setConfirmBulk(true)}>
-                Retry matching ({Math.min(PAGE, total)})
+          <div className="flex min-h-8 min-w-[10.5rem] flex-wrap items-center justify-end gap-2">
+            {filtered && items.length > 0 && !showDismissed && filter.cause !== "input" ? (
+              <button type="button" className="btn-ghost h-8 text-xs" disabled={acting} onClick={() => setConfirmBulk(true)}>
+                {filter.cause ? `Retry matching (${Math.min(PAGE, total)})` : "Retry platform failures"}
+              </button>
+            ) : null}
+            {items.length > 0 ? (
+              <button type="button" className="btn-ghost h-8 text-xs" disabled={acting} onClick={() => setConfirmDismiss(true)}>
+                {showDismissed ? `Restore ${filtered ? "matching" : "all"} (${total})` : `Dismiss ${filtered ? "matching" : "all"} (${total})`}
               </button>
             ) : null}
           </div>
@@ -332,6 +382,7 @@ export function QueueSection() {
           </label>
           <div className="flex h-9 shrink-0 items-center gap-2">
             <Select className="h-9 w-[8.75rem] shrink-0" size="sm" ariaLabel="Stage" value={stage} onValueChange={setStage} options={STAGES} />
+            <Select className="h-9 w-[8.75rem] shrink-0" size="sm" ariaLabel="Cause" value={cause} onValueChange={setCause} options={CAUSES} />
             <Segmented className="h-9 shrink-0" size="sm" ariaLabel="When" value={since} onChange={setSince} options={SINCE} />
           </div>
         </div>
@@ -339,10 +390,12 @@ export function QueueSection() {
           <span>
             {failures.data
               ? items.length
-                ? `Showing ${items.length} of ${total}${truncated ? "+" : ""}`
-                : filtered
-                  ? "No failed work matches this filter"
-                  : "✓ No failed projects or clips."
+                ? `Showing ${items.length} of ${total}${truncated ? "+" : ""}${showDismissed ? " dismissed" : ""}`
+                : showDismissed
+                  ? "Nothing dismissed matches"
+                  : filtered
+                    ? "No failed work matches this filter"
+                    : "✓ No failed projects or clips."
               : failures.error
                 ? failures.error.message
                 : ""}
@@ -354,10 +407,19 @@ export function QueueSection() {
             onClick={() => {
               setQ("");
               setStage("");
+              setCause("");
               setSince("");
             }}
           >
-            Clear
+            Clear filters
+          </button>
+          <button
+            type="button"
+            className="btn-quiet ml-auto h-4 px-0 text-xs text-ink3"
+            aria-pressed={showDismissed}
+            onClick={() => setShowDismissed((v) => !v)}
+          >
+            {showDismissed ? "Back to failed work" : "Show dismissed"}
           </button>
         </p>
         {!failures.data && !failures.error ? (
@@ -373,10 +435,10 @@ export function QueueSection() {
                 <caption className="sr-only">Failed projects and clips, newest first</caption>
                 <colgroup>
                   <col className="w-[38%]" />
-                  <col className="w-[5.5rem]" />
+                  <col className="w-[6rem]" />
                   <col />
                   <col className="w-[5.5rem]" />
-                  <col className="w-[4.5rem]" />
+                  <col className="w-[5rem]" />
                 </colgroup>
                 <thead>
                   <tr className="text-left text-xs text-ink3">
@@ -412,7 +474,12 @@ export function QueueSection() {
                           {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
                         </div>
                       </td>
-                      <td className="truncate py-1.5">{row.stage}</td>
+                      <td className="truncate py-1.5">
+                        {row.stage}
+                        <div className={`truncate text-[11px] ${CAUSE[row.cause].tone}`} title={CAUSE[row.cause].title}>
+                          <span className="font-mono">{CAUSE[row.cause].glyph}</span> {CAUSE[row.cause].word}
+                        </div>
+                      </td>
                       <td className="truncate py-1.5 pr-2 text-xs text-ink2">
                         <button
                           type="button"
@@ -427,14 +494,35 @@ export function QueueSection() {
                         {ago(row.failedAt)}
                       </td>
                       <td className="py-1.5 text-right">
-                        <button
-                          type="button"
-                          className="btn-ghost h-8 min-w-[3.5rem] px-2 text-xs"
-                          disabled={retry.isPending}
-                          onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
-                        >
-                          Retry
-                        </button>
+                        {showDismissed ? (
+                          <button
+                            type="button"
+                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                            disabled={acting}
+                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                          >
+                            Restore
+                          </button>
+                        ) : row.retryable ? (
+                          <button
+                            type="button"
+                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                            disabled={acting}
+                            onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
+                          >
+                            Retry
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-quiet h-8 min-w-[4rem] px-2 text-xs"
+                            disabled={acting}
+                            title="Clear from this list; the owner's project is untouched"
+                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                          >
+                            Dismiss
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -461,9 +549,22 @@ export function QueueSection() {
         open={confirmBulk}
         onOpenChange={setConfirmBulk}
         title="Retry matching failures?"
-        body={`Retry up to ${Math.min(PAGE, total)} failed ${Math.min(PAGE, total) === 1 ? "item" : "items"} that match this filter. Each one uses the same path as the owner Retry button, so live-job limits still apply.`}
+        body={`Retry up to ${PAGE} ${filter.cause ? "" : "platform "}failures that match this filter${filter.cause ? "" : " (a bad source or a plan refusal would fail the same way, so they are left out)"}. Each one uses the same path as the owner Retry button, so live-job limits still apply.`}
         confirm="Retry matching"
         onConfirm={() => onRetry()}
+      />
+
+      <ConfirmDialog
+        open={confirmDismiss}
+        onOpenChange={setConfirmDismiss}
+        title={showDismissed ? "Restore dismissed failures?" : "Dismiss failed work?"}
+        body={
+          showDismissed
+            ? `Bring ${total} dismissed ${total === 1 ? "failure" : "failures"} ${filtered ? "matching this filter " : ""}back into Failed work.`
+            : `Clear ${total} ${total === 1 ? "failure" : "failures"} ${filtered ? "matching this filter " : ""}from this list. The owners' projects keep their error and their own Retry, and anything that fails again shows up here again. Show dismissed brings them back.`
+        }
+        confirm={showDismissed ? "Restore" : "Dismiss"}
+        onConfirm={() => onDismiss()}
       />
 
       <Modal open={!!sel} onOpenChange={(o) => !o && closeFail()} title={detail ? detail.title : "Failed work"} width={520}>
@@ -477,8 +578,8 @@ export function QueueSection() {
           <>
             <Dialog.Description asChild>
               <p className="text-sm text-ink2">
-                {detail.kind === "clip" ? (detail.projectTitle ? `Clip on ${detail.projectTitle}` : "Clip") : "Project"} · {detail.stage} · {detail.ownerEmail}{" "}
-                · {ago(detail.failedAt)}
+                {detail.kind === "clip" ? (detail.projectTitle ? `Clip on ${detail.projectTitle}` : "Clip") : "Project"} · {detail.stage} ·{" "}
+                {CAUSE[detail.cause].word} · {detail.ownerEmail} · {ago(detail.failedAt)}
               </p>
             </Dialog.Description>
             <p className="min-h-4 text-xs text-ink3">{retryHint(detail)}</p>
@@ -504,8 +605,16 @@ export function QueueSection() {
               </Link>
               <button
                 type="button"
-                className="btn-ink min-w-[5.5rem]"
-                disabled={retry.isPending}
+                className="btn-ghost min-w-[6rem]"
+                disabled={acting}
+                onClick={() => void onDismiss([{ kind: detail.kind, id: detail.id }], true, !!detail.dismissedAt)}
+              >
+                {detail.dismissedAt ? "Restore" : "Dismiss"}
+              </button>
+              <button
+                type="button"
+                className={`${detail.retryable ? "btn-ink" : "btn-ghost"} min-w-[5.5rem]`}
+                disabled={acting}
                 onClick={() => onRetry([{ kind: detail.kind, id: detail.id }], true)}
               >
                 Retry

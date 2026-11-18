@@ -185,6 +185,7 @@ describe("event handlers", () => {
         "event.project.done.readyEmail",
         "event.user.signed_up.approvalRequestEmail",
         "event.user.approved.approvedEmail",
+        "event.user.limits_changed.retryRefusedWork",
         "event.webhook.disabled.webhookDisabledEmail",
       ],
     );
@@ -197,8 +198,13 @@ describe("event handlers", () => {
     assert.deepEqual(
       eventHandlerQueues(eventHandlerMap, eeEventHandlerMap)
         .map((q) => q.name)
-        .slice(-1),
-      ["event.billing.detached.cancelAtStripe"],
+        .slice(-4),
+      [
+        "event.billing.detached.cancelAtStripe",
+        "event.billing.subscribed.retryRefusedWork",
+        "event.billing.changed.retryRefusedWork",
+        "event.billing.complimentary.retryRefusedWork",
+      ],
     );
     assert.throws(() => eventHandlerQueues(eventHandlerMap, defineEventHandlers({ "project.done": { readyEmail: { handle } } })), /defined twice/);
   });
