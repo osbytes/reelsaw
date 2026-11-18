@@ -43,7 +43,11 @@ export type ListColumn = {
   /** Only from 1040px up. */
   full?: boolean;
   right?: boolean;
-  /** Makes the header a sort button. */
+  /**
+   * Makes the header a sort button. `onToggle` changes the server query's sort (and the hash), never the order of
+   * the rows already loaded: a paged list sorted in the browser only sorts one page (PRINCIPLES: "Sorting happens
+   * in the database").
+   */
   sort?: { dir: 1 | -1 | null; onToggle: () => void; title?: string };
   className?: string;
 };

@@ -18,7 +18,11 @@ import {
   IP_GROUP_REST,
   isAbuseFlag,
   isUserGroupBy,
+  isUserSortKey,
+  type SortDir,
   type UserGroupBy,
+  type UserSortKey,
+  userSortFirstDir,
 } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
@@ -118,7 +122,19 @@ function sectionCovers(by: UserGroupBy, key: string, siblings: readonly SectionD
 }
 /** A flag section the page splits by sign-up address: several accounts from one address is what the flag means. */
 const byAddress = (k: string) => ADDRESS_FLAGS.some((f) => f === k);
-type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
+/**
+ * The column the server orders every match by (never only the loaded rows: PRINCIPLES "Sorting happens in the
+ * database"). In the hash as sort=storedBytes&dir=desc; null = pending first, then newest.
+ */
+type Sort = { key: UserSortKey; dir: SortDir } | null;
+const readSort = (h: URLSearchParams): Sort => {
+  const key = h.get("sort");
+  if (!isUserSortKey(key)) return null;
+  const dir = h.get("dir");
+  return { key, dir: dir === "asc" || dir === "desc" ? dir : userSortFirstDir(key) };
+};
+/** The sort as list input: spread into every admin.users.list / groups call, so sections page in the same order. */
+type SortInput = { sort?: UserSortKey | undefined; dir?: SortDir | undefined };
 
 const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
   pending: { glyph: "◷", tone: "text-warn", word: "Pending" },
@@ -185,7 +201,7 @@ export function AdminUsersPage() {
   /** only the accounts from one sign-up address, from an address section's "Only this address" */
   const [signupIp, setSignupIp] = useState(() => readHash().get("ip") ?? "");
   const [ruleFor, setRuleFor] = useState<Row | null>(null);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
+  const [sort, setSort] = useState<Sort>(() => readSort(readHash()));
   const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role" | "hold"; row: Row } | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState<BulkAction | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
@@ -223,6 +239,7 @@ export function AdminUsersPage() {
     setHeldBy(h.get("held") ?? "");
     setSignupIp(h.get("ip") ?? "");
     setGroupBy(asGroup(h.get("group")));
+    setSort(readSort(h));
   }, [hashKey]);
   const q = useDebounced(search.trim(), 200);
   const filter = useMemo(
@@ -252,10 +269,13 @@ export function AdminUsersPage() {
     setSel([]);
     setAllOf(null);
   }, [q, flag, status, verified, heldBy, signupIp, groupBy]);
-  // server-side paging; each account carries its all-time usage, so there is no separate usage query
+  // a new order is the same accounts, so the selection stays
+  useEffect(() => writeHash({ sort: sort?.key ?? null, dir: sort?.dir ?? null }), [sort]);
+  const order = useMemo((): SortInput => (sort ? { sort: sort.key, dir: sort.dir } : {}), [sort]);
+  // server-side paging and sorting; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { ...filter, limit: PAGE },
+      { ...filter, ...order, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: !groupBy },
     ),
   );
@@ -364,29 +384,8 @@ export function AdminUsersPage() {
     const live = new Set(loaded.map((r) => r.id));
     setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
   }, [loaded]);
-  // sorting is client side, over the rows loaded so far (within each section when grouped)
-  const sortRows = useCallback(
-    (base: Row[]) => {
-      if (!sort) return base;
-      const val = (r: Row): string | number => {
-        switch (sort.key) {
-          case "name":
-            return (r.name || r.email).toLowerCase();
-          case "status":
-            return r.status;
-          case "lastActive":
-            return r.lastActive ? new Date(r.lastActive).getTime() : 0;
-          case "projects":
-            return r.usage.projects;
-          default:
-            return r.usage[sort.key];
-        }
-      };
-      return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
-    },
-    [sort],
-  );
-  const rows = useMemo(() => sortRows(loaded), [loaded, sortRows]);
+  // already in the server's order (the sort is part of the query)
+  const rows = loaded;
   const pending = pendingCount.data ?? 0;
 
   const selfId = me.data?.id;
@@ -625,11 +624,15 @@ export function AdminUsersPage() {
       </ListRow>
     );
   };
-  const sortable = (k: SortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => ({
-    dir: sort?.key === k ? sort.dir : null,
-    title: usage ? "All time. Sorts the loaded rows" : "Sorts the loaded rows",
-    onToggle: () => setSort(sort?.key === k && sort.dir === -1 ? null : { key: k, dir: sort?.key === k ? -1 : k === "name" || k === "status" ? 1 : -1 }),
-  });
+  // first click: the column's natural direction; second: the other one; third: back to the default order
+  const sortable = (k: UserSortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => {
+    const first = userSortFirstDir(k);
+    return {
+      dir: sort?.key === k ? (sort.dir === "asc" ? 1 : -1) : null,
+      title: usage ? "All time. Sorts every matching account" : "Sorts every matching account",
+      onToggle: () => setSort(sort?.key !== k ? { key: k, dir: first } : sort.dir === first ? { key: k, dir: first === "asc" ? "desc" : "asc" } : null),
+    };
+  };
   // the actions column fits the state button, Limits and the menu; below the fold width only the menu
   const columns: ListColumn[] = [
     {
@@ -669,11 +672,11 @@ export function AdminUsersPage() {
     closed,
     onToggle: toggleSection,
     onRows: onGroupRows,
-    sortRows,
+    order,
     renderRow,
     skeletonRow,
     colCount,
-    pageSize: q ? 100 : PAGE,
+    pageSize: q && !sort ? 100 : PAGE,
     isChecked,
     allOfId: allOf ? allOf.id : undefined,
     onSetMany: setMany,
@@ -1009,7 +1012,8 @@ type SectionShared = {
   closed: ReadonlySet<string>;
   onToggle: (id: string) => void;
   onRows: (id: string, rows: Row[] | null) => void;
-  sortRows: (rows: Row[]) => Row[];
+  /** the page's sort, sent with the section's own list query so every section pages in that order */
+  order: SortInput;
   renderRow: (r: Row, key: string) => ReactNode;
   skeletonRow: (i: number, key?: string | number) => ReactNode;
   /** visible columns below and above the fold width: a spanning cell must not span hidden ones */
@@ -1057,13 +1061,13 @@ function UserGroupSection({
   selectLabel?: string;
   shared: SectionShared;
 }) {
-  const { closed, onToggle, onRows, sortRows, renderRow, skeletonRow, colCount, pageSize, isChecked, allOfId, onSetMany, onSelectAll, onlyAddress, disabled } =
+  const { closed, onToggle, onRows, order, renderRow, skeletonRow, colCount, pageSize, isChecked, allOfId, onSetMany, onSelectAll, onlyAddress, disabled } =
     shared;
   const trpc = useTRPC();
   const open = !closed.has(id);
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { ...section.filter, limit: PAGE },
+      { ...section.filter, ...order, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: open && !split },
     ),
   );
@@ -1074,7 +1078,7 @@ function UserGroupSection({
     if (!split) onRows(id, loaded);
   }, [id, split, loaded, onRows]);
   useEffect(() => () => onRows(id, null), [id, onRows]);
-  const rows = useMemo(() => sortRows(loaded), [loaded, sortRows]);
+  const rows = loaded;
   const ids = rows.map((r) => r.id);
   const allOfHere = allOfId === id;
   /** "every match" is the whole list or another section: the header box reads its rows, a click starts over */

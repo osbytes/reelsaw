@@ -286,6 +286,13 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   (`ILIKE` with `pg_trgm`, or `tsvector`), scoped by `user_id`, and returns a page. The client
   may narrow what it already fetched (Fuse over 20 results), never fetch everything to search it.
   Debounce typing, keep the previous results while the next page loads.
+- **Sorting happens in the database.** A paged list's sort is a query input (`sort`, `dir`), applied
+  in SQL to every match and paged by a keyset on (sort value, `id`) whose cursor names its sort. A
+  sortable column header changes the query, never the order of the rows already loaded: sorting a
+  loaded page shows "the biggest of the first 50" as if it were the biggest overall. The same sort is
+  an MCP tool input and a CLI flag, and the sort is in the hash with the filters. A bounded list that
+  is loaded whole (a project's clips) may be ordered in the browser. `apps/server/test/list-sorting.test.ts`
+  fails when a component that pages with `useInfiniteQuery` also calls `.sort(`.
 - **Payload shape follows the screen.** List rows carry list fields; detail queries carry detail
   fields; heavy blobs (transcript words, diagnostics, settings) have their own query. An event
   invalidates the smallest query that changed (a clip event refetches clips, not the project and

@@ -4,7 +4,7 @@
  * stdio bridge) can import it without the services behind it.
  */
 import { z } from "zod";
-import { ABUSE_FLAGS, FLAG_GROUPS, MAX_IP_GROUPS, USER_GROUP_BY } from "@reelsaw/shared";
+import { ABUSE_FLAGS, FLAG_GROUPS, MAX_IP_GROUPS, SORT_DIRS, USER_GROUP_BY, USER_SORT_KEYS } from "@reelsaw/shared";
 
 export const USER_STATUSES = ["pending", "active", "suspended"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -49,8 +49,24 @@ export const userFilterSchema = z.object({
 });
 export type UserFilter = z.infer<typeof userFilterSchema>;
 
+/** The order of the list, applied by the server to every match before paging (never to one loaded page). */
+export const userSortShape = {
+  sort: z
+    .enum(USER_SORT_KEYS)
+    .optional()
+    .describe(
+      "Order every matching account by: name (name, else email), status, projects, sourceMinutes, clipsRendered, storedBytes (all time), lastActive, created. Omitted = pending first, then newest (a search: best match first)",
+    ),
+  dir: z.enum(SORT_DIRS).optional().describe("asc or desc; default asc for name and status, desc for the rest. Only with sort"),
+};
+
 export const userListInput = userFilterSchema.extend({
-  cursor: z.string().max(300).optional().describe("nextCursor from the previous page (ignored with q: a search returns its best 100 in one page)"),
+  ...userSortShape,
+  cursor: z
+    .string()
+    .max(300)
+    .optional()
+    .describe("nextCursor from the previous page, with the same filter and sort (ignored with q and no sort: a search returns its best 100 in one page)"),
   limit: z.number().int().min(1).max(100).default(50).describe("Page size (1-100, default 50)"),
 });
 
@@ -59,6 +75,7 @@ export const userListInput = userFilterSchema.extend({
  * pages or acts on it. `limit` 0 = counts only (the Users page loads each open section itself).
  */
 export const userGroupsInput = userFilterSchema.extend({
+  ...userSortShape,
   by: z
     .enum(USER_GROUP_BY)
     .describe(

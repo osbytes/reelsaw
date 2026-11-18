@@ -176,6 +176,18 @@ export const FLAG_HELP: Record<AbuseFlag, string> = {
 export const USER_GROUP_BY = ["flag", "ip"] as const;
 export type UserGroupBy = (typeof USER_GROUP_BY)[number];
 export const isUserGroupBy = (v: unknown): v is UserGroupBy => USER_GROUP_BY.some((g) => g === v);
+/**
+ * The columns the admin's account list sorts by (Users page headers, `list_users` sort, `reelsaw users --sort`).
+ * The server sorts every match and pages the result; a screen never sorts only the rows it has loaded
+ * (PRINCIPLES: "Sorting happens in the database"). Usage columns are all time. Omitted = pending first, then newest.
+ */
+export const USER_SORT_KEYS = ["name", "status", "projects", "sourceMinutes", "clipsRendered", "storedBytes", "lastActive", "created"] as const;
+export type UserSortKey = (typeof USER_SORT_KEYS)[number];
+export const isUserSortKey = (v: unknown): v is UserSortKey => USER_SORT_KEYS.some((k) => k === v);
+export const SORT_DIRS = ["asc", "desc"] as const;
+export type SortDir = (typeof SORT_DIRS)[number];
+/** The direction a column sorts in when first picked: words A to Z, numbers and dates biggest or newest first. */
+export const userSortFirstDir = (k: UserSortKey): SortDir => (k === "name" || k === "status" ? "asc" : "desc");
 /** The sections of group-by-flag, in display order; `none` = not flagged, last. */
 export const FLAG_GROUPS = [...ABUSE_FLAGS, "none"] as const;
 export type FlagGroup = (typeof FLAG_GROUPS)[number];

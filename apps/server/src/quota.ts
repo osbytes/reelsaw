@@ -721,7 +721,8 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
 /**
  * Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls, tokens and the
  * cost providers reported, seconds of audio transcribed, stored bytes (all time: sources, uploads, renders, intros/outros). One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
- * without ids it covers the first 500 accounts.
+ * without ids it covers the first 500 accounts. The all-time projects, minutes, clips and stored bytes are also
+ * `USER_SORT_SQL` in accounts-list.ts (the admin list sorts by them in SQL); change one, change both.
  */
 export async function usageByUser(db: Db, days: number | null, userIds?: string[]) {
   const ids = userIds ?? (await db.select({ id: schema.user.id }).from(schema.user).orderBy(schema.user.createdAt).limit(500)).map((u) => u.id);

@@ -8,7 +8,11 @@ import {
   IP_GROUP_REST,
   isFlagGroup,
   isUserGroupBy,
+  isUserSortKey,
+  type SortDir,
   USER_GROUP_BY,
+  USER_SORT_KEYS,
+  type UserSortKey,
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
@@ -24,9 +28,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--ip address] [--shared-ip yes|no] [--in shared_ip|…|none] [--limit n] [--cursor c] [--json]
- *                                           list accounts a page at a time: role, status, email verified, sign-up date
- *   users --group flag|ip [filter flags] [--limit n] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--ip address] [--shared-ip yes|no] [--in shared_ip|…|none] [--sort name|status|projects|sourceMinutes|clipsRendered|storedBytes|lastActive|created] [--dir asc|desc] [--limit n] [--cursor c] [--json]
+ *                                           list accounts a page at a time: role, status, email verified, sign-up date;
+ *                                           --sort orders every match on the server (same as the Users page headers)
+ *   users --group flag|ip [filter flags] [--sort key] [--dir asc|desc] [--limit n] [--json]
  *                                           the same list in sections, each with its count (Users page "Group",
  *                                           list_users groupBy): flag = one per abuse flag then the unflagged, --in <key>
  *                                           takes one; ip = one per sign-up address shared by several accounts, busiest
@@ -359,6 +364,19 @@ function userFilterFlags(): UserFilter {
   return f;
 }
 
+/** `--sort key [--dir asc|desc]`: the order the server applies to every match (Users page headers, list_users sort). */
+function userSortFlags(): { sort?: UserSortKey; dir?: SortDir } {
+  const sort = flag("sort");
+  const dir = flag("dir");
+  if (sort === undefined) {
+    if (dir !== undefined) throw new Error("--dir goes with --sort");
+    return {};
+  }
+  if (!isUserSortKey(sort)) throw new Error(`--sort takes ${USER_SORT_KEYS.join(", ")}`);
+  if (dir !== undefined && dir !== "asc" && dir !== "desc") throw new Error("--dir takes asc or desc");
+  return dir ? { sort, dir } : { sort };
+}
+
 /** "x+12% y-5% | x2+3%": the per-pane offsets of a layout segment, empty when none. */
 function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number; offsetY2?: number }) {
   const pct = (name: string, v: number | undefined) => (v ? `${name}${v > 0 ? "+" : ""}${Math.round(v * 100)}%` : "");
@@ -528,7 +546,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const by = flag("group");
     if (by !== undefined) {
       if (!isUserGroupBy(by)) throw new Error(`--group takes ${USER_GROUP_BY.join(", ")}`);
-      const g = await userGroups(svc, { ...userFilterFlags(), by, limit: flag("limit") ? Number(flag("limit")) : 20 });
+      const g = await userGroups(svc, { ...userFilterFlags(), ...userSortFlags(), by, limit: flag("limit") ? Number(flag("limit")) : 20 });
       if (args.includes("--json")) return void console.log(JSON.stringify(g, null, 2));
       if (!g.groups.length) return void console.log("No accounts match.");
       for (const s of g.groups) {
@@ -551,7 +569,7 @@ ${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.g
       return;
     }
     const limit = flag("limit") ? Number(flag("limit")) : 50;
-    const r = await listUsers(svc, { ...userFilterFlags(), limit, cursor: flag("cursor") });
+    const r = await listUsers(svc, { ...userFilterFlags(), ...userSortFlags(), limit, cursor: flag("cursor") });
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     table(
       r.items.map((u) => ({
