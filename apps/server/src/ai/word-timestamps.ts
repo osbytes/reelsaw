@@ -60,7 +60,7 @@ export const PROBE_TTL_MS = 30 * 24 * 3600_000;
  * stale, so a model it misjudged is tested again at the next boot instead of staying refused for PROBE_TTL_MS.
  * 2: `openai:` with OPENAI_BASE_URL reads words before segments (ai/compat-transcription.ts).
  */
-export const PROBE_READER = 2;
+export const PROBE_READER = 3;
 const PROBE_TIMEOUT_MS = 5 * 60_000; // a self-hosted server may load the model into memory first
 
 export interface WordTimestampVerdict {

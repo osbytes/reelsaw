@@ -80,7 +80,7 @@ export const providerKeyEnv: Record<string, string[]> = {
  */
 const wordTimestampOptions: Record<string, Record<string, unknown>> = {
   openai: { timestampGranularities: ["word"] },
-  groq: { timestampGranularities: ["word", "segment"], responseFormat: "verbose_json" },
+  groq: { timestampGranularities: ["word"], responseFormat: "verbose_json" },
   deepgram: { smartFormat: true, punctuate: true },
   assemblyai: {},
 };
