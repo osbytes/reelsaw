@@ -9,8 +9,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAi } from "../src/ai/registry.js";
 import { createModelCatalog, looksLikeSpeechModel } from "../src/ai/catalog.js";
-import { PROBE_READER, PROBE_TTL_MS, isStale, memoryVerdictStore, verdictKey, type VerdictStore } from "../src/ai/word-timestamps.js";
-import { compatTranscriptionModel, segmentsOf } from "../src/ai/compat-transcription.js";
+import { PROBE_READER, PROBE_TTL_MS, askedFor, isStale, memoryVerdictStore, verdictKey, type VerdictStore } from "../src/ai/word-timestamps.js";
+import { compatTranscriptionModel, segmentsOf, wordsFirst } from "../src/ai/compat-transcription.js";
+import { createGroq } from "@ai-sdk/groq";
+import { createOpenAI } from "@ai-sdk/openai";
+import type { TranscriptionModelV4 } from "@ai-sdk/provider";
 import type { ProviderGate } from "../src/ai/gate.js";
 import { transcribe } from "ai";
 import type { Config } from "../src/config.js";
@@ -20,12 +23,14 @@ const log = { info() {}, warn() {}, error() {}, debug() {}, child: () => log } a
 
 const WORDS = "Reelsaw checks that this speech model returns a time for every single word".split(" ");
 /** what each model id answers: word-level, phrase-level, or nothing heard */
-const behaviour: Record<string, "words" | "segments" | "silent" | "refuses" | "unauthorized"> = {
+const behaviour: Record<string, "words" | "segments" | "silent" | "refuses" | "unauthorized" | "whisper-both"> = {
   "openai/whisper-large-v3-turbo": "words",
   "openai/gpt-4o-transcribe": "segments",
   "acme/deaf": "silent",
   "microsoft/mai-transcribe-1.5": "refuses",
   "acme/locked": "unauthorized",
+  // OpenAI's and Groq's own verbose_json when asked for word and segment granularities (osbytes/reelsaw#288)
+  "whisper-large-v3": "whisper-both",
 };
 
 let server: http.Server;
@@ -41,7 +46,11 @@ before(async () => {
     if (req.method === "GET" && req.url === "/v1/models")
       return json({ data: [{ id: "anthropic/claude-sonnet-4.5", architecture: { output_modalities: ["text"] } }] });
     if (req.method === "GET" && req.url === "/v1/models?output_modalities=transcription")
-      return json({ data: Object.keys(behaviour).map((id) => ({ id, architecture: { output_modalities: ["transcription"] } })) });
+      return json({
+        data: Object.keys(behaviour)
+          .filter((id) => behaviour[id] !== "whisper-both") // a vendor's own model, not the router's
+          .map((id) => ({ id, architecture: { output_modalities: ["transcription"] } })),
+      });
     if (req.method === "POST" && req.url === "/v1/audio/transcriptions") {
       const chunks: Buffer[] = [];
       req.on("data", (c) => chunks.push(c));
@@ -54,6 +63,28 @@ before(async () => {
         if (b === "refuses")
           return void res.writeHead(400, { "content-type": "application/json" }).end('{"error":{"message":"verbose_json is not supported"}}');
         if (b === "unauthorized") return void res.writeHead(401, { "content-type": "application/json" }).end('{"error":{"message":"bad key"}}');
+        if (b === "whisper-both")
+          return json({
+            text: WORDS.join(" "),
+            x_groq: { id: "req_1" },
+            language: "en",
+            duration: 5.2,
+            segments: [
+              {
+                id: 0,
+                seek: 0,
+                start: 0.3,
+                end: 4.8,
+                text: WORDS.join(" "),
+                tokens: [1],
+                temperature: 0,
+                avg_logprob: -0.2,
+                compression_ratio: 1,
+                no_speech_prob: 0,
+              },
+            ],
+            words: WORDS.map((w, i) => ({ word: w, start: 0.3 + i * 0.35, end: 0.6 + i * 0.35 })),
+          });
         // OpenRouter's verbose_json: segments carry only start, end, text, and come along with words
         const segments = [{ start: 0.3, end: 4.8, text: WORDS.join(" ") }];
         if (b === "segments") return json({ text: WORDS.join(" "), segments });
@@ -170,6 +201,27 @@ describe("word-timestamp test transcription", () => {
     assert.equal(isStale({ wordLevel: false, segments: 1, text: "", checkedAt: new Date().toISOString() }), true);
   });
 
+  it("tests a model again when what it is asked changes, without a PROBE_READER bump", async () => {
+    const fresh = { wordLevel: false, segments: 1, text: "", checkedAt: new Date().toISOString(), reader: PROBE_READER };
+    const now = askedFor({ groq: { timestampGranularities: ["word"], responseFormat: "verbose_json" } });
+    const before = askedFor({ groq: { timestampGranularities: ["word", "segment"], responseFormat: "verbose_json" } });
+    assert.equal(askedFor({ groq: { responseFormat: "verbose_json", timestampGranularities: ["word"] } }), now, "key order does not matter");
+    assert.equal(isStale({ ...fresh, asked: before }, { asked: now }), true);
+    assert.equal(isStale({ ...fresh }, { asked: now }), true, "a verdict that never recorded its request");
+    assert.equal(isStale({ ...fresh, asked: now }, { asked: now }), false);
+
+    // end to end: a refusal stored for another request does not block the model
+    const store = memoryVerdictStore();
+    const id = "openrouter:openai/whisper-large-v3-turbo";
+    await store.set(verdictKey(id, base), { ...fresh, asked: before, text: "refused for the old request" });
+    const ai = createAi(config(), log, null, undefined, undefined, null, store);
+    await ai.verify("transcription", id);
+    assert.equal(calls.length, 1);
+    const v = await store.get(verdictKey(id, base));
+    assert.equal(v?.wordLevel, true);
+    assert.equal(v?.asked, askedFor(ai.transcriptionOptions(id)));
+  });
+
   it("reads words before segments from openai: on OPENAI_BASE_URL (Speaches answers with both)", async () => {
     const cfg = { ...config(), TRANSCRIPTION_MODEL: "openai:openai/whisper-large-v3-turbo", OPENAI_BASE_URL: base, OPENAI_API_KEY: "sk-test" } as Config;
     const ai = createAi(cfg, log);
@@ -189,6 +241,7 @@ describe("word-timestamp test transcription", () => {
       text: "from another process",
       checkedAt: new Date().toISOString(),
       reader: PROBE_READER,
+      asked: askedFor({ openai: { timestampGranularities: ["word"] } }),
     });
     const ai = createAi(config(), log, null, undefined, undefined, null, store);
     await ai.verify("transcription", "openrouter:openai/gpt-4o-transcribe");
@@ -210,6 +263,49 @@ describe("compatible transcription model", () => {
     assert.equal(r.durationInSeconds, 5.2);
     assert.equal(calls[0]!.auth, "Bearer sk-or-test");
     assert.match(calls[0]!.body, /name="prompt"\r\n\r\nReelsaw/);
+  });
+
+  // @ai-sdk/openai and @ai-sdk/groq map `segments ?? words`: an answer with both loses the words (osbytes/reelsaw#288)
+  const packages: Array<[string, () => TranscriptionModelV4, Record<string, Record<string, unknown>>]> = [
+    [
+      "groq",
+      () => createGroq({ baseURL: base, apiKey: "gsk-test" }).transcription("whisper-large-v3"),
+      { groq: { timestampGranularities: ["word", "segment"], responseFormat: "verbose_json" } },
+    ],
+    [
+      "openai",
+      () => createOpenAI({ baseURL: base, apiKey: "sk-test" }).transcription("whisper-large-v3"),
+      { openai: { timestampGranularities: ["word", "segment"] } },
+    ],
+  ];
+  for (const [name, make, providerOptions] of packages)
+    it(`reads ${name}'s words when its answer also has segments`, async () => {
+      const audio = new Uint8Array([1, 2, 3]);
+      const bare = await transcribe({ model: make(), audio, providerOptions: providerOptions as never });
+      assert.equal(bare.segments.length, 1, `@ai-sdk/${name} now reads words first: wordsFirst may be unneeded`);
+      const r = await transcribe({ model: wordsFirst(make()), audio, providerOptions: providerOptions as never });
+      assert.equal(r.segments.length, WORDS.length);
+      assert.equal(r.segments[1]!.text, "checks");
+      assert.equal(r.language, "en");
+    });
+
+  it("keeps a package's segments when its answer has no words", async () => {
+    const segments = [{ text: "a b", startSecond: 0, endSecond: 1 }];
+    const inner: TranscriptionModelV4 = {
+      specificationVersion: "v4",
+      provider: "test.transcription",
+      modelId: "m",
+      doGenerate: async () => ({
+        text: "a b",
+        segments,
+        language: undefined,
+        durationInSeconds: 1,
+        warnings: [],
+        response: { timestamp: new Date(), modelId: "m", body: "a b" },
+      }),
+    };
+    const r = await transcribe({ model: wordsFirst(inner), audio: new Uint8Array([1]) });
+    assert.deepEqual(r.segments, segments);
   });
 
   it("falls back to segments, and drops entries without numeric times", () => {

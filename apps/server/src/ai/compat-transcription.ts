@@ -32,16 +32,49 @@ interface Answer {
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
+type Timed = { text: string; startSecond: number; endSecond: number };
+
+const timed = (text: unknown, start: unknown, end: unknown): Timed[] => {
+  const s = num(start);
+  const e = num(end);
+  return s === undefined || e === undefined ? [] : [{ text: String(text ?? ""), startSecond: s, endSecond: e }];
+};
+
+/** The answer's `words` with numeric times; none when it has no such list (text-only, diarized, not JSON). */
+function wordsOf(a: unknown): Timed[] {
+  const words = a && typeof a === "object" ? (a as Answer).words : undefined;
+  return Array.isArray(words) ? words.flatMap((w) => timed(w?.word, w?.start, w?.end)) : [];
+}
+
 /** Words when the server returned any, else its segments; entries without numeric times are dropped. */
-export function segmentsOf(a: Answer): Array<{ text: string; startSecond: number; endSecond: number }> {
-  const timed = (text: unknown, start: unknown, end: unknown) => {
-    const s = num(start);
-    const e = num(end);
-    return s === undefined || e === undefined ? [] : [{ text: String(text ?? ""), startSecond: s, endSecond: e }];
-  };
-  const words = (a.words ?? []).flatMap((w) => timed(w.word, w.start, w.end));
+export function segmentsOf(a: Answer): Timed[] {
+  const words = wordsOf(a);
   if (words.length) return words;
   return (a.segments ?? []).flatMap((s) => timed(s.text, s.start, s.end));
+}
+
+/**
+ * The same rule for a provider package's own transcription model. @ai-sdk/openai and @ai-sdk/groq map
+ * `segments ?? words`, so a server that answers with both loses the words it was asked for: Groq did when asked
+ * for word and segment granularities (osbytes/reelsaw#288), Speaches and OpenRouter do always. OpenAI and Groq
+ * leave segments out when only words are asked for, which is what wordTimestampOptions asks, but that is their
+ * behaviour, not a promise. This reads the words from the raw answer the package hands back (`response.body`),
+ * and leaves the package's segments alone when the answer has none.
+ *
+ * Not for gateway: models: the Gateway maps the vendor's answer on its side and its body has segments only.
+ */
+export function wordsFirst(model: TranscriptionModelV4): TranscriptionModelV4 {
+  return {
+    specificationVersion: "v4",
+    provider: model.provider,
+    modelId: model.modelId,
+    async doGenerate(options) {
+      const result = await model.doGenerate(options);
+      const words = wordsOf(result.response.body);
+      return words.length ? { ...result, segments: words } : result;
+    },
+    ...(model.doStream ? { doStream: model.doStream.bind(model) } : {}),
+  };
 }
 
 export function compatTranscriptionModel(settings: CompatTranscriptionSettings, modelId: string): TranscriptionModelV4 {

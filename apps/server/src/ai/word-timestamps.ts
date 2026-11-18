@@ -41,6 +41,7 @@
  *    table keyed by vendor is exact.
  * Until then the cost is one ~5 s transcription per model per PROBE_TTL_MS.
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { sql } from "drizzle-orm";
 import { transcribe, type TranscriptionModel } from "ai";
@@ -48,6 +49,7 @@ import type { JSONObject } from "@ai-sdk/provider";
 import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import { looksWordLevel } from "../pipeline/transcript.js";
+import { stableStringify } from "../lib/stable-json.js";
 import { bundledAssetPath } from "../lib/assets.js";
 import { takeTxLock, txLock } from "../locks.js";
 
@@ -59,8 +61,10 @@ export const PROBE_TTL_MS = 30 * 24 * 3600_000;
  * Which way of reading answers made a verdict. Bump it when that changes: verdicts from an older reader are
  * stale, so a model it misjudged is tested again at the next boot instead of staying refused for PROBE_TTL_MS.
  * 2: `openai:` with OPENAI_BASE_URL reads words before segments (ai/compat-transcription.ts).
+ * 3: `openai:` and `groq:` read words before segments too (`wordsFirst`, ai/compat-transcription.ts).
+ * A change in what is asked (registry.ts wordTimestampOptions) needs no bump: verdicts record it (`askedFor`).
  */
-export const PROBE_READER = 2;
+export const PROBE_READER = 3;
 const PROBE_TIMEOUT_MS = 5 * 60_000; // a self-hosted server may load the model into memory first
 
 export interface WordTimestampVerdict {
@@ -72,6 +76,13 @@ export interface WordTimestampVerdict {
   checkedAt: string;
   /** PROBE_READER when it was made; absent = 1 */
   reader?: number;
+  /** `askedFor` the provider options the clip was sent with; absent = made before they were recorded */
+  asked?: string;
+}
+
+/** A short fingerprint of the provider options a test sends: a verdict stands only for the request that made it. */
+export function askedFor(providerOptions: Record<string, Record<string, unknown>>): string {
+  return createHash("sha256").update(stableStringify(providerOptions)).digest("hex").slice(0, 16);
 }
 
 /** Where verdicts live. Keys come from `verdictKey`. */
@@ -89,9 +100,12 @@ export function verdictKey(modelId: string, redactedBaseUrl?: string): string {
   return redactedBaseUrl ? `${modelId} @ ${redactedBaseUrl}` : modelId;
 }
 
-export function isStale(v: WordTimestampVerdict, now = Date.now()): boolean {
+/** Too old, read by an older reader, or (given `asked`) made for a different request than the one sent now. */
+export function isStale(v: WordTimestampVerdict, opts: { asked?: string; now?: number } = {}): boolean {
   const at = Date.parse(v.checkedAt);
-  return !Number.isFinite(at) || now - at > PROBE_TTL_MS || (v.reader ?? 1) < PROBE_READER;
+  const now = opts.now ?? Date.now();
+  if (!Number.isFinite(at) || now - at > PROBE_TTL_MS || (v.reader ?? 1) < PROBE_READER) return true;
+  return opts.asked !== undefined && v.asked !== opts.asked;
 }
 
 /** Evals, tests, the CLI before the database is attached: verdicts last for the process. */
@@ -170,6 +184,7 @@ function parseVerdict(v: unknown): WordTimestampVerdict | undefined {
     text: String(o.text ?? ""),
     checkedAt: o.checkedAt,
     ...(typeof o.reader === "number" ? { reader: o.reader } : {}),
+    ...(typeof o.asked === "string" ? { asked: o.asked } : {}),
   };
 }
 
@@ -199,5 +214,6 @@ export async function probeWordTimestamps(
     text: text.slice(0, 120),
     checkedAt: new Date().toISOString(),
     reader: PROBE_READER,
+    asked: askedFor(providerOptions),
   };
 }
