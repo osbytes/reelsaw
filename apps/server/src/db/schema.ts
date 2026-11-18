@@ -509,6 +509,9 @@ export const projects = pgTable(
     index("projects_user_updated_idx").on(t.userId, t.updatedAt),
     // the reconciler and the stall watchdog look up projects by `status in (<working states>)`
     index("projects_status_idx").on(t.status),
+    // "is this upload copied into a project yet" (storedBytes per account, and for every account when the admin
+    // list sorts by Stored; upload cleanup): `source_meta->>'uploadId' = …`
+    index("projects_upload_id_idx").on(sql`(${t.sourceMeta}->>'uploadId')`).where(sql`${t.sourceMeta}->>'uploadId' is not null`),
     // source retention (every reconciler tick when enabled)
     index("projects_source_retention_idx").on(t.updatedAt).where(sql`${t.sourceKey} is not null and ${t.sourceExpiredAt} is null`),
     // palette search (`search`): ILIKE '%q%' on the title

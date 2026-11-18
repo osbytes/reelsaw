@@ -6,7 +6,7 @@
  * upgrade hint when there is one. Checked where the number is known: project count and rate at creation,
  * source minutes at creation when the link announces its length and bound once ffprobe has run, storage at upload. The watermark follows the same chain.
  */
-import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { deletedProjectsPath, type QuotaAction, type QuotaRefusal } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
@@ -514,16 +514,32 @@ const uploadNotCopied = sql`not exists (select 1 from projects p where p.source_
  * `output_key` is set (a re-render or retention clears the key); clips rendered before it existed count 0.
  */
 export async function storedBytes(db: Db, userId: string): Promise<number> {
-  const [r] = (
-    await db.execute<{ bytes: string | number }>(sql`
-    select
-      coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
-      + coalesce((select sum(size_bytes) from uploads x where x.user_id = ${userId} and ${uploadNotCopied}), 0)
-      + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
-      + coalesce((select sum(size_bytes) from assets where user_id = ${userId}), 0) as bytes`)
-  ).rows;
+  const [r] = (await db.execute<{ bytes: string | number }>(sql`select ${storedBytesSql(sql`${userId}`)} as bytes`)).rows;
   return Number(r?.bytes ?? 0);
 }
+
+/**
+ * `storedBytes` as one SQL value for the account `userId` (a parameter, or an outer column such as `"user"."id"`
+ * when the admin list sorts every account by it), so the quota check and the sort cannot count differently.
+ */
+export function storedBytesSql(userId: SQL): SQL {
+  return sql`(coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
+      + coalesce((select sum(size_bytes) from uploads x where x.user_id = ${userId} and ${uploadNotCopied}), 0)
+      + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
+      + coalesce((select sum(size_bytes) from assets where user_id = ${userId}), 0))`;
+}
+
+/**
+ * The all-time usage numbers `usageByUser` reports (`usage.projects`, `sourceMinutes`, `clipsRendered`,
+ * `storedBytes`) as SQL values of the account `userId`, for ordering every account by one of them. The stack test
+ * `users-sort-stack.test.ts` checks the order matches the numbers the list shows.
+ */
+export const allTimeUsageSql = {
+  projects: (userId: SQL) => sql`(select count(*) from source_usage where user_id = ${userId})`,
+  sourceMinutes: (userId: SQL) => sql`(select coalesce(sum(duration_sec), 0) / 60.0 from source_usage where user_id = ${userId})`,
+  clipsRendered: (userId: SQL) => sql`(select count(*) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.status = 'done')`,
+  storedBytes: storedBytesSql,
+} satisfies Record<string, (userId: SQL) => SQL>;
 
 /** Bytes one project (source + its rendered clips) still occupies; used on the Deleted list and after a delete. */
 export async function projectStoredBytes(db: Db, projectId: string): Promise<number> {
@@ -721,7 +737,8 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
 /**
  * Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls, tokens and the
  * cost providers reported, seconds of audio transcribed, stored bytes (all time: sources, uploads, renders, intros/outros). One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
- * without ids it covers the first 500 accounts.
+ * without ids it covers the first 500 accounts. The all-time projects, minutes, clips and stored bytes are also
+ * `allTimeUsageSql` below (the admin list sorts by them in SQL); users-sort-stack.test.ts checks they agree.
  */
 export async function usageByUser(db: Db, days: number | null, userIds?: string[]) {
   const ids = userIds ?? (await db.select({ id: schema.user.id }).from(schema.user).orderBy(schema.user.createdAt).limit(500)).map((u) => u.id);

@@ -903,7 +903,7 @@ export const TOOLS = {
   list_users: {
     title: "List accounts",
     description:
-      "Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. Filter with q (name or email), status, verified, flagged, flag (one reason), signupIp or sharedIp. Returns { items, nextCursor, total }; pass nextCursor for the next page (a search returns its best 100). groupBy returns the matches in sections instead: flag = one per reason then the unflagged; ip = one per shared sign-up address (see groupBy). Hosted non-admins are refused.",
+      "Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. Filter with q (name or email), status, verified, flagged, flag (one reason), signupIp or sharedIp; sort and dir order every match. Returns { items, nextCursor, total }; pass nextCursor (same filter and sort) for more. groupBy returns sections instead: flag = one per reason then the unflagged; ip = one per shared sign-up address. Hosted non-admins are refused.",
     inputSchema: userListToolInput.shape,
     annotations: { readOnlyHint: true },
   },

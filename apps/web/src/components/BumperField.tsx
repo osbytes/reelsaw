@@ -475,7 +475,7 @@ export function LicenseBadge({ provenance: p, className = "", wrap = false }: { 
 /** Tags: pick from the ones already in your library or create one (Enter); each change saves right away. */
 function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name" | "tags">; busy: boolean; onTags: (tags: string[]) => void }) {
   const library = useBumperLibrary();
-  const known = [...new Set([...(library.data?.assets ?? []).flatMap((x) => x.tags), ...a.tags])].sort((x, y) => x.localeCompare(y));
+  const known = [...new Set([...(library.data?.assets ?? []).flatMap((x) => x.tags), ...a.tags])].sort((x, y) => x.localeCompare(y)); // sort-ok: tag suggestions A-Z, not list rows
   return (
     <MultiCombobox
       label={`Tags on ${a.name}`}
