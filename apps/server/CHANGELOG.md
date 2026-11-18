@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.42.0
+
+### Minor Changes
+
+- [#298](https://github.com/osbytes/reelsaw/pull/298) [`17e5fea`](https://github.com/osbytes/reelsaw/commit/17e5fea44ab26f310f77bea13f2402d513682fe2) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Failed work under Settings → System → Queue now says why each item failed: a platform fault (disk, model, encoder, timeout) that a Retry fixes after the platform is repaired, a source problem (a dead or private link, no audio, no usable clips) that fails the same way again, or a plan limit. Admins can dismiss failures nobody will retry, one at a time or every match of a filter, and bring them back from Show dismissed. Dismissing only clears the admin list: the owner's project keeps its error and its own Retry. Retry matching now retries platform failures unless you pick another cause. Videos refused for a plan limit in the last 30 days are retried automatically when the owner subscribes, changes plan or has their limits raised. The same actions are available as the `dismiss_failures` MCP tool, a `cause` filter on `list_failures` and `retry_failures`, and the `reelsaw dismiss-failures` and `reelsaw retry-failures --cause` commands.
+
+### Patch Changes
+
+- [#297](https://github.com/osbytes/reelsaw/pull/297) [`ddf5f67`](https://github.com/osbytes/reelsaw/commit/ddf5f67dc08fd82019d4339aab26ca2da9d08765) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Sorting the admin Users list by a column now sorts every matching account on the server. Before, a column header reordered only the rows already loaded, so "Stored, biggest first" showed the biggest of the first 50 accounts, not the biggest overall. Sorting works with search, filters and grouping, and pages with "Load more". The sort is in the page link (`#sort=storedBytes&dir=desc`). Agents and operators get the same order: `list_users` takes `sort` and `dir`, and `reelsaw users` takes `--sort` and `--dir`.
+
 ## 0.41.0
 
 ### Minor Changes
