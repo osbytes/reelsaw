@@ -1,0 +1,1 @@
+CREATE INDEX "projects_upload_id_idx" ON "projects" USING btree (("source_meta"->>'uploadId')) WHERE "projects"."source_meta"->>'uploadId' is not null;

@@ -3,7 +3,7 @@
  * bulk actions (`bulkUsers` in accounts.ts), so "select all 1,204 matching" acts on exactly what the list
  * counted. One implementation behind every surface (PRINCIPLES: "Surfaces").
  */
-import { and, asc, desc, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, sql, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import {
@@ -19,13 +19,14 @@ import {
   isAbuseFlag,
   MAX_IP_GROUPS,
   type UserGroupBy,
+  type SortDir,
   type UserSortKey,
   userSortFirstDir,
 } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import type { Services } from "./services.js";
 import { decodeCursor, pageOf } from "./pagination.js";
-import { usageByUser } from "./quota.js";
+import { allTimeUsageSql, usageByUser } from "./quota.js";
 import type { UserFilter, UserStatus, userGroupsInput, userListInput } from "./accounts-schema.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "./search.js";
 
@@ -132,6 +133,7 @@ async function sectionsOf(db: Db, by: UserGroupBy, filter: UserFilter, where: SQ
  */
 export async function userGroups(svc: Services, input: z.input<typeof userGroupsInput>) {
   const { by, limit = 20, sort, dir, ...filter } = input;
+  orderOf({ sort, dir });
   const db = svc.database.db;
   const where = and(userMatch(words(filter.q ?? "")), userFilterWhere(filter)) ?? sql`true`;
   const [{ sections, moreSections }, total] = await Promise.all([
@@ -166,13 +168,19 @@ export async function flagCounts(db: Db): Promise<{ any: number } & Record<Abuse
   return out;
 }
 
-const { projects: P, clips: C, uploads: UP, assets: B, sourceUsage: SU, session: S } = schema;
-const num = (expr: SQL) => ({ expr, value: (v: string) => sql`${v}::numeric` });
+/**
+ * When the account was last active, in seconds since the epoch (0 = never): the later of the activity stamp and its
+ * newest session (`session_user_id_idx`). The list shows it and the lastActive sort orders by it, so the two
+ * cannot disagree. Both columns are read as UTC, whatever the server's time zone.
+ */
+const lastActiveSql = sql`greatest(coalesce(extract(epoch from ${U.lastActiveAt}), 0), coalesce((select extract(epoch from max(${schema.session.updatedAt})) from ${schema.session} where ${schema.session.userId} = ${U.id}), 0))::numeric`;
+
+const num = (expr: SQL) => ({ expr: sql`(${expr})::numeric`, value: (v: string) => sql`${v}::numeric` });
 /**
  * Each sortable column as one SQL value per account, so the database orders every match (not a loaded page) and the
- * keyset cursor carries it as text. The usage values are the all-time numbers `usageByUser` (quota.ts) shows for
- * the page; change one, change both. lastActive is the later of the activity stamp and the newest session, as the
- * list shows it. Every value is non-null so (value, id) row comparisons page cleanly.
+ * keyset cursor carries it back as a string. The usage columns order by the all-time `usage.*` numbers of each row
+ * (`allTimeUsageSql` in quota.ts, the definitions `usageByUser` and the storage quota use; the stack test
+ * users-sort-stack.test.ts checks they agree). Every value is non-null so (value, id) row comparisons page cleanly.
  */
 export const USER_SORT_SQL: Record<UserSortKey, { expr: SQL; value: (v: string) => SQL }> = {
   name: { expr: sql`lower(coalesce(nullif(${U.name}, ''), ${U.email}))`, value: (v) => sql`${v}::text` },
@@ -180,20 +188,22 @@ export const USER_SORT_SQL: Record<UserSortKey, { expr: SQL; value: (v: string) 
     expr: sql`(case when ${U.banned} then 'suspended' when ${U.approvedAt} is not null then 'active' else 'pending' end)`,
     value: (v) => sql`${v}::text`,
   },
-  projects: num(sql`(select count(*) from ${SU} where ${SU.userId} = ${U.id})::numeric`),
-  sourceMinutes: num(sql`(select coalesce(sum(${SU.durationSec}), 0) from ${SU} where ${SU.userId} = ${U.id})::numeric`),
-  clipsRendered: num(sql`(select count(*) from ${C} join ${P} on ${P.id} = ${C.projectId} where ${P.userId} = ${U.id} and ${C.status} = 'done')::numeric`),
-  storedBytes: num(
-    sql`((select coalesce(sum(${P.sourceBytes}), 0) from ${P} where ${P.userId} = ${U.id})
-      + (select coalesce(sum(${UP.sizeBytes}), 0) from ${UP} where ${UP.userId} = ${U.id} and not exists (select 1 from projects p where p.source_meta->>'uploadId' = ${UP.id} and p.source_bytes is not null))
-      + (select coalesce(sum(${C.outputBytes}), 0) from ${C} join ${P} on ${P.id} = ${C.projectId} where ${P.userId} = ${U.id} and ${C.outputKey} is not null)
-      + (select coalesce(sum(${B.sizeBytes}), 0) from ${B} where ${B.userId} = ${U.id}))::numeric`,
-  ),
-  lastActive: num(
-    sql`greatest(coalesce(extract(epoch from ${U.lastActiveAt}), 0), coalesce((select extract(epoch from max(${S.updatedAt})) from ${S} where ${S.userId} = ${U.id}), 0))::numeric`,
-  ),
-  created: num(sql`extract(epoch from ${U.createdAt})::numeric`),
+  projects: num(allTimeUsageSql.projects(sql`${U.id}`)),
+  sourceMinutes: num(allTimeUsageSql.sourceMinutes(sql`${U.id}`)),
+  clipsRendered: num(allTimeUsageSql.clipsRendered(sql`${U.id}`)),
+  storedBytes: num(allTimeUsageSql.storedBytes(sql`${U.id}`)),
+  lastActive: num(lastActiveSql),
+  created: num(sql`extract(epoch from ${U.createdAt})`),
 };
+
+/**
+ * The sort a list call asked for, with its default direction. `dir` without `sort` is refused rather than ignored,
+ * on every surface (the CLI, tRPC and list_users share this).
+ */
+function orderOf(input: { sort?: UserSortKey | undefined; dir?: SortDir | undefined } | undefined) {
+  if (input?.dir && !input.sort) throw new TRPCError({ code: "BAD_REQUEST", message: "dir needs sort: say which column to order by." });
+  return input?.sort ? { key: input.sort, dir: input.dir ?? userSortFirstDir(input.sort), ...USER_SORT_SQL[input.sort] } : null;
+}
 
 /**
  * The sort key of the unsearched list: pending first, then newest. `user_list_idx` is on exactly this
@@ -214,7 +224,7 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
   const match = userMatch(ws);
   const score = userScore(ws);
   const filter = userFilterWhere(input ?? {});
-  const order = input?.sort ? { key: input.sort, dir: input.dir ?? userSortFirstDir(input.sort), ...USER_SORT_SQL[input.sort] } : null;
+  const order = orderOf(input);
   let after: SQL | undefined;
   if (order && input?.cursor) {
     // the cursor names its sort, so one from another order is refused instead of misread
@@ -230,10 +240,11 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
   // a search without a sort is its best matches, in one page; with a sort, every match pages in that order
   const ranked = ws.length > 0 && !order;
   const pageSize = ranked ? SEARCH_USERS : limit;
+  // with a sort, ORDER BY names the selected sort_value so Postgres computes it once per row for both
   const orderBy = order
     ? order.dir === "asc"
-      ? [asc(order.expr), asc(U.id)]
-      : [desc(order.expr), desc(U.id)]
+      ? [sql`sort_value asc`, asc(U.id)]
+      : [sql`sort_value desc`, desc(U.id)]
     : [...(score ? [desc(score)] : []), approvedRank, desc(U.createdAt), desc(U.id)];
   const [fetched, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
     await setSearchThreshold(tx);
@@ -252,11 +263,13 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
           signupIp: U.signupIp,
           heldBy: U.heldBy,
           mustChangePassword: U.mustChangePassword,
-          lastActiveAt: U.lastActiveAt,
+          /** seconds since the epoch, 0 = never; the same expression the lastActive sort orders by */
+          lastActiveSec: sql<string>`${lastActiveSql}`,
           createdAt: U.createdAt,
           approved: approvedRank,
           ts: sql<string>`${U.createdAt}::text`,
-          sortValue: sql<string | null>`${order ? sql`(${order.expr})::text` : sql`null`}`,
+          // numeric and text both arrive as strings: exactly the value the cursor carries back
+          sortValue: sql<string | null>`${order ? order.expr : sql`null`}`.as("sort_value"),
         })
         .from(U)
         .where(and(match, filter, after))
@@ -271,17 +284,14 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
       ? pageOf(fetched, limit, (r) => [order.key, order.dir, String(r.sortValue), r.id])
       : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
   const ids = items.map((r) => r.id);
-  const [usage, sessions, plans] = await Promise.all([
+  const [usage, plans] = await Promise.all([
     usageByUser(db, null, ids),
-    lastSessions(db, ids),
     svc.ee ? svc.ee.billing.plansOf(ids) : new Map<string, { plan: string; status: string }>(),
   ]);
   const usageOf = new Map(usage.map((u) => [u.id, u]));
-  const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
   return {
-    items: items.map(({ approved: _a, ts: _t, sortValue: _s, lastActiveAt, ...r }) => {
-      const sessionLast = lastOf.get(r.id);
-      const lastMs = Math.max(lastActiveAt?.getTime() ?? 0, sessionLast ? new Date(sessionLast).getTime() : 0);
+    items: items.map(({ approved: _a, ts: _t, sortValue: _s, lastActiveSec, ...r }) => {
+      const lastMs = Math.round(Number(lastActiveSec) * 1000);
       const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
       return {
         ...r,
@@ -298,13 +308,4 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
     nextCursor,
     total,
   };
-}
-
-async function lastSessions(db: Db, ids: string[]) {
-  if (!ids.length) return [];
-  return db
-    .select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` })
-    .from(schema.session)
-    .where(inArray(schema.session.userId, ids))
-    .groupBy(schema.session.userId);
 }

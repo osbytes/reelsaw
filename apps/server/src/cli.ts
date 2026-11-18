@@ -377,6 +377,25 @@ function userSortFlags(): { sort?: UserSortKey; dir?: SortDir } {
   return dir ? { sort, dir } : { sort };
 }
 
+/** The value `reelsaw users --sort key` ordered by, as an extra table column; none for the columns always shown. */
+function sortedColumn(
+  key: UserSortKey | undefined,
+  u: { lastActive: string | null; usage: { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number } },
+): Record<string, string | number> {
+  switch (key) {
+    case "projects":
+    case "sourceMinutes":
+    case "clipsRendered":
+      return { [key]: u.usage[key] };
+    case "storedBytes":
+      return { stored: formatBytes(u.usage.storedBytes) };
+    case "lastActive":
+      return { active: u.lastActive ? u.lastActive.slice(0, 16).replace("T", " ") : "never" };
+    default:
+      return {};
+  }
+}
+
 /** "x+12% y-5% | x2+3%": the per-pane offsets of a layout segment, empty when none. */
 function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number; offsetY2?: number }) {
   const pct = (name: string, v: number | undefined) => (v ? `${name}${v > 0 ? "+" : ""}${Math.round(v * 100)}%` : "");
@@ -544,9 +563,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Accounts, a page at a time (same list as the Users page and list_users): role, status, verified, sign-up date. */
   async users(svc) {
     const by = flag("group");
+    const order = userSortFlags();
     if (by !== undefined) {
       if (!isUserGroupBy(by)) throw new Error(`--group takes ${USER_GROUP_BY.join(", ")}`);
-      const g = await userGroups(svc, { ...userFilterFlags(), ...userSortFlags(), by, limit: flag("limit") ? Number(flag("limit")) : 20 });
+      const g = await userGroups(svc, { ...userFilterFlags(), ...order, by, limit: flag("limit") ? Number(flag("limit")) : 20 });
       if (args.includes("--json")) return void console.log(JSON.stringify(g, null, 2));
       if (!g.groups.length) return void console.log("No accounts match.");
       for (const s of g.groups) {
@@ -559,6 +579,7 @@ ${s.label} · ${s.total} account${s.total === 1 ? "" : "s"} · ${s.help}`);
             flags: u.flags.join(",") || "-",
             ip: u.signupIp ?? "-",
             created: u.createdAt.slice(0, 10),
+            ...sortedColumn(order.sort, u),
           })),
         );
         const take = g.by === "ip" ? (s.key === IP_GROUP_REST ? "--shared-ip no" : `--ip ${s.key}`) : `--in ${s.key}`;
@@ -569,7 +590,7 @@ ${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.g
       return;
     }
     const limit = flag("limit") ? Number(flag("limit")) : 50;
-    const r = await listUsers(svc, { ...userFilterFlags(), ...userSortFlags(), limit, cursor: flag("cursor") });
+    const r = await listUsers(svc, { ...userFilterFlags(), ...order, limit, cursor: flag("cursor") });
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     table(
       r.items.map((u) => ({
@@ -579,6 +600,8 @@ ${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.g
         status: u.mustChangePassword && u.status === "active" ? "must-change" : u.status,
         verified: u.emailVerified ? "yes" : "no",
         created: u.createdAt.slice(0, 10),
+        // the column the list is ordered by, when the table does not already show it
+        ...sortedColumn(order.sort, u),
       })),
     );
     console.log(`${r.items.length} of ${r.total}${r.nextCursor ? `; next page: --cursor ${r.nextCursor}` : ""}`);

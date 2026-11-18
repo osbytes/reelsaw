@@ -292,7 +292,9 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   loaded page shows "the biggest of the first 50" as if it were the biggest overall. The same sort is
   an MCP tool input and a CLI flag, and the sort is in the hash with the filters. A bounded list that
   is loaded whole (a project's clips) may be ordered in the browser. `apps/server/test/list-sorting.test.ts`
-  fails when a component that pages with `useInfiniteQuery` also calls `.sort(`.
+  fails when a component that pages a list (or renders sortable `ListColumn` headers) also sorts in the
+  browser; a line ordering something else (tag suggestions) says why with `// sort-ok: …`.
+  `users-sort-stack.test.ts` pages every sort key and checks the order against the numbers the rows show.
 - **Payload shape follows the screen.** List rows carry list fields; detail queries carry detail
   fields; heavy blobs (transcript words, diagnostics, settings) have their own query. An event
   invalidates the smallest query that changed (a clip event refetches clips, not the project and

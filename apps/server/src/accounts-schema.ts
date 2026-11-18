@@ -55,7 +55,7 @@ export const userSortShape = {
     .enum(USER_SORT_KEYS)
     .optional()
     .describe(
-      "Order every matching account by: name (name, else email), status, projects, sourceMinutes, clipsRendered, storedBytes (all time), lastActive, created. Omitted = pending first, then newest (a search: best match first)",
+      "Order every matching account by: name (name, else email), status, lastActive, created, or a usage number: projects, sourceMinutes, clipsRendered, storedBytes order by the row's usage.* field of that name (all time; usage.projects counts every project made, deleted ones too, unlike the top-level projects). Omitted = pending first, then newest (a search: best match first)",
     ),
   dir: z.enum(SORT_DIRS).optional().describe("asc or desc; default asc for name and status, desc for the rest. Only with sort"),
 };
