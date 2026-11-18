@@ -1,9 +1,9 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
+import { LiveSourceError, announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
 
-/** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, or an error) and counts its runs. */
-function fakeYtdlp(answer: () => number | null | Error) {
+/** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, an info dict, or an error) and counts its runs. */
+function fakeYtdlp(answer: () => number | null | Error | Record<string, unknown>) {
   const runs: string[] = [];
   return {
     runs,
@@ -12,7 +12,8 @@ function fakeYtdlp(answer: () => number | null | Error) {
         runs.push(args[args.length - 1]!);
         const a = answer();
         if (a instanceof Error) throw a;
-        const stdout = `[info] noise\n${JSON.stringify(a === null ? { id: "x" } : { id: "x", duration: a })}\n`;
+        const info = a === null ? { id: "x" } : typeof a === "number" ? { id: "x", duration: a } : { id: "x", ...a };
+        const stdout = `[info] noise\n${JSON.stringify(info)}\n`;
         return { stdout, stderr: "", proxyId: "direct" };
       },
     },
@@ -53,5 +54,22 @@ describe("announcedDuration", () => {
     fail = false;
     assert.equal(await announcedDuration(y.media as never, LINK), 90);
     assert.equal(y.runs.length, 2);
+  });
+
+  it("refuses a live stream, remembered like any other answer", async () => {
+    const y = fakeYtdlp(() => ({ is_live: true, live_status: "is_live", duration: null }));
+    await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
+    await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
+    assert.equal(y.runs.length, 1);
+  });
+
+  it("refuses a stream that has not started yet", async () => {
+    const y = fakeYtdlp(() => ({ is_live: false, live_status: "is_upcoming" }));
+    await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
+  });
+
+  it("accepts the recording of a stream that has ended", async () => {
+    const y = fakeYtdlp(() => ({ is_live: false, live_status: "was_live", was_live: true, duration: 5400 }));
+    assert.equal(await announcedDuration(y.media as never, LINK), 5400);
   });
 });

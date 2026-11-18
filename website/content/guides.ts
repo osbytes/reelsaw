@@ -392,7 +392,7 @@ export const GUIDES: Guide[] = [
       },
       {
         q: "Will it clip my Shorts and live streams too?",
-        a: "The channel feed lists every upload, including Shorts and finished streams. Add an IF node on the title or link before the Settings node to skip what you do not want clipped.",
+        a: "The channel feed lists every upload, including Shorts and streams. Reelsaw clips a stream once it has ended and its recording is up; a link to a stream that is still live, or has not started, is refused with a message saying so. Add an IF node on the title or link before the Settings node to skip what you do not want clipped.",
       },
       {
         q: "Can I use it with Make, Zapier or a script instead of n8n?",

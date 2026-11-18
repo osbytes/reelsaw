@@ -335,6 +335,11 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 - **Deploys interrupt jobs.** Rebuilding the app container kills in-flight renders; pg-boss retries them, and each
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
+- **Live streams are refused.** A link to a stream that is still live or not yet started fails ingest at once
+  ("This link is a live stream…") instead of recording it until the stream ends through the download proxy. The
+  link lookup reads `is_live` / `live_status`, and the download itself runs with `--match-filter` for when the
+  lookup failed. On a minutes-limited account, check_source and creating the project refuse it up front too.
+  The recording of an ended stream downloads like any video.
 - **YouTube bot-check from a datacentre / `YTDLP_PROXY`.** yt-dlp takes one `--proxy`; Reelsaw walks an
   operator-ranked pool in the same variable (one URL still works). **Priority** is yours and never
   changes at runtime (put the cheap home Pi first). **Reliability** is a circuit breaker per candidate
