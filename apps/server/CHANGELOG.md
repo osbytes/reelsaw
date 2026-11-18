@@ -1,5 +1,21 @@
 # @reelsaw/server
 
+## 0.41.0
+
+### Minor Changes
+
+- [#295](https://github.com/osbytes/reelsaw/pull/295) [`ba20e27`](https://github.com/osbytes/reelsaw/commit/ba20e27d19770edd6518626b37d1d749f576741b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - New per-account limit `MAX_MANUAL_CLIPS_PER_USER`: how many clips an account may add from its own time ranges, deleted ones included (0 = unlimited, the default). Past it, `create_clip`, the editor and `reelsaw create-clip` explain the limit and offer the plan that lifts it. Quota refusals in the web now show their sentence next to the offer's button instead of repeating the link in the text.
+
+- [#295](https://github.com/osbytes/reelsaw/pull/295) [`ba20e27`](https://github.com/osbytes/reelsaw/commit/ba20e27d19770edd6518626b37d1d749f576741b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Plans can set the resolution a link is downloaded at (`sourceHeight` in the plan list). On a capped plan the project keeps a small preview of the video for transcription, analysis and the editor, with the full audio. Each clip renders from a full-quality window of the video fetched for it. Nearby clips share one window, a window is reused by every re-render that fits inside it, and a clip edited past its window fetches only the missing stretch. Windows are placed on the source's clock by matching their audio to the preview, so captions and cuts line up as before. The project page and the clip editor mark a preview source and name the plan that downloads at full quality. `get_project` reports `sourcePreviewHeight`. Window downloads are fetched by ffmpeg, which supports HTTP proxies only; see Troubleshooting for `YTDLP_PROXY`.
+
+### Patch Changes
+
+- [#296](https://github.com/osbytes/reelsaw/pull/296) [`7a3dd2e`](https://github.com/osbytes/reelsaw/commit/7a3dd2e43c6b6ed81c497a9c14976a08ba5a1506) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Links to a live stream, or a stream that has not started yet, are now refused with a message saying to add the link again once the recording is up. Before, ingest recorded the stream through the download proxy until the stream ended, which could take hours and use up proxy traffic. The project sat in ingest with no progress. The recording of a stream that has ended downloads as before. Accounts with a minutes limit see the refusal as soon as they check the link or create the project (check_source, the New project form). Every other account sees it when ingest starts, before anything is downloaded.
+
+- [#295](https://github.com/osbytes/reelsaw/pull/295) [`ba20e27`](https://github.com/osbytes/reelsaw/commit/ba20e27d19770edd6518626b37d1d749f576741b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `reelsaw scenario` sets up a project in a known state in a few seconds, for screenshots and UI review, with no download or model run: a preview source, a used manual-clip allowance, a window that could not be fetched, a full-quality source, or a failed link. It runs only on a local instance (docs/UI.md).
+
+- [#293](https://github.com/osbytes/reelsaw/pull/293) [`b88e89b`](https://github.com/osbytes/reelsaw/commit/b88e89bfb7d02c9ebf8a992b1f0fb5592cf16ff4) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Settings → Share links no longer grows without end. The list scrolls inside its card, and a new Clear button deletes revoked and expired links (also `clear_media_links` in MCP and `reelsaw media-links clear <email>`). Before, those links stayed listed for `MEDIA_LINK_RETENTION_DAYS` after they stopped working. Links of a deleted project or clip now show as "In trash" instead of "Active". They have not worked since the delete, and restoring the project brings them back. You can still revoke them so a restore keeps them off. Other Settings lists that grow with use (a webhook's deliveries, API keys) now scroll at the same height.
+
 ## 0.40.2
 
 ### Patch Changes
