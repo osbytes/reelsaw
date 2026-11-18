@@ -214,7 +214,8 @@ tools and webhooks as a Zapier app.
 ## Notes
 
 - The RSS trigger fires once per new feed entry. Shorts and live streams appear in the feed too; add
-  an IF node on `title` or `link` before **Settings** to skip them.
+  an IF node on `title` or `link` before **Settings** to skip them. A stream that is still live (or not
+  started) is refused, not recorded: add it again once its recording is up.
 - Every new video costs source minutes on a hosted plan; quota errors fail the start execution.
 - Checked on n8n 1.118.2 (Docker) against a mock of `/api/mcp`, Buffer's endpoint and a share link:
   the start workflow's `create_project` call and metadata, the `create_webhook` branch, and signed

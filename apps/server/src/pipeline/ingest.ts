@@ -7,7 +7,7 @@ import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { UnresolvableHostError, UnsafeUrlError, assertPublicHttpUrl } from "../lib/safe-url.js";
-import { announcedDuration } from "../projects/peek.js";
+import { LIVE_SOURCE_MESSAGE, LiveSourceError, NOT_LIVE_FILTER, announcedDuration } from "../projects/peek.js";
 import { type StageContext, DownloadFailedError, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
 import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
@@ -87,6 +87,9 @@ export async function ingest(ctx: StageContext) {
             "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
             "--merge-output-format",
             "mp4",
+            // a live stream would be recorded until it ends; skip it here too, for when the lookup above could not tell
+            "--match-filter",
+            NOT_LIVE_FILTER,
             "--max-filesize",
             `${svc.settings.get().MAX_SOURCE_FILE_MB}M`,
             "-o",
@@ -142,6 +145,8 @@ export async function ingest(ctx: StageContext) {
             : undefined,
         };
       }
+      // --match-filter skipped the link: no info line, no file, exit 0
+      if (!info) throw new NonRetryableError(LIVE_SOURCE_MESSAGE);
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
       if (!chosen) {
@@ -233,7 +238,7 @@ export async function ingest(ctx: StageContext) {
 
 /**
  * `announcedDuration` for the stage, and why it is missing (the site did not say, or the lookup failed): only a
- * cancelled stage or a permanently dead link stops here.
+ * cancelled stage, a permanently dead link or a live stream stops here.
  */
 async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<{ sec: number | null; missing: "unannounced" | "failed" | null }> {
   try {
@@ -241,6 +246,7 @@ async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<
     return { sec: sec || null, missing: sec ? null : "unannounced" };
   } catch (err) {
     ctx.signal.throwIfAborted();
+    if (err instanceof LiveSourceError) throw new NonRetryableError(err.message);
     // the lookup already walked every proxy: a permanent answer here would be the download's answer too
     const stderr = err instanceof CommandError ? err.stderr : "";
     const text = `${err instanceof Error ? err.message : String(err)}\n${stderr}`;

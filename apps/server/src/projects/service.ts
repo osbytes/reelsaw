@@ -58,7 +58,7 @@ import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { announcedDuration, peekUrlMeta } from "./peek.js";
+import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, peekUrlMeta } from "./peek.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
@@ -872,7 +872,13 @@ export async function createProject(svc: Services, userId: string, input: Create
     sourceMeta = { uploadId: up.id, filename: up.filename };
     title ||= up.filename.replace(/\.[^.]+$/, "");
   } else if (input.sourceUrl) {
-    const [peek, announced] = await Promise.all([peekUrlMeta(input.sourceUrl), announcedMinutesFor(svc, userId, input.sourceUrl, log)]);
+    const [peek, announced] = await Promise.all([
+      peekUrlMeta(input.sourceUrl),
+      announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
+        if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }),
+    ]);
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
     if (announced) await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
@@ -914,7 +920,7 @@ export async function createProject(svc: Services, userId: string, input: Create
 /**
  * The length a link announces, in seconds, looked up only when the account has a minutes limit (no lookup, no wait, for
  * everyone else). Null when the site does not say, the link is not a public address, or the lookup is slow or fails:
- * ingest checks again before downloading and on the file itself.
+ * ingest checks again before downloading and on the file itself. Throws `LiveSourceError` for a live or scheduled stream.
  */
 async function announcedMinutesFor(svc: Services, userId: string, url: string, log: Services["log"]): Promise<number | null> {
   if (!(await hasMinuteLimits(svc.database.db, svc.settings.get(), userId, svc.entitlements))) return null;
@@ -922,6 +928,7 @@ async function announcedMinutesFor(svc: Services, userId: string, url: string, l
     await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
     return await announcedDuration(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
   } catch (err) {
+    if (err instanceof LiveSourceError) throw err;
     log.debug({ err }, "could not look up the video's length before creating the project");
     return null;
   }
@@ -939,7 +946,7 @@ export const checkSourceInput = z
 export interface SourceCheck {
   /** the video's length in minutes, when it is known (a link whose site does not say has none) */
   minutes: number | null;
-  /** false: creating the project now would be refused (message and quota say why and what to do); null: the length is unknown, so ingest decides */
+  /** false: creating the project now would be refused (message and quota say why and what to do; no quota for a live stream); null: the length is unknown, so ingest decides */
   fits: boolean | null;
   message: string | null;
   quota: QuotaRefusal | null;
@@ -960,8 +967,15 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
   const log = svc.log.child({ module: "projects", userId });
   const [allowance, durationSec] = await Promise.all([
     minutesAllowance(db, s, userId, svc.entitlements),
-    input.durationSec ?? (input.sourceUrl ? announcedMinutesFor(svc, userId, input.sourceUrl, log) : null),
+    input.durationSec ??
+      (input.sourceUrl
+        ? announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
+            if (err instanceof LiveSourceError) return "live" as const;
+            throw err;
+          })
+        : null),
   ]);
+  if (durationSec === "live") return { minutes: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
