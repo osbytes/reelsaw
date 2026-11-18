@@ -59,7 +59,7 @@ import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, peekUrlMeta } from "./peek.js";
-import { runFacts } from "../pipeline/common.js";
+import { failedRow, runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
 import { clipDecisions, forgetDecisions, recordDecisions } from "../decisions/service.js";
@@ -182,7 +182,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   const stopped = "Stopped because the project was deleted. Retry to continue.";
   await u.db
     .update(schema.clips)
-    .set({ status: "failed", error: stopped, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
+    .set({ ...failedRow(stopped), renderGen: sql`${schema.clips.renderGen} + 1` })
     .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.status, [...IN_FLIGHT]), isNull(schema.clips.deletedAt)));
   const working = (WORKING as readonly string[]).includes(before.status);
   const facts = working ? await runFacts(u.db, projectId) : null;
@@ -194,7 +194,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
       forgetDecisionsOnPurge: !!opts.forgetDecisions,
       stageSeq: sql`${schema.projects.stageSeq} + 1`,
       updatedAt: new Date(),
-      ...(working ? { status: "failed" as const, error: stopped } : {}),
+      ...(working ? failedRow(stopped) : {}),
     })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
@@ -325,7 +325,7 @@ async function markClipDeleted(svc: Services, u: UnitOfWork, c: typeof schema.cl
     .set({
       deletedAt: new Date(),
       renderGen: sql`${schema.clips.renderGen} + 1`,
-      ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}),
+      ...(unfinished ? failedRow("Deleted before it finished") : {}),
       updatedAt: new Date(),
     })
     .where(eq(schema.clips.id, c.id));

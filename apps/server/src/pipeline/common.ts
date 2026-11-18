@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { schema, type Db, type Project } from "../db/index.js";
 import type { Services } from "../services.js";
-import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
+import type { FailureCause, PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import type { DiskLease } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
@@ -21,9 +21,25 @@ import {
 
 /**
  * A failure that trying again cannot fix (the source is gone, a quota refuses the video). Workers end the run at
- * once instead of spending retries on it.
+ * once instead of spending retries on it. `failureCause` is recorded on the row (input unless a subclass says quota).
  */
-export class NonRetryableError extends Error {}
+export class NonRetryableError extends Error {
+  readonly failureCause: Exclude<FailureCause, "platform"> = "input";
+}
+
+/** The cause a thrown error records: a NonRetryableError says its own, anything else is the platform's. */
+export function failureCause(err: unknown): FailureCause {
+  return err instanceof NonRetryableError ? err.failureCause : "platform";
+}
+
+/**
+ * The one way a project or clip row becomes failed: the reason, its cause, and a fresh failure that an earlier
+ * admin dismissal does not hide. Every `status: "failed"` write uses it so the Failed work list can tell causes apart.
+ */
+export function failedRow(err: unknown, cause: FailureCause = failureCause(err)) {
+  const message = err instanceof Error ? err.message : String(err);
+  return { status: "failed" as const, error: message.slice(0, 4000), failureCause: cause, failureDismissedAt: null, updatedAt: new Date() };
+}
 
 /** A failure's class for analytics and alerts (`QuotaExceededError`, `StageTimeoutError`): a name, never the message. */
 export function errorKind(err: unknown): string {
@@ -398,10 +414,7 @@ export async function failProject(svc: Services, projectId: string, stage: Pipel
     if (!(await lockCurrentStage(u.db, projectId, seq)))
       return svc.log.child({ module: stage, projectId }).info({ seq }, "stale job gave up; the newer run is left alone");
     const facts = await runFacts(u.db, projectId);
-    await u.db
-      .update(schema.projects)
-      .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
-      .where(eq(schema.projects.id, projectId));
+    await u.db.update(schema.projects).set(failedRow(err)).where(eq(schema.projects.id, projectId));
     await u.emit("project.failed", { projectId: projectId, stage, error: message.slice(0, 1000), errorKind: errorKind(err), ...facts });
   });
 }

@@ -837,10 +837,17 @@ export const TOOLS = {
   list_failures: {
     title: "List failed work",
     description:
-      "Admins only: failed projects and clips across the instance (owner email, stage, reason, when). A failed project's clips are not listed separately — retry the project. Returns { items, nextCursor, total, limit, truncated }. Filter with q (substring of the error), stage, since (ISO time). Hosted non-admins are refused.",
+      "Admins only: failed projects and clips across the instance (owner email, stage, cause, reason, when); retryable = Retry can help (platform causes only). A failed project's clips are not listed separately — retry the project. Dismissed failures are hidden unless dismissed: true. Returns { items, nextCursor, total, limit, truncated }. Filter with q (substring of the error), stage, cause, since (ISO time). Hosted non-admins are refused.",
     inputSchema: {
       q: z.string().max(200).optional().describe("Case-insensitive substring of the recorded error (e.g. disk, encoder, model)"),
       stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Pipeline stage that failed"),
+      cause: z
+        .enum(["platform", "input", "quota"])
+        .optional()
+        .describe(
+          "platform = this instance's fault (disk, model, encoder, timeout), retry after the fix; input = the video, link or settings (gone, private, no audio, no usable clips), retrying fails the same way; quota = the owner's plan refused it, retried by itself when their plan or limits change",
+        ),
+      dismissed: z.boolean().optional().describe("true = only failures cleared with dismiss_failures; default = only the ones not dismissed"),
       since: z.string().max(40).optional().describe("ISO timestamp; only failures updated at or after this time"),
       cursor: z.string().max(300).optional().describe("nextCursor from the previous page"),
       limit: z.number().int().min(1).max(50).optional().describe("Page size, default 50"),
@@ -850,10 +857,11 @@ export const TOOLS = {
   retry_failures: {
     title: "Retry failed work",
     description:
-      "Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). Each item is its own transaction so live-job caps still apply. Cap 50 per call. Returns { retried, skipped, nextCursor }. Writes an admin event failures.retried. Hosted non-admins are refused.",
+      "Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). Each item is its own transaction so live-job caps still apply. By filter it retries platform failures only unless cause is given (input and quota failures fail the same way again); ids retries exactly those rows. Cap 50 per call. Returns { retried, skipped, nextCursor }. Writes an admin event failures.retried. Hosted non-admins are refused.",
     inputSchema: {
       q: z.string().max(200).optional().describe("Same error substring as list_failures"),
       stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Same stage filter as list_failures"),
+      cause: z.enum(["platform", "input", "quota"]).optional().describe("Same cause filter as list_failures; default platform"),
       since: z.string().max(40).optional().describe("Same since filter as list_failures"),
       ids: z
         .array(
@@ -867,6 +875,30 @@ export const TOOLS = {
         .describe("Retry these rows instead of the current filter; omitted = every match of q/stage/since"),
       limit: z.number().int().min(1).max(50).optional().describe("Max items to retry this call, default 50"),
     },
+  },
+  dismiss_failures: {
+    title: "Dismiss failed work",
+    description:
+      "Admins only: clear failures nobody will retry (a bad link, no audio) from list_failures. Only the admin list changes: the owner's project keeps its error and its own Retry, and failing again lists it again; restore: true brings them back. By filter (as list_failures) or ids; cap 50 per call, call again while nextCursor is set. Returns { changed, skipped, nextCursor }. Writes an admin event failures.dismissed. Hosted non-admins are refused.",
+    inputSchema: {
+      q: z.string().max(200).optional().describe("Same error substring as list_failures"),
+      stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Same stage filter as list_failures"),
+      cause: z.enum(["platform", "input", "quota"]).optional().describe("Same cause filter as list_failures"),
+      since: z.string().max(40).optional().describe("Same since filter as list_failures"),
+      ids: z
+        .array(
+          z.object({
+            kind: z.enum(["project", "clip"]).describe("project or clip, as list_failures returns it"),
+            id: z.string().min(1).max(80).describe("Project id or clip id"),
+          }),
+        )
+        .max(50)
+        .optional()
+        .describe("Dismiss these rows instead of the current filter"),
+      limit: z.number().int().min(1).max(50).optional().describe("Max items this call, default 50"),
+      restore: z.boolean().optional().describe("true = bring dismissed failures back into the list"),
+    },
+    annotations: { destructiveHint: false, idempotentHint: true },
   },
   list_users: {
     title: "List accounts",
