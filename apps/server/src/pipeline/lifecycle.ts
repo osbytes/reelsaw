@@ -8,7 +8,7 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { cleanupWorkdir, runFacts } from "./common.js";
+import { cleanupWorkdir, failedRow, runFacts } from "./common.js";
 import type { PipelineStage, ProjectStatus, RunReason } from "@reelsaw/shared";
 import { removeScratchClip } from "../storage/sweep.js";
 import { recordProjectFinished } from "../quota.js";
@@ -239,7 +239,7 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   // clips (the last one was deleted) is finished too: nothing is left that could finalize it later
   if (!project || project.status !== "rendering") return;
   const clips = await u.db
-    .select({ status: schema.clips.status })
+    .select({ status: schema.clips.status, failureCause: schema.clips.failureCause })
     .from(schema.clips)
     .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
   if (!clips.every((c) => c.status === "done" || c.status === "failed")) return;
@@ -248,7 +248,7 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
     const facts = await runFacts(u.db, projectId);
     await u.db
       .update(schema.projects)
-      .set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() })
+      .set(failedRow("Every clip failed to render", clips.every((c) => c.failureCause === "input") ? "input" : "platform"))
       .where(eq(schema.projects.id, projectId));
     await u.emit("project.failed", { projectId: projectId, stage: "render", error: "Every clip failed to render", errorKind: "AllClipsFailed", ...facts });
     return;

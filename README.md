@@ -508,7 +508,7 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 
 **Key permissions.** A key acts as you, with one exception: the instance-administration tools
 (`get_instance_settings`, `set_instance_settings`, `list_workers`, `get_queue`, `list_failures`,
-`get_failure`, `retry_failures`, `list_users`, `manage_users`, `check_for_update`, and instance-wide
+`get_failure`, `retry_failures`, `dismiss_failures`, `list_users`, `manage_users`, `check_for_update`, and instance-wide
 `report_issue`) need a key
 created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
 Settings. Keys are created without it by default, and a key that lacks it is refused with "This
@@ -627,8 +627,9 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
-| `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
+| `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, cause, reason, when); retryable = Retry can help (platform causes only). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
+| `dismiss_failures` | Admins only: clear failures nobody will retry (a bad link, no audio) from list_failures. |
 | `list_users` | Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. |
 | `manage_users` | Admins only: approve, hold, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). |
 | `list_signup_rules` | Admins only: the sign-up rules in front of SIGNUP_MODE, oldest first (at most 500). |
@@ -721,7 +722,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
 | `reelsaw queue [--json]` | waiting / running / retrying jobs per stage, plus what is in flight (same as Settings → System → Queue) |
 | `reelsaw failure <projectId\|clipId> [--json]` | one failed project or clip: owner, stage, the full recorded reason (same as clicking a row under Settings → System → Queue → Failed work) |
-| `reelsaw retry-failures [--stage s] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (same as Settings → System → Queue → Retry all matching) |
+| `reelsaw retry-failures [--stage s] [--cause platform\|input\|quota] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (platform failures unless --cause; same as Queue → Retry matching) |
+| `reelsaw dismiss-failures [--stage s] [--cause c] [--q text] [--since 24h] [--restore] [--json]` | clear failures nobody will retry from Failed work, or bring them back (same as Settings → System → Queue → Dismiss) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip <clipId>` | everything about one clip incl. render diagnostics |

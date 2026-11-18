@@ -4,6 +4,7 @@
  * their events exactly like the open handlers'. A self-hosted boot never imports it.
  */
 import { defineEventHandlers, type EventHandler } from "../event-handlers.js";
+import { retryRefusedWork } from "../ops/failures.js";
 
 /**
  * `billing.detached` (a removed account had a Stripe customer or live subscription) → cancel it at Stripe.
@@ -21,4 +22,8 @@ export const cancelAtStripe: EventHandler<"billing.detached"> = {
 
 export const eeEventHandlerMap = defineEventHandlers({
   "billing.detached": { cancelAtStripe },
+  // a new or changed plan (or an admin's grant): resume the videos the old plan refused
+  "billing.subscribed": { retryRefusedWork: retryRefusedWork<"billing.subscribed">() },
+  "billing.changed": { retryRefusedWork: retryRefusedWork<"billing.changed">() },
+  "billing.complimentary": { retryRefusedWork: retryRefusedWork<"billing.complimentary">() },
 });

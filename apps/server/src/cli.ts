@@ -108,9 +108,12 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           (same as Settings → System → Queue)
  *   failure <projectId|clipId> [--json]     one failed project or clip: owner, stage, the full recorded reason
  *                                           (same as clicking a row under Settings → System → Queue → Failed work)
- *   retry-failures [--stage s] [--q text] [--since 24h] [--json]
+ *   retry-failures [--stage s] [--cause platform|input|quota] [--q text] [--since 24h] [--json]
  *                                           retry failed projects and clips matching a reason after a platform fix
- *                                           (same as Settings → System → Queue → Retry all matching)
+ *                                           (platform failures unless --cause; same as Queue → Retry matching)
+ *   dismiss-failures [--stage s] [--cause c] [--q text] [--since 24h] [--restore] [--json]
+ *                                           clear failures nobody will retry from Failed work, or bring them back
+ *                                           (same as Settings → System → Queue → Dismiss)
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip <clipId>                           everything about one clip incl. render diagnostics
@@ -228,7 +231,7 @@ import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
 import { listWorkers } from "./ops/workers.js";
 import { summarizeQueue } from "./ops/queue.js";
-import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
+import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures, type FailureFilter } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { changeSignupRules, listSignupRules } from "./signup-rules.js";
 import { SIGNUP_RULE_ACTIONS, SIGNUP_RULE_KINDS } from "./signup-rules-schema.js";
@@ -318,6 +321,24 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
+
+/** `--stage`, `--cause`, `--q`, `--since 24h|ISO` as the Failed work filter (ops/failures.ts). */
+function failureFilterFlags(command: string): FailureFilter {
+  const usage = `usage: reelsaw ${command} [--stage ${FAILURE_STAGES.join("|")}] [--cause ${FAILURE_CAUSES.join("|")}] [--q text] [--since 24h|ISO] [--json]`;
+  const stage = flag("stage");
+  const cause = flag("cause");
+  const stageOk = (s: string | undefined): s is FailureFilter["stage"] => !s || (FAILURE_STAGES as readonly string[]).includes(s);
+  const causeOk = (c: string | undefined): c is FailureFilter["cause"] => !c || (FAILURE_CAUSES as readonly string[]).includes(c);
+  if (!stageOk(stage) || !causeOk(cause)) throw new Error(usage);
+  const sinceArg = flag("since");
+  let since: string | undefined;
+  if (sinceArg) {
+    const ms = parseDuration(sinceArg);
+    since = ms !== undefined ? new Date(Date.now() - ms).toISOString() : new Date(sinceArg).toISOString();
+    if (Number.isNaN(Date.parse(since))) throw new Error("--since takes a duration like 24h or an ISO timestamp");
+  }
+  return { q: flag("q"), stage, cause, since };
+}
 
 /** `--q`, `--status`, `--verified yes|no`, `--flagged yes`, `--flag reason` as the Users page filter (accounts-schema.ts). */
 function userFilterFlags(): UserFilter {
@@ -1487,6 +1508,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       failed.items.map((f) => ({
         kind: f.kind,
         stage: f.stage,
+        cause: f.cause,
         owner: f.ownerEmail,
         title: f.title,
         reason: f.snippet,
@@ -1506,30 +1528,29 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     console.log(`${item.kind}  ${item.title}${item.kind === "clip" ? `  (${item.projectTitle})` : ""}`);
     console.log(`owner   ${item.ownerEmail}`);
     console.log(`stage   ${item.stage}`);
+    console.log(`cause   ${item.cause}${item.retryable ? "" : " (retrying fails the same way)"}${item.dismissedAt ? `  dismissed ${item.dismissedAt}` : ""}`);
     console.log(`when    ${item.failedAt}`);
     console.log(`id      ${item.id}`);
     console.log(`\n${item.error ?? "(no reason recorded)"}`);
   },
   /**
-   * Retry failed projects and clips that match `--stage` / `--q` / `--since`. Same path as the owner's
-   * Retry button. Cap 50 per call; run again if it prints a next page.
+   * Retry failed projects and clips that match `--stage` / `--cause` / `--q` / `--since` (platform failures
+   * unless `--cause` names another). Same path as the owner's Retry button. Cap 50 per call; run again if it
+   * prints a next page.
    */
   async ["retry-failures"](svc) {
-    const stageArg = flag("stage");
-    if (stageArg && !(FAILURE_STAGES as readonly string[]).includes(stageArg)) {
-      throw new Error(`usage: reelsaw retry-failures [--stage ${FAILURE_STAGES.join("|")}] [--q text] [--since 24h|ISO] [--json]`);
-    }
-    const sinceArg = flag("since");
-    let since: string | undefined;
-    if (sinceArg) {
-      const ms = parseDuration(sinceArg);
-      since = ms !== undefined ? new Date(Date.now() - ms).toISOString() : new Date(sinceArg).toISOString();
-      if (Number.isNaN(Date.parse(since))) throw new Error("--since takes a duration like 24h or an ISO timestamp");
-    }
-    const filter = { q: flag("q"), stage: stageArg as FailureStage | undefined, since };
-    const r = await retryFailures(svc, filter, null);
+    const r = await retryFailures(svc, failureFilterFlags("retry-failures"), null);
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     console.log(`retried ${r.retried}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
+  },
+  /**
+   * Clear matching failures from Failed work (same filters as retry-failures, any cause), or bring dismissed
+   * ones back with `--restore`. The owner's project is untouched. Cap 50 per call; run again for more.
+   */
+  async ["dismiss-failures"](svc) {
+    const r = await dismissFailures(svc, failureFilterFlags("dismiss-failures"), null, { restore: args.includes("--restore") });
+    if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
+    console.log(`${args.includes("--restore") ? "restored" : "dismissed"} ${r.changed}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
   },
   /** One account's optional mail by topic (notify/preferences.ts): show it, or `--<topic> on|off` (a "stop emailing me" request). */
   "email-prefs": async (svc) => {
@@ -2834,7 +2855,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

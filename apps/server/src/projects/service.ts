@@ -59,7 +59,7 @@ import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, peekUrlMeta } from "./peek.js";
-import { runFacts } from "../pipeline/common.js";
+import { failedRow, runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
 import { clipDecisions, forgetDecisions, recordDecisions } from "../decisions/service.js";
@@ -105,9 +105,17 @@ export function retryQueueFor(s: {
 /**
  * Resume a project from the furthest completed stage (each stage skips work that already exists).
  * Same path as the owner's Retry button; admin bulk retry and MCP retry_project call this too.
- * Lock order is transcript → clip → project. Returns null when the project is gone or deleted.
+ * The project's retry lock comes first (advisory, before any row lock), then transcript → clip → project. Returns
+ * null when the project is gone or deleted, or, with `onlyIfFailed` (admin and automatic retries), when it is no
+ * longer failed: a retry that waited on the lock sees the run the other one started and leaves it alone.
  */
-export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
+export async function retryProject(
+  svc: Services,
+  u: UnitOfWork,
+  projectId: string,
+  opts: { onlyIfFailed?: boolean } = {},
+): Promise<{ ok: true; queue: QueueName } | null> {
+  await takeTxLock(u.db, txLock.retry(projectId));
   const [p] = await u.db
     .select({
       id: schema.projects.id,
@@ -118,7 +126,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
-  if (!p) return null;
+  if (!p || (opts.onlyIfFailed && p.status !== "failed")) return null;
   const [transcript] = await u.db
     .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine })
     .from(schema.transcripts)
@@ -182,7 +190,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   const stopped = "Stopped because the project was deleted. Retry to continue.";
   await u.db
     .update(schema.clips)
-    .set({ status: "failed", error: stopped, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
+    .set({ ...failedRow(stopped), renderGen: sql`${schema.clips.renderGen} + 1` })
     .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.status, [...IN_FLIGHT]), isNull(schema.clips.deletedAt)));
   const working = (WORKING as readonly string[]).includes(before.status);
   const facts = working ? await runFacts(u.db, projectId) : null;
@@ -194,7 +202,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
       forgetDecisionsOnPurge: !!opts.forgetDecisions,
       stageSeq: sql`${schema.projects.stageSeq} + 1`,
       updatedAt: new Date(),
-      ...(working ? { status: "failed" as const, error: stopped } : {}),
+      ...(working ? failedRow(stopped) : {}),
     })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
@@ -325,7 +333,7 @@ async function markClipDeleted(svc: Services, u: UnitOfWork, c: typeof schema.cl
     .set({
       deletedAt: new Date(),
       renderGen: sql`${schema.clips.renderGen} + 1`,
-      ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}),
+      ...(unfinished ? failedRow("Deleted before it finished") : {}),
       updatedAt: new Date(),
     })
     .where(eq(schema.clips.id, c.id));

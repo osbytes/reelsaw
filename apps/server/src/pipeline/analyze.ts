@@ -505,8 +505,9 @@ export async function analyze(ctx: StageContext) {
   const failWithCandidates = async (message: string): Promise<never> => {
     await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), artifactModels())).catch(() => {});
     // every model answer this verdict rests on is a saved step, so another attempt reaches the same one: fail the run now.
-    // A skipped second pass is the exception: it was not saved, and running it again may turn up a clip.
-    throw gleanFailed ? new Error(message) : new NonRetryableError(message);
+    // A skipped second pass is the exception: it was not saved, and running it again may turn up a clip. The cause is
+    // platform: a weak or broken model finds nothing as readily as a dull video, and a Retry after a model fix helps.
+    throw gleanFailed ? new Error(message) : new NonRetryableError(message, "platform");
   };
   if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
   if (!pooled.length) await failWithCandidates("The model did not return any usable clips. Try widening the clip duration range.");

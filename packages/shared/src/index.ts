@@ -27,6 +27,16 @@ export type RefineStep = (typeof REFINE_STEPS)[number];
 export type RefineStatus = Partial<Record<RefineStep, "queued" | "running" | "done" | "failed">>;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
+/**
+ * Why a project or clip failed, which decides whether Retry can help:
+ * - `platform`: the instance's fault (disk, model, encoder, a crash, a timeout). Retry after the fix.
+ * - `input`: the video, link or settings themselves (gone, private, no audio, nothing worth clipping). Retrying the
+ *   same thing fails the same way; the owner changes something first.
+ * - `quota`: the owner's plan or limits refused it. Retried on its own when their plan or limits change.
+ */
+export const FAILURE_CAUSES = ["platform", "input", "quota"] as const;
+export type FailureCause = (typeof FAILURE_CAUSES)[number];
+
 /** preparing = an AI job is writing metadata (and, for "manual-ai", choosing bounds) before render */
 export const CLIP_STATUSES = ["preparing", "pending", "rendering", "done", "failed"] as const;
 /** ai = found by analysis; manual = exact range picked by the user; manual-ai = AI picked the best clip inside a user selection */

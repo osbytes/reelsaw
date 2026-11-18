@@ -35,6 +35,7 @@ const EXPECTED = [
   "delete_project",
   "delete_projects",
   "delete_webhook",
+  "dismiss_failures",
   "export_decisions",
   "export_project",
   "forget_decisions",

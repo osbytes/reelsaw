@@ -7,7 +7,7 @@ import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
-import { errorKind, type StageContext } from "./common.js";
+import { errorKind, failedRow, type StageContext } from "./common.js";
 import { renderSource } from "./sections.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
@@ -1577,10 +1577,7 @@ export async function markClipFailed(
       .where(eq(schema.clips.id, clipId))
       .for("update");
     if (!cur || (gen !== undefined && cur.gen !== gen) || (o.ifStatus !== undefined && cur.status !== o.ifStatus)) return;
-    await u.db
-      .update(schema.clips)
-      .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
-      .where(eq(schema.clips.id, clipId));
+    await u.db.update(schema.clips).set(failedRow(err)).where(eq(schema.clips.id, clipId));
     await u.emit("clip.failed", { projectId: projectId, clipId, error: message.slice(0, 1000), errorKind: errorKind(err) });
     await finalizeInTx(svc, u, projectId);
   });

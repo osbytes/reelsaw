@@ -109,7 +109,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
 | `reelsaw queue [--json]` | waiting / running / retrying jobs per stage, plus what is in flight (same as Settings → System → Queue) |
 | `reelsaw failure <projectId\|clipId> [--json]` | one failed project or clip: owner, stage, the full recorded reason (same as clicking a row under Settings → System → Queue → Failed work) |
-| `reelsaw retry-failures [--stage s] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (same as Settings → System → Queue → Retry all matching) |
+| `reelsaw retry-failures [--stage s] [--cause platform\|input\|quota] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (platform failures unless --cause; same as Queue → Retry matching) |
+| `reelsaw dismiss-failures [--stage s] [--cause c] [--q text] [--since 24h] [--restore] [--json]` | clear failures nobody will retry from Failed work, or bring them back (same as Settings → System → Queue → Dismiss) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip <clipId>` | everything about one clip incl. render diagnostics |
@@ -550,6 +551,17 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   the server instructions point at `get_media_links`. A **403** on the download is never Reelsaw (it answers 401
   or 404): it is the client sandbox's egress allowlist, so the user allows the host in the client (Claude:
   Settings → Capabilities, code execution domain allowlist).
+- **Failed work has a cause** (2026-11-18): every project or clip that fails records `failure_cause` with its
+  status (`failedRow` in `pipeline/common.ts`, the only way a row becomes failed). `platform` is the instance's
+  fault (disk, model, encoder, timeout, a crash) and is worth a Retry after the fix; `input` is the video, link or
+  settings (a `NonRetryableError`: gone, private, no audio, no usable clips) and fails the same way again;
+  `quota` is the owner's plan (`QuotaExceededError`). Bulk retry by filter (Queue → Retry, `retry-failures`,
+  `retry_failures`) takes platform failures unless a cause is named. Plan refusals from the last 30 days are retried
+  on their own when the owner subscribes, changes plan, gets a complimentary plan or has their limits raised
+  (`retryRefusedWork` on `billing.*` and `user.limits_changed`); ingest checks the minutes again. Failures nobody
+  will retry are dismissed from the list (`dismiss-failures`, `dismiss_failures`), which leaves the owner's project
+  and its Retry alone; failing again lists it again. A new error a retry cannot fix should throw a
+  `NonRetryableError` so it is classed as input, not platform.
 
 ## 6. Lessons: UI
 

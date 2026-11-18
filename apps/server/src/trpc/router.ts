@@ -78,7 +78,7 @@ import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-sc
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
-import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
+import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
 import {
   CLEARABLE_SETTINGS,
@@ -1220,6 +1220,8 @@ const restRouter = router({
             .object({
               q: z.string().max(200).optional(),
               stage: z.enum(FAILURE_STAGES).optional(),
+              cause: z.enum(FAILURE_CAUSES).optional(),
+              dismissed: z.boolean().optional(),
               since: z.string().max(40).optional(),
               cursor: z.string().max(300).optional(),
               limit: z.number().int().min(1).max(50).optional(),
@@ -1236,6 +1238,7 @@ const restRouter = router({
             .object({
               q: z.string().max(200).optional(),
               stage: z.enum(FAILURE_STAGES).optional(),
+              cause: z.enum(FAILURE_CAUSES).optional(),
               since: z.string().max(40).optional(),
               ids: z
                 .array(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) }))
@@ -1248,9 +1251,35 @@ const restRouter = router({
         .mutation(({ ctx, input }) =>
           retryFailures(
             ctx.svc,
-            { q: input?.q, stage: input?.stage, since: input?.since },
+            { q: input?.q, stage: input?.stage, cause: input?.cause, since: input?.since },
             { id: ctx.user.id, email: ctx.user.email },
             { ids: input?.ids, limit: input?.limit },
+          ),
+        ),
+      /** Clear failures from this list (the owner's project is untouched); `restore` brings dismissed ones back. */
+      dismiss: adminProcedure
+        .input(
+          z
+            .object({
+              q: z.string().max(200).optional(),
+              stage: z.enum(FAILURE_STAGES).optional(),
+              cause: z.enum(FAILURE_CAUSES).optional(),
+              since: z.string().max(40).optional(),
+              ids: z
+                .array(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) }))
+                .max(50)
+                .optional(),
+              limit: z.number().int().min(1).max(50).optional(),
+              restore: z.boolean().optional(),
+            })
+            .optional(),
+        )
+        .mutation(({ ctx, input }) =>
+          dismissFailures(
+            ctx.svc,
+            { q: input?.q, stage: input?.stage, cause: input?.cause, since: input?.since },
+            { id: ctx.user.id, email: ctx.user.email },
+            { ids: input?.ids, limit: input?.limit, restore: input?.restore },
           ),
         ),
     }),

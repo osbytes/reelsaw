@@ -223,7 +223,7 @@ export class QuotaExceededError extends NonRetryableError {
     readonly quota?: QuotaRefusal,
     readonly props: RefusalProps = {},
   ) {
-    super(message);
+    super(message, "quota");
     this.name = "QuotaExceededError";
   }
 }
