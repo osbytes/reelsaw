@@ -99,10 +99,14 @@ export const SCENARIOS: Record<string, Spec> = {
   },
 };
 
-const WORDS =
-  "so the thing nobody tells you about shipping is that the last ten percent takes as long as the first ninety and that is fine because the last ten percent is where the product actually becomes something people want to use every single day".split(
-    " ",
-  );
+/** What the seeded transcript says, on repeat: a few sentences of sample speech, not a vocabulary. */
+const SCRIPT = [
+  "so the thing nobody tells you about shipping",
+  "is that the last ten percent takes as long as the first ninety",
+  "and that is fine because the last ten percent",
+  "is where the product actually becomes something people want to use every single day",
+];
+const WORDS = SCRIPT.join(" ").split(" ");
 
 /** Refuses anywhere but a local instance: it writes fake billing state and fake projects. */
 export function assertLocal(appUrl: string): void {
