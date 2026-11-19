@@ -1,5 +1,21 @@
 # @reelsaw/server
 
+## 0.43.0
+
+### Minor Changes
+
+- [#303](https://github.com/osbytes/reelsaw/pull/303) [`dd45d48`](https://github.com/osbytes/reelsaw/commit/dd45d48362b540ca59c1c95625e0b2ef452bf872) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Cancelling a plan is clearer about what happens next. The Billing page shows the day the plan ends, also when the cancellation was set for a date in Stripe rather than the end of the period, and lists the Free limits the account will be over then (storage, projects, this month's minutes) with what each will refuse. The same list is in `get_billing` (`afterCancel`) and in a "your plan ends on …" mail sent when the cancellation is scheduled; a second mail says when the account has moved to Free. The `billing.canceled` event now fires once, when the subscription ends; scheduling a cancellation is `billing.cancel_scheduled`, and taking it back is `billing.cancel_undone`.
+  
+  Counts, sizes and dates read the same everywhere: the CLI, MCP answers and the app say "1 clip" and "3 clips" instead of "clip(s)", and sizes use one format (binary units, so a model download shows 4.4 GB where it used to show 4.7 GB).
+
+### Patch Changes
+
+- [#301](https://github.com/osbytes/reelsaw/pull/301) [`0fcb639`](https://github.com/osbytes/reelsaw/commit/0fcb639b51e567512c02979f5121f1545668541c) Thanks [@WaveHost77](https://github.com/WaveHost77)! - Direct links to a video file (a plain `.mp4` URL) download again instead of being refused as a live stream. Live and not-yet-started streams are still refused.
+
+- [#305](https://github.com/osbytes/reelsaw/pull/305) [`9eddc3b`](https://github.com/osbytes/reelsaw/commit/9eddc3b47f236beee22845a6fb133ca8501d6484) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Errors thrown by browser extensions (wallets, password managers) no longer reach the app's error reports.
+
+- [#306](https://github.com/osbytes/reelsaw/pull/306) [`8cd789e`](https://github.com/osbytes/reelsaw/commit/8cd789ee02b491548468ba7a66727486b0380b62) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `LLM_TRACE=langfuse` sends traces again: Langfuse Cloud stopped accepting traces from the old SDK, so model calls and decision scores now go through Langfuse's current OpenTelemetry SDK. A self-hosted Langfuse needs version 4.59.0 or later.
+
 ## 0.42.0
 
 ### Minor Changes
