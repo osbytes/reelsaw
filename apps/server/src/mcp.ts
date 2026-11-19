@@ -626,6 +626,12 @@ export function createMcpServer(
 
   server.registerTool("manage_signup_rules", TOOLS.manage_signup_rules, (input) => run(() => api.admin.signupRules.change(input)));
 
+  server.registerTool("list_fonts", TOOLS.list_fonts, () => run(() => api.fonts.list()));
+
+  server.registerTool("add_font", TOOLS.add_font, (input) => run(() => api.admin.fonts.add(input)));
+
+  server.registerTool("remove_fonts", TOOLS.remove_fonts, (input) => run(() => api.admin.fonts.remove(input)));
+
   server.registerTool("set_instance_settings", TOOLS.set_instance_settings, (input) => run(() => api.admin.settings.set(input)));
 
   server.registerTool("get_billing", TOOLS.get_billing, () => run(() => api.billing.get()));

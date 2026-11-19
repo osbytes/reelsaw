@@ -201,6 +201,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules
  *                                           and list_signup_rules / manage_signup_rules); hold = needs approval
  *                                           without saying why; rm takes ids or their first 8 characters
+ *   fonts [list | add <file> | rm <family|id…>]
+ *                                           fonts for captions, hooks and text layers (same as Settings → System →
+ *                                           Captions and list_fonts / add_font / remove_fonts); add reads a .ttf, .otf,
+ *                                           .woff or .woff2 inside the container (docker compose cp it in first)
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
  *                                           hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its
  *                                           last webhook events; `sync` re-reads Stripe for one account or every
@@ -242,6 +246,7 @@ import { summarizeQueue } from "./ops/queue.js";
 import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures, type FailureFilter } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { changeSignupRules, listSignupRules } from "./signup-rules.js";
+import { addFont, listFonts, removeFonts } from "./fonts.js";
 import { SIGNUP_RULE_ACTIONS, SIGNUP_RULE_KINDS } from "./signup-rules-schema.js";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -1273,6 +1278,45 @@ ${usage}`);
             .map(([k, v]) => `${k} = ${v}`)
             .join("; "),
       );
+  },
+  fonts: async (svc) => {
+    const usage = "usage: reelsaw fonts [list] | add <file> | rm <family|id…>";
+    const sub = pos[0] ?? "list";
+    const cli = { id: "cli", email: "cli" };
+    if (sub === "add") {
+      if (!pos[1]) throw new Error(usage);
+      const f = await addFont(svc, cli, { file: pos[1], filename: pos[1].split(/[\/]/).pop()! });
+      console.log(`added ${f.id!.slice(0, 8)}  ${f.family}`);
+      return;
+    }
+    const { fonts, defaultFamily } = await listFonts(svc, { admin: true });
+    if (sub === "rm") {
+      if (pos.length < 2) throw new Error(usage);
+      const uploaded = fonts.filter((f) => !f.builtin);
+      const ids = pos.slice(1).map((want) => {
+        const hit = uploaded.filter((f) => f.id === want || f.family.toLowerCase() === want.toLowerCase() || (want.length >= 8 && f.id!.startsWith(want)));
+        if (hit.length !== 1)
+          throw new Error(
+            hit.length ? `${want} matches more than one font; give more of the id` : `no uploaded font ${want} (built-in fonts cannot be removed)`,
+          );
+        return hit[0]!.id!;
+      });
+      const r = await removeFonts(svc, cli, ids);
+      for (const x of r.removed) console.log(`removed ${x.id.slice(0, 8)}  ${x.family}`);
+      return;
+    }
+    if (sub !== "list") throw new Error(usage);
+    if (args.includes("--json")) return void console.log(JSON.stringify(fonts, null, 2));
+    table(
+      fonts.map((f) => ({
+        id: f.id?.slice(0, 8) ?? "",
+        family: f.family,
+        source: f.builtin ? "built in" : "uploaded",
+        size: f.sizeBytes ? `${Math.ceil(f.sizeBytes / 1024)} KB` : "",
+        added: f.createdAt?.slice(0, 10) ?? "",
+        default: f.family === defaultFamily ? "CAPTION_FONT" : "",
+      })),
+    );
   },
   ["signup-rules"]: async (svc) => {
     const usage = `usage: reelsaw signup-rules [list] | add <${SIGNUP_RULE_KINDS.join("|")}> <pattern> <${SIGNUP_RULE_ACTIONS.join("|")}> [--note text] | rm <id…> | test <email> [--ip addr]`;
@@ -2912,7 +2956,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

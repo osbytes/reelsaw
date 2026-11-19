@@ -76,6 +76,7 @@ import { flagCounts, listUsers, userGroups } from "../accounts-list.js";
 import { bulkUsersInput, userGroupsInput, userListInput } from "../accounts-schema.js";
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
+import { addFontFromUpload, listFonts, removeFonts } from "../fonts.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures } from "../ops/failures.js";
@@ -913,6 +914,13 @@ const libraryRouter = router({
 });
 
 const restRouter = router({
+  /**
+   * Fonts for captions, hooks and text layers (fonts.ts): any account lists them for its pickers; admins add and remove
+   * the uploaded ones (`admin.fonts`). The same code serves `list_fonts` / `add_font` / `remove_fonts` and `reelsaw fonts`.
+   */
+  fonts: router({
+    list: protectedProcedure.query(({ ctx }) => listFonts(ctx.svc, { admin: ctx.user.role === "admin" })),
+  }),
   /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
   catalog: router({
     status: adminProcedure.query(async ({ ctx }) => ({
@@ -992,6 +1000,14 @@ const restRouter = router({
      * Sign-up rules (signup-rules.ts): hold, block or allow sign-ups by address, email, domain or abuse flag. The
      * same code serves `list_signup_rules` / `manage_signup_rules` and `reelsaw signup-rules`.
      */
+    fonts: router({
+      add: adminProcedure
+        .input(z.object({ uploadId: z.string().min(1).max(100) }))
+        .mutation(({ ctx, input }) => addFontFromUpload(ctx.svc, { id: ctx.user.id, email: ctx.user.email }, input.uploadId)),
+      remove: adminProcedure
+        .input(z.object({ ids: z.array(z.string().min(1).max(100)).min(1).max(50) }))
+        .mutation(({ ctx, input }) => removeFonts(ctx.svc, { id: ctx.user.id, email: ctx.user.email }, input.ids)),
+    }),
     signupRules: router({
       list: adminProcedure.input(listSignupRulesInput.optional()).query(({ ctx, input }) => listSignupRules(ctx.svc, input)),
       change: adminProcedure

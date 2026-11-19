@@ -76,7 +76,7 @@ import {
 import { ApplyTemplateDialog, SaveAsTemplateDialog, applyTemplateLocally, existingOnClip } from "./TemplatePicker";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
-import { loadTextFonts } from "../lib/fonts";
+import { fontOptions, useFonts } from "../lib/fonts";
 import { z } from "zod";
 import { ThemeToggle } from "../App";
 import { HeaderAlerts } from "./HeaderAlerts";
@@ -107,7 +107,6 @@ import {
   clipLayers,
   clipLayerSchema,
   isVisualLayer,
-  TEXT_FONTS,
   type AssetLayer,
   type AudioLayer,
   type TextLayer,
@@ -451,6 +450,7 @@ function LayerCard({
   onPatch: (patch: LayerPatch, key?: string) => void;
   onRemove: () => void;
 }) {
+  const fonts = useFonts();
   const min = layerMin(l);
   const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
@@ -549,9 +549,9 @@ function LayerCard({
             <Select
               size="sm"
               ariaLabel="Text font"
-              value={l.font ?? TEXT_FONTS[0].family}
-              onValueChange={(v) => onPatch({ font: v === TEXT_FONTS[0].family ? undefined : v })}
-              options={TEXT_FONTS.map((f) => ({ value: f.family, label: f.label }))}
+              value={l.font ?? ""}
+              onValueChange={(v) => onPatch({ font: v || undefined })}
+              options={[{ value: "", label: "Caption font" }, ...fontOptions(fonts.fonts)]}
             />
           </Field>
           <Field label="Colour">
@@ -764,8 +764,6 @@ export function ClipEditor(props: Props) {
   const [applyAll, setApplyAll] = useState<number | null>(null);
   const [selectedLayer, setSelectedLayerRaw] = useState<string | null>(null);
   const [selectedBumper, setSelectedBumperRaw] = useState<BumperSlot | null>(null);
-  // the text-overlay fonts, from the server image, so the preview shows the real faces
-  useEffect(() => loadTextFonts(), []);
   // selecting a block on the timeline brings its card into view in the Layers pane (after a tab switch renders it)
   useEffect(() => {
     if (!selectedLayer) return;
@@ -803,6 +801,7 @@ export function ClipEditor(props: Props) {
   const rememberPick = (a: PickedAsset) => setImported((prev) => (prev.some((x) => x.id === a.id) ? prev : [...prev, layerAssetFromPick(a)]));
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) =>
     history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
+  const fonts = useFonts();
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
   const [selected, setSelectedRaw] = useState<number | null>(null);
   // one selection at a time: a section, a layer or an intro/outro block
@@ -1618,7 +1617,7 @@ export function ClipEditor(props: Props) {
               Number((l.size ?? TEXT_OVERLAY_DEFAULTS.size).toFixed(3)),
               (l.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(),
               !!l.box,
-              l.font ?? TEXT_FONTS[0].family,
+              l.font ?? "",
             ];
           return [...base, l.assetId, ...shared, Number((l.w ?? ASSET_OVERLAY_DEFAULT_W).toFixed(3)), l.loop ?? null];
         }),
@@ -1954,6 +1953,22 @@ export function ClipEditor(props: Props) {
       </Field>
       {style.captions !== "none" && (
         <>
+          <Field label="Font" hint={<span>captions and hook</span>}>
+            <Select
+              ariaLabel="Caption font"
+              // "" is what the clip falls back to: for one clip the project's font (a null override would resolve to it
+              // anyway), for the whole project the instance's
+              value={(styleScope === "clip" ? (style.font ?? null) === (projectStyle.font ?? null) : !style.font) ? "" : (style.font ?? "")}
+              onValueChange={(v) => setStyle({ font: v || (styleScope === "clip" ? (projectStyle.font ?? null) : null) })}
+              options={[
+                {
+                  value: "",
+                  label: styleScope === "clip" ? `Project's font (${projectStyle.font ?? fonts.defaultFamily})` : `Default (${fonts.defaultFamily})`,
+                },
+                ...fontOptions(fonts.fonts),
+              ]}
+            />
+          </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Size">
               <Segmented
