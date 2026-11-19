@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
-import { ffmpegPipeThreads } from "../media.js";
+import { rgbFramesToPipe } from "../media.js";
 import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
@@ -123,7 +123,6 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       "-loglevel",
       "error",
       "-nostdin",
-      ...ffmpegPipeThreads,
       "-ss",
       opts.startSec.toFixed(3),
       "-t",
@@ -132,11 +131,7 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       opts.source,
       "-vf",
       `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`,
-      "-f",
-      "rawvideo",
-      "-pix_fmt",
-      "rgb24",
-      "pipe:1",
+      ...rgbFramesToPipe,
     ],
     { signal: opts.signal, stdio: ["ignore", "pipe", "pipe"] },
   );

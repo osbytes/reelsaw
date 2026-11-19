@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyYtdlpError, fatalYtdlpLine, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../src/ytdlp-errors.js";
+import { classifyYtdlpError, fatalYtdlpLine, isDownloadBlocked, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../src/ytdlp-errors.js";
 
 const PAGE_404 = "ERROR: [generic] zapier-logo: Unable to download webpage: HTTP Error 404: Not Found (caused by <HTTPError 404: Not Found>)";
 
@@ -54,5 +54,19 @@ describe("largestReportedFile", () => {
   it("is the biggest part yt-dlp reports", () => {
     assert.equal(largestReportedFile({ requested_formats: [{ filesize: 10 }, { filesize_approx: 30 }], filesize_approx: 20 }), 30);
     assert.equal(largestReportedFile({ title: "x" }), null);
+  });
+});
+
+describe("isDownloadBlocked", () => {
+  it("a bot check or a refused page on the fatal line is a block", () => {
+    assert.ok(isDownloadBlocked("ERROR: [youtube] abc: Sign in to confirm you're not a bot"));
+    assert.ok(isDownloadBlocked("ERROR: [youtube] abc: Unable to download API page: HTTP Error 403: Forbidden"));
+  });
+
+  it("a rate limit, a 403 on the media URL, a retried 403 or a removed video is not", () => {
+    assert.ok(!isDownloadBlocked("ERROR: HTTP Error 429: Too Many Requests"));
+    assert.ok(!isDownloadBlocked("ERROR: unable to download video data: HTTP Error 403: Forbidden"));
+    assert.ok(!isDownloadBlocked("[download] Got error: HTTP Error 403: Forbidden. Retrying (1/10)...\nERROR: Read timed out"));
+    assert.ok(!isDownloadBlocked("ERROR: [youtube] abc: Video unavailable. This video has been removed by the uploader"));
   });
 });

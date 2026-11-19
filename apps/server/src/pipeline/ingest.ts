@@ -13,7 +13,7 @@ import { type StageContext, DownloadFailedError, NonRetryableError, SourceUnavai
 import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 import { CommandError } from "../media.js";
-import { isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
+import { BOT_CHECK, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
 
 export { isPermanentDownloadFailure } from "../ytdlp-errors.js";
 
@@ -81,8 +81,9 @@ export async function ingest(ctx: StageContext) {
       let stderrTail = "";
       let info: Record<string, unknown> | undefined;
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
+      let jsonLine: string | undefined; // --print-json's info line; stdout itself is not kept (progress has no size bound)
       const t0 = performance.now();
-      const { stdout, proxyId } = await svc.media
+      const { proxyId } = await svc.media
         .ytdlp(
           [
             "--no-playlist",
@@ -112,6 +113,7 @@ export async function ingest(ctx: StageContext) {
               stderrTail = (stderrTail + "\n" + line).slice(-4000);
             },
             onStdout: (line) => {
+              if (line.trimStart().startsWith("{")) jsonLine = line;
               const tick = parseDownloadTick(line);
               if (!tick) return;
               downloaded = Math.max(downloaded, tick.fraction);
@@ -126,10 +128,6 @@ export async function ingest(ctx: StageContext) {
           throw new DownloadFailedError(message);
         });
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
-      const jsonLine = stdout
-        .split("\n")
-        .reverse()
-        .find((l) => l.trim().startsWith("{"));
       if (jsonLine) {
         info = JSON.parse(jsonLine) as Record<string, unknown>;
         meta = {
@@ -338,7 +336,7 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
   if (/Tunnel connection failed|ProxyError|407\s*NO_USER|Unable to connect to proxy/i.test(text)) {
     return "Could not download: a network proxy blocked the connection. Try uploading the file instead (New project → Upload).";
   }
-  if (/sign in to confirm|not a bot|HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
+  if (BOT_CHECK.test(text) || /HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
     const why = /private/i.test(text)
       ? "the video is private"
       : /unavailable/i.test(text)

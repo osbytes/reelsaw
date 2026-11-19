@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import type { FaceDetector, FaceBox } from "../vision/faces.js";
 import { FACE_INPUT_W, FACE_INPUT_H } from "../vision/faces.js";
-import { ffmpegPipeThreads } from "../media.js";
+import { rgbFramesToPipe } from "../media.js";
 import { VAD_FRAME_SEC } from "../audio/vad.js";
 
 const W = FACE_INPUT_W * 2; // decode at 640×480: detector gets a 2× downscale, mouths keep detail
@@ -107,7 +107,6 @@ export async function activeSpeakers(
       "-loglevel",
       "error",
       "-nostdin",
-      ...ffmpegPipeThreads,
       "-ss",
       start.toFixed(3),
       "-t",
@@ -116,11 +115,7 @@ export async function activeSpeakers(
       source,
       "-vf",
       `fps=${fps},scale=${W}:${H}`,
-      "-f",
-      "rawvideo",
-      "-pix_fmt",
-      "rgb24",
-      "pipe:1",
+      ...rgbFramesToPipe,
     ],
     { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] },
   );
