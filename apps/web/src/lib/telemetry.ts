@@ -63,6 +63,12 @@ export function isForeignDomMutation(err: unknown): boolean {
   return /Failed to execute '(removeChild|insertBefore)' on 'Node'/.test(err.message);
 }
 
+/**
+ * Scripts a browser extension injects into the page (wallets, password managers, ad blockers). An error thrown from
+ * one of them reaches the page's global handler like ours do, but there is nothing of ours to fix.
+ */
+export const EXTENSION_SCRIPT_URLS = [/^(chrome|moz|safari(-web)?|ms-browser)-extension:\/\//i];
+
 export function initTelemetry(t: Public | null | undefined): Promise<void> {
   if (started || !t || (!t.sentry && !t.posthog)) return started ?? Promise.resolve();
   started = (async () => {
@@ -78,6 +84,8 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
         tracesSampleRate: 0,
         // the user id is set by identify(); nothing inferred (the IP address) is ours to keep
         dataCollection: { userInfo: false },
+        // an error whose throwing frame is an extension's script, not the app's
+        denyUrls: EXTENSION_SCRIPT_URLS,
         beforeSend: (event, hint) => (isExpectedClientError(hint.originalException) || isForeignDomMutation(hint.originalException) ? null : event),
         // replay only around an error, every word and image masked (SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE, default off)
         ...(replays > 0
