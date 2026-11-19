@@ -200,3 +200,11 @@ describe("createInstanceSettings", () => {
     assert.equal(b.get().ALLOW_PRIVATE_SOURCE_URLS, true);
   });
 });
+
+describe("watermark text", () => {
+  it("may be cleared at runtime for a logo-only watermark, and stays empty rather than going back to .env", () => {
+    assert.equal(settingsPatchSchema.safeParse({ WATERMARK_TEXT: "" }).success, true);
+    const s = resolveSettings({ WATERMARK_TEXT: "reelsaw.com" } as unknown as Config, { WATERMARK_TEXT: "" });
+    assert.equal(s.WATERMARK_TEXT, "");
+  });
+});

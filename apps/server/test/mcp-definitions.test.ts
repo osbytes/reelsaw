@@ -15,6 +15,7 @@ import { INSTRUCTIONS, TOOL_NAMES } from "../src/mcp-tools.js";
 
 const EXPECTED = [
   "add_asset",
+  "add_font",
   "add_transcript_correction",
   "add_transcript_cut",
   "apply_framing",
@@ -56,6 +57,7 @@ const EXPECTED = [
   "list_decisions",
   "list_deleted",
   "list_failures",
+  "list_fonts",
   "list_layer_templates",
   "list_media_links",
   "list_projects",
@@ -74,6 +76,7 @@ const EXPECTED = [
   "purge_project",
   "reanalyze_project",
   "refine_project",
+  "remove_fonts",
   "report_issue",
   "rerender_clip",
   "rerender_clips",

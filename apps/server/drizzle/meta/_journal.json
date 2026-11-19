@@ -435,6 +435,13 @@
       "when": 1795040839857,
       "tag": "0061_billing_cancel_at",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795101663926,
+      "tag": "0062_fonts",
+      "breakpoints": true
     }
   ]
 }

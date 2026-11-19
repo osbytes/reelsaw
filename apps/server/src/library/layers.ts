@@ -8,7 +8,6 @@ import {
   ASSET_OVERLAY_DEFAULT_W,
   CLIP_AUDIO_DEFAULTS,
   MAX_CLIP_LAYERS,
-  TEXT_FONTS,
   TEXT_OVERLAY_DEFAULTS,
   layersToLegacy,
   overlayKind,
@@ -49,7 +48,9 @@ export function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: Clip
         size: r3(o.size ?? TEXT_OVERLAY_DEFAULTS.size),
         color: (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(),
         ...(o.box ? { box: true } : {}),
-        ...(o.font && o.font !== TEXT_FONTS[0].family ? { font: o.font } : {}),
+        // absent = the clip's caption font; a named one is kept even when it is today's default, so changing the
+        // caption font later does not change a text the user set in a particular face
+        ...(o.font ? { font: o.font } : {}),
       });
     else out.push({ ...base, assetId: o.assetId!, w: r3(o.w ?? ASSET_OVERLAY_DEFAULT_W) });
   }

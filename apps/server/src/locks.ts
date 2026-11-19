@@ -33,6 +33,8 @@ export const txLock = {
   retry: (projectId: string) => `retry:${projectId}`,
   /** the instance's sign-up rules, counted against MAX_SIGNUP_RULES when some are added (signup-rules.ts) */
   signupRules: () => "signup-rules",
+  /** the instance's uploaded fonts: one family name at a time, so two uploads of the same family cannot both land (fonts.ts) */
+  fonts: () => "fonts",
   /** one word-timestamp test transcription of a model at a time, instance-wide (ai/word-timestamps.ts) */
   transcriptionProbe: (verdictKey: string) => `transcription-probe:${verdictKey}`,
 } as const;

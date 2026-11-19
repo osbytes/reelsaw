@@ -30,7 +30,6 @@ import {
   LAYER_TIMING_LABEL,
   TEMPLATE_PREVIEW_SECONDS,
   DEFAULT_TEMPLATE_PREVIEW_SEC,
-  TEXT_FONTS,
   audioLayerDefaultsFor,
   assetLayerDefaultsFor,
   defaultStyle,
@@ -55,7 +54,7 @@ import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
 import { useShortcut, useShortcuts, useSheetKey, MOD } from "../lib/shortcuts";
 import { useLeaveGuard, useUnsavedFlag } from "../lib/unsaved";
-import { loadTextFonts } from "../lib/fonts";
+import { fontOptions, useFonts } from "../lib/fonts";
 import { ScrollArea } from "./scroll-area";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, type Framing, type PreviewAssetOverlay } from "./VerticalPreview";
 import { Timeline, type EditorSection, type LayerBlock } from "./Timeline";
@@ -462,6 +461,7 @@ function TemplateLayerCard({
   onPatch: (patch: TemplatePatch, key?: string) => void;
   onRemove: () => void;
 }) {
+  const fonts = useFonts();
   const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
@@ -554,9 +554,9 @@ function TemplateLayerCard({
             <Select
               size="sm"
               ariaLabel="Text font"
-              value={l.font ?? TEXT_FONTS[0].family}
-              onValueChange={(v) => onPatch({ font: v === TEXT_FONTS[0].family ? undefined : v })}
-              options={TEXT_FONTS.map((f) => ({ value: f.family, label: f.label }))}
+              value={l.font ?? ""}
+              onValueChange={(v) => onPatch({ font: v || undefined })}
+              options={[{ value: "", label: "Caption font" }, ...fontOptions(fonts.fonts)]}
             />
           </Field>
           <Field label="Colour">
@@ -724,7 +724,6 @@ export function TemplateEditor({ template, onExit }: Props) {
   const [keysOpen, setKeysOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
   const clock = useMemo(() => createClock(0), []);
-  useEffect(() => loadTextFonts(), []);
   useEffect(() => {
     if (selectedLayer && !layers.some((l) => l.id === selectedLayer)) setSelectedLayer(null);
   }, [layers, selectedLayer]);

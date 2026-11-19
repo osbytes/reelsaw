@@ -35,6 +35,8 @@ export const ACCOUNT_EVENT_TYPES = [
   "settings.changed",
   /** sign-up rules added or removed (signup-rules.ts), recorded against the admin who did it */
   "signup_rules.changed",
+  /** an admin uploaded or removed fonts (fonts.ts), recorded against the admin who did it */
+  "fonts.changed",
   "failures.retried",
   /** an admin cleared failures from Failed work, or brought dismissed ones back (ops/failures.ts) */
   "failures.dismissed",
@@ -84,6 +86,7 @@ const accountEventSchemas = {
   "provider.changed": loose,
   "settings.changed": loose,
   "signup_rules.changed": loose,
+  "fonts.changed": loose,
   "failures.retried": loose,
   "failures.dismissed": loose,
   "billing.subscribed": loose,

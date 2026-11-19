@@ -23,7 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
-import { FAILURE_CAUSES, emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
+import { FAILURE_CAUSES, FONT_FILE_EXTS, MAX_FONT_BYTES, emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { BULK_USERS, bulkUsersShape, userListToolInput } from "./accounts-schema.js";
 import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
@@ -34,7 +34,7 @@ Workflow: (check_source when the account may have a minutes limit) → create_pr
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
-- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look and fades for every clip, re-renders), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
+- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look, font and fades for every clip, re-renders; fonts from list_fonts), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped; retry_projects for several) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project) vs rerender_projects (every clip of several projects)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
@@ -56,6 +56,7 @@ const projectDefaultsInput = z
     maxClipSeconds: projectDefaultsShape.maxClipSeconds.describe("Longest clip, seconds (10-300)"),
     maxClips: projectDefaultsShape.maxClips.describe("Most clips to pick (1-50)"),
     highlightColor: projectDefaultsShape.highlightColor.describe("Caption highlight color, #rrggbb"),
+    font: projectDefaultsShape.font.describe("Caption and hook font, a family from list_fonts"),
     wordsPerLine: projectDefaultsShape.wordsPerLine.describe("Caption words per line (1-8)"),
     uppercase: projectDefaultsShape.uppercase.describe("Upper-case captions"),
     refineEntities: projectDefaultsShape.refineEntities.describe("Fix misheard names"),
@@ -926,6 +927,25 @@ export const TOOLS = {
     inputSchema: manageSignupRulesShape,
     annotations: { destructiveHint: true },
   },
+  list_fonts: {
+    title: "List fonts",
+    description:
+      "The fonts captions, hooks and text layers can use: built in, or uploaded by an admin. defaultFamily is what a style without its own font uses (CAPTION_FONT). Set one with update_project_style or update_clip { style: { font } } (null = defaultFamily), a text layer's font, or set_project_defaults { font }. Returns { defaultFamily, fonts: [{ family, label, builtin, id, filename, sizeBytes, createdAt, createdBy }] }.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  add_font: {
+    title: "Add a font",
+    description: `Admins only: turn an upload (POST /api/upload with the file; ${FONT_FILE_EXTS.join(", ")}, up to ${MAX_FONT_BYTES / 1048576} MB) into a font every account can pick. The family is read from the file, and a file the renderer cannot draw is refused, as is a family already installed (remove_fonts it first to replace it). Returns the font as list_fonts shows it.`,
+    inputSchema: { uploadId: z.string().min(1).max(100).describe("The upload holding the font file") },
+  },
+  remove_fonts: {
+    title: "Remove fonts",
+    description:
+      "Admins only: remove uploaded fonts for good (ids from list_fonts; built-in fonts cannot be removed). Projects, clips and text layers that use one keep its name and render with the instance caption font from their next render; clips already rendered keep the font they have. Returns { removed: [{ id, family }] }.",
+    inputSchema: { ids: z.array(z.string().min(1).max(100)).min(1).max(50).describe("Font ids from list_fonts") },
+    annotations: { destructiveHint: true },
+  },
   set_instance_settings: {
     title: "Change instance settings",
     description:
@@ -1049,7 +1069,7 @@ export const TOOLS = {
   update_project_style: {
     title: "Update project style",
     description:
-      "Change the caption/hook look and fades for the whole project (colors, size, position, words per line, fadeIn/fadeOut, intro/outro bumperTransition). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
+      "Change the caption/hook look and fades for the whole project (font from list_fonts, colors, size, position, words per line, fadeIn/fadeOut, intro/outro bumperTransition). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
     inputSchema: {
       id: projectId(),
       style: styleOverrideSchema.describe("The style fields to change; fields left out keep their value"),

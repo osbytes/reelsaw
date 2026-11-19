@@ -20,7 +20,10 @@ export interface CaptionOptions {
   watermarkUnderLogo?: boolean;
   width: number;
   height: number;
+  /** captions, hooks and text layers without their own font (fonts.ts `pickFont`: clip, project, instance) */
   font: string;
+  /** the watermark's font: the instance caption font, whatever the clip picked; absent = `font` */
+  watermarkFont?: string;
   style: Style;
   /** Hook text; omitted or style.showHook=false → no hook. */
   hook?: string;
@@ -49,7 +52,7 @@ export interface TextOverlayEvent {
   opacity: number;
   /** seconds it fades in and out (ASS `\fad`); absent = appears and goes at once */
   fade?: number;
-  /** font family (TEXT_FONTS); absent = the caption font */
+  /** font family (fonts.ts, already resolved to an available one); absent = the caption font */
   font?: string;
 }
 
@@ -162,7 +165,7 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${captionStyle}
 Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,1
-Style: Watermark,${font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,1
+Style: Watermark,${opts.watermarkFont ?? font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,1
 Style: Text,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,1
 Style: TextBox,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,1
 
