@@ -1,5 +1,33 @@
 # @reelsaw/server
 
+## 0.44.0
+
+### Minor Changes
+
+- [#307](https://github.com/osbytes/reelsaw/pull/307) [`303f119`](https://github.com/osbytes/reelsaw/commit/303f119cd6a0acfd40ca2715e72f13370befc7ff) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Pick the caption font in the app. The editor's Style tab has a Font picker for captions and the hook, for one clip or the whole project, and Project defaults has one for new projects. Admins set the instance's default font under Settings → System → Captions without a restart (`CAPTION_FONT` is now a runtime setting) and can upload `.ttf`, `.otf`, `.woff` or `.woff2` files there, which every account can then pick for captions, hooks and text layers. The watermark always uses the instance's font. A font that is no longer available falls back to the instance font and then DejaVu Sans. The same works through `list_fonts`, `add_font`, `remove_fonts`, `style.font` on `update_project_style` / `update_clip` / `set_project_defaults`, and `reelsaw fonts`.
+
+### Patch Changes
+
+- [#308](https://github.com/osbytes/reelsaw/pull/308) [`2d70bc3`](https://github.com/osbytes/reelsaw/commit/2d70bc3e706b24a06f19d40d395a88e1eb3dc0da) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Polish from a walk through the whole app. Browser tabs now name the page ("Budgeting talk · Reelsaw"), so several
+  open projects can be told apart. While a project is still running, its header no longer shows a green "Transcript
+  updated" as if it were done; it keeps showing the stage at work. The ⌘K palette shows each project's current status
+  instead of one from up to half a minute ago. Deleting a clip happens at once with Undo (the editor still asks when
+  unsaved edits would be lost), and Undo puts it back under its own number instead of at the end. Deep links into
+  Settings highlight the right section, sideways-scrolling tab rows fade at the edge that has more, opening a project
+  or the editor shows one loading skeleton instead of two, and "Resume following" on the transcript only appears when
+  the playhead's line is off screen.
+  
+  Also: uploaded videos get a poster frame on the project page and its tile; ⌘K ranks a match in an action's name above
+  one in its description and, on a project page, offers that project's actions first; a re-render of one clip reports
+  "Re-rendered 1 clip in 0:25 · 3 ready"; deleting a selection of clips uses Undo instead of a dialog; empty lists show
+  one "New …" button; list counts read "3 projects" instead of "Showing 3 of 3"; the clip menu is grouped; the editor's
+  Cuts tab links to the clip's words in the transcript; the transcript toolbar no longer grows a row when the first fix
+  lands; buttons show a spinner instead of "…" while they work. The first ⌘K open shows its box at once (a quick second click used to close it again),
+  a project whose clips were all deleted says so and offers to restore them, and the transcript's selection bar no
+  longer hangs off the panel's edge.
+
+- [#307](https://github.com/osbytes/reelsaw/pull/307) [`4ff416b`](https://github.com/osbytes/reelsaw/commit/4ff416b59b34c4a7e010b8348ad97ed8199ff032) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The watermark text can be left empty for a logo-only watermark: clear Watermark text under Settings → System → Limits (or `reelsaw settings set WATERMARK_TEXT=`).
+
 ## 0.43.0
 
 ### Minor Changes
