@@ -103,6 +103,7 @@ const EXPECTED = [
   "set_project_bumpers",
   "set_project_defaults",
   "set_project_source_text",
+  "set_user_queue_priority",
   "test_model",
   "test_webhook",
   "update_asset",

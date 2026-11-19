@@ -562,7 +562,7 @@ export const COMPETITORS: Competitor[] = [
           name: "Reelsaw hosted (app.reelsaw.com)",
           price: "Free, then $12, $29 or $59/mo",
           includes:
-            "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. No watermark on paid plans; yearly is two months free",
+            "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and the top of the queue. Paid plans start jobs ahead of Free. No watermark on paid plans; yearly is two months free",
         },
         {
           name: "OpenShorts self-hosted",

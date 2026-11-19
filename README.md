@@ -511,7 +511,7 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 
 **Key permissions.** A key acts as you, with one exception: the instance-administration tools
 (`get_instance_settings`, `set_instance_settings`, `list_workers`, `get_queue`, `list_failures`,
-`get_failure`, `retry_failures`, `dismiss_failures`, `list_users`, `manage_users`, `check_for_update`, and instance-wide
+`get_failure`, `retry_failures`, `dismiss_failures`, `list_users`, `manage_users`, `set_user_queue_priority`, `check_for_update`, and instance-wide
 `report_issue`) need a key
 created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
 Settings. Keys are created without it by default, and a key that lacks it is refused with "This
@@ -629,12 +629,13 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `test_model` | Admins only: check that a model id works on this instance with one real call (same as Test under Settings → Models). |
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
-| `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
+| `get_queue` | Admins only: how much work is queued and how fast it is picked up. |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, cause, reason, when); retryable = Retry can help (platform causes only). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
 | `dismiss_failures` | Admins only: clear failures nobody will retry (a bad link, no audio) from list_failures. |
 | `list_users` | Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. |
 | `manage_users` | Admins only: approve, hold, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). |
+| `set_user_queue_priority` | Admins only: move one account's jobs ahead of (or behind) others. |
 | `list_signup_rules` | Admins only: the sign-up rules in front of SIGNUP_MODE, oldest first (at most 500). |
 | `manage_signup_rules` | Admins only: add and remove sign-up rules in one call (ids from list_signup_rules). |
 | `list_fonts` | The fonts captions, hooks and text layers can use: built in, or uploaded by an admin. |
@@ -726,7 +727,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
-| `reelsaw queue [--json]` | waiting / running / retrying jobs per stage, plus what is in flight (same as Settings → System → Queue) |
+| `reelsaw queue [--json]` | waiting / running / retrying jobs per stage with pickup times (median and 95th percentile wait, last hour), queued work by account with its queue priority, plus what is in flight in pickup order (same as Settings → System → Queue) |
 | `reelsaw failure <projectId\|clipId> [--json]` | one failed project or clip: owner, stage, the full recorded reason (same as clicking a row under Settings → System → Queue → Failed work) |
 | `reelsaw retry-failures [--stage s] [--cause platform\|input\|quota] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (platform failures unless --cause; same as Queue → Retry matching) |
 | `reelsaw dismiss-failures [--stage s] [--cause c] [--q text] [--since 24h] [--restore] [--json]` | clear failures nobody will retry from Failed work, or bring them back (same as Settings → System → Queue → Dismiss) |
@@ -758,7 +759,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> [--layers '<json array>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative), plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it sets replaces the clip's either way); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
-| `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
+| `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits); --priority sets the account's queue priority (-20..20, follow = the plan) |
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
@@ -786,6 +787,7 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | Framing | `auto` (face detection decides), then the project's `reframe` with its `reframeAdjust` (a nudge, subject or crop; `apply_framing` sets both from one clip), then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i]`, mode and adjustment). |
 | Quotas | `.env` `MAX_*` (0 = unlimited), then the instance setting an admin saved under Settings → System → Limits, then what the account's plan grants (hosted, `REELSAW_EE`), then a per-user limit set on the Users page. The Users page says which applies. |
 | Watermark | An admin's per-user choice (Users → Limits), else the plan (a paid plan removes it), else `WATERMARK_NON_ADMINS` for everyone who is not an admin. |
+| Queue priority | An admin's per-user value (Users → Limits, `reelsaw limits <email> --priority N`, `set_user_queue_priority`; -20 to 20, negative holds an account back), else the plan (hosted: Starter +2, Creator +3, Pro +5), else 0. Each point moves the account's jobs ahead by one job of backlog in the fair share; read when a job is queued, so jobs already waiting keep their place. |
 | Share links | `.env` `MEDIA_LINK_TTL_DAYS` (default 90) and `MEDIA_LINK_ALLOW_NEVER` (default true; hosted sets false), then the instance setting (Settings → System → Limits). A link may ask for less, never more. `MEDIA_LINKS_REDIRECT` (`.env` only, S3) answers with a redirect to a presigned URL instead of the file. |
 | Webhooks | `MAX_WEBHOOKS_PER_USER` follows the quota chain (default 10). `ALLOW_PRIVATE_WEBHOOK_URLS` (default false: public https only) and `WEBHOOK_DELIVERY_RETENTION_DAYS` (default 14) are instance settings; `WEBHOOK_CONCURRENCY` is `.env` only. |
 | Learning (the decision log) | On for every account; the user's Settings → Learning switch (or `set_learning`) turns recording off. `DECISION_RETENTION_DAYS` (instance setting, default 0 = keep) prunes old decisions; a purge keeps a project's decisions unless the user ticked "Also forget what Reelsaw learned from it" when deleting it (honoured by every purge, the retention sweep included) or in the Delete forever dialog. |

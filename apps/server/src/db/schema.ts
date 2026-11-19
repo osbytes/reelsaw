@@ -352,6 +352,8 @@ export const userSettings = pgTable("user_settings", {
   limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
   /** admin's per-user watermark decision: true / false; null = follow the plan and the instance setting (quota.ts `watermarkFor`) */
   watermark: boolean("watermark"),
+  /** admin's per-user queue priority (points on each job's fair-share priority); null = follow the plan (quota.ts `queuePriorityFor`) */
+  queuePriority: integer("queue_priority"),
   /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
   learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

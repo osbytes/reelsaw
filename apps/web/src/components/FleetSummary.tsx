@@ -37,7 +37,7 @@ interface Tile {
 export function FleetSummary({ onJump }: { onJump: (id: string) => void }) {
   const trpc = useTRPC();
   const workers = useQuery({ ...trpc.admin.workers.list.queryOptions(), refetchInterval: 5000 });
-  const queue = useQuery({ ...trpc.admin.queue.summary.queryOptions(), refetchInterval: 5000 });
+  const queue = useQuery({ ...trpc.admin.queue.summary.queryOptions({ detail: false }), refetchInterval: 5000 });
   const [weekAgo] = useState(() => new Date(Date.now() - 7 * 86400_000).toISOString());
   const failures = useQuery({ ...trpc.admin.failures.list.queryOptions({ since: weekAgo, limit: 1 }), refetchInterval: 30_000 });
   const paused = useSystemStatus(30_000).data?.paused ?? null;

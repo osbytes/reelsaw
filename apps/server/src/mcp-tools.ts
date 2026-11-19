@@ -23,7 +23,15 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
-import { FAILURE_CAUSES, FONT_FILE_EXTS, MAX_FONT_BYTES, emailPreferencesPatchSchema, templateBumpersSchema } from "@reelsaw/shared";
+import {
+  FAILURE_CAUSES,
+  FONT_FILE_EXTS,
+  MAX_FONT_BYTES,
+  QUEUE_PRIORITY_MAX,
+  QUEUE_PRIORITY_MIN,
+  emailPreferencesPatchSchema,
+  templateBumpersSchema,
+} from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { BULK_USERS, bulkUsersShape, userListToolInput } from "./accounts-schema.js";
 import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
@@ -832,7 +840,7 @@ export const TOOLS = {
   get_queue: {
     title: "Queue summary",
     description:
-      "Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). Returns { queues, active, truncated, error? }. Failed work is list_failures, not this. Hosted non-admins are refused.",
+      "Admins only: how much work is queued and how fast it is picked up. queues: per stage, waiting/running/retrying, oldestWaitingAt, pickup { started, p50Sec, p95Sec, maxSec } over the last pickupWindowMinutes; pickup: all stages. owners: top 20 accounts with work queued, with plan and priority. active: running, then waiting in pickup order. Returns { queues, pickup, pickupWindowMinutes, owners, ownersTruncated, active, truncated, error? }. Set priority with set_user_queue_priority. Hosted non-admins are refused.",
     annotations: { readOnlyHint: true },
   },
   list_failures: {
@@ -913,6 +921,15 @@ export const TOOLS = {
     description: `Admins only: approve, hold, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). hold: back to waiting for approval, not told why; suspend: signed out, app, keys and MCP blocked; delete: gone with all projects and files, forever. You and the last admin are skipped with the reason. Up to ${BULK_USERS} per call: with a filter, call again with nextCursor until null. Returns { action, changed, unchanged, skipped: [{ id, email, reason }], nextCursor }.`,
     inputSchema: bulkUsersShape,
     annotations: { destructiveHint: true },
+  },
+  set_user_queue_priority: {
+    title: "Set an account's queue priority",
+    description: `Admins only: move one account's jobs ahead of (or behind) others. priority is points on each job's fair-share priority, one point per job of backlog (${QUEUE_PRIORITY_MIN} to ${QUEUE_PRIORITY_MAX}; negative holds the account back); null follows the plan again (hosted: paid plans rank ahead of Free). Applies to jobs queued from now; jobs already waiting keep their place. get_queue shows owners with the priority in force. Returns { ok, queuePriority }.`,
+    inputSchema: {
+      userId: z.string().min(1).max(80).describe("Account id (from list_users or get_queue owners)"),
+      priority: z.number().int().min(QUEUE_PRIORITY_MIN).max(QUEUE_PRIORITY_MAX).nullable().describe("Points, or null to follow the plan"),
+    },
+    annotations: { idempotentHint: true },
   },
   list_signup_rules: {
     title: "List sign-up rules",

@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { ProjectStatus } from "@reelsaw/shared";
-import { schema } from "../db/index.js";
+import { type RawTime, rawTimeIso, schema } from "../db/index.js";
 import { listWorkers } from "../ops/workers.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import type { Services } from "../services.js";
@@ -188,7 +188,7 @@ export async function recentErrors(
   return out.slice(-MAX_ERROR_LINES);
 }
 
-type LiveJob = { name: string; state: string; retries: number; singletonKey: string; startedOn: Date | null; output: unknown; projectId: string | null };
+type LiveJob = { name: string; state: string; retries: number; singletonKey: string; startedOn: RawTime | null; output: unknown; projectId: string | null };
 
 /**
  * Unfinished projects and their live jobs — the same facts `reelsaw stuck` prints. Bounded; titles
@@ -270,7 +270,7 @@ export async function stuckInfo(svc: Services) {
           state: j.state,
           retries: j.retries,
           singletonKey: j.singletonKey,
-          startedOn: j.startedOn,
+          startedOn: rawTimeIso(j.startedOn),
           output: j.output,
         })),
         unfinishedClips: unfinished.map((c) => {

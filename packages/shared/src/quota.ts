@@ -29,3 +29,12 @@ export interface QuotaRefusal {
    */
   sentence?: string | undefined;
 }
+
+/**
+ * An account's queue priority: points added to each of its jobs' fair-share priority (the server's `fairPriority`,
+ * minus the owner's live jobs), so one point is worth one job of backlog. The plan grants it (hosted), an admin
+ * may override it per account, negative to hold an account back. The bounds keep an override from starving
+ * everyone else outright.
+ */
+export const QUEUE_PRIORITY_MIN = -20;
+export const QUEUE_PRIORITY_MAX = 20;

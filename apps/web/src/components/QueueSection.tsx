@@ -1,7 +1,8 @@
 /**
- * Settings → System → Queue: only the stages that have work, how long the oldest job has waited, what each
- * job in flight is doing (and why a retry failed), and failed work with its cause, Retry and Dismiss. Idle is
- * one line, not a table of dashes. Admins only (admin.queue.summary / admin.failures.*).
+ * Settings → System → Queue: only the stages that have work, how long the oldest job has waited and how fast
+ * jobs were picked up in the last hour, whose work is queued and at what priority, what each job in flight is
+ * doing (and why a retry failed), and failed work with its cause, Retry and Dismiss. Idle is one line, not a
+ * table of dashes. Admins only (admin.queue.summary / admin.failures.*).
  */
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,7 +16,7 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
-import { type FailureCause, plural } from "@reelsaw/shared";
+import { type FailureCause, formatPriority, formatSeconds, plural } from "@reelsaw/shared";
 
 const PAGE = 50;
 /** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
@@ -140,7 +141,7 @@ export function QueueSection() {
   const more = useLoadMoreSentinel(() => void failures.fetchNextPage(), !!failures.hasNextPage && !failures.isFetching);
 
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: trpc.admin.queue.summary.queryKey() });
+    void qc.invalidateQueries({ queryKey: trpc.admin.queue.summary.pathKey() });
     void qc.invalidateQueries({ queryKey: trpc.admin.failures.pathKey() });
   };
 
@@ -198,7 +199,7 @@ export function QueueSection() {
   const d = queue.data;
   const waiting = d?.queues.reduce((n, r) => n + r.waiting + r.retrying, 0) ?? 0;
   const running = d?.queues.reduce((n, r) => n + r.running, 0) ?? 0;
-  const busy = d?.queues.filter((r) => r.waiting + r.running + r.retrying > 0) ?? [];
+  const busy = d?.queues.filter((r) => r.waiting + r.running + r.retrying > 0 || r.pickup.started > 0) ?? [];
   // a stage nobody listens on never drains: say so instead of letting it look slow (only once the heartbeats are in)
   const listened = workers.data ? new Set(workers.data.items.filter((w) => w.live).flatMap((w) => w.queues)) : null;
   const stageNote = (r: (typeof busy)[number]) => {
@@ -217,6 +218,9 @@ export function QueueSection() {
         <h2 className="text-[15px] font-bold">Queue</h2>
         <span className="min-h-4 text-xs text-ink3">
           {d ? (running || waiting ? `${running} running · ${waiting} waiting` : "idle") : queue.error ? queue.error.message : ""}
+          {d?.pickup.started
+            ? ` · picked up in ${formatSeconds(d.pickup.p50Sec)} typically, ${formatSeconds(d.pickup.p95Sec)} at worst (95%), last ${d.pickupWindowMinutes} min`
+            : ""}
         </span>
       </div>
       <p className="text-[13px] text-ink2">
@@ -235,17 +239,18 @@ export function QueueSection() {
         <p className="text-[13px] text-ink3">Queue tables are not ready yet.</p>
       ) : d && !busy.length ? (
         <p className="flex h-9 items-center gap-2 rounded-[10px] bg-sunk px-3 text-[13px] text-ink2">
-          <span className="font-mono text-ink3">○</span> Idle: nothing waiting or running.
+          <span className="font-mono text-ink3">○</span> Idle: nothing waiting or running, nothing started in the last {d.pickupWindowMinutes} min.
         </p>
       ) : d ? (
         <ScrollArea>
-          <table className="w-full min-w-[30rem] table-fixed text-[13px]">
-            <caption className="sr-only">Stages with work waiting or running</caption>
+          <table className="w-full min-w-[38rem] table-fixed text-[13px]">
+            <caption className="sr-only">Stages with work waiting or running, or picked up in the last hour</caption>
             <colgroup>
               <col className="w-[7rem]" />
               <col className="w-[4.5rem]" />
               <col className="w-[4.5rem]" />
               <col className="w-[7rem]" />
+              <col className="w-[8.5rem]" />
               <col />
             </colgroup>
             <thead>
@@ -262,6 +267,13 @@ export function QueueSection() {
                 <th scope="col" className="py-1 text-right font-medium">
                   Longest wait
                 </th>
+                <th
+                  scope="col"
+                  className="py-1 text-right font-medium"
+                  title={`Wait from queued to picked up, jobs started in the last ${d.pickupWindowMinutes} min: median / 95th percentile`}
+                >
+                  Pickup p50 / p95
+                </th>
                 <th scope="col" className="py-1 pl-4 font-medium">
                   <span className="sr-only">Note</span>
                 </th>
@@ -276,6 +288,12 @@ export function QueueSection() {
                     <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.running || "—"}</td>
                     <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.waiting + r.retrying || "—"}</td>
                     <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.oldestWaitingAt ? elapsed(r.oldestWaitingAt) : "—"}</td>
+                    <td
+                      className="py-1.5 text-right font-mono text-xs tabular-nums text-ink2"
+                      title={r.pickup.started ? `${plural(r.pickup.started, "job")} started; longest wait ${formatSeconds(r.pickup.maxSec)}` : undefined}
+                    >
+                      {r.pickup.started ? `${formatSeconds(r.pickup.p50Sec)} / ${formatSeconds(r.pickup.p95Sec)}` : "—"}
+                    </td>
                     <td className={`truncate py-1.5 pl-4 text-xs font-semibold ${note?.tone ?? ""}`}>{note?.text}</td>
                   </tr>
                 );
@@ -285,9 +303,73 @@ export function QueueSection() {
         </ScrollArea>
       ) : null}
 
+      {d && d.owners.length > 0 && (
+        <div>
+          <h3 className="text-[13px] font-bold">By account{d.ownersTruncated ? ` (top ${d.owners.length})` : ""}</h3>
+          <p className="text-xs text-ink3">
+            Priority moves an account&apos;s next jobs ahead by that many jobs of backlog. Paid plans get it automatically; set it per account in Users →
+            Limits.
+          </p>
+          <ScrollArea className="max-h-[min(16rem,35dvh)]">
+            <table className="mt-1 w-full min-w-[30rem] table-fixed text-[13px]">
+              <caption className="sr-only">Accounts with work waiting or running, most waiting first</caption>
+              <colgroup>
+                <col />
+                <col className="w-[6.5rem]" />
+                <col className="w-[4.5rem]" />
+                <col className="w-[4.5rem]" />
+                <col className="w-[7rem]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-xs text-ink3">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Account
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                    Priority
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                    Running
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                    Waiting
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                    Longest wait
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.owners.map((o) => (
+                  <tr key={o.userId} className="border-t border-line/60">
+                    <td className="truncate py-1.5" title={o.email ?? o.userId}>
+                      <Link to={`/admin/users#${new URLSearchParams({ q: o.email ?? o.userId }).toString()}`} className="text-ink no-underline hover:underline">
+                        {o.email ?? o.userId.slice(0, 8)}
+                      </Link>
+                      {o.plan && o.plan !== "free" ? <span className="text-ink3"> · {o.plan}</span> : null}
+                    </td>
+                    <td
+                      className="py-1.5 text-right font-mono text-xs tabular-nums"
+                      title={o.prioritySource === "override" ? "Set by an admin" : o.prioritySource === "plan" ? "From the plan" : "Default"}
+                    >
+                      {formatPriority(o.priority)}
+                      {o.prioritySource === "override" ? <span className="text-ink3"> (set)</span> : null}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.running || "—"}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.waiting || "—"}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.oldestWaitingAt ? elapsed(o.oldestWaitingAt) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollArea>
+        </div>
+      )}
+
       {d && d.active.length > 0 && (
         <div>
           <h3 className="text-[13px] font-bold">Jobs{d.truncated ? " (showing 50)" : ""}</h3>
+          <p className="text-xs text-ink3">Running first, then waiting in the order workers will take them.</p>
           <ScrollArea className="max-h-[min(22rem,45dvh)]">
             <table className="mt-1 w-full min-w-[30rem] table-fixed text-[13px]">
               <caption className="sr-only">Jobs waiting, running or retrying, running first</caption>
@@ -323,7 +405,10 @@ export function QueueSection() {
                         : { glyph: "○", word: "Waiting", tone: "text-ink3" };
                   return (
                     <tr key={`${j.queue}:${j.projectId}:${j.clipId}:${i}`} className="border-t border-line/60">
-                      <td className="truncate py-1.5">
+                      <td
+                        className="truncate py-1.5"
+                        title={j.ownerEmail ? `${j.ownerEmail} · priority ${formatPriority(j.priority)}` : `priority ${formatPriority(j.priority)}`}
+                      >
                         {j.projectId ? (
                           <Link to={j.clipId ? `/p/${j.projectId}#clip=${j.clipId}` : `/p/${j.projectId}`} className="text-ink no-underline hover:underline">
                             {j.title ?? j.projectId.slice(0, 8)}

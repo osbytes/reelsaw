@@ -1,4 +1,4 @@
-import { formatDay } from "@reelsaw/shared";
+import { formatDay, formatSeconds } from "@reelsaw/shared";
 
 /** "5 min ago" style age for lists. */
 export function ago(d: string | Date) {
@@ -13,8 +13,5 @@ export function ago(d: string | Date) {
 /** "42 s", "4 min", "2 h 5 min": how long something has been running or waiting. */
 export function elapsed(d: string | Date) {
   const s = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.floor(s / 60)} min`;
-  const m = Math.floor((s % 3600) / 60);
-  return `${Math.floor(s / 3600)} h${m ? ` ${m} min` : ""}`;
+  return s < 1 ? "0 s" : formatSeconds(s);
 }

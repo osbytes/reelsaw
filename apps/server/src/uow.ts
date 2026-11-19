@@ -22,7 +22,7 @@ import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHa
 import { eventRow, eventSubject, isProjectEventType, type EventPayload, type EventType } from "./event-types.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
-import { checkJobLimits, limitsFor } from "./quota.js";
+import { checkJobLimits, limitsFor, queuePriorityOf } from "./quota.js";
 import { isWebhookEvent, writeDeliveries } from "./webhooks/outbox.js";
 
 /**
@@ -192,12 +192,15 @@ export function createUnitOfWork(
         async enqueue(q, data, opts) {
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
-          // the owner's plan may lift the job (hosted Pro); one indexed read, nothing self-hosted
+          // the owner's queue priority: an admin's override (read with the admission), else the plan's (hosted: paid
+          // plans). The plan is read once here and handed to the limits below, so an enqueue reads it at most once.
           const ent = entitlements();
-          const priorityBoost = ent && a.userId ? ((await ent.grantsFor(db, a.userId))?.queuePriority ?? 0) : 0;
+          const grants = ent && a.userId ? await ent.grantsFor(db, a.userId) : null;
+          const priorityBoost = queuePriorityOf(a.queuePriority ?? null, grants).value;
+          const readGrants: Entitlements | null = ent ? { grantsFor: async () => grants } : null;
           if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost, ...opts });
           if (instanceLimits) {
-            const limits = await limitsFor(db, instanceLimits(), a.userId, entitlements());
+            const limits = await limitsFor(db, instanceLimits(), a.userId, readGrants);
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
               // one admission at a time per user, counted again under the lock, so two requests can't both take the last slot
               await client.query(TX_LOCK_SQL, [txLock.jobs(a.userId)]);
