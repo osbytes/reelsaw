@@ -5,7 +5,7 @@
  * failed rows after three days.
  */
 import { inArray, sql } from "drizzle-orm";
-import { schema } from "../db/index.js";
+import { type RawTime, rawTimeIso, schema } from "../db/index.js";
 import { QUEUES, WEBHOOK_QUEUE } from "../queue/boss.js";
 import { queuePriorityOf, type QueuePrioritySource } from "../quota.js";
 import type { Services } from "../services.js";
@@ -106,7 +106,7 @@ export interface QueueSummary {
 
 const NO_PICKUP: Pickup = { started: 0, p50Sec: null, p95Sec: null, maxSec: null };
 
-export function foldCounts(rows: Array<{ name: string; state: string; n: number; oldest?: Date | null }>): QueueDepth[] {
+export function foldCounts(rows: Array<{ name: string; state: string; n: number; oldest?: RawTime | null }>): QueueDepth[] {
   const by = new Map<string, QueueDepth>();
   const ensure = (queue: string) => {
     let row = by.get(queue);
@@ -121,7 +121,7 @@ export function foldCounts(rows: Array<{ name: string; state: string; n: number;
     if (isInternal(r.name)) continue;
     const row = ensure(r.name);
     if (r.oldest && (r.state === "created" || r.state === "retry")) {
-      const at = r.oldest.toISOString();
+      const at = rawTimeIso(r.oldest)!;
       if (!row.oldestWaitingAt || at < row.oldestWaitingAt) row.oldestWaitingAt = at;
     }
     if (r.state === "created") row.waiting += r.n;
@@ -134,9 +134,9 @@ export function foldCounts(rows: Array<{ name: string; state: string; n: number;
   return [...QUEUE_ORDER, ...extra].map((k) => by.get(k)!);
 }
 
-type CountRow = { name: string; state: string; n: number; oldest: Date | null };
+type CountRow = { name: string; state: string; n: number; oldest: RawTime | null };
 type PickupRow = { name: string | null; started: number; p50: number | null; p95: number | null; max: number | null };
-type OwnerRow = { userId: string; waiting: number; running: number; oldest: Date | null };
+type OwnerRow = { userId: string; waiting: number; running: number; oldest: RawTime | null };
 type ActiveRow = {
   priority: number;
   userId: string | null;
@@ -145,8 +145,8 @@ type ActiveRow = {
   retries: number;
   projectId: string | null;
   clipId: string | null;
-  startedOn: Date | null;
-  createdOn: Date;
+  startedOn: RawTime | null;
+  createdOn: RawTime;
   lastError: string | null;
 };
 
@@ -251,7 +251,7 @@ export async function summarizeQueue(
           email: emailOf.get(r.userId) ?? null,
           waiting: r.waiting,
           running: r.running,
-          oldestWaitingAt: r.oldest ? new Date(r.oldest).toISOString() : null,
+          oldestWaitingAt: rawTimeIso(r.oldest),
           priority: p.value,
           prioritySource: p.source,
           plan: grants[i]?.plan ?? null,
@@ -266,8 +266,8 @@ export async function summarizeQueue(
         clipId: r.clipId,
         ...(r.projectId && byId.get(r.projectId) ? { title: byId.get(r.projectId) } : {}),
         attempt: r.retries + 1,
-        startedAt: r.startedOn?.toISOString() ?? null,
-        createdAt: r.createdOn.toISOString(),
+        startedAt: rawTimeIso(r.startedOn),
+        createdAt: rawTimeIso(r.createdOn)!,
         ...(r.lastError ? { lastError: r.lastError.slice(0, 500) } : {}),
         priority: r.priority,
         ...(r.userId && emailOf.get(r.userId) ? { ownerEmail: emailOf.get(r.userId) } : {}),

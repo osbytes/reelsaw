@@ -54,6 +54,12 @@ describe("queue priority", () => {
     assert.deepEqual(queuePriorityOf(-3, null), { value: -3, source: "override", plan: 0, override: -3 });
   });
 
+  it("reads the waiting time whether the driver hands back a Date or Postgres text", () => {
+    // drizzle's node-postgres driver returns raw db.execute timestamps as text, not Date
+    const rows = foldCounts([{ name: QUEUES.render, state: "created", n: 1, oldest: "2026-01-01 00:02:00.5+00" }]);
+    assert.equal(rows.find((r) => r.queue === QUEUES.render)!.oldestWaitingAt, "2026-01-01T00:02:00.500Z");
+  });
+
   it("starts every stage with no pickups measured", () => {
     for (const r of foldCounts([])) assert.deepEqual(r.pickup, { started: 0, p50Sec: null, p95Sec: null, maxSec: null });
   });

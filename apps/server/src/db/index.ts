@@ -9,6 +9,16 @@ import type { Logger } from "../log.js";
 
 export type Db = NodePgDatabase<typeof schema>;
 export { schema };
+
+/**
+ * A timestamp column from a raw `db.execute` row, as ISO 8601. Drizzle's node-postgres driver hands timestamps back
+ * as Postgres text there ("2026-11-19 20:03:47.03+00"), not as Date (only typed selects map them), so a raw row's
+ * time is `RawTime` and goes through this, never `.toISOString()` on the value itself.
+ */
+export type RawTime = Date | string;
+export function rawTimeIso(v: RawTime | null | undefined): string | null {
+  return v === null || v === undefined ? null : new Date(v).toISOString();
+}
 export type { Project, Clip, Transcript } from "./schema.js";
 
 export interface Database {
