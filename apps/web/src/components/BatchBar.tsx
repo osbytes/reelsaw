@@ -5,11 +5,10 @@ import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
 import { useDeletedToast } from "../lib/deletedToast";
-import { useRestoreWindow } from "../lib/retention";
 import { BulkBumpersPopover } from "./BumperField";
 import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
-import { ConfirmDialog, MoreButton } from "./ui";
+import { MoreButton } from "./ui";
 import { useCopyShareLink } from "./ShareLinks";
 import { plural } from "@reelsaw/shared";
 
@@ -46,8 +45,26 @@ export function BatchBar({
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
   const notifyDeleted = useDeletedToast();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const keepWindow = useRestoreWindow("clip", confirmDelete);
+  // a soft delete of the selection: done at once, and the toast's Undo brings every one back (no dialog first)
+  const deleteSelected = () => {
+    const clips = selected;
+    delMany.mutateAsync({ projectId, clipIds: clips.map((c) => c.id) }).then(
+      (r) => {
+        onClear();
+        onChanged();
+        if (!r.deleted) {
+          toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
+          return;
+        }
+        notifyDeleted({
+          items: clips.map((c) => ({ kind: "clip", id: c.id, title: c.title })),
+          restorable: r.restorable,
+          storedBytes: r.storedBytes,
+        });
+      },
+      (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
+    );
+  };
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const done = selected.filter((c) => c.status === "done");
@@ -122,8 +139,8 @@ export function BatchBar({
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-            <DropdownMenu.Item className="menu-item-danger" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
-              Delete…
+            <DropdownMenu.Item className="menu-item-danger" disabled={delMany.isPending} onSelect={() => later(deleteSelected)}>
+              Delete
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -145,30 +162,6 @@ export function BatchBar({
         onDone={onChanged}
         open={templateOpen}
         onOpenChange={setTemplateOpen}
-      />
-      <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title={selected.length === 1 ? "Delete this clip?" : `Delete ${selected.length} clips?`}
-        body={`${selected.length === 1 ? `“${selected[0]?.title || "Untitled clip"}” is` : `${selected.length} clips are`} hidden from the project. ${keepWindow.hint(selected.length > 1)} Storage still counts until you delete ${selected.length === 1 ? "it" : "them"} forever.`}
-        confirm={selected.length === 1 ? "Delete clip" : "Delete clips"}
-        danger
-        onConfirm={() => {
-          const clips = selected;
-          return delMany.mutateAsync({ projectId, clipIds: clips.map((c) => c.id) }).then((r) => {
-            onClear();
-            onChanged();
-            if (!r.deleted) {
-              toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
-              return;
-            }
-            notifyDeleted({
-              items: clips.map((c) => ({ kind: "clip", id: c.id, title: c.title })),
-              restorable: r.restorable,
-              storedBytes: r.storedBytes,
-            });
-          });
-        }}
       />
     </SelectionBar>
   );

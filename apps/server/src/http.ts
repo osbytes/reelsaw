@@ -763,6 +763,21 @@ export function createApp(svc: Services) {
     return c.body(new Uint8Array(audio));
   });
 
+  // an uploaded source's poster frame (ingest writes it; keys.sourcePoster), for the project page and its tile
+  app.get("/media/source/:projectId/poster.jpg", async (c) => {
+    const session = await actor(c);
+    if (!session) return c.text("unauthorized", 401);
+    const project = await db.query.projects.findFirst({
+      where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)),
+    });
+    if (!project?.sourceKey) return c.text("not found", 404);
+    const key = keys.sourcePoster(project.id);
+    if (!(await storage.exists(key))) return c.text("not found", 404);
+    const loc = await storage.resolve(key);
+    if ("url" in loc) return c.redirect(loc.url, 302);
+    return sendFile(c.req.raw, loc.file, undefined, { cacheControl: "private, max-age=3600" });
+  });
+
   app.get("/media/source/:projectId", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);

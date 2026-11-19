@@ -47,6 +47,7 @@ import {
 import { SelectionBar } from "../components/SelectionBar";
 import { RuleFromUserDialog } from "../components/SignupRules";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 type Usage = {
   projects: number;
@@ -188,6 +189,7 @@ const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "
  * rows, or on every account matching the filters ("Select all 1,204"), in pages of 50 on the server.
  */
 export function AdminUsersPage() {
+  useDocumentTitle(pageTitle("Users"));
   const trpc = useTRPC();
   const client = useTRPCClient();
   const qc = useQueryClient();

@@ -748,7 +748,7 @@ export const TOOLS = {
   restore_clip: {
     title: "Restore clip",
     description:
-      "Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it goes to the end of the project's clips. Returns { changed, status, needsRerender }; needsRerender means it never finished, so call rerender_clip.",
+      "Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it keeps its number unless a live clip took it meanwhile, else it goes to the end of the project's clips. Returns { changed, status, needsRerender }; needsRerender means it never finished, so call rerender_clip.",
     inputSchema: { id: z.string().describe("Clip id (from list_deleted or get_project → replacedClips)") },
     annotations: { idempotentHint: true },
   },

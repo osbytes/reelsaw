@@ -33,10 +33,11 @@ import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
 import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
-import { formatDay, formatTime, masksSourceText, type ProjectEvent, plural } from "@reelsaw/shared";
+import { DELETED_PATH, formatDay, formatTime, masksSourceText, type ProjectEvent, plural } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { describeStageDetail, type StageDetail } from "../lib/stage-detail";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: "Preparing source",
@@ -87,6 +88,7 @@ export function ProjectPage() {
   const me = useMe();
   const isAdmin = me.data?.role === "admin";
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
+  useDocumentTitle(pageTitle(q.data?.title));
   // the words, segments and flags are megabytes on a long source: their own query, refreshed only by transcript changes
   const tq = useQuery(trpc.transcripts.get.queryOptions({ projectId: id }));
   const transcript = tq.data ?? null;
@@ -202,6 +204,8 @@ export function ProjectPage() {
   const stageIdx = p ? (p.status === "failed" && p.stage ? (STAGE_REACHED[p.stage] ?? -1) : (STAGE_INDEX[p.status] ?? -1)) : -1;
   const active = !!p && ACTIVE.has(p.status);
   const sortedClips = useMemo(() => (p?.clips ?? []).slice().sort((a, b) => a.index - b.index), [p]);
+  // clips the owner deleted (or a re-pick replaced) and can still restore
+  const deletedCount = p?.replacedClips?.length ?? 0;
   const readyCount = sortedClips.filter((c) => c.status === "done").length;
   const failedClips = sortedClips.filter((c) => c.status === "failed");
 
@@ -359,7 +363,11 @@ export function ProjectPage() {
   // parts done of total with the time left, for a stage that saves its parts (live tick first, else the stored value)
   const stageDetail = (progress && progress.stage === p.stage ? progress.detail : undefined) ?? p.stageDetail ?? null;
   const activityLoading = !replayed && activity.length === 0;
-  const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
+  // While a run is going, a one-off "ok" line (a saved fix, a clip that finished) must not read as the run being
+  // over: the header shows the newest line of the current run that is still working or needs attention.
+  const current = active ? (runGroups[0]?.entries.find((x) => x.d.tone !== "ok")?.d ?? null) : null;
+  const live =
+    current ?? activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
 
   const fmtRun = (sec: number) => (sec < 60 ? `${Math.round(sec)} s` : formatTime(sec));
@@ -922,6 +930,7 @@ export function ProjectPage() {
 
   const clipsList = (
     <>
+      {/* deleted (or replaced) clips are not "nothing found": say so and point at the way back */}
       {sortedClips.length === 0 && (
         <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
           <div className="flex gap-1.5">
@@ -930,16 +939,29 @@ export function ProjectPage() {
             ))}
           </div>
           <b className="mt-1">
-            {active ? "Clips appear here as soon as moments are found" : p.status === "failed" && !p.transcript ? "No clips yet" : "No clips found"}
+            {active
+              ? "Clips appear here as soon as moments are found"
+              : p.status === "failed" && !p.transcript
+                ? "No clips yet"
+                : deletedCount
+                  ? "No clips left"
+                  : "No clips found"}
           </b>
           <span className="text-[13px] text-ink2">
             {active
               ? "They stream in one by one while the rest render."
               : p.status === "failed" && !p.transcript
                 ? "Clips appear after the source is prepared and moments are found."
-                : "Nothing in this video stood on its own. Try a different focus, or select text in the transcript and make a clip yourself."}
+                : deletedCount
+                  ? `${plural(deletedCount, "deleted or replaced clip")} can be restored, or select text in the transcript and make a new one.`
+                  : "Nothing in this video stood on its own. Try a different focus, or select text in the transcript and make a clip yourself."}
           </span>
-          {!active && p.transcript && (
+          {!active && deletedCount > 0 && (
+            <Link to={`${DELETED_PATH}#clip=${p.replacedClips?.[0]?.id ?? ""}`} className="btn-ghost mt-1 no-underline">
+              Restore deleted clips
+            </Link>
+          )}
+          {!active && p.transcript && !deletedCount && (
             <button className="btn-ghost mt-1" onClick={() => setConfirm("repick")}>
               Re-pick moments
             </button>
@@ -1003,7 +1025,8 @@ export function ProjectPage() {
           >
             Select all
           </button>
-          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={!sel.length} onClick={() => setSel([])}>
+          {/* only with a selection to clear; invisible (not removed) so Select all does not shift */}
+          <button className={`font-semibold text-acc-text ${sel.length ? "" : "invisible"}`} disabled={!sel.length} onClick={() => setSel([])}>
             Clear
           </button>
           <span
@@ -1034,7 +1057,7 @@ export function ProjectPage() {
       </div>
       {compact ? (
         <>
-          <ScrollArea className="shrink-0 border-b border-line">
+          <ScrollArea fadeEdges className="shrink-0 border-b border-line">
             <div className="flex w-max gap-1 px-3 py-2">
               {(
                 [

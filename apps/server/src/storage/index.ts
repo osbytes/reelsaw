@@ -408,6 +408,8 @@ export const ASR_CACHE_PREFIX = "cache/asr/";
 export const keys = {
   upload: (id: string, ext: string) => `uploads/${id}${ext}`,
   source: (projectId: string, ext: string) => `projects/${projectId}/source${ext}`,
+  /** a frame of an uploaded source, its poster on the project page and its tile (a link source has the platform's) */
+  sourcePoster: (projectId: string) => `projects/${projectId}/poster.jpg`,
   // one file per render generation: a stale render can never overwrite a newer one's output
   clip: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.mp4`,
   thumb: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.jpg`,

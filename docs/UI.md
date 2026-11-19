@@ -155,6 +155,28 @@ page loads when the list scrolls to its end, and keep "Showing n of m" below it.
 holds what accumulated with no use (stopped links, old deliveries) also needs a way to clear it, or a
 retention that does.
 
+## Page chrome: titles, loading, sideways strips
+
+- **Every page names its tab.** A page calls `useDocumentTitle(pageTitle(...))` (`lib/title.ts`), most
+  specific name first: "Clip title · Project · Reelsaw", "Settings · Reelsaw". With several projects open,
+  tabs that all read "Reelsaw" cannot be told apart.
+- **One skeleton per load.** A route whose page has its own skeleton passes it to `Protected` as
+  `fallback`, so the code-split chunk loading shows that skeleton too; otherwise the generic list skeleton
+  flashes first and the layout jumps when the page's own one replaces it. Bare routes (the editors) default
+  to `ClipEditorSkeleton`.
+- **A strip that scrolls sideways says so.** A one-row `ScrollArea` of tabs or chips that can overflow
+  (the editor's inspector tabs, the project's phone tabs, Settings' nav on phones, the transcript toolbar)
+  sets `fadeEdges`: an edge that hides content fades, so a clipped "Trans…" reads as more to scroll to.
+- **Soft deletes do not ask first.** Deleting clips (one, or a selection) happens at once with the Undo toast
+  (`useDeletedToast`), per [PRINCIPLES](PRINCIPLES.md) (Confirm risky changes). It asks only when it would
+  also throw away something Undo does not bring back (the editor's unsaved edits).
+
+- **An empty list has one call to action.** It sits in the empty state (`ListEmpty`'s `action`, the Projects
+  first-run card), and the header's "New …" button appears once the list has something in it.
+- **Counts say what they count.** A list footer uses `showingCount` (`ListPage.tsx`): "Showing 50 of 1,204
+  projects" while more are left, "3 projects" once all are on screen, never "Showing 1 of 1".
+- **A pending button keeps its label's width.** Put `Pending` (`ui.tsx`) inside it, not a bare "…".
+
 ## Seeing a state without producing it (scenarios)
 
 Screenshots and UI review need projects in states that are slow or awkward to reach for real: a Free account's

@@ -17,6 +17,8 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { readHash, writeHash } from "../lib/hash";
 import { useShortcut, useShortcuts } from "../lib/shortcuts";
 import { ProjectsBar } from "../components/ProjectsBar";
+import { pageTitle, useDocumentTitle } from "../lib/title";
+import { showingCount } from "../components/ListPage";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
@@ -95,7 +97,25 @@ function NewProjectMenu() {
 }
 
 const PAGE = 24;
-const num = new Intl.NumberFormat();
+
+/** The account's project count from the last visit (this browser only): sizes the loading skeleton. */
+const lastProjectCount = {
+  read(): number | null {
+    try {
+      const v = Number(localStorage.getItem("reelsaw.projectCount"));
+      return Number.isFinite(v) && localStorage.getItem("reelsaw.projectCount") !== null ? v : null;
+    } catch {
+      return null;
+    }
+  },
+  write(n: number) {
+    try {
+      localStorage.setItem("reelsaw.projectCount", String(n));
+    } catch {
+      // private window or blocked storage: the skeleton falls back to a full row
+    }
+  },
+};
 
 /** A placeholder card with the real card's boxes, so a page arriving is a content swap, not a layout change. */
 function CardSkeleton({ i }: { i: number }) {
@@ -115,6 +135,7 @@ function CardSkeleton({ i }: { i: number }) {
 }
 
 export function ProjectsPage() {
+  useDocumentTitle(pageTitle("Projects"));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const isAdmin = useMe().data?.role === "admin";
@@ -154,6 +175,12 @@ export function ProjectsPage() {
     [loaded, activeById],
   );
   const running = active.data ? active.data.length : (stats.data?.running ?? 0);
+  const isEmpty = !q.isPending && !q.isPlaceholderData && !projects.length && !q.error;
+  // as many skeleton cards as the account had last time (up to a row's worth), so the grid does not collapse on load
+  const skeletonCards = Math.min(6, Math.max(1, stats.data?.total ?? lastProjectCount.read() ?? 6));
+  useEffect(() => {
+    if (stats.data) lastProjectCount.write(stats.data.total);
+  }, [stats.data]);
   const remaining = Math.max(0, total - loaded.length);
   const more = useLoadMoreSentinel(() => void q.fetchNextPage(), !!q.hasNextPage && !q.isFetching);
 
@@ -198,12 +225,13 @@ export function ProjectsPage() {
               <p className="mt-1 min-h-5" />
             )}
           </div>
-          <NewProjectMenu />
+          {/* an empty list's one call to action is the card below (docs/UI.md) */}
+          {!isEmpty && <NewProjectMenu />}
         </div>
 
         {q.error && <p className="text-err">{q.error.message}</p>}
 
-        {!q.isPending && !q.isPlaceholderData && !projects.length && !q.error && (
+        {isEmpty && (
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
             <span className="film h-[72px] w-[42px] rounded-[8px]" />
             <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
@@ -218,7 +246,7 @@ export function ProjectsPage() {
 
         {q.isPending && !q.error && (
           <SkeletonRegion label="Loading projects…" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
-            {Array.from({ length: 6 }, (_, i) => (
+            {Array.from({ length: skeletonCards }, (_, i) => (
               <CardSkeleton key={i} i={i} />
             ))}
           </SkeletonRegion>
@@ -336,9 +364,7 @@ export function ProjectsPage() {
                 {q.isFetchingNextPage ? "Loading…" : "Load more"}
               </button>
             ) : null}
-            <span className="tabular-nums">
-              Showing {num.format(projects.length)} of {num.format(total)}
-            </span>
+            <span className="tabular-nums">{showingCount(projects.length, total, "project")}</span>
           </div>
         )}
       </main>

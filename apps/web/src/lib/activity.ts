@@ -147,6 +147,16 @@ export interface RunGroup {
 }
 
 /** Group the log by run (newest run first, entries newest first). A run starts at `run.started`; older logs start one at `project.created`. */
+/** project.done for a run that rendered fewer clips than the project has: "Re-rendered 1 clip in 0:25 · 3 ready". */
+function runDoneText(p: Record<string, unknown>, renderedThisRun: number, fallback: string): string {
+  const total = Number(p.clips);
+  if (p.runReason === "created" || !renderedThisRun || renderedThisRun >= total) return fallback;
+  const t = sec(p.runSec);
+  const why = reasonLabel(p.runReason);
+  const verb = p.runReason === "rerender" ? "Re-rendered" : "Rendered";
+  return `${verb} ${plural(renderedThisRun, "clip")}${t !== null ? ` in ${formatTime(t)}` : ""} · ${total} ready${p.failed ? `, ${p.failed} failed` : ""}${why && p.runReason !== "rerender" ? ` · ${why}` : ""}`;
+}
+
 export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null, olderExist = false): RunGroup[] {
   const explicit = log.some((e) => e.type === "run.started");
   const groups: RunGroup[] = [];
@@ -181,7 +191,10 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
       // the loaded log begins inside a run whose start is on an older page
       if (olderExist && groups.length === 1 && e.type !== "project.created") cur.continued = true;
     }
-    const d = describe(e);
+    let d = describe(e);
+    // a run that rendered only some clips (one re-render, a clip added) says how many it did: "3 clips ready in 0:25"
+    // read as if all three took that long
+    if (d && e.type === "project.done") d = { ...d, text: runDoneText(p, cur!.entries.filter((x) => x.e.type === "clip.done").length, d.text) };
     if (d) cur!.entries.unshift({ e, d });
     if (e.type === "project.done" || e.type === "project.failed") {
       cur!.outcome = e.type === "project.done" ? "done" : "failed";

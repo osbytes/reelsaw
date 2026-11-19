@@ -8,6 +8,7 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { plural } from "@reelsaw/shared";
+import { showingCount } from "./ListPage";
 
 const EVENT_LABEL: Record<string, string> = {
   "project.created": "Project created",
@@ -289,11 +290,7 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
           <div ref={more} />
         </ScrollArea>
       )}
-      {items.length > 0 && (
-        <span className="text-xs text-ink3">
-          Showing {items.length} of {total}
-        </span>
-      )}
+      {items.length > 0 && <span className="text-xs text-ink3">{showingCount(items.length, total, "delivery", "deliveries")}</span>}
     </div>
   );
 }

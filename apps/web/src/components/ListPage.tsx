@@ -70,12 +70,17 @@ export function ListPage({ title, subtitle, actions, children }: { title: string
   );
 }
 
-export function ListEmpty({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
+/**
+ * An empty list. When the page has a "New …" action, it goes here as `action` and the header leaves it out while the
+ * list is empty: one call to action, where the eye already is (not the same button twice).
+ */
+export function ListEmpty({ icon: Icon, title, children, action }: { icon: LucideIcon; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-[16px] border border-dashed border-line2 px-5 py-10 text-center">
       <Icon className="h-6 w-6 text-ink3" aria-hidden />
       <b className="text-[15px]">{title}</b>
       {children && <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">{children}</p>}
+      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }
@@ -204,6 +209,16 @@ export function ListCell({
 }
 
 /** The count, and room for a "Load more", in a line that keeps its height so nothing below moves. */
+/**
+ * A list's count line: "Showing 50 of 1,204 projects" while more are left to load, and just "3 projects" once
+ * everything is on screen ("Showing 1 of 1" read as noise).
+ */
+export function showingCount(shown: number, total: number, noun: string, nounPlural = `${noun}s`): string {
+  const n = (x: number) => x.toLocaleString();
+  const word = (x: number) => (x === 1 ? noun : nounPlural);
+  return shown < total ? `Showing ${n(shown)} of ${n(total)} ${word(total)}` : `${n(total)} ${word(total)}`;
+}
+
 export function ListFooter({ children, action }: { children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-3 text-xs tabular-nums text-ink3">

@@ -24,11 +24,13 @@ import {
   ListRow,
   LIST_REVEAL_ROW,
   ListTable,
+  showingCount,
 } from "../components/ListPage";
 import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, MoreButton, Skeleton } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
@@ -97,6 +99,7 @@ function foldedLine(r: Row) {
  * checkbox, and its hit target fills the whole cell. Deep links: `#project=id` (also clip, asset, template).
  */
 export function DeletedPage() {
+  useDocumentTitle(pageTitle("Deleted"));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const hash = useHashParams();
@@ -309,7 +312,7 @@ export function DeletedPage() {
               );
             })}
           </ListTable>
-          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : `Showing ${items.length.toLocaleString()} of ${plural(total, "item")}`}</ListFooter>
+          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : showingCount(items.length, total, "item")}</ListFooter>
           {selected.length > 0 && (
             <SelectionBar label="Selected deletions" count={selected.length} busy={busy} onClear={() => setSel([])}>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>

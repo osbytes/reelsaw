@@ -4,6 +4,7 @@ import { authClient } from "../lib/auth";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
+import { Pending } from "./ui";
 
 /** Settings → Account: name, email (read-only), password. */
 export function AccountSection() {
@@ -62,7 +63,7 @@ export function AccountSection() {
           <div className="flex gap-2">
             <input className="input" value={shownName} onChange={(e) => setName(e.target.value)} maxLength={80} aria-label="Name" />
             <button className="btn-ghost min-w-[4.5rem]" type="submit" disabled={busy || name === null || !shownName.trim() || shownName === me.data?.name}>
-              {saveName.isPending ? "…" : "Save"}
+              <Pending busy={saveName.isPending}>Save</Pending>
             </button>
           </div>
         </form>
@@ -95,7 +96,7 @@ export function AccountSection() {
               aria-label="New password"
             />
             <button className="btn-ghost min-w-[5.5rem]" type="submit" disabled={busy || !cur || next.length < 8}>
-              {changePassword.isPending ? "…" : "Change"}
+              <Pending busy={changePassword.isPending}>Change</Pending>
             </button>
           </div>
         </form>

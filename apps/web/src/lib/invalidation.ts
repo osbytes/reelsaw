@@ -5,7 +5,8 @@
  *
  *   project    projects.get       the project, its clips, estimates and bumpers
  *   transcript transcripts.get    words, segments, flags, overlays
- *   list       projects.list and projects.stats (the Projects page and its header counts)
+ *   list       projects.list and projects.stats (the Projects page and its header counts), and the
+ *              command palette's project rows (searchIndex, search), which show the same status and counts
  */
 import type { ProjectEventType } from "@reelsaw/shared";
 
@@ -53,8 +54,14 @@ export function scopesFor(e: { type: ProjectEventType; payload: Payload }): Scop
   return typeof rule === "function" ? rule(e.payload) : rule;
 }
 
-/** True for the query keys of projects.list and projects.stats (tRPC keys start with the procedure path). */
+/**
+ * True for every query that lists projects with their status and clip counts: projects.list and
+ * projects.stats, and the palette's searchIndex and search (tRPC keys start with the procedure path).
+ * A list view of projects that is left out here shows a stale status until its own cache expires.
+ */
 export function isListKey(key: readonly unknown[]): boolean {
   const path = key[0];
-  return Array.isArray(path) && path[0] === "projects" && (path[1] === "list" || path[1] === "stats");
+  if (!Array.isArray(path)) return false;
+  if (path[0] === "searchIndex" || path[0] === "search") return true;
+  return path[0] === "projects" && (path[1] === "list" || path[1] === "stats");
 }
