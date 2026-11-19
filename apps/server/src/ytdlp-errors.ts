@@ -17,8 +17,12 @@ const CONTENT = /video unavailable|confirm your age|age-restricted|file is large
  * run fails. A 404 on the media URL itself (signed, expiring, IP-bound) is not this and stays retryable.
  */
 const PAGE_MISSING = /Unable to download (?:webpage|JSON metadata|API page)\b[^\n]*HTTP Error (?:404|410)\b/i;
-const PROXY =
-  /sign in to confirm|not a bot|HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/i;
+/** YouTube's bot check, in every wording it has used; one pattern for the pool, the block check and the user's message */
+export const BOT_CHECK = /sign in to confirm|not a bot/i;
+const PROXY = new RegExp(
+  `${BOT_CHECK.source}|${/HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/.source}`,
+  "i",
+);
 
 /** yt-dlp's last `ERROR:` line, trimmed; undefined when there is none (it was killed, or this is not yt-dlp output). */
 export function fatalYtdlpLine(text: string): string | undefined {
@@ -57,6 +61,19 @@ export function isPageMissing(text: string): boolean {
 export function isPermanentDownloadFailure(text: string): boolean {
   const fatal = fatalYtdlpLine(text);
   return !!fatal && (GONE.test(fatal) || PAGE_MISSING.test(fatal));
+}
+
+/** The page itself (not a signed media URL, which expires and stays retryable) answered 403. */
+const PAGE_FORBIDDEN = /Unable to download (?:webpage|JSON metadata|API page)\b[^\n]*HTTP Error 403\b/i;
+
+/**
+ * yt-dlp gave up on a bot check or a refused page, rather than the video being gone. Read from the fatal line only:
+ * retry notices name 403s that yt-dlp then got past. A rate limit (429) or a 403 on the media URL is not this, and
+ * stays retryable.
+ */
+export function isDownloadBlocked(text: string): boolean {
+  const fatal = fatalYtdlpLine(text);
+  return !!fatal && (BOT_CHECK.test(fatal) || PAGE_FORBIDDEN.test(fatal));
 }
 
 /** The largest size yt-dlp's info JSON reports for the download or any of its parts, in bytes; null when it says none. */

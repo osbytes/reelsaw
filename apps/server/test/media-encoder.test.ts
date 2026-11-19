@@ -1,7 +1,7 @@
 /** Encoder selection: which encoders a setting probes, and the per-encoder ffmpeg arguments. */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { encoderCandidates, ffmpegPipeThreads, ffmpegThreadArgs, videoEncodeArgs } from "../src/media.js";
+import { encoderCandidates, ffmpegThreadArgs, rgbFramesToPipe, videoEncodeArgs } from "../src/media.js";
 import { normaliseArgs } from "../src/pipeline/bumpers.js";
 
 describe("video encoder", () => {
@@ -31,7 +31,11 @@ describe("video encoder", () => {
   it("caps filtergraph threads at 1 so concurrent scale graphs cannot EAGAIN on reinit", () => {
     assert.deepEqual(ffmpegThreadArgs(8), ["-threads", "8", "-filter_threads", "1", "-filter_complex_threads", "1"]);
     assert.deepEqual(ffmpegThreadArgs(0), ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"]);
-    assert.deepEqual([...ffmpegPipeThreads], ["-threads", "1", "-filter_threads", "1"]);
+  });
+
+  it("frame samplers set one encoder thread as an output option, right before the pipe", () => {
+    // -threads binds to the next file: ahead of -i it only limited the decoder and rawvideo still frame-threaded
+    assert.deepEqual([...rgbFramesToPipe], ["-threads", "1", "-filter_threads", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
   });
 
   it("bumper normalisation takes the encoder in use and defaults to libx264", () => {

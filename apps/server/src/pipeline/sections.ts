@@ -14,6 +14,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { LRUCache } from "lru-cache";
 import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Project } from "../db/schema.js";
@@ -23,7 +24,7 @@ import { keys } from "../storage/index.js";
 import { removeScratchSections } from "../storage/sweep.js";
 import { clipPcm } from "../audio/pcm.js";
 import { VAD_SR } from "../audio/vad.js";
-import { isPermanentDownloadFailure } from "../ytdlp-errors.js";
+import { isDownloadBlocked, isPermanentDownloadFailure } from "../ytdlp-errors.js";
 import { count } from "../metrics.js";
 import { sessionLock, waitSessionLock } from "../locks.js";
 import { NoEligibleProxyError } from "../ytdlp-proxy.js";
@@ -86,13 +87,21 @@ export async function renderSource(ctx: StageContext, project: Project, clip: Cl
     return await waitSessionLock(
       lockPool(svc),
       sessionLock.sourceWindows(project.id),
-      async () => (await coveringWindow(ctx, project.id, clip)) ?? (await fetchWindow(ctx, project, clip)),
+      async () => {
+        const covered = await coveringWindow(ctx, project.id, clip);
+        if (covered) return covered;
+        // a sibling clip just learned the windows cannot be had: do not walk every proxy into the same wall again
+        const known = unavailable.get(project.id);
+        if (known) throw new SectionUnavailableError(known);
+        return await fetchWindow(ctx, project, clip);
+      },
       { signal: ctx.signal },
     );
   } catch (err) {
     if (ctx.signal.aborted || !(err instanceof SectionUnavailableError)) throw err;
-    // the video is gone (deleted, private): the clip can still be made, softly, from the copy we have
-    ctx.log.warn({ clipId: clip.id, err }, "full-quality window unavailable for good; rendering from the preview copy");
+    unavailable.set(project.id, err.message);
+    // the video is gone (deleted, private) or the site blocks us: the clip can still be made, softly, from the copy we have
+    ctx.log.warn({ clipId: clip.id, err }, "full-quality window unavailable; rendering from the preview copy");
     await svc.events
       .emit("clip.preview_source", { projectId: project.id, clipId: clip.id, height: previewHeight, reason: err.message.slice(0, 500) })
       .catch(() => {});
@@ -101,6 +110,13 @@ export async function renderSource(ctx: StageContext, project: Project, clip: Cl
 }
 
 class SectionUnavailableError extends Error {}
+
+/**
+ * Projects whose full-quality windows could not be had (gone, or blocked), with why, so the rest of their clips render
+ * from the preview copy without another download each. Per process and short-lived: a block can lift, and a re-render
+ * after it expires tries again.
+ */
+const unavailable = new LRUCache<string, string>({ max: 1000, ttl: 30 * 60 * 1000 });
 
 /**
  * The window lock's own small pool. The holder keeps its client for the whole download, and `fetchWindow` needs the
@@ -366,7 +382,10 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
       if (err instanceof NoEligibleProxyError)
         throw new SectionUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP proxy or direct)");
       const message = describeDownloadFailure(err, stderrTail);
-      if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SectionUnavailableError(message);
+      const text = `${err.message}\n${stderrTail}`;
+      // gone for good, or the site is turning us away (every exit already tried): render from the preview copy now
+      // rather than retry into the same block and fail the clip
+      if (isPermanentDownloadFailure(text) || isDownloadBlocked(text)) throw new SectionUnavailableError(message);
       throw new DownloadFailedError(message);
     });
   const name = (await fs.readdir(dir)).find((f) => f.startsWith(`${stem}.`) && f.endsWith(".mp4"));

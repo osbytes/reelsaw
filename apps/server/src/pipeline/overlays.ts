@@ -8,7 +8,7 @@
  * a coarse grid, and keep only cells that show text in several different shots.
  */
 import { spawn } from "node:child_process";
-import { ffmpegPipeThreads } from "../media.js";
+import { rgbFramesToPipe } from "../media.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import type { TextDetector } from "../vision/text.js";
 import { TEXT_INPUT_W, TEXT_INPUT_H } from "../vision/text.js";
@@ -219,7 +219,6 @@ function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSi
         "-loglevel",
         "error",
         "-nostdin",
-        ...ffmpegPipeThreads,
         "-ss",
         t.toFixed(2),
         "-i",
@@ -228,11 +227,7 @@ function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSi
         "1",
         "-vf",
         `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`,
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgb24",
-        "pipe:1",
+        ...rgbFramesToPipe,
       ],
       { signal },
     );
@@ -496,7 +491,6 @@ export async function sampleClipText(
       "-loglevel",
       "error",
       "-nostdin",
-      ...ffmpegPipeThreads,
       "-ss",
       startSec.toFixed(3),
       "-t",
@@ -505,11 +499,7 @@ export async function sampleClipText(
       source,
       "-vf",
       `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`,
-      "-f",
-      "rawvideo",
-      "-pix_fmt",
-      "rgb24",
-      "pipe:1",
+      ...rgbFramesToPipe,
     ],
     { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] },
   );

@@ -17,9 +17,24 @@ export interface RunOptions {
   signal?: AbortSignal | undefined;
   /** each complete stderr line (split on \n or \r, so carriage-return progress bars arrive as lines) */
   onStderr?: ((line: string) => void) | undefined;
-  /** each complete stdout line; yt-dlp writes its `[download]` progress here, not to stderr */
+  /**
+   * each complete stdout line; yt-dlp writes its `[download]` progress here, not to stderr. A caller that reads lines
+   * gets `stdout: ""` back and keeps what it needs itself: progress output has no size bound, and buffering it all
+   * once grew past V8's string limit and crashed the process (`RangeError: Invalid string length`).
+   */
   onStdout?: (line: string) => void;
+  /** most stdout kept when there is no `onStdout`; past it the child is killed and the run rejects (default 64 MB) */
+  maxStdoutBytes?: number;
   cwd?: string;
+}
+
+/** Ceiling on a buffered stdout (ffprobe JSON, yt-dlp `--dump-single-json` are a few MB at most). */
+export const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
+
+export class OutputTooLargeError extends Error {
+  constructor(cmd: string, limit: number) {
+    super(`${cmd} wrote more than ${Math.round(limit / 1024 / 1024)} MB to stdout; stopped it`);
+  }
 }
 export interface ProbeInfo {
   durationSec: number;
@@ -70,8 +85,13 @@ export function ffmpegThreadArgs(encodeThreads: number): string[] {
   return ["-threads", t, "-filter_threads", "1", "-filter_complex_threads", "1"];
 }
 
-/** Rawvideo-to-pipe sampling: frame-threaded rawvideo fails to open (`ff_frame_thread_encoder_init`). */
-export const ffmpegPipeThreads = ["-threads", "1", "-filter_threads", "1"] as const;
+/**
+ * The output half of every frame sampler: RGB24 frames on stdout. Frame-threaded rawvideo fails to open
+ * (`ff_frame_thread_encoder_init`), so the encoder gets one thread. `-threads` is per file and binds to the file that
+ * follows it: before `-i` it limited only the decoder and the encoder kept frame threading, which is why it went in
+ * as an input option and still failed. It sits here, right before the output, so it cannot be misplaced again.
+ */
+export const rgbFramesToPipe = ["-threads", "1", "-filter_threads", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"] as const;
 
 /**
  * `-c:v …` and its quality settings per encoder, tuned to look alike: libx264 crf 21 is the
@@ -129,38 +149,84 @@ export function parseProgressTime(line: string): number | undefined {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
-/** Feeds complete lines (split on \n or \r) to `onLine`, buffering the unfinished tail across chunks. */
-export function lineSplitter(onLine?: (line: string) => void): (chunk: string) => void {
+/**
+ * Feeds complete lines (split on \n or \r) to `onLine`, buffering the unfinished tail across chunks. A tail longer
+ * than `maxLine` without a line break is dropped rather than grown without bound.
+ */
+export function lineSplitter(onLine?: (line: string) => void, maxLine = MAX_STDOUT_BYTES): (chunk: string) => void {
   if (!onLine) return () => {};
   let partial = "";
-  return (chunk) => {
-    partial += chunk;
-    const lines = partial.split(/\r?\n|\r/);
-    partial = lines.pop() ?? "";
-    for (const l of lines) onLine(l);
+  let discarding = false; // the current line outgrew maxLine: skip the rest of it rather than emit its tail as a line
+  let pendingCR = false; // the last chunk ended in \r: a \n opening this one finishes that same break
+  return (input) => {
+    // only the new chunk is scanned, so a long line costs linear time, not a rescan of everything buffered so far
+    const chunk = pendingCR && input.startsWith("\n") ? input.slice(1) : input;
+    pendingCR = chunk.endsWith("\r");
+    const parts = chunk.split(/\r?\n|\r/);
+    const last = parts.pop() ?? "";
+    for (const p of parts) {
+      if (discarding) discarding = false;
+      else onLine(partial + p);
+      partial = "";
+    }
+    if (discarding) return;
+    partial += last;
+    if (partial.length > maxLine) {
+      partial = "";
+      discarding = true;
+    }
   };
 }
 
-function runRaw(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+/**
+ * Runs a binary and collects its output. Nothing here may throw from a stream handler: an exception there is
+ * uncaught, and the process (HTTP and workers) exits. Every buffer is bounded, and a handler's own error rejects the run.
+ */
+export function runRaw(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { signal: opts.signal, cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const maxStdout = opts.maxStdoutBytes ?? MAX_STDOUT_BYTES;
+    // decode across chunk boundaries: a multibyte character split between two chunks would otherwise become U+FFFD
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
     let stdout = "";
+    let stdoutBytes = 0;
     let stderr = "";
-    const outLines = lineSplitter(opts.onStdout);
-    const errLines = lineSplitter(opts.onStderr);
-    child.stdout.on("data", (d) => {
-      const s = d.toString();
-      stdout += s;
-      outLines(s);
+    let failure: Error | undefined;
+    const fail = (err: unknown) => {
+      if (failure) return;
+      failure = err instanceof Error ? err : new Error(String(err));
+      child.kill("SIGKILL");
+    };
+    const outLines = lineSplitter(opts.onStdout, maxStdout);
+    const errLines = lineSplitter(opts.onStderr, 64 * 1024);
+    child.stdout.on("data", (s: string) => {
+      if (failure) return;
+      try {
+        if (opts.onStdout) return outLines(s);
+        stdoutBytes += Buffer.byteLength(s);
+        if (stdoutBytes > maxStdout) return fail(new OutputTooLargeError(bin, maxStdout));
+        stdout += s;
+      } catch (err) {
+        fail(err);
+      }
     });
-    child.stderr.on("data", (d) => {
-      const s = d.toString();
-      stderr += s;
-      if (stderr.length > 200_000) stderr = stderr.slice(-100_000);
-      errLines(s);
+    child.stderr.on("data", (s: string) => {
+      if (failure) return;
+      try {
+        stderr += s;
+        if (stderr.length > 200_000) stderr = stderr.slice(-100_000);
+        errLines(s);
+      } catch (err) {
+        fail(err);
+      }
     });
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve({ stdout, stderr }) : reject(new CommandError(bin, code, stderr))));
+    child.on("close", (code) => {
+      if (failure) reject(failure);
+      else if (code === 0) resolve({ stdout, stderr });
+      else reject(new CommandError(bin, code, stderr));
+    });
   });
 }
 
@@ -264,7 +330,9 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const cookies = config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : [];
       // YouTube n-sig / PO tokens: eval already passes this; ingest and issue-report must too
       const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
-      const prefix = [...js, ...cookies];
+      // progress goes to stdout and has no size bound: only a caller that reads it line by line asks for it
+      const progress = opts?.onStdout || args.includes("--progress") ? [] : ["--no-progress"];
+      const prefix = [...js, ...cookies, ...progress];
       if (args.includes("--proxy") || ytdlpPool.size === 0) {
         return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], opts)), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
       }
@@ -320,7 +388,11 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
           [
             "-hide_banner",
             "-nostdin",
-            ...ffmpegPipeThreads,
+            // one decoder thread and one filter thread: scene scoring runs beside renders and must not take every core
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
             ...seek,
             "-i",
             input,
