@@ -112,8 +112,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
  *   workers [--json]                        every process that has checked in: role, specs, last seen, current jobs
  *                                           (same as Settings → System → Workers)
- *   queue [--json]                          waiting / running / retrying jobs per stage, plus what is in flight
- *                                           (same as Settings → System → Queue)
+ *   queue [--json]                          waiting / running / retrying jobs per stage with pickup times (median and
+ *                                           95th percentile wait, last hour), queued work by account with its queue
+ *                                           priority, plus what is in flight in pickup order (same as Settings → System → Queue)
  *   failure <projectId|clipId> [--json]     one failed project or clip: owner, stage, the full recorded reason
  *                                           (same as clicking a row under Settings → System → Queue → Failed work)
  *   retry-failures [--stage s] [--cause platform|input|quota] [--q text] [--since 24h] [--json]
