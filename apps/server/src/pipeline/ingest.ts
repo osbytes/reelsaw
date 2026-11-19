@@ -17,6 +17,9 @@ import { isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "
 export { isPermanentDownloadFailure } from "../ytdlp-errors.js";
 
 const UPLOAD_MISSING = "Uploaded source file is missing";
+/** The download skipped a link the lookup said was not live: a fault in Reelsaw's filter, not in the link. */
+const FILTER_CONTRADICTION_MESSAGE =
+  "Could not download this link: the downloader skipped it as a live stream, but it is not one. This is a Reelsaw problem, not your link. Try again after an update, or upload the file instead (New project → Upload).";
 
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
@@ -150,8 +153,13 @@ export async function ingest(ctx: StageContext) {
             : undefined,
         };
       }
-      // --match-filter skipped the link: no info line, no file, exit 0
-      if (!info) throw new NonRetryableError(LIVE_SOURCE_MESSAGE);
+      // --match-filter skipped the link: no info line, no file, exit 0. That is the live refusal only when the lookup
+      // could not tell; a lookup that said "not live" contradicts the filter, which is our fault, not the link's
+      if (!info) {
+        if (missing === "failed") throw new NonRetryableError(LIVE_SOURCE_MESSAGE);
+        ctx.log.error({ filter: NOT_LIVE_FILTER, stderrTail }, "download skipped by the live filter although the lookup said not live");
+        throw new NonRetryableError(FILTER_CONTRADICTION_MESSAGE, "platform");
+      }
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
       if (!chosen) {

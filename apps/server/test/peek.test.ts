@@ -1,6 +1,17 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LiveSourceError, announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
+import { LiveSourceError, NOT_LIVE_FILTER, announcedDuration, forgetAnnouncedDurations } from "../src/projects/peek.js";
+
+describe("NOT_LIVE_FILTER", () => {
+  // yt-dlp fails `key!=value` when the extractor left `key` unset; `key!=?value` passes it. A direct .mp4 link has no
+  // live_status, so a comparison without the `?` refuses every such file as a live stream (#300)
+  it("lets a field the extractor left unset pass every comparison", () => {
+    for (const clause of NOT_LIVE_FILTER.split("&").map((c) => c.trim())) {
+      if (/^!?\w+$/.test(clause)) continue; // a unary test (`!is_live`) already passes an unset field
+      assert.match(clause, /^\w+\s*(?:!?[*^$~]?=|[<>]=?)\s*\?/, `"${clause}" needs a ? after its operator`);
+    }
+  });
+});
 
 /** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, an info dict, or an error) and counts its runs. */
 function fakeYtdlp(answer: () => number | null | Error | Record<string, unknown>) {

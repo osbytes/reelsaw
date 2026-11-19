@@ -44,8 +44,12 @@ export class LiveSourceError extends Error {
 /**
  * yt-dlp `--match-filter` that skips a live or scheduled stream instead of recording it until the stream ends. A skipped
  * link exits 0 with no info line and no file, so the download step reads that as this refusal.
+ *
+ * yt-dlp fails a comparison against a field the extractor left unset unless the operator ends in `?`, and many leave
+ * `live_status` unset (a direct .mp4 link through the generic extractor), so every comparison here must carry the `?`
+ * (test/peek.test.ts checks it); otherwise ordinary files are refused as live streams.
  */
-export const NOT_LIVE_FILTER = "!is_live & live_status!=is_upcoming";
+export const NOT_LIVE_FILTER = "!is_live & live_status!=?is_upcoming";
 
 /**
  * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (some sites).
