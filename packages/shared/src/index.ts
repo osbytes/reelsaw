@@ -371,7 +371,9 @@ const clipOverlayBase = z.object({
     .optional()
     .describe("text: colour as #RRGGBB, default white"),
   box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
-  font: fontFamilySchema.optional().describe("text: font family from list_fonts; unset = the clip's caption font"),
+  // looser than fontFamilySchema on purpose: layers saved before it existed must still parse (clipLayers drops a layer
+  // that does not), and render.ts maps any name it cannot use to the caption font before it reaches the ASS line
+  font: z.string().trim().min(1).max(60).optional().describe("text: font family from list_fonts; unset = the clip's caption font"),
   opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
   fade: z
     .number()

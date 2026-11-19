@@ -59,7 +59,11 @@ let installed: Promise<string[]> | null = null;
 export function installedFamilies(): Promise<string[]> {
   installed ??= execFileAsync("fc-list", ["--format", "%{family}\n"], { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 })
     .then(({ stdout }) => [...new Set(stdout.split("\n").flatMap((l) => l.split(",").map((f) => f.trim())))].filter(Boolean))
-    .catch(() => []);
+    .catch(() => {
+      // a timeout under load must not disable the image's fonts until a restart: the next call asks again
+      installed = null;
+      return [] as string[];
+    });
   return installed;
 }
 
@@ -80,7 +84,7 @@ export async function loadFontState(db: Db): Promise<FontState> {
 /**
  * The fonts the pickers offer: the image's, then the uploaded ones by name, with the font a style without its own uses
  * (`defaultFamily`: the instance's CAPTION_FONT, or the fallback when that is not available). A CAPTION_FONT from a
- * custom image is listed too, so a picker can show it. Who uploaded a font is for admins only.
+ * custom image is listed too, so a picker can show it. Who uploaded a font, and its file name, are for admins only.
  */
 export async function listFonts(svc: Pick<Services, "database" | "settings">, opts: { admin: boolean }): Promise<{ fonts: FontInfo[]; defaultFamily: string }> {
   const [rows, state] = await Promise.all([svc.database.db.select().from(schema.fonts).orderBy(asc(schema.fonts.family)), loadFontState(svc.database.db)]);
@@ -107,7 +111,7 @@ export async function listFonts(svc: Pick<Services, "database" | "settings">, op
           label: r.family,
           builtin: false,
           id: r.id,
-          filename: r.filename,
+          filename: opts.admin ? r.filename : null,
           sizeBytes: r.sizeBytes,
           createdAt: r.createdAt.toISOString(),
           createdBy: opts.admin ? r.createdBy : null,

@@ -703,7 +703,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const watermark = owner ? await watermarkFor(db, svc.settings.get(), owner, svc.entitlements) : { on: false, text: "", source: "instance" as const };
   // the logo above the text: composited like an overlay for the whole body; a missing file leaves the text alone
   const logo: LoadedOverlay[] = watermark.on ? await watermarkLogo(svc.config.WATERMARK_LOGO_PATH, outDuration, log) : [];
-  if (watermark.on) log.debug({ source: watermark.source, logo: logo.length > 0 }, "watermark on");
+  // what is actually burned in: an empty WATERMARK_TEXT with no readable logo leaves nothing, and the clip must not
+  // then be marked (and offered an upgrade) as watermarked
+  const watermarkShown = watermark.on && (watermark.text.trim() !== "" || logo.length > 0);
+  if (watermark.on) log.debug({ source: watermark.source, logo: logo.length > 0, shown: watermarkShown }, "watermark on");
   // the clip's layers whatever generation of row it is: text goes into the caption file, assets are composited, audio is mixed
   const layers = clipLayers(clip);
   const visualLayerCount = layers.filter((l) => l.kind !== "audio").length;
@@ -1120,7 +1123,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.transitions.bodyStartSec);
     await u.db
       .update(schema.clips)
-      .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, captions, updatedAt: new Date() })
+      .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermarkShown, error: null, diagnostics, captions, updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
     await u.emit("clip.done", { projectId: projectId, clipId, index: clip.index, renderSec: Math.round((Date.now() - renderStarted) / 1000) });
     await finalizeInTx(svc, u, projectId);

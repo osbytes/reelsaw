@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { defaultStyle, fontFamilySchema, resolveStyle, styleSchema } from "@reelsaw/shared";
+import { clipLayers, defaultStyle, fontFamilySchema, resolveStyle, styleSchema } from "@reelsaw/shared";
 import { FALLBACK_FONT, fontFileProblem, pickFont } from "../src/fonts.js";
 import { buildAss } from "../src/pipeline/captions.js";
 import { envSchema } from "../src/config.js";
@@ -62,9 +62,9 @@ describe("caption fonts", () => {
   });
 });
 
-describe("watermark without text", () => {
-  it("writes no watermark line when the text is empty (the logo, if any, is composited by render.ts)", () => {
-    const ass = buildAss([{ text: "hi", start: 0, end: 1 }], { width: 1080, height: 1920, font: "DejaVu Sans", style: defaultStyle, watermark: "" });
-    assert.doesNotMatch(ass, /^Dialogue: 2,.*Watermark/m);
+describe("text layer fonts", () => {
+  it("still parse when saved before font names were checked, so clipLayers keeps the layer", () => {
+    const layer = { kind: "text", id: "t1", text: "Hi", start: 1, end: 2, x: 0.5, y: 0.5, font: "Arial, sans-serif" };
+    assert.equal(clipLayers({ layers: [layer] } as never).length, 1);
   });
 });

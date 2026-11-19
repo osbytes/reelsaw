@@ -401,12 +401,13 @@ export function createApp(svc: Services) {
   // exactly what libass will. Public: a font file is not user data. Long cache: the files never change.
   app.get("/api/fonts/:family", async (c) => {
     const asked = c.req.param("family");
-    // the image's fonts (the pickers' and a custom image's CAPTION_FONT) are public like the image itself
-    const family = TEXT_FONTS.find((f) => f.family === asked)?.family ?? (await installedFamilies()).find((f) => f.toLowerCase() === asked.toLowerCase());
+    // the nine fonts Reelsaw ships are public like the image itself; a custom image's own fonts and uploads may be
+    // licensed, so only signed-in accounts (who can pick them) get those files, and nobody caches them in between
+    const shipped = TEXT_FONTS.find((f) => f.family === asked)?.family;
+    if (!shipped && !(await actor(c))) return c.text("unknown font", 404);
+    const family = shipped ?? (await installedFamilies()).find((f) => f.toLowerCase() === asked.toLowerCase());
     if (!family) {
-      // an admin's upload (fonts.ts): often a licensed face, so only signed-in accounts (who can pick it) get the file,
-      // and nobody caches it in between. Short: it can be removed and its name reused
-      if (!(await actor(c))) return c.text("unknown font", 404);
+      // an admin's upload (fonts.ts). Short: it can be removed and its name reused
       const file = await uploadedFontFile(svc, asked).catch((err) => {
         c.get("log").warn({ err }, "uploaded font lookup failed");
         return null;
@@ -420,7 +421,7 @@ export function createApp(svc: Services) {
       // fc-match falls back to any font when the family is missing: refuse that instead of serving the wrong face
       if (!file || !matched || !matched.split(",").some((m) => m.trim().toLowerCase() === family.toLowerCase())) return c.text("font not installed", 404);
       // sendFile answers with its own headers, so the cache policy goes through it (a c.header here is dropped)
-      return sendFile(c.req.raw, file, undefined, { cacheControl: "public, max-age=604800, immutable" });
+      return sendFile(c.req.raw, file, undefined, { cacheControl: shipped ? "public, max-age=604800, immutable" : "private, max-age=3600" });
     } catch (err) {
       c.get("log").warn({ err, family }, "font lookup failed");
       return c.text("font not available", 404);

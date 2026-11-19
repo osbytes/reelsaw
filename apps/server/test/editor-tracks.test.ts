@@ -379,3 +379,10 @@ describe("fixed crops", () => {
     assert.ok(chain.includes("scale=1080:1918") && chain.includes("scale=1080:2"), chain);
   });
 });
+
+describe("watermark without text", () => {
+  it("writes no watermark line when the text is empty (the logo, if any, is composited by render.ts)", () => {
+    const ass = buildAss([{ text: "hi", start: 0, end: 1 }], { width: 1080, height: 1920, font: "DejaVu Sans", style: resolveStyle({}), watermark: "" });
+    assert.doesNotMatch(ass, /^Dialogue: 2,.*Watermark/m);
+  });
+});
