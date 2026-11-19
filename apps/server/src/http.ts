@@ -761,8 +761,7 @@ export function createApp(svc: Services) {
     if (!(await storage.exists(key))) return c.text("not found", 404);
     const loc = await storage.resolve(key);
     if ("url" in loc) return c.redirect(loc.url, 302);
-    c.header("Cache-Control", "private, max-age=3600");
-    return sendFile(c.req.raw, loc.file);
+    return sendFile(c.req.raw, loc.file, undefined, { cacheControl: "private, max-age=3600" });
   });
 
   app.get("/media/source/:projectId", async (c) => {
