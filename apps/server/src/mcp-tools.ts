@@ -949,7 +949,7 @@ export const TOOLS = {
   get_billing: {
     title: "Billing",
     description:
-      "Hosted instances: your plan, subscription and billing period, the limits in force and where each comes from, this period's usage, the watermark, and the plans on offer. With a cancellation scheduled, `afterCancel` says what Free will be from `subscription.cancelAt`: its limits, where you would be over them and what that refuses, and what else changes. Returns { plan, subscription, afterCancel, limits, usage, watermark, plans, … }; self-hosted, that billing is not enabled.",
+      "Hosted instances: your plan, subscription and billing period, the limits in force and where each comes from, this period's usage, the watermark, the plans on offer, and with a cancellation scheduled what Free will be once the plan ends: its limits, where you would be over them and what that refuses. `afterCancel` holds that from `subscription.cancelAt`, with what else changes. Returns { plan, subscription, afterCancel, limits, usage, watermark, plans, … }; self-hosted, that billing is not enabled.",
     annotations: { readOnlyHint: true },
   },
   billing_checkout_url: {

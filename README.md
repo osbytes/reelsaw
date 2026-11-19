@@ -640,7 +640,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 | `get_email_preferences` | Which optional emails you get, by topic. |
 | `set_email_preferences` | Turn topics of optional email on or off; omitted topics stay as they are. |
-| `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer; with a cancellation scheduled, when the plan ends and which Free limits you would be over. |
+| `get_billing` | Hosted instances: your plan, subscription and billing period, the limits in force and where each comes from, this period's usage, the watermark, the plans on offer, and with a cancellation scheduled what Free will be once the plan ends: its limits, where you would be over them and what that refuses. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
 | `list_transcript_flags` | The fixes Reelsaw made or suggests in a project's transcript: misheard names, fillers and repetitions to cut, and your own cuts and corrections. |
 | `review_transcript_flags` | Accept or reject suggested transcript fixes (ids from list_transcript_flags), optionally with your own replacement text for an accepted name fix. |
