@@ -234,7 +234,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `LLM_TRACE_MAX_CHARS` | `4000` | Truncate captured prompts and responses to this many characters. |
 | `LANGFUSE_PUBLIC_KEY` | unset | Langfuse public key (checked at boot when LLM_TRACE includes langfuse). |
 | `LANGFUSE_SECRET_KEY` | unset | Langfuse secret key. |
-| `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Langfuse host. |
+| `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Langfuse host: Langfuse Cloud, or a self-hosted Langfuse 4.59.0 or later (traces are sent over OpenTelemetry). |
 | `LOG_FILE` | unset | Also write JSON lines here (daily files, 7 kept). Each process writes its own `<name>.<worker id>.<date>.log` next to this path, so scaled workers never prune each other. Survives container re-creation; `reelsaw logs` and issue reports read every such file. |
 
 ### Media tools and downloads

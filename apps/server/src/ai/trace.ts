@@ -4,7 +4,7 @@
  *   logs      – one structured log line per call: prompt, response, tokens, latency, error
  *               (LLM_TRACE_MAX_CHARS truncates prompt/response; logs also land in LOG_FILE)
  *   langfuse  – a Langfuse trace per job and a generation per call (LANGFUSE_PUBLIC_KEY,
- *               LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL), for replaying and comparing analysis runs; each
+ *               LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL; ai/langfuse.ts), for replaying and comparing analysis runs; each
  *               generation carries its step's prompt version, and a user's decisions about the output (a clip
  *               deleted, a fix rejected) arrive as scores on the project's session (decisions/scores.ts)
  *
@@ -17,6 +17,7 @@ import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
 import { reportedCost } from "../eval/meter.js";
 import type { DecisionScore } from "../decisions/scores.js";
+import { createLangfuseSink, type LangfuseDeps, type LangfuseSink } from "./langfuse.js";
 
 export interface LlmContext {
   projectId?: string;
@@ -118,9 +119,14 @@ function bodyCode(body: unknown): string | undefined {
   }
 }
 
+/** Model settings Langfuse can show (it takes strings and numbers): the ones a call left unset are dropped. */
+function definedSettings(s: Record<string, unknown>): Record<string, string | number> {
+  return Object.fromEntries(Object.entries(s).filter((e): e is [string, string | number] => typeof e[1] === "string" || typeof e[1] === "number"));
+}
+
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… [+${s.length - n} chars]` : s);
 
-export async function createLlmTracer(config: TraceConfig, log: Logger): Promise<LlmTracer> {
+export async function createLlmTracer(config: TraceConfig, log: Logger, deps: { langfuse?: LangfuseDeps } = {}): Promise<LlmTracer> {
   const sinks = config.LLM_TRACE.split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s): s is TraceSink => s === "logs" || s === "langfuse");
@@ -134,38 +140,17 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
     shutdown: async () => {},
   };
 
-  let langfuse: import("langfuse").Langfuse | undefined;
-  const traces = new Map<string, ReturnType<import("langfuse").Langfuse["trace"]>>();
+  let langfuse: LangfuseSink | undefined;
   if (sinks.includes("langfuse")) {
     if (!config.LANGFUSE_PUBLIC_KEY || !config.LANGFUSE_SECRET_KEY)
       throw new Error("LLM_TRACE includes langfuse but LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are not set");
-    const { Langfuse } = await import("langfuse");
-    langfuse = new Langfuse({
-      publicKey: config.LANGFUSE_PUBLIC_KEY,
-      secretKey: config.LANGFUSE_SECRET_KEY,
-      baseUrl: config.LANGFUSE_BASE_URL,
-      flushAt: 10,
-      flushInterval: 5000,
-    });
-    langfuse.on("error", (err: unknown) => log.warn({ err }, "langfuse export error"));
+    langfuse = await createLangfuseSink(
+      { LANGFUSE_PUBLIC_KEY: config.LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY: config.LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL: config.LANGFUSE_BASE_URL },
+      log.child({ module: "llm" }),
+      deps.langfuse,
+    );
   }
   const traceLog = log.child({ module: "llm" });
-  // one Langfuse trace per job (or per project+stage outside jobs), so a run reads as one timeline
-  const traceFor = (c: LlmContext) => {
-    const key = c.jobId ?? `${c.projectId ?? "none"}:${c.stage ?? "none"}`;
-    let t = traces.get(key);
-    if (!t) {
-      t = langfuse!.trace({
-        name: c.stage ?? "llm",
-        ...(c.projectId ? { sessionId: c.projectId } : {}),
-        metadata: { projectId: c.projectId, clipId: c.clipId, jobId: c.jobId },
-        tags: ["reelsaw", ...(c.stage ? [c.stage] : [])],
-      });
-      traces.set(key, t);
-      if (traces.size > 500) traces.delete(traces.keys().next().value!);
-    }
-    return t;
-  };
 
   const middleware: LanguageModelMiddleware = {
     wrapGenerate: async ({ doGenerate, params, model }) => {
@@ -211,10 +196,10 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
           );
         }
         if (langfuse) {
-          traceFor(ctx).generation({
+          langfuse.generation(ctx, {
             name: ctx.call ?? ctx.stage ?? "generate",
             model: model.modelId,
-            modelParameters: settings as Record<string, string | number>,
+            modelParameters: definedSettings(settings),
             input,
             output,
             startTime,
@@ -244,14 +229,13 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
             "llm call failed",
           );
         if (langfuse)
-          traceFor(ctx).generation({
+          langfuse.generation(ctx, {
             name: ctx.call ?? ctx.stage ?? "generate",
             model: model.modelId,
             input,
             startTime,
             endTime: new Date(),
-            level: "ERROR",
-            statusMessage: (err as Error).message?.slice(0, 1000),
+            error: (err as Error).message?.slice(0, 1000) || "model call failed",
             ...(ctx.promptVersion ? { version: ctx.promptVersion } : {}),
             metadata: { ...ctx, provider: model.provider, ...why },
           });
@@ -264,16 +248,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
   if (langfuse) {
     const lf = langfuse;
     tracer.scoring = true;
-    tracer.score = (projectId, scores) => {
-      for (const s of scores) {
-        try {
-          // the score's id is the decision's, so a retried commit hook upserts instead of counting twice
-          lf.score({ id: s.id, sessionId: projectId, name: s.name, value: s.value, dataType: "BOOLEAN", metadata: s.metadata });
-        } catch (err) {
-          traceLog.warn({ err, projectId, score: s.name }, "langfuse score failed");
-        }
-      }
-    };
+    tracer.score = (projectId, scores) => lf.score(projectId, scores);
   }
   tracer.check = async () => {
     if (!langfuse) return;
@@ -289,7 +264,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
     if (!res.ok) throw new Error(`Langfuse check failed: HTTP ${res.status}`);
   };
   tracer.shutdown = async () => {
-    await langfuse?.shutdownAsync().catch(() => {});
+    await langfuse?.shutdown().catch(() => {});
   };
   return tracer;
 }
