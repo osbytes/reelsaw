@@ -377,7 +377,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   LLM_TRACE_MAX_CHARS: ["observability", "Truncate captured prompts and responses to this many characters."],
   LANGFUSE_PUBLIC_KEY: ["observability", "Langfuse public key (checked at boot when LLM_TRACE includes langfuse)."],
   LANGFUSE_SECRET_KEY: ["observability", "Langfuse secret key."],
-  LANGFUSE_BASE_URL: ["observability", "Langfuse host."],
+  LANGFUSE_BASE_URL: ["observability", "Langfuse host: Langfuse Cloud, or a self-hosted Langfuse 4.59.0 or later (traces are sent over OpenTelemetry)."],
   OTEL_ENABLED: [
     "observability",
     "OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. AI SDK calls are GenAI spans (`invoke_agent analyze.map`: model, tokens, finish reason, the project/stage/step/prompt-version ids) and never carry the prompt or the answer. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end.",
