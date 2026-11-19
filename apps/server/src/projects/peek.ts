@@ -29,11 +29,21 @@ export async function peekUrlMeta(url: string): Promise<{ title?: string | undef
   }
 }
 
-/** What every surface says when a link is a live or scheduled stream: there is no end to download up to. */
+/**
+ * What every surface says when a link is a stream with no finished video yet: live, scheduled, or just ended and still
+ * being processed by the site (YouTube's `post_live`, which reports no length and downloads for hours).
+ */
 export const LIVE_SOURCE_MESSAGE =
-  "This link is a live stream (or one that has not started yet), which never finishes downloading. Add it again once the stream has ended and its recording is up, or upload the file instead (New project → Upload).";
+  "This link is a live stream, one that has not started yet, or one that just ended and is still being processed, so there is no finished video to download. Add it again once its recording is up (a stream that just ended can take a few hours), or upload the file instead (New project → Upload).";
 
-/** The link is a live or scheduled stream: refused before anything is downloaded, on every attempt alike. */
+/**
+ * yt-dlp `live_status` values with no finished video behind them. `post_live` is a stream that ended but whose
+ * recording the site is still processing: no length to check limits against, and a fragment-by-fragment download of
+ * the whole stream (a day-long one ran for hours before it was stopped).
+ */
+const UNFINISHED_LIVE_STATUSES = new Set(["is_live", "is_upcoming", "post_live"]);
+
+/** The link is a live, scheduled or still-processing stream: refused before anything is downloaded, on every attempt alike. */
 export class LiveSourceError extends Error {
   constructor() {
     super(LIVE_SOURCE_MESSAGE);
@@ -42,19 +52,20 @@ export class LiveSourceError extends Error {
 }
 
 /**
- * yt-dlp `--match-filter` that skips a live or scheduled stream instead of recording it until the stream ends. A skipped
+ * yt-dlp `--match-filter` that skips a live, scheduled or still-processing stream (UNFINISHED_LIVE_STATUSES) instead of
+ * recording it until the stream ends. A skipped
  * link exits 0 with no info line and no file, so the download step reads that as this refusal.
  *
  * yt-dlp fails a comparison against a field the extractor left unset unless the operator ends in `?`, and many leave
  * `live_status` unset (a direct .mp4 link through the generic extractor), so every comparison here must carry the `?`
  * (test/peek.test.ts checks it); otherwise ordinary files are refused as live streams.
  */
-export const NOT_LIVE_FILTER = "!is_live & live_status!=?is_upcoming";
+export const NOT_LIVE_FILTER = "!is_live & live_status!=?is_upcoming & live_status!=?post_live";
 
 /**
  * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (some sites).
- * Throws `LiveSourceError` for a live or scheduled stream (no length, and a download that would run until the stream
- * ends), and the lookup's own error when it fails. Used when a link is checked (check_source, the New project form), when
+ * Throws `LiveSourceError` for a live, scheduled or still-processing stream (no length, and a download that would run
+ * until the stream ends, or through every fragment of it), and the lookup's own error when it fails. Used when a link is checked (check_source, the New project form), when
  * the project is created (a refusal with the upgrade offer instead of a failed project) and again before ingest downloads;
  * the binding check still runs on the probed file.
  *
@@ -78,7 +89,7 @@ async function lookUp(media: Pick<MediaTools, "ytdlp">, url: string, signal?: Ab
     .find((l) => l.trim().startsWith("{"));
   const parsed = jsonLine ? announcedSchema.safeParse(JSON.parse(jsonLine)) : null;
   const info = parsed?.success ? parsed.data : {};
-  const answer = { sec: info.duration ?? null, live: info.is_live === true || info.live_status === "is_live" || info.live_status === "is_upcoming" };
+  const answer = { sec: info.duration ?? null, live: info.is_live === true || UNFINISHED_LIVE_STATUSES.has(info.live_status ?? "") };
   lengths.set(url, answer);
   return answer;
 }

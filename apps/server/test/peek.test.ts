@@ -11,6 +11,9 @@ describe("NOT_LIVE_FILTER", () => {
       assert.match(clause, /^\w+\s*(?:!?[*^$~]?=|[<>]=?)\s*\?/, `"${clause}" needs a ? after its operator`);
     }
   });
+  it("skips every status the lookup refuses, for when the lookup could not tell", () => {
+    for (const status of ["is_upcoming", "post_live"]) assert.ok(NOT_LIVE_FILTER.includes(`live_status!=?${status}`), status);
+  });
 });
 
 /** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, an info dict, or an error) and counts its runs. */
@@ -76,6 +79,12 @@ describe("announcedDuration", () => {
 
   it("refuses a stream that has not started yet", async () => {
     const y = fakeYtdlp(() => ({ is_live: false, live_status: "is_upcoming" }));
+    await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
+  });
+
+  // a stream that just ended reports no length (so no minutes check) and downloads fragment by fragment for hours
+  it("refuses a stream that ended but is still being processed", async () => {
+    const y = fakeYtdlp(() => ({ is_live: false, was_live: true, live_status: "post_live", duration: null }));
     await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
   });
 
