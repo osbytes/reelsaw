@@ -1,3 +1,4 @@
+import { FontsSection } from "../components/FontsSection";
 import { SignupRulesSection } from "../components/SignupRules";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -64,6 +65,7 @@ const SYSTEM_SECTIONS: Section[] = [
   ["signup-rules", "Sign-up rules"],
   ["limits", "Limits"],
   ["pipeline", "Pipeline"],
+  ["captions", "Captions"],
   ["retention", "Retention"],
   ["operations", "Operations"],
   ["library", "Library"],
@@ -400,6 +402,7 @@ function SystemTab() {
         intro="Refine-stage ceilings for every account. Off by default. Turn a gate on so projects (and Project defaults) may opt into that step; leave off to keep every account on the fast path."
         fields={PIPELINE_FIELDS}
       />
+      <FontsSection />
       <InstanceSettingsGroup
         id="retention"
         title="Retention"

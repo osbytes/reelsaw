@@ -54,3 +54,11 @@ describe("sendFile", () => {
     assert.equal(await whole.text(), "0123456789abcdef");
   });
 });
+
+describe("sendFile callers", () => {
+  it("pass the cache policy to sendFile instead of setting a header it drops", async () => {
+    // sendFile builds its own Response, so a `c.header("Cache-Control", …)` just before `return sendFile(…)` never applied
+    const src = await fsp.readFile(path.join(import.meta.dirname, "../src/http.ts"), "utf8");
+    assert.doesNotMatch(src, /c\.header\("Cache-Control"[^\n]*\n\s*return sendFile\(/);
+  });
+});

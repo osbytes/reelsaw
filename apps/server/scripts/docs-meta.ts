@@ -409,7 +409,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     'yt-dlp egress: one URL (`http`, `https`, `socks5`, `socks5h`), or a comma-separated pool `[id=]<url-or-direct>[;priority=N][;concurrency=N]`. `priority` is the operator ranking (higher is tried first) and never changes at runtime; a circuit breaker skips a candidate after consecutive faults, then the ranking applies again. `direct` uses this server\'s IP. `{session}` in a URL is replaced with a fresh id on every download so a residential gateway can pin that process to one IP and give the next download a different one (DataImpulse: `sessid.{session}` in the username; turn plan-wide sticky off). YouTube blocks many datacentre IPs. On a hosted or shared instance this is also where to enforce that downloads cannot reach private networks (SECURITY.md, "URL sources and your network"). `reelsaw ytdlp-proxies` shows the pool (never URLs). Example: `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,paid=http://user:pass@gate.example:7000;priority=1`. Full-quality clip windows of a preview-sized source (a plan with a `sourceHeight`, hosted Free) are fetched by ffmpeg, which speaks only HTTP proxies: those downloads skip `socks` candidates, so give a home exit an HTTP proxy too (TROUBLESHOOTING.md).',
   ],
   YTDLP_COOKIES_FILE: ["tools", "Cookies file in Netscape format for yt-dlp."],
-  CAPTION_FONT: ["tools", "Font family for burned-in captions; it must be installed where ffmpeg runs."],
+  CAPTION_FONT: [
+    "tools",
+    "Default font for captions and hooks, and always the watermark's. A project or clip may pick another (`style.font`). One of the fonts in the image (DejaVu Sans, Liberation Sans, Roboto, Open Sans, Lato, Inter, Bebas Neue, Liberation Serif, DejaVu Sans Mono) one an admin uploaded under Settings → System → Captions (`reelsaw fonts add`, `add_font`), or any other family installed in a custom image. A fontconfig list (`Inter, DejaVu Sans`) uses its first family; one that is not available falls back to DejaVu Sans.",
+  ],
 
   POSTGRES_PASSWORD: ["compose", "Database password used by both the db and app containers (compose only)."],
   REELSAW_IMAGE: ["compose", "Image the compose file runs (compose only)."],

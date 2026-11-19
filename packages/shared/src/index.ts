@@ -71,6 +71,20 @@ export type CaptionPosition = z.infer<typeof captionPositionSchema>;
 export type CaptionStyle = z.infer<typeof captionStyleSchema>;
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+/**
+ * A font family as libass and fontconfig name it. Commas, backslashes and braces would break the ASS line it goes
+ * into (a style's Fontname, a `\fn` override), so they are refused here rather than escaped at every use.
+ */
+export const fontFamilySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(60)
+  .regex(/^[^,\\{}\r\n]+$/, "A font name cannot contain commas, backslashes or braces");
+/** Font files an admin can upload (fonts.ts): what FreeType, and so libass and the browser preview, read. */
+export const FONT_FILE_EXTS = [".ttf", ".otf", ".woff", ".woff2"] as const;
+/** Largest font file accepted: a full CJK face is ~20 MB. */
+export const MAX_FONT_BYTES = 30 * 1024 * 1024;
 /** Fraction of the 9:16 frame, 0 = left/top, 1 = right/bottom. */
 const frac = (what: string) => z.number().min(0).max(1).describe(`${what}, as a fraction of the 9:16 frame (0-1)`);
 
@@ -132,6 +146,11 @@ export function bodyEdgeFades(
  */
 export const styleSchema = z.object({
   captions: captionStyleSchema.default("karaoke"),
+  /** Caption and hook typeface; unset or null = the instance caption font (CAPTION_FONT). */
+  font: fontFamilySchema
+    .nullable()
+    .optional()
+    .describe("Caption and hook font: a family from list_fonts (built-in or uploaded by an admin); unset or null = the instance caption font"),
   captionSize: z.number().min(0.5).max(2).describe("Caption size multiplier (0.5-2, default 1)").default(1),
   captionX: frac("Caption centre, horizontal").default(0.5),
   captionY: frac("Caption centre, vertical (default 0.72)").default(0.72),
@@ -352,7 +371,7 @@ const clipOverlayBase = z.object({
     .optional()
     .describe("text: colour as #RRGGBB, default white"),
   box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
-  font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
+  font: fontFamilySchema.optional().describe("text: font family from list_fonts; unset = the clip's caption font"),
   opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
   fade: z
     .number()
@@ -693,8 +712,9 @@ export function isStickerAsset(a: { kind: string; mime?: string | null | undefin
 }
 
 /**
- * Fonts a text overlay can use: installed in the server image (Dockerfile) and served to the editor
- * preview from there (`/api/fonts/:family`), so what you see is what libass draws.
+ * The fonts installed in the server image (Dockerfile), for captions, hooks and text overlays; an admin can add more
+ * (fonts.ts, `list_fonts`). Served to the editor preview from the server (`/api/fonts/:family`), so what you see is
+ * what libass draws. The first is the built-in default caption font (CAPTION_FONT).
  */
 export const TEXT_FONTS = [
   { family: "DejaVu Sans", label: "DejaVu Sans (default)" },
@@ -1015,6 +1035,7 @@ export const userProjectDefaultsSchema = z
     maxClipSeconds: z.number().int().min(10).max(300),
     maxClips: z.number().int().min(1).max(50),
     highlightColor: hexColor,
+    font: fontFamilySchema,
     wordsPerLine: z.number().int().min(1).max(8),
     uppercase: z.boolean(),
     fadeIn: z.number().min(0).max(MAX_FADE_SEC),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import path from "node:path";
+import { fontFamilySchema } from "@reelsaw/shared";
 import { parseLogLevels } from "./log.js";
 import { parseYtdlpProxies } from "./ytdlp-proxy.js";
 import { bundledAssetPath } from "./lib/assets.js";
@@ -307,7 +308,14 @@ export const envSchema = z.object({
   /** Datacentre IPs get blocked by YouTube: one proxy URL, or a ranked pool (`{session}` filled per download; ytdlp-proxy.ts) */
   YTDLP_PROXY: z.string().optional(),
   YTDLP_COOKIES_FILE: z.string().optional(),
-  CAPTION_FONT: z.string().default("DejaVu Sans"),
+  /** default caption, hook and watermark font; a runtime setting (instance-settings.ts), projects and clips may pick another (fonts.ts) */
+  // a fontconfig list ("Inter, DejaVu Sans"), which this variable used to take, keeps booting: the first family is the
+  // one asked for, and a family that is not installed falls back at render time (fonts.ts pickFont)
+  CAPTION_FONT: z
+    .string()
+    .default("DejaVu Sans")
+    .transform((v) => v.split(",")[0]!.trim())
+    .pipe(fontFamilySchema),
 });
 
 export type Config = Omit<z.infer<typeof envSchema>, "SIGNUP_MODE" | "ALLOW_SIGNUP"> & { SIGNUP_MODE: "open" | "approval" | "closed" };

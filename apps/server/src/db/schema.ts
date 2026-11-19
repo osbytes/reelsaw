@@ -114,6 +114,31 @@ export const signupRules = pgTable(
 );
 export type SignupRuleRow = typeof signupRules.$inferSelect;
 
+/**
+ * Fonts an admin uploaded (fonts.ts): instance-wide, beside the ones in the image (`TEXT_FONTS`). Any account can pick
+ * one for its captions, hooks and text layers; every render job copies them to `DATA_DIR/fonts` and points libass at
+ * that folder. Removing one is for good: clips that used it fall back to the instance caption font on their next render.
+ */
+export const fonts = pgTable(
+  "fonts",
+  {
+    id: text("id").primaryKey(),
+    /** the family as fontconfig reads it from the file (`fc-scan`), the name styles and layers store */
+    family: text("family").notNull(),
+    /** `fonts/<id><ext>` in the store */
+    storageKey: text("storage_key").notNull(),
+    /** the uploaded file name, for the list */
+    filename: text("filename").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    /** the address of the admin who added it, as it was then ("cli" from the operator CLI) */
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  // one file per family: a second would make which face libass picks a coin toss
+  (t) => [uniqueIndex("fonts_family_idx").on(sql`lower(${t.family})`)],
+);
+export type FontRow = typeof fonts.$inferSelect;
+
 /** Per-account request counter for the mutation rate limit (abuse.ts `checkRequestRate`): one row per user and minute, pruned hourly. */
 export const userRate = pgTable(
   "user_rate",

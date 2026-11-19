@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { textFontFamily } from "../lib/fonts";
+import { cssFontFamily, useFonts } from "../lib/fonts";
 import {
   OVERLAY_PAD_X,
   OVERLAY_PAD_Y,
@@ -332,7 +332,6 @@ function InlineText({ text, onDone }: { text: string; onDone: (next: string | nu
   );
 }
 
-const FONT = `"DejaVu Sans", Verdana, system-ui, sans-serif`;
 const SNAP = 0.03;
 /** a text layer's line, like the schema: one line, 1–120 characters */
 const TEXT_MAX = 120;
@@ -579,6 +578,11 @@ export function VerticalPreview({
   }
   const panning = !!drag && typeof drag === "object" && "pan" in drag;
 
+  // the font the render picks (fonts.ts pickFont): the style's, else the instance's; one not available falls back the same way
+  const fonts = useFonts();
+  const available = (f?: string | null) => (f ? fonts.fonts.find((x) => x.family.toLowerCase() === f.toLowerCase())?.family : undefined);
+  const captionFamily = available(style.font) ?? fonts.defaultFamily;
+  const FONT = cssFontFamily(captionFamily);
   const capPx = h * CAPTION_FONT_FRAC * style.captionSize;
   const hookPx = h * HOOK_FONT_FRAC;
   const draggable = !!onStyleChange;
@@ -680,7 +684,7 @@ export function VerticalPreview({
               style={{
                 left: `${o.x * 100}%`,
                 top: `${o.y * 100}%`,
-                fontFamily: textFontFamily(o.font),
+                fontFamily: cssFontFamily(available(o.font) ?? captionFamily),
                 fontSize: px,
                 maxWidth: width * 0.88,
                 color: o.color,

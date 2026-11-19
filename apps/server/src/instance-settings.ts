@@ -1,6 +1,6 @@
 /**
  * Instance settings an admin changes at runtime: who may sign up, email verification, captcha,
- * legal links, quotas, upload limits, refine-stage gates (name fixes, disfluency, scenes),
+ * legal links, quotas, upload limits, the caption font, refine-stage gates (name fixes, disfluency, scenes),
  * retention, the stall watchdog, the update check and whether /api/health shows machine numbers.
  * One precedence chain (README, "Settings and precedence"): the environment (config.ts) is the
  * default; a value stored in `instance_settings` (key `runtime`) overrides it; `null` in a patch
@@ -15,6 +15,7 @@
  * it is read once at boot and changing it needs a restart anyway.
  */
 import { z } from "zod";
+import { fontFamilySchema } from "@reelsaw/shared";
 import { eq } from "drizzle-orm";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
@@ -26,6 +27,7 @@ export const SETTING_GROUPS = [
   ["access", "Access"],
   ["limits", "Limits"],
   ["pipeline", "Pipeline"],
+  ["captions", "Captions"],
   ["retention", "Retention"],
   ["library", "Library"],
   ["operations", "Operations"],
@@ -125,6 +127,12 @@ export const RUNTIME_SETTINGS = {
   ),
   MEDIA_LINK_TTL_DAYS: def("limits", z.number().int().min(1).max(3650), "Share links last this many days unless the owner picks less."),
   MEDIA_LINK_ALLOW_NEVER: def("limits", z.boolean(), "Owners may make a share link that never expires (they can still revoke it)."),
+
+  CAPTION_FONT: def(
+    "captions",
+    fontFamilySchema,
+    "The font captions and hooks use unless a project or clip picks another, and the watermark's font. A family from list_fonts: one installed in the image or uploaded under Settings → System → Captions. A family the renderer cannot find falls back to DejaVu Sans.",
+  ),
 
   TRANSCRIPT_CORRECTION: def(
     "pipeline",

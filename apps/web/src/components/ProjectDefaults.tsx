@@ -10,6 +10,7 @@ import { Link } from "react-router";
 import { useBumperLibrary } from "./BumperField";
 import { RefineDefaultsFields } from "./RefineToggles";
 import { TemplateSelect } from "./TemplatePicker";
+import { fontOptions, useFonts } from "../lib/fonts";
 
 type RefineForm = { refineEntities: "" | "yes" | "no"; refineDisfluency: "" | "yes" | "no"; disfluencyLlm: "" | "yes" | "no"; refineScenes: "" | "yes" | "no" };
 type Form = {
@@ -23,6 +24,7 @@ type Form = {
   maxClipSeconds: string;
   maxClips: string;
   highlightColor: string;
+  font: string;
   wordsPerLine: string;
   uppercase: "" | "yes" | "no";
   fadeIn: string;
@@ -43,6 +45,7 @@ const EMPTY: Form = {
   maxClipSeconds: "",
   maxClips: "",
   highlightColor: "",
+  font: "",
   wordsPerLine: "",
   uppercase: "",
   fadeIn: "",
@@ -72,6 +75,7 @@ function fromSaved(d: UserProjectDefaults): Form {
     maxClipSeconds: d.maxClipSeconds?.toString() ?? "",
     maxClips: d.maxClips?.toString() ?? "",
     highlightColor: d.highlightColor ?? "",
+    font: d.font ?? "",
     wordsPerLine: d.wordsPerLine?.toString() ?? "",
     uppercase: d.uppercase === undefined ? "" : d.uppercase ? "yes" : "no",
     fadeIn: d.fadeIn?.toString() ?? "",
@@ -99,6 +103,7 @@ function toSaved(f: Form): UserProjectDefaults {
     maxClipSeconds: num(f.maxClipSeconds),
     maxClips: num(f.maxClips),
     highlightColor: f.highlightColor.trim() || undefined,
+    font: f.font || undefined,
     wordsPerLine: num(f.wordsPerLine),
     uppercase: f.uppercase === "" ? undefined : f.uppercase === "yes",
     fadeIn: num(f.fadeIn),
@@ -138,6 +143,7 @@ export function ProjectDefaultsSection() {
     onError: (e) => toast.error(e.message),
   });
   const b = me.data?.builtInDefaults;
+  const fonts = useFonts();
   const pick = (k: keyof Form) => (v: string) => setF((p) => ({ ...p, [k]: v }));
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value }));
@@ -235,6 +241,15 @@ export function ProjectDefaultsSection() {
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Most clips per project
           <input className="input" type="number" min={1} max={50} value={f.maxClips} onChange={set("maxClips")} placeholder="as many as stand on their own" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink2">
+          Caption font
+          <Select
+            ariaLabel="Caption font"
+            value={f.font}
+            onValueChange={pick("font")}
+            options={[{ value: "", label: `instance default (${fonts.defaultFamily})` }, ...fontOptions(fonts.fonts)]}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Caption highlight colour

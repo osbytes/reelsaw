@@ -76,6 +76,7 @@ import {
   type ClipAudio,
 } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
+import { ensureFontsDir, loadFontState, pickFont } from "../fonts.js";
 import type { Logger } from "../log.js";
 import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
 import {
@@ -709,6 +710,21 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const audioLayerCount = layers.length - visualLayerCount;
   const assPath = path.join(clipsDir, `${clip.id}.ass`);
   const style = resolveStyle(settings, clip.style);
+  // fonts (fonts.ts): the clip's, then the project's, then the instance's; the watermark always the instance's. A
+  // family no longer available falls down that chain instead of leaving fontconfig to substitute something else
+  const fontState = await loadFontState(svc.database.db);
+  const fontsAvailable = fontState.available;
+  const instanceFont = pickFont(fontsAvailable, svc.settings.get().CAPTION_FONT);
+  const captionFont = pickFont(fontsAvailable, style.font, instanceFont);
+  if (style.font && captionFont.toLowerCase() !== style.font.toLowerCase())
+    log.warn({ font: style.font, using: captionFont }, "caption font not available; using the fallback");
+  // only the uploaded files this clip draws with are pulled to this host
+  const uploadedFontsDir = await ensureFontsDir(svc, fontState, [
+    captionFont,
+    ...(watermark.on ? [instanceFont] : []),
+    ...layers.map((l) => (l.kind === "text" ? pickFont(fontsAvailable, l.font, captionFont) : null)),
+  ]);
+  const assFilter = `ass='${escapeFilterPath(assPath)}'${uploadedFontsDir ? `:fontsdir='${escapeFilterPath(uploadedFontsDir)}'` : ""}`;
   // split / stack stretches on the body's post-cut clock: captions there sit on the line between the panes
   const seams = mergeSeamRuns(
     segments.map((sg) => ({ start: plan.mapTime(sg.start), end: plan.mapTime(sg.end), y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH) })),
@@ -718,17 +734,19 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     buildAss(words, {
       width,
       height,
-      font: svc.config.CAPTION_FONT,
+      font: captionFont,
+      watermarkFont: instanceFont,
       style,
       seams,
       hook: clip.hook,
       emphasis: clip.emphasis ?? [],
+      // a text layer's own font goes through the same fallback, to the clip's caption font
       texts: textOverlayEvents(
         layers.filter((l): l is TextLayer => l.kind === "text"),
         clip.startSec,
         duration,
         plan.mapTime,
-      ),
+      ).map((t) => (t.font ? { ...t, font: pickFont(fontsAvailable, t.font, captionFont) } : t)),
       ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}),
     }),
     "utf8",
@@ -783,9 +801,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const composited = [...(withOverlays ? overlayItems.items : []), ...logo];
     const withMusic = withOverlays && music.length > 0;
     const captioned = (inLabel: string) => {
-      if (!composited.length) return `${inLabel}ass='${escapeFilterPath(assPath)}'${vOut}`;
+      if (!composited.length) return `${inLabel}${assFilter}${vOut}`;
       const o = overlayChain(composited, 1, OUT_W, OUT_H, inLabel);
-      return `${o.chain}${o.out}ass='${escapeFilterPath(assPath)}'${vOut}`;
+      return `${o.chain}${o.out}${assFilter}${vOut}`;
     };
     const ovl = composited.length > 0;
     const nOverlayInputs = composited.length;
@@ -842,7 +860,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       const src = sourceVideo(overlays, srcW, srcH, 1);
       graph = ovl
         ? `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)}[body];${captioned("[body]")}`
-        : `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},ass='${escapeFilterPath(assPath)}'${vOut}`;
+        : `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},${assFilter}${vOut}`;
       audioMap = ["-map", "0:a:0?"];
     }
     // the body's audio as one labelled stream when something has to be mixed in or joined after it
