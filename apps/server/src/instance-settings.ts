@@ -109,7 +109,11 @@ export const RUNTIME_SETTINGS = {
     z.boolean(),
     "Burn a small watermark into the clips of accounts that are not admins. A paid plan removes it, and an admin can switch it per user on the Users page.",
   ),
-  WATERMARK_TEXT: def("limits", z.string().trim().min(1).max(60), "The watermark text, e.g. your site name."),
+  WATERMARK_TEXT: def(
+    "limits",
+    z.string().trim().max(60),
+    "The watermark text, e.g. your site name. Empty = no text: the logo alone (WATERMARK_LOGO_PATH), or nothing visible without one.",
+  ),
   MAX_REQUESTS_PER_MINUTE: def(
     "limits",
     int0,

@@ -85,7 +85,7 @@ export const LIMIT_FIELDS: Field[] = [
   { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: "Minutes of video per month", kind: "int", unit: "minutes", zero: "unlimited" },
   { key: "MAX_STORAGE_MB", label: "Storage per account", kind: "int", unit: "MB", zero: "unlimited" },
   { key: "WATERMARK_NON_ADMINS", label: "Watermark for non-admins", kind: "bool", on: "On", off: "Off" },
-  { key: "WATERMARK_TEXT", label: "Watermark text", kind: "text", placeholder: "reelsaw.com" },
+  { key: "WATERMARK_TEXT", label: "Watermark text", kind: "text", placeholder: "none: the logo alone" },
   { key: "MAX_REQUESTS_PER_MINUTE", label: "Changes per minute", kind: "int", unit: "requests", zero: "unlimited" },
   { key: "MAX_REQUESTS_PER_HOUR", label: "Changes per hour", kind: "int", unit: "requests", zero: "unlimited" },
   { key: "MAX_UPLOAD_MB", label: "Largest upload", kind: "int", min: 1, unit: "MB" },

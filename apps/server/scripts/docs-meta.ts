@@ -311,7 +311,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "limits",
     "Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits).",
   ],
-  WATERMARK_TEXT: ["limits", "The watermark text, shown under the logo."],
+  WATERMARK_TEXT: [
+    "limits",
+    "The watermark text, shown under the logo. To burn in the logo alone, clear it under Settings → System → Limits (or `reelsaw settings set WATERMARK_TEXT=`): an empty value in `.env` counts as unset and gives the default.",
+  ],
   WATERMARK_LOGO_PATH: [
     "limits",
     "PNG composited above the watermark text (top-left under the platform top band, 18% of the frame width, 95% opacity). An unreadable file logs a warning and leaves the text watermark alone.",
