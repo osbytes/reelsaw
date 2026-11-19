@@ -15,6 +15,7 @@ import {
   type VerdictStore,
   type WordTimestampVerdict,
 } from "./word-timestamps.js";
+import { plural } from "@reelsaw/shared";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
@@ -363,7 +364,7 @@ export function createAi(
     }
     if (!v.wordLevel)
       throw new Error(
-        `"${id}" does not return word timestamps, which cuts and captions need: ${v.segments ? `a test clip came back as ${v.segments} segment(s) ("${v.text}")` : v.text}. Pick another transcription model; Settings → Models shows which ones passed.`,
+        `"${id}" does not return word timestamps, which cuts and captions need: ${v.segments ? `a test clip came back as ${plural(v.segments, "segment")} ("${v.text}")` : v.text}. Pick another transcription model; Settings → Models shows which ones passed.`,
       );
   }
 

@@ -11,7 +11,7 @@ import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { QuotaError, trackQuotaRefusal } from "./quota.js";
 import { and, inArray } from "drizzle-orm";
-import { defaultStyle, resolveFraming, resolveStyle } from "@reelsaw/shared";
+import { defaultStyle, resolveFraming, resolveStyle, plural } from "@reelsaw/shared";
 import { exportPlan } from "./export.js";
 import { readClip } from "./clips/service.js";
 import type { Services } from "./services.js";
@@ -44,9 +44,11 @@ function mmss(s: number) {
 
 /** The follow-up for a settings change that re-renders: `skipped` clips were still preparing or rendering and finish with the old settings. */
 function rerenderHint(rerendered: number, skipped: number): string {
-  const base = rerendered ? `Re-rendering ${rerendered} clip(s); follow with wait_for_project.` : "No finished clips to re-render; the next render uses it.";
+  const base = rerendered
+    ? `Re-rendering ${plural(rerendered, "clip")}; follow with wait_for_project.`
+    : "No finished clips to re-render; the next render uses it.";
   return skipped
-    ? `${base} ${skipped} clip(s) were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.`.trim()
+    ? `${base} ${plural(skipped, "clip")} were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.`.trim()
     : base;
 }
 
@@ -413,7 +415,9 @@ export function createMcpServer(
       return {
         ...r,
         ...(r.skipped
-          ? { hint: `${r.skipped} clip(s) were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).` }
+          ? {
+              hint: `${plural(r.skipped, "clip")} were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).`,
+            }
           : {}),
       };
     }),
@@ -692,7 +696,7 @@ export function createMcpServer(
       const flags = (t?.flags ?? []).filter((f) => asked.has(f.id)).map(flagView);
       const needsRerender = !rerender && done.changed > 0;
       const hint = done.changed
-        ? `${done.changed} fix${done.changed === 1 ? "" : "es"} changed the transcript; ${rerender ? `${done.rerendered} clip${done.rerendered === 1 ? "" : "s"} re-rendering` : "re-render the clips with rerender_clips to show it in the captions"}.`
+        ? `${plural(done.changed, "fix", "fixes")} changed the transcript; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it in the captions"}.`
         : "Nothing changed: those fixes already had that decision.";
       return { changed: done.changed, rerendered: done.rerendered, needsRerender, flags, hint };
     }),
@@ -703,7 +707,7 @@ export function createMcpServer(
       const done = await api.transcripts.addCorrection({ projectId: id, start: startSec, end: endSec, text, rerender });
       return {
         ...done,
-        hint: `Captions now say "${text}" for that span; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
+        hint: `Captions now say "${text}" for that span; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
       };
     }),
   );
@@ -713,7 +717,7 @@ export function createMcpServer(
       const done = await api.transcripts.addCut({ projectId: id, start: startSec, end: endSec, rerender });
       return {
         ...done,
-        hint: `Those words are cut from the transcript; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
+        hint: `Those words are cut from the transcript; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
       };
     }),
   );

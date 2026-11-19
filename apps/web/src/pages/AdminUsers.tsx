@@ -23,6 +23,7 @@ import {
   type UserGroupBy,
   type UserSortKey,
   userSortFirstDir,
+  plural,
 } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
@@ -177,7 +178,6 @@ function useDebounced<T>(value: T, ms: number) {
   return v;
 }
 const num = new Intl.NumberFormat();
-const accounts = (n: number) => `${num.format(n)} account${n === 1 ? "" : "s"}`;
 const asStatus = (v: string | null): Status | "" => (v === "pending" || v === "active" || v === "suspended" ? v : "");
 const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "no" ? v : "");
 
@@ -365,7 +365,7 @@ export function AdminUsersPage() {
     },
     onMutate: ({ ids }) => setProgress({ done: 0, of: ids?.length ?? allTotal }),
     onSuccess: (r) => {
-      const parts = [`${BULK_DONE[r.action]} ${accounts(r.changed)}`];
+      const parts = [`${BULK_DONE[r.action]} ${plural(r.changed, "account")}`];
       if (r.unchanged) parts.push(`${num.format(r.unchanged)} left as they were`);
       if (r.skipped.length) parts.push(`${num.format(r.skipped.length)} skipped: ${r.skipped[0]!.reason}`);
       toast(parts.join(" · "));
@@ -422,7 +422,7 @@ export function AdminUsersPage() {
       reason: reason || undefined,
     });
   /** What a bulk action acts on, for its title and its confirm: "every matching account (1,204)" or "3 accounts". */
-  const scope = (a: BulkAction) => (allOf ? `${allLabel} (${num.format(allTotal)})` : accounts(targets(a).length));
+  const scope = (a: BulkAction) => (allOf ? `${allLabel} (${num.format(allTotal)})` : plural(targets(a).length, "account"));
   const bulkOff = (a: BulkAction) => busy || (!allMatching && targets(a).length === 0);
   const bulkTitle = (a: BulkAction, verb: string, none: string) => (bulkOff(a) && !busy ? none : `${verb} ${scope(a)}`);
 
@@ -811,9 +811,9 @@ export function AdminUsersPage() {
             {pendingList ? (
               <Skeleton className="h-3 w-40" />
             ) : groupBy ? (
-              `${accounts(total)} in ${num.format(sections.length)} section${sections.length === 1 ? "" : "s"}${groupBy === "flag" && sections.length > 1 ? " · an account with two flags is in both" : ""}`
+              `${plural(total, "account")} in ${plural(sections.length, "section")}${groupBy === "flag" && sections.length > 1 ? " · an account with two flags is in both" : ""}`
             ) : (
-              `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${accounts(total)}`
+              `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${plural(total, "account")}`
             )}
           </ListFooter>
           {(selected.length > 0 || allMatching) && (
@@ -941,7 +941,7 @@ export function AdminUsersPage() {
         body={
           allMatching
             ? `${sentence(allLabel)} (${num.format(allTotal)}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
-            : `${accounts(targets("delete").length)}, with ${num.format(targets("delete").reduce((n, r) => n + r.projects, 0))} projects and all their clips and files, are deleted permanently. This cannot be undone.`
+            : `${plural(targets("delete").length, "account")}, with ${num.format(targets("delete").reduce((n, r) => n + r.projects, 0))} projects and all their clips and files, are deleted permanently. This cannot be undone.`
         }
         confirm="Delete accounts forever"
         danger
@@ -951,11 +951,7 @@ export function AdminUsersPage() {
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title={`Delete ${confirm?.row.email ?? "this account"} forever?`}
-        body={
-          <>
-            Their {confirm?.row.projects ?? 0} project{confirm?.row.projects === 1 ? "" : "s"}, clips and files are deleted permanently. This cannot be undone.
-          </>
-        }
+        body={<>Their {plural(confirm?.row.projects ?? 0, "project")}, clips and files are deleted permanently. This cannot be undone.</>}
         confirm="Delete account forever"
         danger
         onConfirm={() => (confirm ? remove.mutateAsync({ id: confirm.row.id }) : Promise.resolve())}
@@ -1139,7 +1135,7 @@ function UserGroupSection({
                   {label}
                 </span>
               )}
-              <span className="shrink-0 text-xs tabular-nums text-ink2">{accounts(total)}</span>
+              <span className="shrink-0 text-xs tabular-nums text-ink2">{plural(total, "account")}</span>
               <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{split ? `${help}, by address` : help}</span>
             </button>
             <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
@@ -1244,7 +1240,7 @@ function MoreAddresses({ n, cols, nested = false }: { n: number; cols: { folded:
   return (
     <tr>
       <SpanCells cols={cols} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "pl-8 pr-3" : "px-3"}`}>
-        {num.format(n)} more shared address{n === 1 ? "" : "es"} not shown. Search or filter to narrow the list.
+        {plural(n, "more shared address", "more shared addresses")} not shown. Search or filter to narrow the list.
       </SpanCells>
     </tr>
   );

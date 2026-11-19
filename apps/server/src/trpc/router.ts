@@ -32,7 +32,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS, emailPreferencesPatchSchema } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema, plural } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   checkSource,
@@ -1331,7 +1331,7 @@ const restRouter = router({
     forget: protectedProcedure.input(z.object({ projectId: z.string().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
       const forgotten = await ctx.svc.tx((u) => forgetDecisions(u.db, ctx.user.id, input));
       ctx.log.info({ projectId: input.projectId ?? null, forgotten }, "decisions forgotten");
-      return { ok: true as const, forgotten, message: forgotten ? `Forgot ${forgotten} decision${forgotten === 1 ? "" : "s"}.` : "Nothing to forget." };
+      return { ok: true as const, forgotten, message: forgotten ? `Forgot ${plural(forgotten, "decision")}.` : "Nothing to forget." };
     }),
     /** Turn recording on or off; what is already kept stays until forgotten. */
     setLearning: protectedProcedure

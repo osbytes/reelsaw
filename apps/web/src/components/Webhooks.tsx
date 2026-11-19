@@ -7,6 +7,7 @@ import { useTRPC } from "../lib/trpc";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
+import { plural } from "@reelsaw/shared";
 
 const EVENT_LABEL: Record<string, string> = {
   "project.created": "Project created",
@@ -247,7 +248,7 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
                 {open === d.id && (
                   <div className="mt-2 flex flex-col gap-2 text-xs">
                     <span className="text-ink2">
-                      {d.attempt} attempt{d.attempt === 1 ? "" : "s"}
+                      {plural(d.attempt, "attempt")}
                       {d.lastError ? ` · ${d.lastError}` : ""}
                       {d.nextAttemptAt && d.status === "pending" ? ` · next try ${when(d.nextAttemptAt)}` : ""}
                       {d.deliveredAt ? ` · delivered ${when(d.deliveredAt)}` : ""}

@@ -12,7 +12,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { Loader2, Search, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useLocation, useNavigate } from "react-router";
-import { DELETED_PATH } from "@reelsaw/shared";
+import { DELETED_PATH, plural } from "@reelsaw/shared";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
@@ -264,11 +264,11 @@ export function AssetFinder({
 
   const usageText = (r: LibraryAsset) =>
     r.usedByClips > 0
-      ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}`
+      ? `${plural(r.usedByClips, "clip")}`
       : r.usedBy > 0
-        ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}`
+        ? `${plural(r.usedBy, "project")}`
         : r.usedByTemplates > 0
-          ? `${r.usedByTemplates} template${r.usedByTemplates === 1 ? "" : "s"}`
+          ? `${plural(r.usedByTemplates, "template")}`
           : undefined;
   const libTile = (r: LibraryAsset): TileModel => ({
     key: `lib:${r.id}`,
@@ -436,7 +436,7 @@ export function AssetFinder({
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
         {mode === "library" && (list.data?.deleted.length ?? 0) > 0 && (
           <p className="text-xs text-ink3">
-            {list.data!.deleted.length} deleted {list.data!.deleted.length === 1 ? "item" : "items"} restorable from{" "}
+            {plural(list.data!.deleted.length, "deleted item")} restorable from{" "}
             <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
               Deleted
             </Link>

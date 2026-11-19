@@ -42,13 +42,12 @@ import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { ForgetDecisionsOption } from "./ForgetDecisionsOption";
-import { CHANGELOG_URL, DELETED_PATH, formatTime } from "@reelsaw/shared";
+import { CHANGELOG_URL, DELETED_PATH, formatTime, plural } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { DeleteAssetDialog } from "./BumperField";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
 const oneLine = (s: string) => s.trim().split(/\s+/).join(" ");
 

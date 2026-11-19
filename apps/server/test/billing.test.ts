@@ -5,8 +5,8 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { allowanceWindow, effectivePlan, grantsOf } from "../src/ee/billing/entitlements.js";
-import { mapSubscription, subscriptionIdOf } from "../src/ee/billing/service.js";
+import { allowanceWindow, effectivePlan, grantsOf, pendingCancelAt } from "../src/ee/billing/entitlements.js";
+import { mapSubscription, rowDiffers, subscriptionIdOf } from "../src/ee/billing/service.js";
 import { PLANS, planByLookupKey, planOf, ALL_LOOKUP_KEYS } from "../src/ee/billing/plans.js";
 import { periodFor, type Grants } from "../src/quota.js";
 import type { BillingSubscriptionRow } from "../src/db/schema.js";
@@ -23,6 +23,7 @@ const row = (o: Partial<BillingSubscriptionRow>): BillingSubscriptionRow => ({
   periodStart: new Date("2026-10-01T00:00:00Z"),
   periodEnd: new Date("2026-11-01T00:00:00Z"),
   cancelAtPeriodEnd: false,
+  cancelAt: null,
   pastDueSince: null,
   endedAt: null,
   syncedAt: now,
@@ -57,6 +58,22 @@ describe("effectivePlan", () => {
   });
   it("an unknown plan name (a price with no lookup key) grants Free", () => {
     assert.equal(effectivePlan(row({ plan: "unknown:price_x" }), 7, now).plan.name, "free");
+  });
+});
+
+describe("pendingCancelAt", () => {
+  const at = new Date("2026-11-01T00:00:00Z");
+  it("is the end date while the paid plan still holds: active, trialing, past_due in grace", () => {
+    assert.equal(pendingCancelAt(row({ cancelAt: at }), 7, now), at);
+    assert.equal(pendingCancelAt(row({ status: "trialing", cancelAt: at }), 7, now), at);
+    assert.equal(pendingCancelAt(row({ status: "past_due", pastDueSince: now, cancelAt: at }), 7, now), at);
+  });
+  it("is null once the plan is gone: Stripe keeps cancel_at on an ended subscription, a lapse is already Free", () => {
+    assert.equal(pendingCancelAt(row({ status: "canceled", cancelAt: at }), 7, now), null);
+    assert.equal(pendingCancelAt(row({ status: "past_due", pastDueSince: new Date(now.getTime() - 9 * 86_400_000), cancelAt: at }), 7, now), null);
+    assert.equal(pendingCancelAt(row({ status: "complimentary", cancelAt: at }), 7, now), null);
+    assert.equal(pendingCancelAt(row({}), 7, now), null);
+    assert.equal(pendingCancelAt(null, 7, now), null);
   });
 });
 
@@ -157,6 +174,22 @@ describe("mapSubscription", () => {
     assert.equal(m.interval, "year");
     assert.equal(m.unknownPrice, true);
   });
+  it("a scheduled cancellation is read from cancel_at, or from the period-end flag, and is absent when it renews", () => {
+    assert.equal(mapSubscription(sub()).cancelAt, null);
+    assert.equal(mapSubscription(sub({ cancel_at_period_end: true })).cancelAt?.getTime(), 1_762_600_000 * 1000);
+    const dated = mapSubscription(sub({ cancel_at: 1_761_000_000 }));
+    assert.equal(dated.cancelAtPeriodEnd, false);
+    assert.equal(dated.cancelAt?.getTime(), 1_761_000_000 * 1000);
+  });
+
+  it("rowDiffers sees every field a sync writes that the Billing page shows, the cancel date included", () => {
+    const a = mapSubscription(sub());
+    assert.equal(rowDiffers(a, mapSubscription(sub())), false);
+    assert.equal(rowDiffers(null, a), true);
+    assert.equal(rowDiffers(a, mapSubscription(sub({ cancel_at: 1_761_000_000 }))), true);
+    assert.equal(rowDiffers(a, mapSubscription(sub({ status: "canceled" }))), true);
+  });
+
   it("a status this SDK does not know grants nothing", () => {
     assert.equal(mapSubscription(sub({ status: "some_future_status" })).status, "incomplete");
   });

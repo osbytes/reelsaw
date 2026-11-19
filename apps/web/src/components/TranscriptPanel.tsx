@@ -12,7 +12,7 @@ import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import type { Playback } from "../lib/playback";
 import { cutState, cutStateLabel, cutStateTitle, type CutDiagnostics, type CutState } from "../lib/cutState";
-import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word, plural, pluralWord } from "@reelsaw/shared";
 
 interface Props {
   projectId: string;
@@ -172,7 +172,7 @@ export function TranscriptPanel({
       setPinnedFlag(null);
       setOpenFlag(null);
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
-      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`, {
+      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${plural(r.rerendered, "clip")}` : ""}`, {
         description: "You can also restore it from the transcript’s Deleted filter",
         action: { label: "Undo", onClick: () => void restoreOne(f.id) },
       });
@@ -186,7 +186,7 @@ export function TranscriptPanel({
       const r = await restore.mutateAsync({ projectId, flagId: id });
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
       if (deletedFlags.length <= 1) setFilter("all");
-      toast(`Restored${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`);
+      toast(`Restored${r.rerendered ? ` · re-rendering ${plural(r.rerendered, "clip")}` : ""}`);
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -205,7 +205,7 @@ export function TranscriptPanel({
       setFixText(null);
       setPick(null);
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
-      toast(r.rerendered ? `Corrected · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Corrected");
+      toast(r.rerendered ? `Corrected · re-rendering ${plural(r.rerendered, "clip")}` : "Corrected");
     } catch {
       /* error shown in the bar */
     }
@@ -217,7 +217,7 @@ export function TranscriptPanel({
       window.getSelection()?.removeAllRanges();
       setPick(null);
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
-      toast(r.rerendered ? `Cut added · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Cut added");
+      toast(r.rerendered ? `Cut added · re-rendering ${plural(r.rerendered, "clip")}` : "Cut added");
     } catch {
       /* error shown in the bar */
     }
@@ -958,7 +958,7 @@ export function TranscriptPanel({
           <div className="min-w-0 flex-1 text-[13px]">
             <b>{nDecided} staged</b>{" "}
             <span className="text-ink2">
-              · {affected.length ? `re-renders clip${affected.length === 1 ? "" : "s"} ${affected.join(", ")}` : "no clips affected"}
+              · {affected.length ? `re-renders ${pluralWord(affected.length, "clip")} ${affected.join(", ")}` : "no clips affected"}
             </span>
           </div>
           <button className="btn-ghost" onClick={() => setDecisions({})}>

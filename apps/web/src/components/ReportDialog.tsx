@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { clientContext } from "../lib/diagnostics";
 import { closeReport, openReportHere, REPORT_SHORTCUT, useReportTarget } from "../lib/report";
 import { sendIssueFeedback } from "../lib/telemetry";
+import { plural } from "@reelsaw/shared";
 
 interface Preview {
   sourceType: "url" | "upload";
@@ -286,11 +287,7 @@ export function ReportDialog() {
                 row(
                   "allClips",
                   "All rendered clips",
-                  preview ? (
-                    `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}`
-                  ) : (
-                    <Skeleton className="mt-0.5 inline-block h-3 w-28" />
-                  ),
+                  preview ? `${plural(preview.clips, "clip")} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />,
                 )}
               {projectId &&
                 row(

@@ -105,8 +105,10 @@ Haiku-class selection and refinement), before compute and storage.
      any failure is a 5xx and Stripe redelivers for up to three days.
    - **Convergent sync.** The job retrieves the subscription from Stripe at run time, takes a
      per-account advisory lock, locks the row, rewrites it, writes `admin_events` for what
-     changed (`billing.subscribed`, `.changed`, `.payment_failed`, `.canceled`) and marks the
-     events processed, in one transaction. Events late, twice or out of order give the same row.
+     changed (`billing.subscribed`, `.changed`, `.payment_failed`, `.cancel_scheduled`,
+     `.cancel_undone`, `.canceled`) and marks the events processed, in one transaction. One event per
+     transition: `.cancel_scheduled` when a cancellation is set or moved, `.canceled` only when the
+     subscription actually ends (live → not live), so a redelivery or the period end never repeats one. Events late, twice or out of order give the same row.
      One sync per subscription at a time (`exclusive` + singletonKey); a sync queued during
      another waits and reads the newer state. pg-boss retries a failed sync eight times with
      backoff; the error is kept on the pending event rows.
@@ -158,8 +160,16 @@ Haiku-class selection and refinement), before compute and storage.
    before it applies the per-user override.
 6. **Subscription state → limits**: `active` and `trialing` grant the plan; `past_due` keeps the
    plan for `BILLING_GRACE_DAYS` (7) after the first failed payment, then Free; `canceled`,
-   `unpaid`, `incomplete_expired` and no row mean Free. Cancelling keeps the plan until the period
-   end (Stripe's `cancel_at_period_end`), which the plugin stores.
+   `unpaid`, `incomplete_expired` and no row mean Free. Cancelling keeps the plan until the
+   subscription ends; the row stores when (`cancel_at`: Stripe's `cancel_at`, set by a dated
+   cancellation from the Dashboard or the API, or the period end with `cancel_at_period_end`).
+   Nothing is deleted when the plan ends; limits the account is over refuse new work until it is
+   under them again. The account is told twice, with the same sentences (`quota.ts` `overages`,
+   `billing/service.ts` `freePreview`): when the cancellation is scheduled (a "Cancels <day>" chip and a
+   "what changes" panel on the Billing page with Free's limits next to the plan's, what would be over
+   and what else changes, a "Keep <plan>" button to Stripe's portal; `get_billing`'s `afterCancel`;
+   and a "plan ends on …" mail) and when it ends (a "you're on Free now" mail). Both
+   mails are `ee/event-handlers.ts` handlers on `.cancel_scheduled` and `.canceled`.
 7. **Per user now, organisations later.** The plugin's `referenceId` is the user id today. When
    organisations arrive, a workspace's subscription carries its organisation id and
    `limitsFor()` resolves the owner's workspace; nothing about the plan list or the limits

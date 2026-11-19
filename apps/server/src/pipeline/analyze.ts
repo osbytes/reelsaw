@@ -25,7 +25,7 @@ import {
 } from "./select.js";
 import { isAbortError } from "./steps.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
-import { clipCandidateSchema } from "@reelsaw/shared";
+import { clipCandidateSchema, plural } from "@reelsaw/shared";
 import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import type { ClipCandidate, ProjectSettings, TranscriptSegment, Word } from "@reelsaw/shared";
@@ -395,7 +395,7 @@ export async function analyze(ctx: StageContext) {
   // selection settings (sc): a retry, or a re-analyze with nothing changed, reuses the windows already mapped.
   const chunks = chunkTranscript(segments);
   const candidatesSchema = z.array(clipCandidateSchema);
-  await ctx.progress(0.03, `Finding moments in ${chunks.length} part(s) of the transcript`);
+  await ctx.progress(0.03, `Finding moments in ${plural(chunks.length, "part")} of the transcript`);
   const perChunk = await ctx.steps(chunks, { concurrency, range: [0.05, 0.4], message: (d, t) => `Found candidates in part ${d}/${t}` }, (ch, i, signal) =>
     ctx.step(
       `map:${i}`,
@@ -409,7 +409,7 @@ export async function analyze(ctx: StageContext) {
   const gleanIdx = chunks.map((ch, i) => (needsSecondLook(ch, perChunk[i]!, settings.minClipSeconds) ? i : -1)).filter((i) => i >= 0);
   /** second passes that failed and were skipped: not saved as steps, so another attempt runs them again and may find more */
   let gleanFailed = 0;
-  await ctx.steps(gleanIdx, { concurrency, range: [0.4, 0.45], message: (d, t) => `Looking again in ${d}/${t} part(s)` }, async (i, _k, signal) => {
+  await ctx.steps(gleanIdx, { concurrency, range: [0.4, 0.45], message: (d, t) => `Looking again in ${d}/${plural(t, "part")}` }, async (i, _k, signal) => {
     const ch = chunks[i]!;
     const exclude = excludeRanges(perChunk[i]!);
     const more = await ctx
@@ -514,7 +514,7 @@ export async function analyze(ctx: StageContext) {
 
   // 4. rubric scoring
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c, segments) }));
-  await ctx.progress(0.45, `Scoring ${pooled.length} candidate(s)${samples > 1 ? ` × ${samples} samples` : ""}`);
+  await ctx.progress(0.45, `Scoring ${plural(pooled.length, "candidate")}${samples > 1 ? ` × ${samples} samples` : ""}`);
   // one step per batch of candidates (all its samples): keyed on the candidates' texts, the judge, the prompt and the settings
   const scoreResults = await ctx.steps(
     scoreBatches(inputs),

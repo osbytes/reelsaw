@@ -23,6 +23,7 @@ import {
 } from "./asr-loops.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { enqueueRefine } from "./refine.js";
+import { plural } from "@reelsaw/shared";
 
 /**
  * Transcribe stage: audio → chunks → words. Each chunk is a durable step (ctx.step; rows in
@@ -177,7 +178,7 @@ export async function transcribe(ctx: StageContext) {
     ctx.log.debug({ chunk: i, offsetSec: offsets[i], language: result.language, empty: result.text.trim().length === 0 }, "chunk transcribed");
     return chunkStepOutput(i, result.text, result.segments.length, Date.now() - t0);
   };
-  await ctx.progress(0.1, `Transcribing ${chunkFiles.length} chunk(s), ${concurrency} at a time`);
+  await ctx.progress(0.1, `Transcribing ${plural(chunkFiles.length, "chunk")}, ${concurrency} at a time`);
   await ctx.steps(chunkFiles, { concurrency, range: [0.1, 0.95], message: (d, t) => `Transcribed chunk ${d}/${t}` }, async (file, i, signal) => {
     const audio = await fs.readFile(path.join(chunkDir, file));
     const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });

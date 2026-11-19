@@ -27,6 +27,7 @@ import {
   type ProjectSettingsPatch,
   type SectionAdjustFields,
   type SectionMode,
+  plural,
 } from "@reelsaw/shared";
 import {
   checkAnnouncedMinutes,
@@ -78,7 +79,7 @@ export function byOwner(actor: Actor, p: { userId: string }): boolean {
 
 const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 /** "for 7 days" / "until you purge it", for messages and tool results. */
-export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc)} day${days(svc) === 1 ? "" : "s"}` : "until it is purged");
+export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${plural(days(svc), "day")}` : "until it is purged");
 
 /**
  * Where a retry resumes, from what the project already has. Live clips mean render, except when the project failed in

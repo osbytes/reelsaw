@@ -28,6 +28,7 @@ import pg from "pg";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { percentile } from "./meter.js";
 import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
+import { plural } from "@reelsaw/shared";
 
 const argv = process.argv.slice(2);
 const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
@@ -602,7 +603,7 @@ async function main() {
   if (steps.length && !base) throw new Error(`--base-profile ${baseName} is not among the selected profiles`);
 
   console.log(
-    `bench stack ${COMPOSE_PROJECT} at ${BASE}${has("gpu") ? " (--gpu: NVENC for the bench app)" : ""}; ${profiles.length} profile(s) × ${repeat} run(s)${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`,
+    `bench stack ${COMPOSE_PROJECT} at ${BASE}${has("gpu") ? " (--gpu: NVENC for the bench app)" : ""}; ${plural(profiles.length, "profile")} × ${plural(repeat, "run")}${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`,
   );
   const pool = new pg.Pool({ connectionString: DB_URL });
   const results: RunResult[] = [];

@@ -8,7 +8,7 @@
  */
 import { and, eq, gte, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { deletedProjectsPath, type QuotaAction, type QuotaRefusal } from "@reelsaw/shared";
+import { deletedProjectsPath, type QuotaAction, type QuotaRefusal, formatDay, formatMb, plural } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
@@ -228,12 +228,6 @@ export class QuotaExceededError extends NonRetryableError {
   }
 }
 
-function formatMb(mb: number): string {
-  if (mb >= 1024 && mb % 1024 === 0) return `${mb / 1024} GB`;
-  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-  return `${mb.toLocaleString("en-US")} MB`;
-}
-
 /** What the next paid plan would give for this limit, for the upgrade CTA. */
 export function upgradeCapacityLabel(upgrade: NonNullable<Grants["upgrade"]>, key: LimitKey): string {
   const n = upgrade.limits[key];
@@ -296,7 +290,6 @@ function refuseOffering(d: LimitsDetail, key: LimitKey, sentence: string, props:
 
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
 const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
-const dayOf = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
 
 /** The window a monthly allowance counts in: the billing period when the account has one, else the UTC calendar month. */
 export function periodFor(grants: Grants | null, now = new Date()): { start: Date; end: Date; source: "billing" | "calendar" } {
@@ -359,7 +352,7 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
       refuseOffering(
         d,
         "MAX_SOURCE_MINUTES_PER_MONTH",
-        `Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${dayOf(period.end)}.`,
+        `Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${formatDay(period.end, { year: false, utc: true })}.`,
       );
   }
 }
@@ -605,7 +598,7 @@ async function minutesOver(
       const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
       const sentence = m.firstPending
         ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.`
-        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${dayOf(period.end)}.`;
+        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${formatDay(period.end, { year: false, utc: true })}.`;
       return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${upgrade}`, sentence, firstVideo: m.firstPending };
     }
   }
@@ -827,4 +820,44 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
       sttMinutes: Math.round(Number(s?.sttSeconds ?? 0) / 6) / 10,
     };
   });
+}
+
+/** The limits that stay a wall after a downgrade (each refuses new work until usage is under it again), in the order they bite. */
+const WALL_KEYS = ["MAX_STORAGE_MB", "MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_MONTH"] as const satisfies readonly LimitKey[];
+export type Overage = { key: (typeof WALL_KEYS)[number]; used: number; limit: number; sentence: string };
+
+/** What a wall counts that no plan changes (kept projects, MB stored): one read the Billing page and its preview of Free share. */
+export type WallUsage = Pick<Record<LimitKey, number>, "MAX_PROJECTS_PER_USER" | "MAX_STORAGE_MB">;
+
+/**
+ * Where the account is at or over the limits `detail` gives it (the limitsDetail of a plan it is about to fall
+ * back to): what would be refused, said once for the Billing page, `get_billing` and the billing mails. Admin
+ * overrides still apply. Monthly minutes count the window that plan would use, and only when `at` is inside the
+ * current one (a plan ending next month starts on a fresh allowance). `kept` is usage already read for the page.
+ */
+export async function overages(db: Db, userId: string, detail: LimitsDetail, at = new Date(), kept?: WallUsage): Promise<Overage[]> {
+  const month = periodFor(detail.grants, at);
+  const thisMonth = month.start.getTime() === periodFor(detail.grants).start.getTime();
+  const [projects, storedMb, minutes] = await Promise.all([
+    kept ? kept.MAX_PROJECTS_PER_USER : db.$count(schema.projects, and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt))),
+    kept ? kept.MAX_STORAGE_MB : storedBytes(db, userId).then((b) => Math.round(b / 1_048_576)),
+    thisMonth && detail.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? monthlyMinutes(db, userId, month.start, detail.grants).then((m) => Math.round(m.used)) : 0,
+  ]);
+  const usage = { MAX_STORAGE_MB: storedMb, MAX_PROJECTS_PER_USER: projects, MAX_SOURCE_MINUTES_PER_MONTH: minutes };
+  const label = detail.grants?.planLabel ?? "the plan";
+  const out: Overage[] = [];
+  for (const key of WALL_KEYS) {
+    const limit = detail.limits[key];
+    const used = usage[key];
+    if (limit <= 0 || used < limit) continue;
+    if (key === "MAX_SOURCE_MINUTES_PER_MONTH" && !thisMonth) continue;
+    const sentence =
+      key === "MAX_STORAGE_MB"
+        ? `${formatMb(used)} stored, and ${label} keeps ${formatMb(limit)}: new projects and uploads are refused until you delete some (removed projects count until deleted forever).`
+        : key === "MAX_PROJECTS_PER_USER"
+          ? `${plural(used, "project")}, and ${label} keeps ${limit}: new projects and restores are refused until you delete some.`
+          : `${plural(used, "minute")} of video used this month, and ${label} allows ${limit}: new videos are refused until ${formatDay(month.end, { year: false, utc: true })}.`;
+    out.push({ key, used, limit, sentence });
+  }
+  return out;
 }

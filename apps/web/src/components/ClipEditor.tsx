@@ -139,6 +139,7 @@ import {
   BUMPER_TRANSITION_LABEL,
   bodyEdgeFades,
   fadeLevel,
+  plural,
 } from "@reelsaw/shared";
 import { FadePresets, fadeText } from "./FadeField";
 
@@ -2392,11 +2393,9 @@ export function ClipEditor(props: Props) {
     <div className="flex flex-col gap-3">
       <p className="text-[13px] leading-snug text-ink2">
         {cuts.length
-          ? `${nCut} cut${nCut === 1 ? "" : "s"} applied${nUnverified ? ` (▲ ${nUnverified} without a seam check)` : ""}${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}`
+          ? `${plural(nCut, "cut")} applied${nUnverified ? ` (▲ ${nUnverified} without a seam check)` : ""}${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}`
           : "No disfluencies in this range."}
-        {pauses?.cuts
-          ? ` ${pauses.cuts} pause${pauses.cuts === 1 ? "" : "s"} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).`
-          : ""}
+        {pauses?.cuts ? ` ${plural(pauses.cuts, "pause")} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).` : ""}
       </p>
       {cuts.map(({ f, label, tone, reason }) => (
         <div
@@ -2687,7 +2686,7 @@ export function ClipEditor(props: Props) {
                       .then((r) =>
                         qc
                           .invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) })
-                          .then(() => toast(`Source text kept · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}`)),
+                          .then(() => toast(`Source text kept · re-rendering ${plural(r.rerendered, "clip")}`)),
                       )
                       .catch((err) => toast.error((err as Error).message))
                   }
@@ -3085,7 +3084,7 @@ export function ClipEditor(props: Props) {
 
       <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">
-          You have {dirtyCount} unsaved change{dirtyCount === 1 ? "" : "s"} to this clip{needsRender ? ", and some need a re-render" : ""}.
+          You have {plural(dirtyCount, "unsaved change")} to this clip{needsRender ? ", and some need a re-render" : ""}.
         </p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
           <button className="btn-ghost" onClick={guard.stay}>

@@ -862,6 +862,11 @@ export const billingSubscriptions = pgTable(
     periodStart: timestamp("period_start", { withTimezone: true }),
     periodEnd: timestamp("period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    /**
+     * When a scheduled cancellation ends the subscription, however it was scheduled: Stripe's `cancel_at` (a date
+     * set in the Dashboard or the API, or the period end when `cancel_at_period_end` is on). null = it renews.
+     */
+    cancelAt: timestamp("cancel_at", { withTimezone: true }),
     /** first time the status became past_due; the grace period (BILLING_GRACE_DAYS) counts from here */
     pastDueSince: timestamp("past_due_since", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),

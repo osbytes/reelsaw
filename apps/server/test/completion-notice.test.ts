@@ -198,12 +198,14 @@ describe("event handlers", () => {
     assert.deepEqual(
       eventHandlerQueues(eventHandlerMap, eeEventHandlerMap)
         .map((q) => q.name)
-        .slice(-4),
+        .slice(-6),
       [
         "event.billing.detached.cancelAtStripe",
         "event.billing.subscribed.retryRefusedWork",
         "event.billing.changed.retryRefusedWork",
         "event.billing.complimentary.retryRefusedWork",
+        "event.billing.cancel_scheduled.cancelScheduledEmail",
+        "event.billing.canceled.planEndedEmail",
       ],
     );
     assert.throws(() => eventHandlerQueues(eventHandlerMap, defineEventHandlers({ "project.done": { readyEmail: { handle } } })), /defined twice/);

@@ -36,7 +36,7 @@ import type { Logger } from "../log.js";
 import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
-import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
+import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment, plural } from "@reelsaw/shared";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
 
@@ -238,7 +238,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       "searched selection",
     );
     if (snapped.length) {
-      await ctx.progress(0.5, `Scoring ${snapped.length} option(s)`, { clipId });
+      await ctx.progress(0.5, `Scoring ${plural(snapped.length, "option")}`, { clipId });
       const texts = snapped.map((c, id) => ({
         id,
         durationSec: c.endSec - c.startSec,
@@ -249,7 +249,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       const scored = await scoreStep(ctx, "pick-score", clipId, o, modelId, unitMs, texts, sc);
       const best = snapped.map((c, id) => ({ c, t: scored.get(id)?.total ?? c.score })).sort((a, b) => b.t - a.t)[0]!;
       pick = best.c;
-      note = `AI picked ${fmtTs(pick.startSec)}–${fmtTs(pick.endSec)} from your selection (${snapped.length} option${snapped.length > 1 ? "s" : ""}). ${pick.reasoning}`;
+      note = `AI picked ${fmtTs(pick.startSec)}–${fmtTs(pick.endSec)} from your selection (${plural(snapped.length, "option")}). ${pick.reasoning}`;
     } else {
       note = "No tighter standalone moment found inside the selection; kept all of it.";
     }

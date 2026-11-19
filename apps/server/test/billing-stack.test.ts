@@ -33,7 +33,8 @@ const mock = async (path: string, body: unknown = {}) =>
 type State = {
   plan: { name: string };
   reason: string;
-  subscription: { status: string; cancelAtPeriodEnd: boolean } | null;
+  subscription: { status: string; cancelAtPeriodEnd: boolean; cancelAt: string | null } | null;
+  afterCancel: { at: string; planLabel: string; limits: Record<string, number>; over: { key: string; sentence: string }[]; expect: string[] } | null;
   limits: Record<string, number>;
   usage: Record<string, number>;
   watermark: { on: boolean; source: string };
@@ -254,17 +255,48 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal((await pool.query(`select count(*)::int as n from billing_events`)).rows[0].n, before);
   });
 
-  it("cancel at period end keeps the plan; a deletion returns the account to Free with the watermark", async () => {
+  it("a cancellation on a date (cancel_at, no period-end flag) is shown and announced; taking it back is too", async () => {
+    const at = Math.floor(Date.now() / 1000) + 5 * 86400;
+    await mock(`/_mock/cancel/${subscriptionId}`, { at });
+    const s = await until(state, (x) => !!x.subscription?.cancelAt);
+    assert.equal(s.plan.name, "pro");
+    assert.equal(s.subscription?.cancelAtPeriodEnd, false);
+    assert.equal(new Date(s.subscription!.cancelAt!).getTime(), at * 1000);
+    assert.equal(s.afterCancel?.at, s.subscription?.cancelAt);
+    // what Free will be, said ahead: its limits, and the rest of what changes
+    assert.equal(s.afterCancel?.planLabel, "Free");
+    assert.equal(s.afterCancel?.limits.MAX_SOURCE_MINUTES_PER_MONTH, 20);
+    assert.ok(s.afterCancel?.expect.some((x) => /Nothing is deleted/.test(x)));
+    assert.ok(s.afterCancel?.expect.some((x) => /watermark/.test(x)));
+    assert.equal(await events("billing.cancel_scheduled"), 1);
+    await mock(`/_mock/uncancel/${subscriptionId}`);
+    const u = await until(state, (x) => !x.subscription?.cancelAt);
+    assert.equal(u.afterCancel, null);
+    assert.equal(await events("billing.cancel_undone"), 1);
+    assert.equal(await events("billing.canceled"), 0, "nothing ended");
+  });
+
+  it("cancel at period end keeps the plan; a deletion returns the account to Free with the watermark, one event per step", async () => {
     await mock(`/_mock/cancel/${subscriptionId}`, { atPeriodEnd: true });
     const s = await until(state, (x) => !!x.subscription?.cancelAtPeriodEnd);
     assert.equal(s.plan.name, "pro");
-    assert.equal(await events("billing.canceled"), 1);
+    assert.equal(s.subscription?.cancelAt, s.afterCancel?.at);
+    assert.equal(await events("billing.cancel_scheduled"), 2, "the earlier dated one, and this one");
+    assert.equal(await events("billing.canceled"), 0, "scheduling is not the end");
     await mock(`/_mock/cancel/${subscriptionId}`);
     const f = await until(state, (x) => x.plan.name === "free");
     assert.equal(f.plan.name, "free");
     assert.equal(f.reason, "ended");
     assert.equal(f.watermark.on, true);
     assert.equal(f.limits.MAX_SOURCE_MINUTES_PER_MONTH, 20);
+    assert.equal(f.afterCancel, null);
+    // Stripe keeps cancel_at on the ended subscription; the page must not read it as still pending
+    assert.equal(f.subscription?.cancelAt ?? null, null);
+    assert.equal(await events("billing.canceled"), 1);
+    // a redelivered deletion is the same end, not a second one
+    await mock(`/_mock/redeliver/${subscriptionId}`);
+    await new Promise((res) => setTimeout(res, 1500));
+    assert.equal(await events("billing.canceled"), 1);
   });
 
   it("a complimentary grant survives a late event of the ended subscription, and admin sync keeps it", async () => {

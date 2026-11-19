@@ -212,6 +212,13 @@ project already hit the problem it prevents.
   `clipLabel` or `greetingName` that wraps a general operation is the same helper written again,
   under a name nobody will search for. Equally, don't wrap two lines in a helper with one caller
   (`whenMailOn`, a lookup used once): inline it.
+  Formatting for people is the usual offender, because each copy is one line and looks harmless:
+  counts with a noun (`plural`, `pluralWord`), sizes (`formatBytes`, `formatMb`) and days
+  (`formatDay`, `utcDay`) live in `packages/shared/src/format.ts` and nowhere else. That covers the
+  inline spellings too (`${n} clip${n === 1 ? "" : "s"}`, `clip(s)`). Twenty local copies drifted
+  apart before this was enforced: decimal vs binary GB, one vs two decimals, viewer locale vs UTC.
+  `apps/server/test/shared-helpers-guard.test.ts` fails on a local copy or an inline plural. When
+  you need a format the module lacks, add it there with a case in that test.
 
 #### Logging
 

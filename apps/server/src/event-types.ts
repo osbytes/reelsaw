@@ -42,6 +42,11 @@ export const ACCOUNT_EVENT_TYPES = [
   "billing.subscribed",
   "billing.changed",
   "billing.payment_failed",
+  /** a cancellation was scheduled, or moved to another date: the plan stays until `endsAt` */
+  "billing.cancel_scheduled",
+  /** a scheduled cancellation was taken back before it ended the subscription: it renews again */
+  "billing.cancel_undone",
+  /** the subscription ended (canceled, unpaid, expired): the account is on Free from now */
   "billing.canceled",
   "billing.complimentary",
   "billing.unknown_price",
@@ -84,7 +89,9 @@ const accountEventSchemas = {
   "billing.subscribed": loose,
   "billing.changed": loose,
   "billing.payment_failed": loose,
-  "billing.canceled": loose,
+  "billing.cancel_scheduled": account.extend({ subscriptionId: z.string(), plan: z.string(), endsAt: z.string() }).catchall(z.unknown()),
+  "billing.cancel_undone": loose,
+  "billing.canceled": account.extend({ subscriptionId: z.string(), plan: z.string(), endedAt: z.string() }).catchall(z.unknown()),
   "billing.complimentary": loose,
   "billing.unknown_price": loose,
   /** what to cancel at Stripe; null when there is nothing (ee/billing/service.ts detachUser) */

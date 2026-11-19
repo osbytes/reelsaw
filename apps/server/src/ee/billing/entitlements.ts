@@ -42,6 +42,17 @@ export function effectivePlan(
   }
 }
 
+/**
+ * The day a scheduled cancellation ends a paid plan the account still has, else null. Stripe keeps `cancel_at` on
+ * a subscription after it ends, so an ended, lapsed or complimentary row can carry one: the one check the Billing
+ * page, `get_billing` and the "plan ends" mail use for "a cancellation is pending".
+ */
+export function pendingCancelAt(row: (PlanInput & { cancelAt: Date | null }) | null | undefined, graceDays: number, now = new Date()): Date | null {
+  if (!row?.cancelAt) return null;
+  const { reason } = effectivePlan(row, graceDays, now);
+  return reason === "active" || reason === "trialing" || reason === "grace" ? row.cancelAt : null;
+}
+
 /** `k` calendar months after `anchor`, the day clamped to the target month's length (31 Jan + 1 → 28/29 Feb, + 2 → 31 Mar). */
 function monthsAfter(anchor: Date, k: number): Date {
   const y = anchor.getUTCFullYear();

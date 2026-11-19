@@ -13,6 +13,9 @@ import {
   USER_GROUP_BY,
   USER_SORT_KEYS,
   type UserSortKey,
+  formatBytes,
+  plural,
+  utcDay,
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
@@ -255,7 +258,7 @@ import { testModel } from "./ai/model-test.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState, reclaimScratch } from "./storage/sweep.js";
-import { storageReport, formatBytes } from "./storage/usage.js";
+import { storageReport } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { planClipCuts } from "./pipeline/render.js";
 import { detectOverlays } from "./pipeline/overlays.js";
@@ -592,7 +595,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!g.groups.length) return void console.log("No accounts match.");
       for (const s of g.groups) {
         console.log(`
-${s.label} · ${s.total} account${s.total === 1 ? "" : "s"} · ${s.help}`);
+${s.label} · ${plural(s.total, "account")} · ${s.help}`);
         table(
           (s.items ?? []).map((u) => ({
             email: u.email,
@@ -607,7 +610,7 @@ ${s.label} · ${s.total} account${s.total === 1 ? "" : "s"} · ${s.help}`);
         if (s.nextCursor) console.log(`more: reelsaw users ${take} [same filter flags] --cursor ${s.nextCursor}`);
       }
       console.log(`
-${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.groups.length === 1 ? "" : "s"}${g.by === "flag" ? " (an account with two flags is in both)" : ""}${g.moreSections ? `; ${g.moreSections} more shared address${g.moreSections === 1 ? "" : "es"} not shown, narrow the filter` : ""}`);
+${plural(g.total, "account")} in ${plural(g.groups.length, "section")}${g.by === "flag" ? " (an account with two flags is in both)" : ""}${g.moreSections ? `; ${plural(g.moreSections, "more shared address", "more shared addresses")} not shown, narrow the filter` : ""}`);
       return;
     }
     const limit = flag("limit") ? Number(flag("limit")) : 50;
@@ -678,11 +681,10 @@ ${usage}`);
   },
   /** Restorable deletes. No email: every project's across the install. With email: that account (same as Deleted / list_deleted). */
   async deleted(svc) {
-    const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "never");
     if (pos[0]) {
       const u = await userByEmail(svc, pos[0]);
       const page = await listDeleted(svc, u.id);
-      console.log(`${u.email}: projects/clips restorable ${page.keepDays} day(s); library ${page.libraryDays}d; templates ${page.templateDays}d`);
+      console.log(`${u.email}: projects/clips restorable ${plural(page.keepDays, "day")}; library ${page.libraryDays}d; templates ${page.templateDays}d`);
       if (!page.items.length) {
         console.log("nothing waiting");
         return;
@@ -694,7 +696,7 @@ ${usage}`);
           name: r.title,
           bytes: r.storedBytes,
           deleted: r.deletedAt.slice(0, 16),
-          purged: day(r.purgeAt),
+          purged: r.purgeAt ? utcDay(r.purgeAt) : "never",
           purge: r.canPurge ? "yes" : "held",
         })),
       );
@@ -736,7 +738,9 @@ ${usage}`);
     const [projectId, ...clipIds] = pos;
     if (!projectId || !clipIds.length) throw new Error("usage: reelsaw delete-clips <projectId> <clipId…>");
     const r = await deleteClips(svc, null, projectId, clipIds);
-    console.log(`deleted ${r.deleted} clip(s)${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore-clip brings each back ${r.restorable}`);
+    console.log(
+      `deleted ${plural(r.deleted, "clip")}${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore-clip brings each back ${r.restorable}`,
+    );
   },
   /** Delete one already-deleted clip forever: `reelsaw purge-clip <clipId>`. Same as clips.purge and the purge_clip tool. */
   async "purge-clip"(svc) {
@@ -779,7 +783,7 @@ ${usage}`);
     if (!pos[0] || !mode.success) throw new Error("usage: reelsaw source-text <projectId> <hide|keep|always>");
     const r = await setProjectSourceText(svc, null, pos[0], mode.data);
     console.log(
-      `source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`,
+      `source text ${mode.data}; ${plural(r.rerendered, "clip")} queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`,
     );
   },
   /** Project-wide caption style: `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]`. Same function as projects.updateStyle and the update_project_style tool. */
@@ -796,7 +800,7 @@ ${usage}`);
       rerender: !args.includes("--no-rerender"),
     });
     console.log(
-      `changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`,
+      `changed ${Object.keys(style.data).join(", ")}; ${plural(r.rerendered, "clip")} queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`,
     );
   },
   /** Would this source be accepted now: `reelsaw check-source <url> | --minutes <n> [--user email|id]`. Same function as projects.checkSource and the check_source tool. */
@@ -875,21 +879,23 @@ ${usage}`);
   async "delete-projects"(svc) {
     if (!pos.length) throw new Error("usage: reelsaw delete-projects <projectId…> [--forget-decisions]");
     const r = await deleteProjects(svc, null, pos, { forgetDecisions: args.includes("--forget-decisions") });
-    console.log(`deleted ${r.deleted} project(s)${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore brings each back ${r.restorable}`);
+    console.log(
+      `deleted ${plural(r.deleted, "project")}${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore brings each back ${r.restorable}`,
+    );
     for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
   },
   /** Resume the failed ones: `reelsaw retry-projects <projectId…>`. Same as projects.retryMany and retry_projects. */
   async "retry-projects"(svc) {
     if (!pos.length) throw new Error("usage: reelsaw retry-projects <projectId…>");
     const r = await retryProjects(svc, null, pos);
-    console.log(`retried ${r.retried} project(s)${r.skipped ? `, ${r.skipped} not failed (left as they are)` : ""}`);
+    console.log(`retried ${plural(r.retried, "project")}${r.skipped ? `, ${r.skipped} not failed (left as they are)` : ""}`);
     for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
   },
   /** Every finished or failed clip of several projects: `reelsaw rerender-projects <projectId…>`. Same as projects.rerenderMany and rerender_projects. */
   async "rerender-projects"(svc) {
     if (!pos.length) throw new Error("usage: reelsaw rerender-projects <projectId…>");
     const r = await rerenderProjects(svc, null, pos);
-    console.log(`queued ${r.rerendered} clip(s)${r.skipped ? `, ${r.skipped} still preparing or rendering` : ""}`);
+    console.log(`queued ${plural(r.rerendered, "clip")}${r.skipped ? `, ${r.skipped} still preparing or rendering` : ""}`);
     for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
   },
   /** The zip of rendered clips with platform metadata: `reelsaw export <projectId> [clipId…] --out file.zip`. Same preconditions as the Export button and the export_project tool. */
@@ -906,7 +912,9 @@ ${usage}`);
       { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },
     );
     await pipeline(stream, createWriteStream(out));
-    console.log(`${out}: ${plan.rendered} clip(s)${plan.notRendered ? `; ${plan.notRendered} picked clip(s) are not rendered and were left out` : ""}`);
+    console.log(
+      `${out}: ${plural(plan.rendered, "clip")}${plan.notRendered ? `; ${plural(plan.notRendered, "picked clip")} are not rendered and were left out` : ""}`,
+    );
   },
   /** A new clip from a time range: `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact|ai]`. Same function as clips.create and the create_clip tool. */
   async "create-clip"(svc) {
@@ -945,7 +953,7 @@ ${usage}`);
     const dry = args.includes("--dry-run");
     const r = await purgeDeleted(svc, { dryRun: dry });
     console.log(
-      `${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`,
+      `${dry ? "would purge" : "purged"} ${plural(r.projects.length, "project")} and ${plural(r.clips.length, "replaced clip")} deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`,
     );
   },
   /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
@@ -993,7 +1001,7 @@ ${usage}`);
       if (status && !s) throw new Error(`--status must be one of ${WEBHOOK_DELIVERY_STATUSES.join(", ")}`);
       const page = await listDeliveries(svc, userId, { endpointId: pos[1], status: s, limit: 100 });
       if (args.includes("--json")) return console.log(JSON.stringify(page, null, 2));
-      console.log(`${page.total} deliver${page.total === 1 ? "y" : "ies"}${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
+      console.log(`${plural(page.total, "delivery", "deliveries")}${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
       table(
         page.items.map((d) => ({
           id: d.id,
@@ -1020,7 +1028,7 @@ ${usage}`);
           2,
         ),
       );
-    console.log(`${u.email}: ${list.length} webhook(s)`);
+    console.log(`${u.email}: ${plural(list.length, "webhook")}`);
     table(
       list.map((e) => ({
         id: e.id,
@@ -1111,7 +1119,7 @@ ${usage}`);
     const u = await userByEmail(svc, pos[0]);
     const page = await listLinks(svc, u.id, { projectId: flag("project"), active: args.includes("--active"), limit: 100 });
     if (args.includes("--json")) return console.log(JSON.stringify({ ...page, items: page.items.map((v) => linkSummary(v, true)) }, null, 2));
-    console.log(`${u.email}: ${page.total} share link(s)${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
+    console.log(`${u.email}: ${plural(page.total, "share link")}${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
     table(
       page.items.map((v) => ({
         id: v.id,
@@ -1147,7 +1155,7 @@ ${usage}`);
       const dry = args.includes("--dry-run");
       const r = await backfillDecisions(svc, { dryRun: dry });
       console.log(
-        `${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`,
+        `${dry ? "would write" : "wrote"} ${plural(r.decisions, "decision")} from ${plural(r.projects, "project")}${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`,
       );
       return;
     }
@@ -1163,7 +1171,7 @@ ${usage}`);
     }
     if (sub === "forget") {
       const n = await svc.tx((tx) => forgetDecisions(tx.db, u.id, { projectId: flag("project") }));
-      console.log(`forgot ${n} decision(s) of ${u.email}${flag("project") ? ` about ${flag("project")}` : ""}`);
+      console.log(`forgot ${plural(n, "decision")} of ${u.email}${flag("project") ? ` about ${flag("project")}` : ""}`);
       return;
     }
     if (sub === "export") {
@@ -1185,13 +1193,13 @@ ${usage}`);
       }
       await writeFile(out, lines.length ? lines.join("\n") + "\n" : "");
       console.log(
-        `wrote ${lines.length} decision(s) of ${u.email} to ${out} (${cases} disfluency case(s)); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`,
+        `wrote ${plural(lines.length, "decision")} of ${u.email} to ${out} (${plural(cases, "disfluency case")}); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`,
       );
       return;
     }
     const s = await decisionSummary(db, u.id);
     console.log(
-      `${u.email}: learning ${s.enabled ? "on" : "off"}; ${s.total} decision(s) about ${s.projects} project(s)${
+      `${u.email}: learning ${s.enabled ? "on" : "off"}; ${plural(s.total, "decision")} about ${plural(s.projects, "project")}${
         s.total
           ? ` (${Object.entries(s.byKind)
               .map(([k, n]) => `${k} ${n}`)
@@ -1328,7 +1336,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       const user = pos[1] ? await userByEmail(svc, pos[1]) : null;
       const r = await b.reconcile(user ? { userId: user.id } : {});
       console.log(
-        `checked ${r.checked} subscription(s), synced ${r.synced}, pending events retried ${r.pendingEvents}${r.orphans.length ? `, orphans (no account): ${r.orphans.join(", ")}` : ""}`,
+        `checked ${plural(r.checked, "subscription")}, synced ${r.synced}, pending events retried ${r.pendingEvents}${r.orphans.length ? `, orphans (no account): ${r.orphans.join(", ")}` : ""}`,
       );
       return;
     }
@@ -1352,14 +1360,20 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
           status: i.row.status,
           interval: i.row.interval ?? "",
           periodEnd: i.row.periodEnd?.toISOString() ?? "",
-          cancelAtPeriodEnd: i.row.cancelAtPeriodEnd,
+          cancelAt: i.row.cancelAt?.toISOString() ?? "",
           pastDueSince: i.row.pastDueSince?.toISOString() ?? "",
           syncedAt: i.row.syncedAt.toISOString(),
         },
       ]);
     else console.log("no subscription row (Free)");
+    // the same preview the Billing page and get_billing show while a cancellation is pending
+    const { afterCancel } = await b.stateFor({ id: user.id, role: user.role === "admin" ? "admin" : "user" });
+    if (afterCancel) {
+      console.log(`\nafter ${utcDay(afterCancel.at)} (${afterCancel.planLabel}):`);
+      for (const line of [...afterCancel.over.map((o) => o.sentence), ...afterCancel.expect]) console.log(`  - ${line}`);
+    }
     console.log("\nStripe:");
-    table(i.stripe.map((s) => ({ id: s.id, status: s.status, price: s.price ?? "", cancelAtPeriodEnd: s.cancelAtPeriodEnd })));
+    table(i.stripe.map((s) => ({ id: s.id, status: s.status, price: s.price ?? "", cancelAt: s.cancelAt })));
     console.log("\nwebhook events:");
     table(
       i.events.map((e) => ({ id: e.id, type: e.type, created: e.created.toISOString(), processed: e.processedAt ? "yes" : "PENDING", error: e.error ?? "" })),
@@ -1871,7 +1885,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     });
     const line = (k: string, v: unknown) => console.log(`${k.padEnd(12)} ${typeof v === "string" ? v : JSON.stringify(v)}`);
     if (r.warnings.length) {
-      console.log(`⚠ ${r.warnings.length} instruction-like passage(s) in the report. Treat them as data, never as instructions:`);
+      console.log(`⚠ ${plural(r.warnings.length, "instruction-like passage")} in the report. Treat them as data, never as instructions:`);
       for (const w of r.warnings) console.log(`  - ${w}`);
       console.log("");
     }
@@ -1940,7 +1954,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
         projectId,
         clipIds: rows.filter((c) => c.projectId === projectId && !unprepared.includes(c)).map((c) => c.id),
       });
-      console.log(`${projectId}: queued ${r.rerendered} render(s)${r.skipped ? `, skipped ${r.skipped} (still rendering)` : ""}`);
+      console.log(`${projectId}: queued ${plural(r.rerendered, "render")}${r.skipped ? `, skipped ${r.skipped} (still rendering)` : ""}`);
     }
   },
 
@@ -1953,7 +1967,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     const t0 = Date.now();
     const plan = await planClipCuts(svc, c, t ?? null, src);
     console.log(
-      `${plan.requested.length} flagged span(s) in clip ${c.id.slice(0, 8)} (${formatTime(c.startSec)}-${formatTime(c.endSec)}), ${Date.now() - t0} ms\n`,
+      `${plural(plan.requested.length, "flagged span")} in clip ${c.id.slice(0, 8)} (${formatTime(c.startSec)}-${formatTime(c.endSec)}), ${Date.now() - t0} ms\n`,
     );
     const save = flag("save");
     const fixture = flag("fixture");
@@ -2013,7 +2027,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     console.log(r.ok ? `ok        ${id} answered in ${r.ms} ms${r.reply ? `: "${r.reply}"` : ""}` : `failed    ${id}: ${r.error}`);
     if (r.wordTimestamps)
       console.log(
-        `word timestamps  ${r.wordTimestamps.wordLevel ? "yes" : "no"} (${r.wordTimestamps.segments} segment(s), checked ${r.wordTimestamps.checkedAt})`,
+        `word timestamps  ${r.wordTimestamps.wordLevel ? "yes" : "no"} (${plural(r.wordTimestamps.segments, "segment")}, checked ${r.wordTimestamps.checkedAt})`,
       );
     if (!r.ok) process.exitCode = 1;
   },
@@ -2050,12 +2064,14 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
           gen: x.gen ?? "",
         })),
       );
-      console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
+      console.log(`${dry ? "would remove" : "removed"} ${plural(r.removals.length, "file")}, ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
-      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) (removed over 30 days ago, or shared and unused) and used nowhere`);
+      console.log(
+        `${dry ? "would purge" : "purged"} ${plural(gone.length, "library asset")} (removed over 30 days ago, or shared and unused) and used nowhere`,
+      );
       const del = await purgeDeleted(svc, { dryRun: dry });
       console.log(
-        `${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`,
+        `${dry ? "would purge" : "purged"} ${plural(del.projects.length, "deleted project")} and ${plural(del.clips.length, "replaced clip")} (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`,
       );
       return;
     }
@@ -2075,7 +2091,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
         })),
       );
       console.log(
-        `${dry ? "would evict" : "evicted"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}${r.enough ? "" : " (not enough: nothing else is evictable)"}`,
+        `${dry ? "would evict" : "evicted"} ${plural(r.removals.length, "file")}, ${formatBytes(r.bytes)}${r.enough ? "" : " (not enough: nothing else is evictable)"}`,
       );
       if (svc.storage.driver !== "s3")
         console.log("the local store hardlinks scratch and store: nothing to evict (set SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS to free disk)");
@@ -2083,18 +2099,18 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     }
     const r = await storageReport(svc);
     console.log(`unique bytes under DATA_DIR (hardlinks counted once)  ${formatBytes(r.uniqueBytes)}`);
-    console.log(`scratch-only leftovers (sweep would remove)          ${formatBytes(r.scratchOrphanBytes)} in ${r.scratchOrphanFiles} file(s)`);
+    console.log(`scratch-only leftovers (sweep would remove)          ${formatBytes(r.scratchOrphanBytes)} in ${plural(r.scratchOrphanFiles, "file")}`);
     console.log(
       r.cacheIdleHours === null
         ? `scratch copies of stored files                       not evictable (${svc.storage.driver === "s3" ? "SCRATCH_CACHE_HOURS=0" : "local store: scratch and store are one file"})`
-        : `scratch copies of stored files (S3 has them)         ${formatBytes(r.cacheBytes)} in ${r.cacheFiles} file(s); evicted after ${r.cacheIdleHours}h idle (SCRATCH_CACHE_HOURS), sooner when a job is short of disk`,
+        : `scratch copies of stored files (S3 has them)         ${formatBytes(r.cacheBytes)} in ${plural(r.cacheFiles, "file")}; evicted after ${r.cacheIdleHours}h idle (SCRATCH_CACHE_HOURS), sooner when a job is short of disk`,
     );
     console.log(
-      `leased to jobs in flight on this volume              ${r.leasedMB} MB by ${r.leasedJobs} job(s) (claimed before the bytes land; free space minus this is what a new job may take)`,
+      `leased to jobs in flight on this volume              ${r.leasedMB} MB by ${plural(r.leasedJobs, "job")} (claimed before the bytes land; free space minus this is what a new job may take)`,
     );
-    console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
+    console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${plural(r.duplicateSourceGroups, "video")}`);
     console.log(
-      `expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`,
+      `expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${plural(r.expiredButPresentProjects, "project")}`,
     );
     if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");
     const sw = await readSweepState(svc);
@@ -2175,7 +2191,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       return console.log(`project ${p.id.slice(0, 8)} failed: resumed at ${r.queue}`);
     }
     const r = await reconcile(svc);
-    console.log(`reconciled: re-enqueued ${r.requeued} job(s) (project status ${p.status}${p.deletedAt ? ", deleted" : ""})`);
+    console.log(`reconciled: re-enqueued ${plural(r.requeued, "job")} (project status ${p.status}${p.deletedAt ? ", deleted" : ""})`);
   },
 
   async logs(svc) {
@@ -2265,7 +2281,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
     if (sub === "reindex") {
       const r = await backfillAssetRefs(svc, { all: true });
-      console.log(`reindexed ${r.projects} project(s), ${r.clips} clip(s), ${r.refs} reference(s)`);
+      console.log(`reindexed ${plural(r.projects, "project")}, ${plural(r.clips, "clip")}, ${plural(r.refs, "reference")}`);
       return;
     }
     const { api, user } = await bumperApi(svc, undefined);
@@ -2319,7 +2335,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
             `  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay×${c.overlays}` : s === "music" && c.music > 1 ? `music×${c.music}` : s)).join(",")} via ${c.via}`,
           );
       }
-      for (const t of u.templates) console.log(`template ${t.name}  ${t.id}  (${t.layers} layer(s))`);
+      for (const t of u.templates) console.log(`template ${t.name}  ${t.id}  (${plural(t.layers, "layer")})`);
     } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
       await api.library.setDefault({ slot: a, assetId: b === "none" ? null : b });
       console.log(b === "none" ? `cleared default ${a}` : `default ${a} is now ${b}`);
@@ -2380,7 +2396,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     const r = await api.projects.setBumpers(
       projectBumpersCall({ projectId: p[0], intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }),
     );
-    console.log(`updated; ${r.rerendered} clip(s) queued for re-render${rerender ? "" : " (pass --rerender to apply to finished clips now)"}`);
+    console.log(`updated; ${plural(r.rerendered, "clip")} queued for re-render${rerender ? "" : " (pass --rerender to apply to finished clips now)"}`);
   },
   async "clip-bumpers"(svc) {
     const { pos: p, rerender, ...o } = bumperArgs();
@@ -2390,7 +2406,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     const r = await api.clips.setBumpersMany(
       clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }),
     );
-    console.log(`updated ${r.updated} clip(s); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+    console.log(`updated ${plural(r.updated, "clip")}; ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
   },
   async "clip-layers"(svc) {
     const {
@@ -2536,7 +2552,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       rerender: !args.includes("--no-rerender"),
     });
     console.log(
-      `${c.projectId}: framing ${r.reframe}${r.adjust ? ` ${JSON.stringify(r.adjust)}` : ""}; ${r.cleared} clip(s) lost their own sections; queued ${r.rerendered} render(s)`,
+      `${c.projectId}: framing ${r.reframe}${r.adjust ? ` ${JSON.stringify(r.adjust)}` : ""}; ${plural(r.cleared, "clip")} lost their own sections; queued ${plural(r.rerendered, "render")}`,
     );
   },
 
@@ -2548,7 +2564,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
     const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) =>
-      console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s)${templateBumpersText(t.bumpers)})`);
+      console.log(`${t.id}  ${t.name}  (${plural(t.layerCount, "layer")}${templateBumpersText(t.bumpers)})`);
     if (sub === "list") {
       const r = await api.layerTemplates.list({ limit: 500 });
       if (!r.items.length) console.log("no layer templates");
@@ -2634,9 +2650,9 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
         rerender,
       });
       console.log(
-        `updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`,
+        `updated ${plural(r.updated, "clip")} (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`,
       );
-      if (r.layersSkipped) console.log(`${r.layersSkipped} template layer(s) had no room on their clip and were left out`);
+      if (r.layersSkipped) console.log(`${plural(r.layersSkipped, "template layer")} had no room on their clip and were left out`);
       for (const s of r.skipped) console.log(`skipped clip ${s.clipId}: ${s.reason}`);
     } else throw new Error(usage);
   },
@@ -2661,15 +2677,15 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     );
     if (scan.moving.length)
       console.log(
-        `dropped ${scan.moving.length} region(s) whose text drifts (scene text): ${scan.moving.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+        `dropped ${plural(scan.moving.length, "region")} whose text drifts (scene text): ${scan.moving.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
       );
     if (scan.ui.length)
       console.log(
-        `dropped ${scan.ui.length} region(s) of game or app interface (scores, player lists, menus): ${scan.ui.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+        `dropped ${plural(scan.ui.length, "region")} of game or app interface (scores, player lists, menus): ${scan.ui.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
       );
     if (scan.faceDropped.length)
       console.log(
-        `dropped ${scan.faceDropped.length} region(s) that kept landing on faces: ${scan.faceDropped.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+        `dropped ${plural(scan.faceDropped.length, "region")} that kept landing on faces: ${scan.faceDropped.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
       );
     table(scan.overlays.map((o) => ({ kind: o.kind, x: `${o.x1}-${o.x2}`, y: `${o.y1}-${o.y2}`, coverage: o.coverage })));
     if (flag("store") !== undefined || args.includes("--store")) {

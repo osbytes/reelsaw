@@ -12,7 +12,7 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
+import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word, plural } from "@reelsaw/shared";
 import { sentenceEndAfter } from "../../pipeline/thought.js";
 import {
   chunkTranscript,
@@ -263,8 +263,8 @@ export function creatorPickMetrics(p: Pick<CreatorPicks, "picks" | "negative">, 
 function creatorResult(id: string, p: CreatorPicks, ranked: RankedCandidate[], gate: ScoreGateOpts, extra: Record<string, string | number> = {}): CaseResult {
   const m = creatorPickMetrics(p, ranked, gate);
   const fails: string[] = [];
-  if (!m.recalled) fails.push(`none of the creator's ${m.spans} span(s) in our top ${m.n}`);
-  if (m.matchingKept < m.matching) fails.push(`the gate drops ${m.matching - m.matchingKept} of ${m.matching} candidate(s) matching a creator span`);
+  if (!m.recalled) fails.push(`none of the creator's ${plural(m.spans, "span")} in our top ${m.n}`);
+  if (m.matchingKept < m.matching) fails.push(`the gate drops ${m.matching - m.matchingKept} of ${plural(m.matching, "candidate")} matching a creator span`);
   const fmtT = (x: number) => x.toFixed(0);
   const spanNotes = m.perSpan.map(
     (s) => `${fmtT(s.span[0])}-${fmtT(s.span[1])}: ${s.recalled ? "found" : "missed"} (best IoU ${s.bestIou}${s.bestRank ? ` at rank ${s.bestRank}` : ""})`,
