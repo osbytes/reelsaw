@@ -79,6 +79,12 @@ describe("announcedDuration", () => {
     await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
   });
 
+  // a stream that just ended reports no length (so no minutes check) and downloads fragment by fragment for hours
+  it("refuses a stream that ended but is still being processed", async () => {
+    const y = fakeYtdlp(() => ({ is_live: false, was_live: true, live_status: "post_live", duration: null }));
+    await assert.rejects(announcedDuration(y.media as never, LINK), LiveSourceError);
+  });
+
   it("accepts the recording of a stream that has ended", async () => {
     const y = fakeYtdlp(() => ({ is_live: false, live_status: "was_live", was_live: true, duration: 5400 }));
     assert.equal(await announcedDuration(y.media as never, LINK), 5400);

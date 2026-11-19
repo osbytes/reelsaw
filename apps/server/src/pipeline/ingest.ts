@@ -82,6 +82,10 @@ export async function ingest(ctx: StageContext) {
       let info: Record<string, unknown> | undefined;
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
       let jsonLine: string | undefined; // --print-json's info line; stdout itself is not kept (progress has no size bound)
+      const limitMB = svc.settings.get().MAX_SOURCE_FILE_MB;
+      // --max-filesize only refuses a size known up front; a fragmented download (a stream's recording) has none, so
+      // stop it ourselves once what has arrived passes the limit instead of letting it run for hours
+      const oversize = new AbortController();
       const t0 = performance.now();
       const { proxyId } = await svc.media
         .ytdlp(
@@ -101,14 +105,14 @@ export async function ingest(ctx: StageContext) {
             "--match-filter",
             NOT_LIVE_FILTER,
             "--max-filesize",
-            `${svc.settings.get().MAX_SOURCE_FILE_MB}M`,
+            `${limitMB}M`,
             "-o",
             path.join(dir, "source.%(ext)s"),
             "--",
             project.sourceUrl!,
           ],
           {
-            signal: ctx.signal,
+            signal: AbortSignal.any([ctx.signal, oversize.signal]),
             onStderr: (line) => {
               stderrTail = (stderrTail + "\n" + line).slice(-4000);
             },
@@ -116,12 +120,15 @@ export async function ingest(ctx: StageContext) {
               if (line.trimStart().startsWith("{")) jsonLine = line;
               const tick = parseDownloadTick(line);
               if (!tick) return;
+              if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
               downloaded = Math.max(downloaded, tick.fraction);
               void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
             },
           },
         )
         .catch((err: Error) => {
+          ctx.signal.throwIfAborted();
+          if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
           const message = describeDownloadFailure(err, stderrTail);
           // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
           if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
@@ -163,13 +170,8 @@ export async function ingest(ctx: StageContext) {
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
       if (!chosen) {
         // --max-filesize makes yt-dlp skip an over-limit download and still exit 0; the same video is as big next time
-        const limitMB = svc.settings.get().MAX_SOURCE_FILE_MB;
         const largest = info ? largestReportedFile(info) : null;
-        if (largest !== null && largest > limitMB * 1024 * 1024) {
-          throw new NonRetryableError(
-            `Could not download: the video is larger than the ${limitMB} MB download limit (about ${Math.ceil(largest / 1024 / 1024)} MB). Try a shorter video, or upload the file instead (New project → Upload).`,
-          );
-        }
+        if (largest !== null && largest > limitMB * 1024 * 1024) throw new NonRetryableError(overSizeLimitMessage(limitMB, largest));
         throw new Error("yt-dlp finished but no source file was produced");
       }
       sourcePath = path.join(dir, chosen);
@@ -312,18 +314,35 @@ export function recordDownload(proxy: string, sec: number, videoSec: number, byt
   if (sec > 0 && bytes > 0) histogram("reelsaw.ytdlp.download.throughput", bytes / sec, "By/s", { proxy }, "Downloaded source bytes per wall second, by proxy");
 }
 
+/** The same video is as big on every attempt: refused with the size when yt-dlp reported one. */
+function overSizeLimitMessage(limitMB: number, bytes: number | null) {
+  const about = bytes === null ? "" : ` (about ${Math.ceil(bytes / 1024 / 1024)} MB)`;
+  return `Could not download: the video is larger than the ${limitMB} MB download limit${about}. Try a shorter video, or upload the file instead (New project → Upload).`;
+}
+
 /**
- * A yt-dlp `--newline` progress line ("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00") as a
- * fraction and a short message for the activity bar. Null for every other line.
+ * A yt-dlp `--newline` progress line ("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00") as a fraction, the
+ * bytes of the current file that have arrived (null when the line gives no total) and a short message for the activity
+ * bar. Null for every other line.
  */
-export function parseDownloadTick(line: string): { fraction: number; message: string } | null {
+export function parseDownloadTick(line: string): { fraction: number; bytes: number | null; message: string } | null {
   const m = /^\[download\]\s+(\d+(?:\.\d+)?)%(?:\s+of\s+~?\s*(\S+))?(?:\s+at\s+(\S+))?/.exec(line);
   if (!m) return null;
   const pct = Number(m[1]);
   const parts = [`Downloading ${Math.floor(pct)}%`];
   if (m[2]) parts.push(`of ${m[2]}`);
   if (m[3] && m[3] !== "Unknown") parts.push(`at ${m[3]}`);
-  return { fraction: Math.max(0, Math.min(1, Math.round(pct * 100) / 10_000)), message: parts.join(" ") };
+  const fraction = Math.max(0, Math.min(1, Math.round(pct * 100) / 10_000));
+  const total = m[2] ? sizeBytes(m[2]) : null;
+  return { fraction, bytes: total === null ? null : Math.round(total * fraction), message: parts.join(" ") };
+}
+
+const SIZE_UNITS: Record<string, number> = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
+
+/** yt-dlp's size ("1.57GiB", "114.74KiB") in bytes; null for anything else ("Unknown", "N/A"). */
+function sizeBytes(s: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)(B|KiB|MiB|GiB|TiB)$/.exec(s);
+  return m ? Number(m[1]) * SIZE_UNITS[m[2]!]! : null;
 }
 
 /**

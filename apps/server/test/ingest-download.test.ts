@@ -20,13 +20,29 @@ describe("parseDownloadTick", () => {
   it("reads a yt-dlp --newline progress line", () => {
     assert.deepEqual(parseDownloadTick("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00"), {
       fraction: 0.123,
+      bytes: Math.round(1.57 * 1024 ** 3 * 0.123),
       message: "Downloading 12% of 1.57GiB at 5.00MiB/s",
     });
     assert.deepEqual(parseDownloadTick("[download] 100.0% of  114.74KiB at    5.98MiB/s ETA 00:00"), {
       fraction: 1,
+      bytes: Math.round(114.74 * 1024),
       message: "Downloading 100% of 114.74KiB at 5.98MiB/s",
     });
-    assert.deepEqual(parseDownloadTick("[download]   0.0% of   10.00MiB at  Unknown B/s ETA Unknown"), { fraction: 0, message: "Downloading 0% of 10.00MiB" });
+    assert.deepEqual(parseDownloadTick("[download]   0.0% of   10.00MiB at  Unknown B/s ETA Unknown"), {
+      fraction: 0,
+      bytes: 0,
+      message: "Downloading 0% of 10.00MiB",
+    });
+  });
+  // ingest stops a download once `bytes` passes MAX_SOURCE_FILE_MB: a stream's recording has no size up front, so
+  // --max-filesize cannot refuse it, and a day-long one ran for hours
+  it("counts the bytes that have arrived, so ingest can stop a download that outgrows the limit", () => {
+    const tick = parseDownloadTick("[download]  10.0% of ~  91.22GiB at 12.00MiB/s ETA 02:10:00 (frag 812/8121)");
+    assert.ok(tick && tick.bytes !== null && tick.bytes > 8192 * 1024 * 1024, "9 GiB of a 91 GiB recording is past an 8 GB limit");
+  });
+  it("gives no bytes when the line has no total", () => {
+    assert.equal(parseDownloadTick("[download]  42.0% at 1.00MiB/s")?.bytes, null);
+    assert.equal(parseDownloadTick("[download]  42.0% of Unknown at 1.00MiB/s")?.bytes, null);
   });
   it("ignores everything else, including the --print-json line", () => {
     assert.equal(parseDownloadTick('{"id": "x", "title": "[download] 50%"}'), null);

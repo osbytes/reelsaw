@@ -42,8 +42,17 @@ jobs:
       - run: pnpm docs:check
       - run: pnpm --filter @reelsaw/web build
       - run: pnpm --filter @reelsaw/server bundle
+      # the Dockerfile's pinned, checksummed yt-dlp, so test/live-filter.test.ts runs the real --match-filter
+      - name: Install yt-dlp (Dockerfile pin)
+        run: |
+          v=$(sed -n 's/^ARG YTDLP_VERSION=//p' Dockerfile); sum=$(sed -n 's/^ARG YTDLP_SHA256=//p' Dockerfile)
+          curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/$v/yt-dlp" -o "$RUNNER_TEMP/yt-dlp"
+          echo "$sum  $RUNNER_TEMP/yt-dlp" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/yt-dlp" && echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       # every test file that does not import test/helpers.ts (no app, no Postgres); see docs/EVALS.md
       - run: pnpm --filter @reelsaw/server test:unit
+        env:
+          REQUIRE_YTDLP: "1"
       - run: node --test scripts/hook.test.mjs
       # the ONNX models behind the framing, pauses, alignment, speakers and overlays suites
       # (same script the Dockerfile runs); cached so CI does not download ~100 MB per run
