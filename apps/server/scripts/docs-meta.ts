@@ -48,7 +48,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
   REELSAW_COMMIT: ["core", "Git commit baked into the image at build time."],
   REELSAW_BUILT_AT: ["core", "Build timestamp baked into the image."],
   MAX_UPLOAD_MB: ["core", "Largest accepted file upload in MB."],
-  MAX_SOURCE_FILE_MB: ["core", "Largest file yt-dlp may download for a link source, in MB (`--max-filesize`)."],
+  MAX_SOURCE_FILE_MB: [
+    "core",
+    "Largest file yt-dlp may download for a link source, in MB (`--max-filesize`, and ingest stops a download with no size up front once it passes this).",
+  ],
   ALLOW_PRIVATE_SOURCE_URLS: [
     "core",
     '`true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). The guard checks the first address only: yt-dlp follows redirects itself, so a shared or hosted instance also needs an egress proxy or network policy (see SECURITY.md, "URL sources and your network").',
