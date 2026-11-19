@@ -6,6 +6,7 @@ import { useTRPC } from "../lib/trpc";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Skeleton, SkeletonRegion } from "./ui";
+import { formatDay, plural } from "@reelsaw/shared";
 
 type LinkInput =
   | { kind: "clip" | "thumb" | "srt" | "vtt"; clipId: string; ttlDays?: number | null; label?: string }
@@ -13,13 +14,8 @@ type LinkInput =
 
 const PAGE = 50;
 
-function day(d: Date | string | null | undefined) {
-  if (!d) return null;
-  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
 /** "until 29 Jan 2027" / "with no expiry" */
-const until = (d: Date | string | null) => (d ? `until ${day(d)}` : "with no expiry");
+const until = (d: Date | string | null) => (d ? `until ${formatDay(d, { month: "short" })}` : "with no expiry");
 
 /**
  * Copy a share link (docs/specs/media-links.md): the clip's active link, or a new one. The clipboard write is started
@@ -253,18 +249,25 @@ export function ShareLinksSection() {
                       </span>
                       <span className="text-xs text-ink3 md:truncate">
                         {KIND_LABEL[l.kind]} · by {SOURCE_LABEL[l.source]}
-                        {l.lastUsedAt ? ` · last used ${day(l.lastUsedAt)}` : " · not used yet"}
+                        {l.lastUsedAt ? ` · last used ${formatDay(l.lastUsedAt, { month: "short" })}` : " · not used yet"}
                         <span className="md:hidden">
                           {" "}
                           · <span className={STATE[l.state].cls}>{STATE[l.state].word.toLowerCase()}</span>
-                          {l.revokedAt ? "" : l.expiresAt ? ` until ${day(l.expiresAt)}` : ", never expires"} · {l.useCount} use{l.useCount === 1 ? "" : "s"}
+                          {l.revokedAt ? "" : l.expiresAt ? ` until ${formatDay(l.expiresAt, { month: "short" })}` : ", never expires"} ·{" "}
+                          {plural(l.useCount, "use")}
                         </span>
                       </span>
                     </span>
                     <span className={`hidden text-xs md:block ${STATE[l.state].cls}`}>
                       {STATE[l.state].glyph} <span className="text-ink2">{STATE[l.state].word}</span>
                     </span>
-                    <span className="hidden text-xs text-ink2 md:block">{l.revokedAt ? `revoked ${day(l.revokedAt)}` : (day(l.expiresAt) ?? "never")}</span>
+                    <span className="hidden text-xs text-ink2 md:block">
+                      {l.revokedAt
+                        ? `revoked ${formatDay(l.revokedAt, { month: "short" })}`
+                        : l.expiresAt
+                          ? formatDay(l.expiresAt, { month: "short" })
+                          : "never"}
+                    </span>
                     <span className="hidden text-right text-xs tabular-nums text-ink2 md:block">{l.useCount}</span>
                     <span className="flex justify-end gap-1.5">
                       <button
@@ -321,7 +324,7 @@ export function ShareLinksSection() {
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="Clear stopped share links?"
-        body={`Deletes ${stopped} revoked or expired link${stopped === 1 ? "" : "s"} from this list; they already don’t work. Active links and links of projects in the trash stay.`}
+        body={`Deletes ${plural(stopped, "revoked or expired link")} from this list; they already don’t work. Active links and links of projects in the trash stay.`}
         confirm="Clear"
         onConfirm={() => clear.mutateAsync()}
       />

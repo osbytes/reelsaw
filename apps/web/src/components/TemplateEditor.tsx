@@ -48,6 +48,7 @@ import {
   type Style,
   type TemplateBumpers,
   type TemplateLayer,
+  plural,
 } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useHistory } from "../lib/history";
@@ -1186,7 +1187,7 @@ export function TemplateEditor({ template, onExit }: Props) {
       />
       {/* always present, so the count appearing never moves the controls */}
       <span className={`min-w-0 truncate text-xs ${skipped ? "text-warn" : "text-ink3"}`}>
-        {skipped ? `▲ ${skipped} layer${skipped === 1 ? "" : "s"} left out at ${len} s` : ""}
+        {skipped ? `▲ ${plural(skipped, "layer")} left out at ${len} s` : ""}
       </span>
       <span className="flex-1" />
       <button className={chip} aria-pressed={safe} onClick={() => setSafe(!safe)} title="Show the TikTok safe zones">

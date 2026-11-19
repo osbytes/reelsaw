@@ -10,6 +10,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./registry.js";
 import type { WordTimestampVerdict } from "./word-timestamps.js";
+import { formatBytes } from "@reelsaw/shared";
 
 export type CatalogKind = "language" | "transcription";
 
@@ -106,10 +107,6 @@ const TITLES: Record<string, string> = {
   gateway: "Vercel AI Gateway",
 };
 
-function fmtBytes(n: number) {
-  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
-}
-
 /**
  * Fallback for model lists that say nothing about what a model does (OpenAI, Groq, a plain
  * OpenAI-compatible server): guess speech-to-text from the id, so the picker can file it under
@@ -186,7 +183,7 @@ export function createModelCatalog(
               label: m.name,
               installed: true,
               sizeBytes: m.size,
-              note: [fmtBytes(m.size), m.details?.parameter_size, m.details?.quantization_level].filter(Boolean).join(" · "),
+              note: [formatBytes(m.size), m.details?.parameter_size, m.details?.quantization_level].filter(Boolean).join(" · "),
             });
           }
           const have = new Set(out.models.map((m) => m.label.replace(/:latest$/, "")));

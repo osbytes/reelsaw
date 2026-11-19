@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ModelPicker, type PickerProvider } from "./ModelPicker";
 import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
 import { ConfirmDialog, ProgressBar, Skeleton } from "./ui";
+import { formatBytes, plural } from "@reelsaw/shared";
 
 type Kind = "language" | "transcription" | "align";
 const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language" | "transcription" }> = [
@@ -17,10 +18,6 @@ const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language
     catalog: "transcription",
   },
 ];
-
-function fmtBytes(n: number) {
-  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
-}
 
 /**
  * Settings → System → Models (admins). Swap the language, transcription and alignment models without
@@ -210,7 +207,7 @@ export function ModelsSection() {
                   Downloading <span className="font-mono text-xs">{p.model}</span> <span className="text-ink3">· {p.message}</span>
                 </span>
                 <span className="flex items-center gap-2 font-mono text-xs text-ink3">
-                  {p.total > 0 ? `${fmtBytes(p.completed)} / ${fmtBytes(p.total)}` : ""}
+                  {p.total > 0 ? `${formatBytes(p.completed)} / ${formatBytes(p.total)}` : ""}
                   <button type="button" className="btn-quiet text-xs" onClick={() => cancel.mutate({ id: p.id })}>
                     Cancel
                   </button>
@@ -244,7 +241,7 @@ export function ModelsSection() {
       />
       <StickyPanelFooter>
         <span className="mr-auto text-[12px] text-ink3">
-          {dirty.length ? `${dirty.length} change${dirty.length === 1 ? "" : "s"} to save; each is checked first (key, server, word timestamps)` : ""}
+          {dirty.length ? `${plural(dirty.length, "change")} to save; each is checked first (key, server, word timestamps)` : ""}
         </span>
         <span className="flex gap-2">
           {dirty.length > 0 && (

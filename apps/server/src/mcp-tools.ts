@@ -949,7 +949,7 @@ export const TOOLS = {
   get_billing: {
     title: "Billing",
     description:
-      "Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. Returns { enabled, plan, reason, subscription, period, limits, limitSource, usage, watermark, canManage, plans }. On a self-hosted Reelsaw this answers that billing is not enabled.",
+      "Hosted instances: your plan, subscription and billing period, the limits in force and where each comes from, this period's usage, the watermark, the plans on offer, and with a cancellation scheduled what Free will be once the plan ends: its limits, where you would be over them and what that refuses. `afterCancel` holds that from `subscription.cancelAt`, with what else changes. Returns { plan, subscription, afterCancel, limits, usage, watermark, plans, … }; self-hosted, that billing is not enabled.",
     annotations: { readOnlyHint: true },
   },
   billing_checkout_url: {

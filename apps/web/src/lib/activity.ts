@@ -1,4 +1,4 @@
-import { formatTime, type ProjectEvent } from "@reelsaw/shared";
+import { formatTime, type ProjectEvent, plural } from "@reelsaw/shared";
 import { summarizeError } from "./errors";
 
 const STAGE: Record<string, string> = {
@@ -45,12 +45,12 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       // one-shot event: the fix is saved when it's emitted; only the re-renders are still running
       if (p.stage === "review")
         return p.rerendered
-          ? { text: `Transcript updated, re-rendering ${p.rerendered} clip${p.rerendered === 1 ? "" : "s"}`, tone: "run" }
-          : { text: p.changed ? `Transcript updated (${p.changed} fix${p.changed === 1 ? "" : "es"})` : "Transcript updated", tone: "ok" };
+          ? { text: `Transcript updated, re-rendering ${plural(Number(p.rerendered), "clip")}`, tone: "run" }
+          : { text: p.changed ? `Transcript updated (${plural(Number(p.changed), "fix", "fixes")})` : "Transcript updated", tone: "ok" };
       if (p.stage === "refine" && Array.isArray(p.steps))
         return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
       if (p.stage === "analyze" && p.repick && typeof p.kept === "number" && p.kept > 0)
-        return { text: `Finding new moments. Kept ${p.kept} clip${p.kept === 1 ? "" : "s"} you made or edited`, tone: "run" };
+        return { text: `Finding new moments. Kept ${plural(Number(p.kept), "clip")} you made or edited`, tone: "run" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
     case "run.started": {
       const why = reasonLabel(p.reason);
@@ -61,7 +61,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       const exp = d !== null && o.expectedSec ? o.expectedSec(String(p.stage)) : null;
       const done = `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`;
       if (p.stage === "transcribe" && typeof p.loops === "number" && p.loops > 0) {
-        return { text: `${done}. Collapsed ${p.loops} looping stretch${p.loops === 1 ? "" : "es"} — review them on the transcript`, tone: "warn" };
+        return { text: `${done}. Collapsed ${plural(Number(p.loops), "looping stretch", "looping stretches")} — review them on the transcript`, tone: "warn" };
       }
       return { text: done, tone: "ok" };
     }
@@ -76,7 +76,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       const t = sec(p.runSec);
       const why = p.runReason === "created" ? null : reasonLabel(p.runReason);
       return {
-        text: `All done: ${p.clips} clip${p.clips === 1 ? "" : "s"} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`,
+        text: `All done: ${plural(Number(p.clips), "clip")} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`,
         tone: "ok",
       };
     }
@@ -116,7 +116,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
     case "transcript.imported":
       return {
-        text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`,
+        text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${plural(Number(p.warnings), "warning")}` : ""}`,
         tone: "ok",
       };
     case "job.stalled":

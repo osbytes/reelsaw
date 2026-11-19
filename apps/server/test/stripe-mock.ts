@@ -214,7 +214,7 @@ const server = http.createServer(async (req, res) => {
     );
     return json(res, 200, { subscription: sub.id, delivered: out });
   }
-  mm = /^\/_mock\/(fail|recover|cancel|change|redeliver)\/([^/]+)$/.exec(p);
+  mm = /^\/_mock\/(fail|recover|cancel|uncancel|change|redeliver)\/([^/]+)$/.exec(p);
   if (mm) {
     const s = subscriptions.get(mm[2]!);
     if (!s) return notFound(res, "subscription");
@@ -246,12 +246,20 @@ const server = http.createServer(async (req, res) => {
             opts,
           ),
         });
-      case "cancel":
-        if (body.atPeriodEnd) s.cancel_at_period_end = true;
+      case "cancel": {
+        // like Stripe: the period-end flag also sets `cancel_at`; a date (`at`, seconds) sets only `cancel_at`
+        const at = typeof body.at === "number" ? body.at : null;
+        if (body.atPeriodEnd) Object.assign(s, { cancel_at_period_end: true, cancel_at: item.current_period_end });
+        else if (at) s.cancel_at = at;
         else Object.assign(s, { status: "canceled", ended_at: now() });
+        const scheduled = !!body.atPeriodEnd || !!at;
         return json(res, 200, {
-          delivered: await deliverAll([[body.atPeriodEnd ? "customer.subscription.updated" : "customer.subscription.deleted", s]], opts),
+          delivered: await deliverAll([[scheduled ? "customer.subscription.updated" : "customer.subscription.deleted", s]], opts),
         });
+      }
+      case "uncancel":
+        Object.assign(s, { cancel_at_period_end: false, cancel_at: null });
+        return json(res, 200, { delivered: await deliverAll([["customer.subscription.updated", s]], opts) });
       case "change": {
         const price = [...prices.values()].find((x) => x.lookup_key === body.lookupKey);
         if (!price) return notFound(res, "price");

@@ -13,6 +13,7 @@ import { collapseDecoderLoopsWithStats, flagsFromCollapse, tokenKey } from "../.
 import { applyFlags } from "../../pipeline/entities.js";
 import { toWords, type RawSegment } from "../../pipeline/transcript.js";
 import type { CaseResult, FixtureSource, Suite } from "../framework.js";
+import { plural } from "@reelsaw/shared";
 
 type Repeat = { repeat: string; n: number; start: number; end: number };
 type PhraseRepeat = { phrase: string[]; n: number; start: number; end: number };
@@ -115,7 +116,7 @@ function grade(c: Case): CaseResult {
     }
     if (flags.length) {
       pass = false;
-      notes.push(`unexpected ${flags.length} loop flag(s)`);
+      notes.push(`unexpected ${plural(flags.length, "loop flag")}`);
     }
   }
   if (c.expect.text !== undefined && text !== c.expect.text) {

@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
+import { plural } from "@reelsaw/shared";
 
 /**
  * Samples CPU, memory and disk and gates heavy work so N concurrent ffmpeg/yt-dlp processes
@@ -226,7 +227,7 @@ export function leaseFits(p: { freeMB: number; leasedMB: number; requiredMB: num
 
 /** Progress / log text for a job held back by other jobs' leases rather than by the bytes on disk. */
 export function leaseShortReason(freeMB: number, leasedMB: number, jobs: number, requiredMB: number): string {
-  return `${freeMB} MB free but ${leasedMB} MB leased to ${jobs} job${jobs === 1 ? "" : "s"} in flight, needs ${requiredMB} MB`;
+  return `${freeMB} MB free but ${leasedMB} MB leased to ${plural(jobs, "job")} in flight, needs ${requiredMB} MB`;
 }
 
 /** Null when disk is unmeasured (`diskFreeMB < 0`) or there is enough. */
@@ -478,7 +479,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000)
           throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot (${running} running)`);
-        const reason = `${running} render${running === 1 ? "" : "s"} running, room for ${lastLimit} (${s.cpus} CPUs, ${s.memAvailableMB} MB free)`;
+        const reason = `${plural(running, "render")} running, room for ${lastLimit} (${s.cpus} CPUs, ${s.memAvailableMB} MB free)`;
         if (reason !== lastReason) {
           lastReason = reason;
           onWait?.(`Waiting for a render slot: ${reason}`);

@@ -8,6 +8,7 @@ import { useSession } from "./auth";
 import { useSystemStatus } from "./account";
 import { toast } from "sonner";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { plural } from "@reelsaw/shared";
 
 /** Thrown (as the rejection) when an upload is cancelled with its AbortSignal. */
 export class UploadCancelled extends Error {
@@ -275,7 +276,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       {jobs.length > 0 && (
         <div className="fixed bottom-4 right-4 z-[75] flex w-[320px] max-w-[calc(100vw-32px)] flex-col gap-1.5 rounded-[14px] border border-line bg-panel p-3 shadow-pop">
           <div className="flex items-center gap-2">
-            <b className="text-[13px]">{active ? `Uploading ${active} video${active === 1 ? "" : "s"}` : "Uploads"}</b>
+            <b className="text-[13px]">{active ? `Uploading ${plural(active, "video")}` : "Uploads"}</b>
             {active > 1 && (
               <button className="btn-quiet ml-auto px-2 py-0.5 text-xs" onClick={cancelAll}>
                 Cancel all

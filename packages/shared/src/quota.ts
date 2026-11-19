@@ -29,10 +29,3 @@ export interface QuotaRefusal {
    */
   sentence?: string | undefined;
 }
-
-export function formatBytes(n: number): string {
-  if (n >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(1)} GB`;
-  if (n >= 1_048_576) return `${Math.max(1, Math.round(n / 1_048_576))} MB`;
-  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
-  return `${n} B`;
-}

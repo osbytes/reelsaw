@@ -428,6 +428,13 @@
       "when": 1795029025439,
       "tag": "0060_projects_upload_id_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795040839857,
+      "tag": "0061_billing_cancel_at",
+      "breakpoints": true
     }
   ]
 }

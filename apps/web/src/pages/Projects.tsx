@@ -9,7 +9,7 @@ import { useTRPC } from "../lib/trpc";
 import { PosterBumperCards } from "../components/PosterBumperCards";
 import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
-import { formatTime } from "@reelsaw/shared";
+import { formatTime, plural } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { useMe } from "../lib/account";
 import { summarizeError } from "../lib/errors";
@@ -191,8 +191,8 @@ export function ProjectsPage() {
               </div>
             ) : stats.data && stats.data.total > 0 ? (
               <p className="mt-1 min-h-5 text-sm text-ink2">
-                {num.format(stats.data.total)} project{stats.data.total === 1 ? "" : "s"}
-                {running ? ` · ${running} processing` : ""} · {num.format(stats.data.clipsDone)} clip{stats.data.clipsDone === 1 ? "" : "s"} ready
+                {plural(stats.data.total, "project")}
+                {running ? ` · ${running} processing` : ""} · {plural(stats.data.clipsDone, "clip")} ready
               </p>
             ) : (
               <p className="mt-1 min-h-5" />
@@ -231,7 +231,7 @@ export function ProjectsPage() {
               p.status === "failed"
                 ? summarizeError(p.error ?? "Something went wrong", { admin: isAdmin }).summary
                 : p.clipCount
-                  ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
+                  ? `${plural(p.clipCount, "clip")} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;
             const checked = sel.includes(p.id);
             return (

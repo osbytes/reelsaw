@@ -10,6 +10,7 @@ import { useTRPC } from "../lib/trpc";
 import { useSystemStatus } from "../lib/account";
 import { ago, elapsed } from "../lib/time";
 import { Skeleton, SkeletonRegion } from "./ui";
+import { plural } from "@reelsaw/shared";
 
 type Tone = "ok" | "warn" | "err" | "idle";
 const FG: Record<Tone, string> = { ok: "text-ok", warn: "text-warn", err: "text-err", idle: "text-ink3" };
@@ -107,7 +108,7 @@ export function FleetSummary({ onJump }: { onJump: (id: string) => void }) {
     glyph: slots.max && slots.busy >= slots.max ? "●" : slots.busy ? "◔" : "○",
     word: !slots.max ? "None" : slots.busy >= slots.max ? "Full" : slots.busy ? "In use" : "Free",
     value: slots.max ? `${slots.busy} of ${slots.max} busy` : "—",
-    note: `Across ${takers.length} ${takers.length === 1 ? "process" : "processes"}`,
+    note: `Across ${plural(takers.length, "process", "processes")}`,
     tone: !slots.max ? "err" : slots.busy >= slots.max ? "warn" : slots.busy ? "ok" : "idle",
   };
 

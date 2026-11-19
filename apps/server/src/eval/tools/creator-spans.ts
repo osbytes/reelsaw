@@ -38,6 +38,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TranscriptSegment } from "@reelsaw/shared";
 import { exec, findEvalRoot } from "../framework.js";
+import { plural } from "@reelsaw/shared";
 
 interface Json3Seg {
   utf8?: string;
@@ -424,7 +425,7 @@ async function main() {
       2,
     ) + "\n",
   );
-  process.stderr.write(`  wrote ${path.relative(process.cwd(), dir)}: ${segments.length} segments in ${keep.length} window(s)\n`);
+  process.stderr.write(`  wrote ${path.relative(process.cwd(), dir)}: ${segments.length} segments in ${plural(keep.length, "window")}\n`);
 }
 
 if (process.argv[1] && /creator-spans\.(ts|js)$/.test(process.argv[1])) {

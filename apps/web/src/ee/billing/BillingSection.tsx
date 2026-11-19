@@ -9,12 +9,10 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
-import { CHECKOUT_PARAM, deletedProjectsPath, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM } from "@reelsaw/shared";
+import { CHECKOUT_PARAM, deletedProjectsPath, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM, formatDay, formatMb } from "@reelsaw/shared";
 import { Skeleton, SkeletonRegion } from "../../components/ui";
 
 const num = new Intl.NumberFormat();
-const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : "");
-const gb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 ? 1 : 0)} GB` : `${mb} MB`);
 
 type Interval = "month" | "year";
 
@@ -95,15 +93,15 @@ export default function BillingSection() {
     : d.reason === "complimentary"
       ? "Granted by an admin."
       : d.reason === "grace"
-        ? `Payment failed; the plan stays until ${day(sub?.graceEndsAt)}. Update your card to keep it.`
+        ? `Payment failed; the plan stays until ${sub?.graceEndsAt ? formatDay(sub?.graceEndsAt) : ""}. Update your card to keep it.`
         : d.reason === "lapsed"
           ? "Payment failed and the grace period ended: the account is on Free until the card is updated."
           : d.reason === "trialing"
-            ? `Trial until ${day(sub?.periodEnd)}.`
-            : sub?.cancelAtPeriodEnd
-              ? `Cancels on ${day(sub.periodEnd)}; the plan stays until then.`
+            ? `Trial until ${sub?.periodEnd ? formatDay(sub?.periodEnd) : ""}.`
+            : sub?.cancelAt
+              ? `Canceled: the plan stays until ${formatDay(sub.cancelAt)}, then the account moves to Free.`
               : sub?.periodEnd && d.reason === "active"
-                ? `Renews on ${day(sub.periodEnd)}${sub.interval ? ` (${sub.interval === "year" ? "yearly" : "monthly"})` : ""}.`
+                ? `Renews on ${formatDay(sub.periodEnd)}${sub.interval ? ` (${sub.interval === "year" ? "yearly" : "monthly"})` : ""}.`
                 : "No subscription: the Free plan. Pick a plan below to lift the limits.";
 
   const bar = (used: number, cap: number) => {
@@ -121,7 +119,7 @@ export default function BillingSection() {
       <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-[15px] font-bold">Plan</h2>
-          <span className="min-h-4 font-mono text-xs text-ink3">{period ? `Period ${day(period.start)} to ${day(period.end)}` : ""}</span>
+          <span className="min-h-4 font-mono text-xs text-ink3">{period ? `Period ${formatDay(period.start)} to ${formatDay(period.end)}` : ""}</span>
         </div>
         {q.isPending ? (
           <SkeletonRegion className="flex flex-col gap-3">
@@ -149,8 +147,58 @@ export default function BillingSection() {
               <span className={`chip ${d.watermark.on ? "bg-warn-soft text-warn" : "bg-acc-soft text-acc-text"}`}>
                 {d.watermark.on ? "◇ watermark on" : "◆ no watermark"}
               </span>
+              {d.afterCancel && <span className="chip bg-warn-soft text-warn">◷ Cancels {formatDay(d.afterCancel.at, { month: "short", year: false })}</span>}
             </div>
             <p className="min-h-5 text-sm text-ink2">{statusLine}</p>
+            {d.afterCancel && (
+              <div className="flex flex-col gap-3 rounded-[12px] border border-warn/40 bg-warn-soft px-4 py-3.5 text-sm">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-warn">
+                    {d.plan.label} ends on {formatDay(d.afterCancel.at)}, then this account is on {d.afterCancel.planLabel}
+                  </span>
+                  <span className="text-ink2">Until then nothing changes. From that day:</span>
+                </div>
+                <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
+                  {(
+                    [
+                      ["MAX_SOURCE_MINUTES_PER_MONTH", "Minutes a month", (n: number) => num.format(n)],
+                      ["MAX_STORAGE_MB", "Storage", formatMb],
+                      ["MAX_PROJECTS_PER_USER", "Projects kept", (n: number) => num.format(n)],
+                    ] as const
+                  ).map(([key, label, fmt]) => {
+                    const over = d.afterCancel!.over.find((o) => o.key === key);
+                    const cap = (n: number) => (n > 0 ? fmt(n) : "no cap");
+                    return (
+                      <div key={key} className="flex flex-col gap-0.5">
+                        <dt className="text-xs font-semibold text-ink2">{label}</dt>
+                        <dd className={`tabular-nums ${over ? "font-semibold text-warn" : "text-ink"}`}>
+                          {cap(d.limits[key])} → {cap(d.afterCancel!.limits[key])}
+                          {over && " · over"}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+                {d.afterCancel.over.length > 0 && (
+                  <ul className="flex list-disc flex-col gap-1 pl-5 text-ink">
+                    {d.afterCancel.over.map((o) => (
+                      <li key={o.key}>{o.sentence}</li>
+                    ))}
+                  </ul>
+                )}
+                <ul className="flex list-disc flex-col gap-1 pl-5 text-ink2">
+                  {d.afterCancel.expect.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn-primary min-w-[9rem]" disabled={portal.isPending} onClick={() => portal.mutate()}>
+                    {portal.isPending ? "…" : `Keep ${d.plan.label}`}
+                  </button>
+                  <span className="text-xs text-ink3">Opens Stripe's portal: choose "Don't cancel subscription".</span>
+                </div>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-ink2">Minutes this period</span>
@@ -165,7 +213,7 @@ export default function BillingSection() {
                 <span className="text-xs font-semibold text-ink2">Storage</span>
                 {bar(d.usage.MAX_STORAGE_MB, storageCap)}
                 <span className="text-xs tabular-nums text-ink3">
-                  {storageCap ? `${gb(d.usage.MAX_STORAGE_MB)} of ${gb(storageCap)}` : `${gb(d.usage.MAX_STORAGE_MB)}, no cap`}
+                  {storageCap ? `${formatMb(d.usage.MAX_STORAGE_MB)} of ${formatMb(storageCap)}` : `${formatMb(d.usage.MAX_STORAGE_MB)}, no cap`}
                 </span>
                 <span className="text-xs text-ink3">
                   Deleted projects still count until you{" "}
@@ -245,7 +293,7 @@ export default function BillingSection() {
                       ? `${num.format(p.limits.MAX_SOURCE_MINUTES_PER_MONTH)} minutes of video a month`
                       : "Unlimited minutes"}
                   </li>
-                  <li>{p.limits.MAX_STORAGE_MB ? `${gb(p.limits.MAX_STORAGE_MB)} of storage` : "Unlimited storage"}</li>
+                  <li>{p.limits.MAX_STORAGE_MB ? `${formatMb(p.limits.MAX_STORAGE_MB)} of storage` : "Unlimited storage"}</li>
                   <li>{p.limits.MAX_PROJECTS_PER_USER ? `${num.format(p.limits.MAX_PROJECTS_PER_USER)} projects` : "Unlimited projects"}</li>
                   <li>{p.watermark ? "Small watermark" : "No watermark"}</li>
                   {p.priority && <li>Priority processing queue</li>}

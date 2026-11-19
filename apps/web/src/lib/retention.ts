@@ -6,12 +6,13 @@
 import { useQuery } from "@tanstack/react-query";
 import type { DeletedKind } from "@reelsaw/shared";
 import { useTRPC } from "./trpc";
+import { plural } from "@reelsaw/shared";
 
 /** "You can restore it from Deleted for 7 days." ("at any time" when kept forever; no window while it loads). */
 export function restoreHint(days: number | undefined, many = false) {
   const it = many ? "them" : "it";
   if (days === undefined) return `You can restore ${it} from Deleted.`;
-  return days > 0 ? `You can restore ${it} from Deleted for ${days} day${days === 1 ? "" : "s"}.` : `You can restore ${it} from Deleted at any time.`;
+  return days > 0 ? `You can restore ${it} from Deleted for ${plural(days, "day")}.` : `You can restore ${it} from Deleted at any time.`;
 }
 
 /**
@@ -30,6 +31,6 @@ export function useRestoreWindow(kind: DeletedKind, enabled = true) {
   return {
     days,
     hint: (many = false) => restoreHint(days, many),
-    restorable: days === undefined ? undefined : days > 0 ? `for ${days} day${days === 1 ? "" : "s"}` : "until you delete it forever",
+    restorable: days === undefined ? undefined : days > 0 ? `for ${plural(days, "day")}` : "until you delete it forever",
   };
 }

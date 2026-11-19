@@ -38,6 +38,7 @@ import {
 import { createMeter, meteredModel, type MeterSummary } from "./meter.js";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { suites } from "./suites/index.js";
+import { plural } from "@reelsaw/shared";
 
 const BOOL_FLAGS = new Set(["offline", "update", "verbose", "list", "no-cache"]);
 const argv = process.argv.slice(2);
@@ -196,7 +197,7 @@ async function main() {
       if (cmp.regressions.length && !accepting) failed = true;
       if (update && cmp.regressions.length && !accepting) {
         console.log(
-          `  ✗ baseline NOT updated: ${cmp.regressions.length} regression(s) above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`,
+          `  ✗ baseline NOT updated: ${plural(cmp.regressions.length, "regression")} above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`,
         );
       } else if (update && s.noBaseline) {
         console.log("  baseline NOT updated: this suite replays data from outside the repo and has no baseline");

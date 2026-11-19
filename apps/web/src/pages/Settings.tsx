@@ -31,14 +31,10 @@ import {
   PIPELINE_FIELDS,
   RETENTION_FIELDS,
 } from "../components/InstanceSettings";
-import { BILLING_PATH, CHANGELOG_URL, REPO_URL } from "@reelsaw/shared";
+import { BILLING_PATH, CHANGELOG_URL, REPO_URL, formatMb } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
-
-function gb(mb: number) {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
-}
 
 type Section = readonly [id: string, label: string];
 
@@ -324,7 +320,7 @@ function SystemTab() {
         ],
         [
           "Admission",
-          `heavy jobs wait above ${s.limits.maxCpuPercent}% CPU, under ${gb(s.limits.minFreeMemMB)} memory or ${gb(s.limits.minFreeDiskMB)} disk free`,
+          `heavy jobs wait above ${s.limits.maxCpuPercent}% CPU, under ${formatMb(s.limits.minFreeMemMB)} memory or ${formatMb(s.limits.minFreeDiskMB)} disk free`,
         ],
         ["Email", s.email],
         ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],

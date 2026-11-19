@@ -15,7 +15,7 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
-import type { FailureCause } from "@reelsaw/shared";
+import { type FailureCause, plural } from "@reelsaw/shared";
 
 const PAGE = 50;
 /** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
@@ -560,8 +560,8 @@ export function QueueSection() {
         title={showDismissed ? "Restore dismissed failures?" : "Dismiss failed work?"}
         body={
           showDismissed
-            ? `Bring ${total} dismissed ${total === 1 ? "failure" : "failures"} ${filtered ? "matching this filter " : ""}back into Failed work.`
-            : `Clear ${total} ${total === 1 ? "failure" : "failures"} ${filtered ? "matching this filter " : ""}from this list. The owners' projects keep their error and their own Retry, and anything that fails again shows up here again. Show dismissed brings them back.`
+            ? `Bring ${plural(total, "dismissed failure")} ${filtered ? "matching this filter " : ""}back into Failed work.`
+            : `Clear ${plural(total, "failure")} ${filtered ? "matching this filter " : ""}from this list. The owners' projects keep their error and their own Retry, and anything that fails again shows up here again. Show dismissed brings them back.`
         }
         confirm={showDismissed ? "Restore" : "Dismiss"}
         onConfirm={() => onDismiss()}

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { formatBytes, type DeletedKind } from "@reelsaw/shared";
+import { formatBytes, formatDay, type DeletedKind, plural } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useHashParams } from "../lib/hash";
 import { ago } from "../lib/time";
@@ -31,8 +31,6 @@ import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-const dateFmt: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
 /** The first per-item reason of a partly failed bulk restore / delete forever, so the toast says why. */
 const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
@@ -52,7 +50,7 @@ function foreverWhen(purgeAt: string | null) {
 }
 
 function foreverDate(purgeAt: string | null) {
-  return purgeAt ? `Deleted forever on ${new Date(purgeAt).toLocaleDateString(undefined, dateFmt)}` : undefined;
+  return purgeAt ? `Deleted forever on ${formatDay(purgeAt, { month: "short" })}` : undefined;
 }
 
 type Row = {
@@ -311,13 +309,7 @@ export function DeletedPage() {
               );
             })}
           </ListTable>
-          <ListFooter>
-            {list.isPending ? (
-              <Skeleton className="h-3 w-40" />
-            ) : (
-              `Showing ${items.length.toLocaleString()} of ${total.toLocaleString()} item${total === 1 ? "" : "s"}`
-            )}
-          </ListFooter>
+          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : `Showing ${items.length.toLocaleString()} of ${plural(total, "item")}`}</ListFooter>
           {selected.length > 0 && (
             <SelectionBar label="Selected deletions" count={selected.length} busy={busy} onClear={() => setSel([])}>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>

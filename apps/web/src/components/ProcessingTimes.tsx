@@ -3,7 +3,7 @@
  * its finished projects with the current models. Nothing to configure: the runs are the calibration.
  */
 import { useQuery } from "@tanstack/react-query";
-import { formatTime } from "@reelsaw/shared";
+import { formatTime, plural } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { Skeleton, SkeletonRegion } from "./ui";
 
@@ -39,7 +39,7 @@ export function ProcessingTimes() {
         <h3 className="text-[14px] font-bold">Processing time</h3>
         <span className="text-xs text-ink3">
           {d.samples
-            ? `learned from ${d.samples} finished project${d.samples === 1 ? "" : "s"} with the current models${learned < d.stages.length ? `; ${d.stages.length - learned} stage${d.stages.length - learned === 1 ? "" : "s"} still on defaults` : ""}`
+            ? `learned from ${plural(d.samples, "finished project")} with the current models${learned < d.stages.length ? `; ${plural(d.stages.length - learned, "stage")} still on defaults` : ""}`
             : "no finished project with the current models yet; showing defaults from the README until one finishes"}
         </span>
       </div>
@@ -65,9 +65,7 @@ export function ProcessingTimes() {
               <td className="py-1.5 text-right">~{formatTime(s.factor * TEN_MIN)}</td>
               <td className="py-1.5 text-right">{s.actualAvgSec !== null ? formatTime(s.actualAvgSec) : "—"}</td>
               <td className="py-1.5 text-right">{s.expectedAvgSec !== null ? formatTime(s.expectedAvgSec) : "—"}</td>
-              <td className="py-1.5 text-right font-sans text-xs text-ink3">
-                {s.source === "history" ? `${s.samples} project${s.samples === 1 ? "" : "s"}` : "default"}
-              </td>
+              <td className="py-1.5 text-right font-sans text-xs text-ink3">{s.source === "history" ? `${plural(s.samples, "project")}` : "default"}</td>
             </tr>
           ))}
         </tbody>

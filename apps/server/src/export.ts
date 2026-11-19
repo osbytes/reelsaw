@@ -20,7 +20,7 @@ import { schema } from "./db/index.js";
 import type { Clip, Project } from "./db/schema.js";
 import type { Services } from "./services.js";
 import { findProject, type Actor } from "./projects/service.js";
-import { formatTime, toSrt, toVtt } from "@reelsaw/shared";
+import { formatTime, toSrt, toVtt, plural } from "@reelsaw/shared";
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
@@ -376,7 +376,7 @@ export function buildCsv(m: ExportManifest) {
 
 export function buildReadme(m: ExportManifest) {
   return `Reelsaw export — "${m.project.title}"
-${m.clips.length} clip(s)${m.subset ? ` (a selection: ${m.subset.requested} picked of ${m.subset.total} rendered)` : ""}, generated ${m.generatedAt}
+${plural(m.clips.length, "clip")}${m.subset ? ` (a selection: ${m.subset.requested} picked of ${m.subset.total} rendered)` : ""}, generated ${m.generatedAt}
 
 LAYOUT
   clips/NN-title.mp4           vertical 1080x1920 H.264/AAC, ready to upload as-is
