@@ -340,7 +340,11 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   ("This link is a live stream…") instead of recording it until the stream ends through the download proxy. The
   link lookup reads `is_live` / `live_status`, and the download itself runs with `--match-filter` for when the
   lookup failed. On a minutes-limited account, check_source and creating the project refuse it up front too.
-  The recording of an ended stream downloads like any video.
+  The recording of an ended stream downloads like any video. Every comparison in that filter ends in `?`
+  (`live_status!=?is_upcoming`): many extractors leave `live_status` unset (a direct `.mp4` link) and yt-dlp fails a
+  plain comparison against an unset field. If the filter skips a link the lookup called not live, ingest fails with
+  cause `platform` and logs `download skipped by the live filter although the lookup said not live`, rather than
+  telling the user their link is a live stream.
 - **YouTube bot-check from a datacentre / `YTDLP_PROXY`.** yt-dlp takes one `--proxy`; Reelsaw walks an
   operator-ranked pool in the same variable (one URL still works). **Priority** is yours and never
   changes at runtime (put the cheap home Pi first). **Reliability** is a circuit breaker per candidate
