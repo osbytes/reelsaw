@@ -107,7 +107,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
-| `reelsaw queue [--json]` | waiting / running / retrying jobs per stage, plus what is in flight (same as Settings → System → Queue) |
+| `reelsaw queue [--json]` | waiting / running / retrying jobs per stage with pickup times (median and 95th percentile wait, last hour), queued work by account with its queue priority, plus what is in flight in pickup order (same as Settings → System → Queue) |
 | `reelsaw failure <projectId\|clipId> [--json]` | one failed project or clip: owner, stage, the full recorded reason (same as clicking a row under Settings → System → Queue → Failed work) |
 | `reelsaw retry-failures [--stage s] [--cause platform\|input\|quota] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (platform failures unless --cause; same as Queue → Retry matching) |
 | `reelsaw dismiss-failures [--stage s] [--cause c] [--q text] [--since 24h] [--restore] [--json]` | clear failures nobody will retry from Failed work, or bring them back (same as Settings → System → Queue → Dismiss) |
@@ -139,7 +139,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> [--layers '<json array>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative), plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it sets replaces the clip's either way); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
-| `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
+| `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow]` | an account's quotas: instance value, plan, override, in force, in use now, and its queue priority; --watermark sets the per-user override, --priority the queue priority (-20 to 20; follow = the plan) (same as Users → Limits) |
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
@@ -521,7 +521,13 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
   nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The
   priority is fixed at enqueue: a backlog queued before a second user arrived keeps its place only for the jobs
-  already ahead. Jobs a person asked for (create, retry, re-render, new clip, from the UI, MCP or `--user` CLI calls)
+  already ahead. The owner's **queue priority** is added on top (`queuePriorityFor` in `quota.ts`): an admin's
+  per-user value (Users → Limits, `reelsaw limits <email> --priority N|follow`, MCP `set_user_queue_priority`;
+  -20 to 20), else the plan's (hosted: Starter +2, Creator +3, Pro +5), else 0. One point is one job of backlog: a
+  Pro account with five jobs queued ties an idle Free account. Settings → System → Queue (`reelsaw queue`,
+  `get_queue`) shows how long jobs waited to be picked up in the last hour per stage (median, 95th percentile,
+  longest), the accounts with work queued and the priority each gets, and waiting jobs in the order workers take
+  them. Jobs a person asked for (create, retry, re-render, new clip, from the UI, MCP or `--user` CLI calls)
   also carry `data.by = "user"` and are refused past `MAX_LIVE_JOBS_PER_USER` ("You have 12 requests queued or
   running…"; only `by = "user"` jobs count, so a project's own transcribe/analyze/render hand-offs never block the
   owner's next request) or `MAX_RERENDERS_PER_HOUR` (renders, new clips and re-analyze / refine runs); pipeline hand-offs and the reconciler are never refused. Both are
@@ -529,6 +535,8 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   agree. Jobs queued before this change have no `userId` and are not counted. See one account with
   `reelsaw limits <email>`; inspect the queue with
   `select name, priority, data->>'userId', state from pgboss.job where state in ('created','retry','active') order by priority desc, created_on`.
+  Slow pickups with idle workers point at a stage nobody listens on (the Queue page says so); slow pickups with
+  busy workers are a capacity question (more workers, or `RENDER_CONCURRENCY` and friends).
 - **One model server, many jobs: `PROVIDER_CONCURRENCY`.** `ANALYZE_CONCURRENCY` / `TRANSCRIBE_CONCURRENCY` are per
   job; the provider gate (`ai/gate.ts`) caps calls per provider across all jobs and processes (default 2 for a
   self-hosted Ollama or compatible server, 1 for `openai` pointed at a local server such as Speaches, unlimited for

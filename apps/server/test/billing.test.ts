@@ -93,6 +93,10 @@ describe("grants and the quota chain", () => {
     assert.equal(periodFor(paid, now).source, "billing");
     assert.equal(paid.limits.MAX_SOURCE_MINUTES_PER_MONTH, 300);
     assert.equal(grantsOf(row({ plan: "pro" }), 7, "https://app.example.com", now).queuePriority, 5);
+    // every paid plan starts its jobs ahead of Free, and each higher plan ahead of the one below
+    const ranks = PLANS.map((p) => p.queuePriority);
+    assert.equal(ranks[0], 0);
+    for (let i = 1; i < ranks.length; i++) assert.ok(ranks[i]! > ranks[i - 1]!, `${PLANS[i]!.name} ranks above ${PLANS[i - 1]!.name}`);
   });
   it("a stale period (row not yet synced past its end) falls back to the calendar month instead of counting forever", () => {
     const g: Grants = {

@@ -21,7 +21,10 @@ export interface Plan {
   limits: Partial<Limits>;
   /** the account's first video does not count against the monthly minutes when it is at most this long (0 = no allowance) */
   firstVideoFreeMinutes: number;
-  /** added to every job's fair-share priority (pg-boss: higher first); 0 = none */
+  /**
+   * Points added to every job's fair-share priority (pg-boss: higher first; one point = one job of backlog); 0 = none.
+   * Every paid plan ranks ahead of Free, higher plans further. An admin's per-user override replaces it (quota.ts `queuePriorityFor`).
+   */
   queuePriority: number;
   /** false = the plan removes the watermark; null = follow the instance setting */
   watermark: boolean | null;
@@ -57,10 +60,10 @@ export const PLANS: Plan[] = [
     lookupKeys: { month: "starter_monthly", year: "starter_yearly" },
     limits: { MAX_SOURCE_MINUTES_PER_MONTH: 100, MAX_STORAGE_MB: 10240, MAX_PROJECTS_PER_USER: 50, MAX_LIVE_JOBS_PER_USER: 4, MAX_MANUAL_CLIPS_PER_USER: 0 },
     firstVideoFreeMinutes: 0,
-    queuePriority: 0,
+    queuePriority: 2,
     watermark: false,
     sourceHeight: null,
-    blurb: "100 minutes a month, 10 GB of storage, no watermark.",
+    blurb: "100 minutes a month, 10 GB of storage, no watermark, ahead of Free in the queue.",
     next: "creator",
   },
   {
@@ -70,10 +73,10 @@ export const PLANS: Plan[] = [
     lookupKeys: { month: "creator_monthly", year: "creator_yearly" },
     limits: { MAX_SOURCE_MINUTES_PER_MONTH: 300, MAX_STORAGE_MB: 30720, MAX_PROJECTS_PER_USER: 200, MAX_LIVE_JOBS_PER_USER: 6, MAX_MANUAL_CLIPS_PER_USER: 0 },
     firstVideoFreeMinutes: 0,
-    queuePriority: 0,
+    queuePriority: 3,
     watermark: false,
     sourceHeight: null,
-    blurb: "300 minutes a month, 30 GB of storage, no watermark.",
+    blurb: "300 minutes a month, 30 GB of storage, no watermark, ahead of Starter in the queue.",
     next: "pro",
   },
   {
@@ -86,7 +89,7 @@ export const PLANS: Plan[] = [
     queuePriority: 5,
     watermark: false,
     sourceHeight: null,
-    blurb: "750 minutes a month, 100 GB of storage, unlimited projects, no watermark, priority queue.",
+    blurb: "750 minutes a month, 100 GB of storage, unlimited projects, no watermark, top of the queue.",
     next: null,
   },
 ];
@@ -116,6 +119,7 @@ export const publicPlan = (p: Plan) => ({
   watermark: p.watermark !== false,
   firstVideoFreeMinutes: p.firstVideoFreeMinutes,
   sourceHeight: p.sourceHeight,
-  priority: p.queuePriority > 0,
+  /** how far ahead of Free the plan's jobs start (one point = one job of backlog; 0 = none) */
+  queuePriority: p.queuePriority,
   blurb: p.blurb,
 });

@@ -622,6 +622,10 @@ export function createMcpServer(
 
   server.registerTool("manage_users", TOOLS.manage_users, (input) => run(() => api.admin.users.bulk(input)));
 
+  server.registerTool("set_user_queue_priority", TOOLS.set_user_queue_priority, ({ userId, priority }) =>
+    run(() => api.admin.users.setQueuePriority({ id: userId, priority })),
+  );
+
   server.registerTool("list_signup_rules", TOOLS.list_signup_rules, (input) => run(() => api.admin.signupRules.list(input)));
 
   server.registerTool("manage_signup_rules", TOOLS.manage_signup_rules, (input) => run(() => api.admin.signupRules.change(input)));

@@ -56,6 +56,7 @@ export const PRICING: PricingPlan[] = [
       "Full-quality source in the editor",
       "Unlimited clips of your own",
       "MCP and API access for agents",
+      "Jobs start ahead of Free",
       "4 jobs at once",
     ],
   },
@@ -76,6 +77,7 @@ export const PRICING: PricingPlan[] = [
       "Full-quality source in the editor",
       "Unlimited clips of your own",
       "MCP and API access for agents",
+      "Jobs start ahead of Starter and Free",
       "6 jobs at once",
     ],
   },
@@ -89,6 +91,6 @@ export const PRICING: PricingPlan[] = [
     watermark: false,
     firstVideoFreeMinutes: 0,
     blurb: "Daily publishing and a back catalogue.",
-    bullets: ["750 minutes of source video a month", "100 GB of storage, unlimited projects", "No watermark", "Priority processing queue", "12 jobs at once"],
+    bullets: ["750 minutes of source video a month", "100 GB of storage, unlimited projects", "No watermark", "Top of the processing queue", "12 jobs at once"],
   },
 ];

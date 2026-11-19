@@ -1,7 +1,8 @@
 /**
  * Fair share between accounts: a job's pg-boss priority is minus its owner's live jobs, so someone with nothing in
  * flight is served before the backlog of someone who queued many; and MAX_LIVE_JOBS_PER_USER refuses a user's own
- * request (never a pipeline hand-off) with a sentence, counting only the jobs they asked for.
+ * request (never a pipeline hand-off) with a sentence, counting only the jobs they asked for. The owner's queue
+ * priority is added on top, and the admin queue summary reports pickup times, queued work by account and pickup order.
  *
  * Runs this checkout's unit of work and queue code in-process against the local stack's Postgres (TEST_DATABASE_URL)
  * on a throwaway pg-boss queue no worker listens on; the running app is only used for sign-up (REELSAW_URL).
@@ -16,6 +17,9 @@ import { createQueue, type QueueName } from "../src/queue/boss.js";
 import { QuotaError } from "../src/quota.js";
 import type { Config } from "../src/config.js";
 import { createProviderGate, parseProviderConcurrency } from "../src/ai/gate.js";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { schema, type Db } from "../src/db/index.js";
+import { summarizeQueue } from "../src/ops/queue.js";
 import { db, signUp } from "./helpers.js";
 
 const quiet = {
@@ -124,6 +128,66 @@ describe("fair share between users", () => {
     const all = await jobs();
     assert.equal(all.length, 7);
     assert.equal(all.find((j) => j.project === projects.heavy![5])!.by, null, "a hand-off is not tagged as the user's request");
+  });
+
+  it("adds the owner's queue priority (an admin's override) to the fair share, from the next job on", async () => {
+    const id = randomUUID();
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Fairness test', 'url', 'https://example.com/v.mp4', 'done', '{}')`,
+      [id, users[0]],
+    );
+    await pool.query(`insert into user_settings (user_id, queue_priority) values ($1, 10) on conflict (user_id) do update set queue_priority = 10`, [users[0]]);
+    const before = (await jobs()).filter((j) => j.user === users[0]).map((j) => j.priority);
+    await enqueue(0, id);
+    const all = await jobs();
+    // six of the heavy user's jobs were live: -6 + 10
+    assert.equal(all.find((j) => j.project === id)!.priority, 4);
+    assert.deepEqual(
+      all.filter((j) => j.user === users[0] && j.project !== id).map((j) => j.priority),
+      before,
+      "jobs already queued keep their place",
+    );
+    assert.equal(all[0]!.project, id, "now first in fetch order");
+  });
+
+  it("summarizes pickup times, queued work by account and pickup order; a retry is not a pickup", async () => {
+    const svc = { database: { db: drizzle(pool, { schema }) as unknown as Db }, entitlements: null };
+    const summary = () => summarizeQueue(svc, { queues: [name] });
+    const [taken] = await queue.boss.fetch<{ projectId: string }>(name);
+    assert.ok(taken, "a worker took the first job");
+    const s = await summary();
+    assert.equal(s.error, undefined);
+    assert.equal(s.detail, true);
+    assert.equal(s.pickup.started, 1);
+    assert.ok((s.pickup.p50Sec ?? -1) >= 0);
+    assert.equal(s.queues.find((q) => q.queue === name)!.pickup.started, 1);
+    const heavy = s.owners.find((o) => o.userId === users[0])!;
+    assert.deepEqual(
+      { running: heavy.running, waiting: heavy.waiting, priority: heavy.priority, source: heavy.prioritySource },
+      { running: 1, waiting: 6, priority: 10, source: "override" },
+    );
+    const light = s.owners.find((o) => o.userId === users[1])!;
+    assert.deepEqual({ waiting: light.waiting, priority: light.priority, source: light.prioritySource }, { waiting: 1, priority: 0, source: "instance" });
+    const mine = s.active.filter((j) => j.queue === name);
+    assert.equal(mine[0]!.state, "active");
+    assert.equal(mine[0]!.projectId, taken.data.projectId);
+    const waitingPriorities = mine.slice(1).map((j) => j.priority);
+    assert.deepEqual(
+      waitingPriorities,
+      [...waitingPriorities].sort((a, b) => b - a),
+      "waiting jobs in fetch order",
+    );
+
+    // the attempt fails and goes back to retry: pg-boss keeps its started_on, but it was not picked up again
+    await queue.boss.fail(name, taken.id);
+    const after = await summary();
+    assert.equal(after.queues.find((q) => q.queue === name)!.pickup.started, 0);
+    const retried = after.active.filter((j) => j.queue === name);
+    assert.equal(retried[0]!.projectId, taken.data.projectId, "the retry, eligible now and highest priority, is next");
+    assert.equal(retried[0]!.state, "retry");
+
+    const light2 = await summarizeQueue(svc, { queues: [name], detail: false });
+    assert.deepEqual([light2.detail, light2.owners, light2.pickup.started], [false, [], 0]);
   });
 });
 

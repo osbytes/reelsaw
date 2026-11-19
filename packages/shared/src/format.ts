@@ -65,3 +65,20 @@ export function utcDay(iso: string | Date): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
   return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
 }
+
+/** A span of seconds as people read a wait: "<1 s", "42 s", "7 min", "2 h 5 min"; "—" when unknown. */
+export function formatSeconds(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined || !Number.isFinite(sec)) return "—";
+  if (sec < 1) return "<1 s";
+  // whole seconds first, so 59.7 s reads "1 min", not "60 s"
+  const s = Math.round(sec);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  const m = Math.floor((s % 3600) / 60);
+  return `${Math.floor(s / 3600)} h${m ? ` ${m} min` : ""}`;
+}
+
+/** A queue priority as an offset: "+5", "0", "-3" (one point = one job of backlog; QUEUE_PRIORITY_MIN..MAX). */
+export function formatPriority(n: number): string {
+  return n > 0 ? `+${n}` : String(n);
+}

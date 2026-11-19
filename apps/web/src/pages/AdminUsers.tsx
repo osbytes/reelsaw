@@ -24,6 +24,9 @@ import {
   type UserSortKey,
   userSortFirstDir,
   plural,
+  formatPriority,
+  QUEUE_PRIORITY_MAX,
+  QUEUE_PRIORITY_MIN,
 } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
@@ -1307,7 +1310,7 @@ const WATERMARK_OPTIONS = [
 
 /**
  * Per-user quota overrides, each next to what the account has used and where the value in force comes from
- * (instance, plan, override); the watermark decision; and, on a hosted instance, a complimentary plan.
+ * (instance, plan, override); the watermark decision; the queue priority; and, on a hosted instance, a complimentary plan.
  * Empty = the instance setting or the plan (0 = unlimited).
  */
 function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
@@ -1317,6 +1320,11 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const [wmDraft, setWmDraft] = useState<string | null>(null);
   const [planDraft, setPlanDraft] = useState<string | null>(null);
+  const [prioDraft, setPrioDraft] = useState<string | null>(null);
+  const prioCurrent = q.data?.queuePriority.override == null ? "" : String(q.data.queuePriority.override);
+  const prio = prioDraft ?? prioCurrent;
+  const prioValue = prio.trim() === "" ? null : Number(prio);
+  const prioInvalid = prioValue !== null && (!Number.isInteger(prioValue) || prioValue < QUEUE_PRIORITY_MIN || prioValue > QUEUE_PRIORITY_MAX);
   const values = draft ?? Object.fromEntries(Object.entries(q.data?.overrides ?? {}).map(([k, v]) => [k, String(v)]));
   const wmCurrent = q.data?.watermark.override === true ? "on" : q.data?.watermark.override === false ? "off" : "default";
   const wm = wmDraft ?? wmCurrent;
@@ -1331,7 +1339,17 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const save = useMutation({ ...trpc.admin.users.setLimits.mutationOptions(), onError: fail });
   const saveWm = useMutation({ ...trpc.admin.users.setWatermark.mutationOptions(), onError: fail });
   const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
-  const busy = save.isPending || saveWm.isPending || savePlan.isPending;
+  const savePrio = useMutation({ ...trpc.admin.users.setQueuePriority.mutationOptions(), onError: fail });
+  const busy = save.isPending || saveWm.isPending || savePlan.isPending || savePrio.isPending;
+  const prioHint = !q.data
+    ? ""
+    : prioInvalid
+      ? `A whole number from ${QUEUE_PRIORITY_MIN} to ${QUEUE_PRIORITY_MAX}.`
+      : prioValue !== null
+        ? `${formatPriority(prioValue)}: next jobs start as if this account had ${Math.abs(prioValue)} ${prioValue >= 0 ? "fewer" : "more"} queued. ${q.data.queuePriority.plan ? `The plan gives ${formatPriority(q.data.queuePriority.plan)}.` : ""}`
+        : q.data.queuePriority.plan
+          ? `Following the plan: ${formatPriority(q.data.queuePriority.plan)}, ahead of Free.`
+          : "Following the plan: no priority (0). Negative holds an account back.";
   const sourceWord = (k: LimitKey) =>
     q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance";
   const wmHint =
@@ -1358,6 +1376,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
             if (draft) await save.mutateAsync({ id: row.id, limits });
             if (wmDraft !== null && wm !== wmCurrent) await saveWm.mutateAsync({ id: row.id, watermark: wm === "default" ? null : wm === "on" });
             if (hasPlans && planDraft !== null && plan !== planCurrent) await savePlan.mutateAsync({ id: row.id, plan: plan === "free" ? null : plan });
+            if (prioDraft !== null && prio.trim() !== prioCurrent) await savePrio.mutateAsync({ id: row.id, priority: prioValue });
           } catch {
             return; // the toast said why; keep the dialog open
           }
@@ -1411,6 +1430,31 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                 />
               )}
               <span className="min-h-4 text-xs text-ink3">{wmHint}</span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="limit-queue-priority" className="flex items-baseline justify-between text-xs font-semibold text-ink2">
+                Queue priority
+                <span className="font-normal text-ink3">
+                  {q.data && !prio.trim() ? (q.data.queuePriority.plan ? `${q.data.plan ?? "plan"} plan` : "default") : ""}
+                </span>
+              </label>
+              {q.isPending ? (
+                <Skeleton className="h-[38px] w-full rounded-[10px]" />
+              ) : (
+                <input
+                  id="limit-queue-priority"
+                  className="input"
+                  type="number"
+                  step={1}
+                  min={QUEUE_PRIORITY_MIN}
+                  max={QUEUE_PRIORITY_MAX}
+                  value={prio}
+                  aria-invalid={prioInvalid || undefined}
+                  placeholder={q.data ? `plan: ${formatPriority(q.data.queuePriority.plan)}` : ""}
+                  onChange={(e) => setPrioDraft(e.target.value)}
+                />
+              )}
+              <span className={`min-h-4 text-xs ${prioInvalid ? "text-err" : "text-ink3"}`}>{prioHint}</span>
             </div>
             {LIMITS.map(({ key, label, window, unit }) => {
               const used = q.data?.usage?.[key];
@@ -1476,7 +1520,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           <button type="button" className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data}>
+          <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data || prioInvalid}>
             {busy ? "…" : "Save"}
           </button>
         </div>

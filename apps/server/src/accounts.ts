@@ -8,7 +8,7 @@ import { and, asc, eq, gt, inArray, isNotNull, ne, sql, type SQL } from "drizzle
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
-import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError } from "@reelsaw/shared";
+import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN } from "@reelsaw/shared";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
@@ -131,6 +131,24 @@ export async function setUserWatermark(svc: Services, actorId: string | null, us
       .onConflictDoUpdate({ target: schema.userSettings.userId, set: { watermark, updatedAt: new Date() } });
     await u.emit("user.watermark_changed", { userId, email: user.email, watermark }, { actorId });
     return { ok: true, watermark };
+  });
+}
+
+/**
+ * The admin's per-user queue priority (QUEUE_PRIORITY_MIN..MAX points on each job's fair-share priority; negative
+ * holds the account back), or null to follow the plan. Applies to jobs queued from now; queued ones keep their place.
+ */
+export async function setUserQueuePriority(svc: Services, actorId: string | null, userId: string, priority: number | null) {
+  if (priority !== null && (!Number.isInteger(priority) || priority < QUEUE_PRIORITY_MIN || priority > QUEUE_PRIORITY_MAX))
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Queue priority is a whole number from ${QUEUE_PRIORITY_MIN} to ${QUEUE_PRIORITY_MAX}.` });
+  return svc.tx(async (u) => {
+    const user = await lockedUser(u, userId);
+    await u.db
+      .insert(schema.userSettings)
+      .values({ userId, queuePriority: priority })
+      .onConflictDoUpdate({ target: schema.userSettings.userId, set: { queuePriority: priority, updatedAt: new Date() } });
+    await u.emit("user.queue_priority_changed", { userId, email: user.email, queuePriority: priority }, { actorId });
+    return { ok: true, queuePriority: priority };
   });
 }
 

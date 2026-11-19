@@ -56,8 +56,8 @@ export interface TxOpts {
 
 /**
  * What the queue knows about a job's owner at enqueue time, from one statement: the owner, how many of
- * their jobs are queued or running (any queue), how many of those they asked for themselves, and how many renders, new
- * clips and re-runs (analysis, refinement) they asked for in the last hour. Jobs enqueued before `userId` was carried in
+ * their jobs are queued or running (any queue), how many of those they asked for themselves, how many renders, new
+ * clips and re-runs (analysis, refinement) they asked for in the last hour, and an admin's queue priority for them. Jobs enqueued before `userId` was carried in
  * job data are not counted.
  */
 export interface Admission {
@@ -67,6 +67,8 @@ export interface Admission {
   /** live jobs tagged `by: "user"`: what MAX_LIVE_JOBS_PER_USER counts, so a project's own renders never block the next request */
   userLive: number;
   userRendersLastHour: number;
+  /** the admin's per-user queue priority (user_settings.queue_priority); null/absent = follow the plan (quota.ts `queuePriorityOf`) */
+  queuePriority?: number | null;
 }
 
 /**
@@ -132,7 +134,8 @@ export interface Queue {
   retryLimitOf(queue: QueueName): number;
   /**
    * Enqueue a stage job. Deduped per project/clip via singletonKey + exclusive policy. Carries the owner's
-   * `userId` and a fair `priority` (see `fairPriority`); pass `admission` when the caller already looked it up.
+   * `userId` and a fair `priority` (see `fairPriority`) plus the owner's `priorityBoost` (quota.ts `queuePriorityFor`);
+   * pass `admission` when the caller already looked it up.
    */
   enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission; priorityBoost?: number; expireInSeconds?: number }): Promise<string | null>;
   /** A job on any queue the caller created itself (ee/ billing): plain pg-boss send on the transaction's connection when given. */
@@ -182,6 +185,7 @@ export function createQueue(
       `with o as (select coalesce($2::text, (select user_id from projects where id = $1)) as uid)
        select o.uid as "userId",
          l.live, l."userLive",
+         (select s.queue_priority from user_settings s where s.user_id = o.uid) as "queuePriority",
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
        from o, lateral (
          select count(*)::int as live, (count(*) filter (where j.data->>'by' = 'user'))::int as "userLive"
@@ -195,6 +199,7 @@ export function createQueue(
       live: Number(r?.live ?? 0),
       userLive: Number(r?.userLive ?? 0),
       userRendersLastHour: Number(r?.userRendersLastHour ?? 0),
+      queuePriority: r?.queuePriority ?? null,
     };
   };
 
@@ -270,7 +275,8 @@ export function createQueue(
         if (r?.seq !== undefined && data.seq === undefined) payload = { ...payload, seq: r.seq };
         expireInSeconds ??= expireInSecondsFor(queue, r?.durationSec, languageSelfHosted());
       }
-      // a plan's boost (ee) lifts the account above others with the same backlog, never above an idle account's first job by more than the boost
+      // the owner's queue priority (quota.ts `queuePriorityFor`: an admin's override, else the plan's) moves the account by that many
+      // jobs of backlog: ahead of others with the same backlog, never ahead of an idle account's first job by more than the boost
       return boss.send(queue, payload, {
         singletonKey,
         priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0),

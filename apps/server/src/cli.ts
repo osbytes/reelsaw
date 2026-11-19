@@ -189,9 +189,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --store saves them (renders then hide them)
  *   usage [--days 30]                       per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
- *   limits  <email> [--watermark always|never|follow]
+ *   limits  <email> [--watermark always|never|follow] [--priority N|follow]
  *                                           an account's quotas: instance value, plan, override, in force, in use now;
- *                                           --watermark sets the per-user override (same as Users → Limits)
+ *                                           --watermark sets the per-user override (same as Users → Limits);
+ *                                           --priority sets the account's queue priority (-20..20, follow = the plan)
  *   email-prefs <email> [--<topic> on|off]
  *                                           an account's optional mail by topic (ready: the note when projects finish;
  *                                           same as their Settings → Account and the email's unsubscribe link)
@@ -255,10 +256,10 @@ import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
-import { approveUser, bulkUsers, setUserPassword, setUserRole, setUserWatermark } from "./accounts.js";
+import { approveUser, bulkUsers, setUserPassword, setUserQueuePriority, setUserRole, setUserWatermark } from "./accounts.js";
 import { listUsers, userGroups } from "./accounts-list.js";
 import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
-import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
+import { LIMIT_KEYS, limitsFor, limitUsage, queuePriorityFor, usageByUser, watermarkFor } from "./quota.js";
 import { testModel } from "./ai/model-test.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
@@ -282,6 +283,8 @@ import {
   CLIP_AUDIO_DEFAULTS,
   TEXT_OVERLAY_DEFAULTS,
   ASSET_OVERLAY_DEFAULT_W,
+  formatPriority,
+  formatSeconds,
   type ClipLayer,
   type TemplateBumpers,
 } from "@reelsaw/shared";
@@ -1586,8 +1589,27 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
         retrying: r.retrying,
         failed: r.failed,
         "waiting since": r.oldestWaitingAt ?? "",
+        "pickup p50/p95": r.pickup.started ? `${formatSeconds(r.pickup.p50Sec)} / ${formatSeconds(r.pickup.p95Sec)} (${r.pickup.started})` : "",
       })),
     );
+    console.log(
+      q.pickup.started
+        ? `\npickup, last ${q.pickupWindowMinutes} min: p50 ${formatSeconds(q.pickup.p50Sec)}, p95 ${formatSeconds(q.pickup.p95Sec)}, max ${formatSeconds(q.pickup.maxSec)} over ${q.pickup.started} jobs`
+        : `\nno pipeline job started in the last ${q.pickupWindowMinutes} min`,
+    );
+    if (q.owners.length) {
+      console.log(q.ownersTruncated ? `\nqueued by account (top ${q.owners.length})` : "\nqueued by account");
+      table(
+        q.owners.map((o) => ({
+          account: o.email ?? o.userId,
+          plan: o.plan ?? "",
+          priority: `${formatPriority(o.priority)}${o.prioritySource === "override" ? " (override)" : ""}`,
+          waiting: o.waiting,
+          running: o.running,
+          "waiting since": o.oldestWaitingAt ?? "",
+        })),
+      );
+    }
     if (q.active.length) {
       console.log(q.truncated ? `\nin flight (showing ${q.active.length}; more exist)` : "\nin flight");
       table(
@@ -1595,6 +1617,8 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
           stage: j.label,
           state: j.state,
           project: j.title ?? j.projectId?.slice(0, 8) ?? "—",
+          owner: j.ownerEmail ?? "",
+          priority: formatPriority(j.priority),
           attempt: j.attempt,
           since: j.startedAt ?? j.createdAt,
           "last error": j.lastError?.slice(0, 80) ?? "",
@@ -1667,7 +1691,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     console.log(`${u.email}${svc.email.enabled ? "" : " (this instance sends no mail: EMAIL_DRIVER=none)"}`);
     for (const topic of EMAIL_TOPIC_NAMES) console.log(`  ${topic.padEnd(10)} ${p[topic] ? "on " : "off"}  ${EMAIL_TOPICS[topic].label}`);
   },
-  /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
+  /** One account's quotas (0 = unlimited), watermark and queue priority. Change them in Users → Limits, or `--watermark always|never|follow`, `--priority N|follow`. */
   async limits(svc) {
     const u = await userByEmail(svc, pos[0]);
     const wmArg = flag("watermark");
@@ -1680,9 +1704,17 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
             : wmArg === "follow" || wmArg === "default"
               ? null
               : undefined;
-      if (parsed === undefined) throw new Error("usage: reelsaw limits <email> [--watermark always|never|follow]");
+      if (parsed === undefined) throw new Error("usage: reelsaw limits <email> [--watermark always|never|follow] [--priority N|follow]");
       await setUserWatermark(svc, null, u.id, parsed);
       console.log(`watermark ${parsed === true ? "always" : parsed === false ? "never" : "follow"} for ${u.email}; next render uses it`);
+    }
+    const prArg = flag("priority");
+    if (prArg !== undefined) {
+      const follow = prArg === "follow" || prArg === "default";
+      const n = Number(prArg);
+      if (!follow && (prArg === "" || !Number.isInteger(n))) throw new Error("usage: reelsaw limits <email> --priority N|follow (N from -20 to 20)");
+      await setUserQueuePriority(svc, null, u.id, follow ? null : n);
+      console.log(`queue priority ${follow ? "follows the plan" : n} for ${u.email}; jobs queued from now use it`);
     }
     const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true, watermark: true } });
     const [effective, used, wm] = await Promise.all([
@@ -1701,6 +1733,8 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     );
     const override = row?.watermark === true ? "always" : row?.watermark === false ? "never" : "follow";
     console.log(`watermark next render: ${wm.on ? "on" : "off"} (${override === "follow" ? wm.source : `override ${override}`})`);
+    const pr = await queuePriorityFor(svc.database.db, u.id, svc.entitlements);
+    console.log(`queue priority: ${formatPriority(pr.value)} (${pr.source === "override" ? `override; plan gives ${formatPriority(pr.plan)}` : pr.source})`);
   },
   /**
    * Instance settings in force and where each comes from. `settings SIGNUP_MODE=approval MAX_UPLOAD_MB=2048`

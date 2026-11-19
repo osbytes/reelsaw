@@ -82,6 +82,8 @@ export default function BillingSection() {
   }, [outcome]);
 
   const d = q.data;
+  /** the highest plan's queue priority: that plan's cards say "top of the queue" */
+  const topPriority = Math.max(1, ...(d?.plans ?? []).map((x) => x.queuePriority));
   const sub = d?.subscription;
   const period = d?.period;
   const minutesCap = d?.limits.MAX_SOURCE_MINUTES_PER_MONTH ?? 0;
@@ -296,7 +298,7 @@ export default function BillingSection() {
                   <li>{p.limits.MAX_STORAGE_MB ? `${formatMb(p.limits.MAX_STORAGE_MB)} of storage` : "Unlimited storage"}</li>
                   <li>{p.limits.MAX_PROJECTS_PER_USER ? `${num.format(p.limits.MAX_PROJECTS_PER_USER)} projects` : "Unlimited projects"}</li>
                   <li>{p.watermark ? "Small watermark" : "No watermark"}</li>
-                  {p.priority && <li>Priority processing queue</li>}
+                  {p.queuePriority > 0 && <li>{p.queuePriority >= topPriority ? "Top of the processing queue" : "Jobs start ahead of lower plans"}</li>}
                 </ul>
                 <div className="mt-auto pt-2">
                   {p.price ? (

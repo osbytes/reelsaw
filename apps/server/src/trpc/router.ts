@@ -19,6 +19,7 @@ import {
   setUserPassword,
   setUserRole,
   setUserWatermark,
+  setUserQueuePriority,
   unbanUser,
 } from "../accounts.js";
 import {
@@ -32,7 +33,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS, emailPreferencesPatchSchema, plural } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   checkSource,
@@ -163,7 +164,7 @@ import { emailPreferences, setEmailPreferences } from "../notify/preferences.js"
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
-import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
+import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, queuePriorityOf, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
@@ -1053,11 +1054,11 @@ const restRouter = router({
       unban: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => unbanUser(ctx.svc, ctx.user.id, input.id)),
       remove: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => removeUser(ctx.svc, ctx.user.id, input.id)),
       /** Per-user quota overrides; null = back to the instance setting. */
-      /** One account's numbers: the instance values, the plan's, the overrides, what is in force and why, what is used now; plus the watermark decision. */
+      /** One account's numbers: the instance values, the plan's, the overrides, what is in force and why, what is used now; plus the watermark decision and queue priority. */
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
         const db = ctx.svc.database.db;
         const [row, user] = await Promise.all([
-          db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true } }),
+          db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true, queuePriority: true } }),
           db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } }),
         ]);
         if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
@@ -1073,6 +1074,7 @@ const restRouter = router({
           usage: await limitUsage(db, input.id, d.grants),
           period: periodOf(d.grants),
           watermark: { override: row?.watermark ?? null, effective: wm.on, source: wm.source },
+          queuePriority: queuePriorityOf(row?.queuePriority ?? null, d.grants),
         };
       }),
       setLimits: adminProcedure
@@ -1082,6 +1084,10 @@ const restRouter = router({
       setWatermark: adminProcedure
         .input(z.object({ id: z.string(), watermark: z.boolean().nullable() }))
         .mutation(({ ctx, input }) => setUserWatermark(ctx.svc, ctx.user.id, input.id, input.watermark)),
+      /** points on the fair-share priority of the account's next jobs (negative holds it back); null = follow the plan */
+      setQueuePriority: adminProcedure
+        .input(z.object({ id: z.string(), priority: z.number().int().min(QUEUE_PRIORITY_MIN).max(QUEUE_PRIORITY_MAX).nullable() }))
+        .mutation(({ ctx, input }) => setUserQueuePriority(ctx.svc, ctx.user.id, input.id, input.priority)),
     }),
     /** Billing administration (ee): complimentary grants, and a re-read of Stripe for one account. */
     billing: router({
@@ -1224,9 +1230,14 @@ const restRouter = router({
     workers: router({
       list: adminProcedure.query(({ ctx }) => listWorkers(ctx.svc)),
     }),
-    /** Waiting / running / retrying counts from pg-boss, plus the jobs in flight. Same as Settings → System → Queue. */
+    /**
+     * Waiting / running / retrying counts from pg-boss, pickup times, queued work by account and the jobs in flight.
+     * Same as Settings → System → Queue. `detail: false` (the fleet cards) leaves out pickup times and accounts.
+     */
     queue: router({
-      summary: adminProcedure.query(({ ctx }) => summarizeQueue(ctx.svc)),
+      summary: adminProcedure
+        .input(z.object({ detail: z.boolean().optional() }).optional())
+        .query(({ ctx, input }) => summarizeQueue(ctx.svc, { detail: input?.detail ?? true })),
     }),
     /** Failed projects and clips across the instance (durable app state). Retry goes through the same lifecycle as the owner Retry button. */
     failures: router({

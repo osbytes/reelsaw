@@ -100,6 +100,36 @@ export async function limitsFor(db: Db, instance: InstanceLimits, userId: string
   return (await limitsDetail(db, instance, userId, ent)).limits;
 }
 
+export type QueuePrioritySource = "instance" | "plan" | "override";
+export interface QueuePriority {
+  /** points added to each of the account's jobs' fair-share priority (queue/boss.ts `fairPriority`) */
+  value: number;
+  source: QueuePrioritySource;
+  /** what the plan grants (0 without one), shown beside an override */
+  plan: number;
+  /** the admin's override; null = follow the plan */
+  override: number | null;
+}
+
+/**
+ * The account's queue priority: an admin's per-user override, else what the plan grants (hosted: paid plans rank
+ * ahead of Free), else 0. Read at enqueue in the caller's transaction (uow.ts), so a change applies to the next job;
+ * jobs already queued keep their place.
+ */
+export async function queuePriorityFor(db: Db, userId: string, ent?: Entitlements | null): Promise<QueuePriority> {
+  const [row, grants] = await Promise.all([
+    db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { queuePriority: true } }),
+    ent ? ent.grantsFor(db, userId) : null,
+  ]);
+  return queuePriorityOf(row?.queuePriority ?? null, grants);
+}
+
+export function queuePriorityOf(override: number | null, grants: Grants | null): QueuePriority {
+  const plan = grants?.queuePriority ?? 0;
+  if (typeof override === "number") return { value: override, source: "override", plan, override };
+  return { value: plan, source: plan ? "plan" : "instance", plan, override: null };
+}
+
 /**
  * How tall a link's source is downloaded for this account: the plan's cap (Free: 240p, the editor's and analysis's
  * copy; clips still render from full-quality windows, pipeline/sections.ts), or null for the full download.
