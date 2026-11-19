@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { DELETED_PATH, deletedItemPath, formatBytes, type DeletedKind } from "@reelsaw/shared";
+import { DELETED_PATH, deletedItemPath, formatBytes, type DeletedKind, plural } from "@reelsaw/shared";
 import { useTRPC } from "./trpc";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ConfirmDialog } from "../components/ui";
@@ -14,7 +14,6 @@ import { ConfirmDialog } from "../components/ui";
 export type DeletedToastItem = { kind: DeletedKind; id: string; title: string };
 
 const TOAST_MS = 10_000;
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function heading(items: DeletedToastItem[]) {
   if (items.length === 1) return `Deleted “${items[0]!.title}”`;

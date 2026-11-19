@@ -6,12 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { pausedWord } from "./FleetSummary";
 import { Skeleton, SkeletonRegion } from "./ui";
+import { formatMb } from "@reelsaw/shared";
 
 const ROLE: Record<string, string> = { app: "API + worker", api: "API only", worker: "worker" };
-
-function gb(mb: number) {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
-}
 
 function ago(sec: number) {
   if (sec < 5) return "just now";
@@ -27,7 +24,7 @@ function queueLabel(q: string) {
 function diskLine(w: { diskFreeMB: number; diskTotalMB: number; diskLeasedMB: number }) {
   if (w.diskFreeMB < 0) return "disk n/a";
   // leased: free bytes jobs in flight on this volume have claimed for the scratch they are writing
-  return `${gb(w.diskFreeMB)} free${w.diskLeasedMB > 0 ? ` (${gb(w.diskLeasedMB)} leased)` : ""}`;
+  return `${formatMb(w.diskFreeMB)} free${w.diskLeasedMB > 0 ? ` (${formatMb(w.diskLeasedMB)} leased)` : ""}`;
 }
 
 /** A worker process that dropped the media queues: short of disk with nothing left to evict (queue/disk-gate.ts). */
@@ -105,7 +102,7 @@ export function WorkersSection() {
                 : w.live
                   ? "idle"
                   : "—";
-            const specs = `${w.cpus} CPU · ${gb(w.memTotalMB)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${w.renders.running}/${w.renders.max} renders`}`;
+            const specs = `${w.cpus} CPU · ${formatMb(w.memTotalMB)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${w.renders.running}/${w.renders.max} renders`}`;
             const otherVersion = w.live && version && w.version !== version;
             return (
               <li

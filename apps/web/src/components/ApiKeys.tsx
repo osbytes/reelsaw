@@ -6,6 +6,7 @@ import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
+import { formatDay } from "@reelsaw/shared";
 
 type Key = {
   id: string;
@@ -21,11 +22,7 @@ function adminLabel(k: Key): string | null {
   return k.permissions?.admin?.includes("write") ? "can administer" : null;
 }
 
-function when(d: Date | string | null | undefined) {
-  if (!d) return "never";
-  const t = new Date(d);
-  return t.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
+const when = (d: Date | string | null | undefined) => (d ? formatDay(d, { month: "short" }) : "never");
 
 const copy = (s: string, what: string) => {
   void navigator.clipboard.writeText(s).then(() => toast(`${what} copied`));

@@ -2,6 +2,7 @@
  * The one muted line under a clip card ("Auto · Follow speaker · intro 3 s · outro 3 s · 1.9 s trimmed") and
  * the text a clip copies to the clipboard. Pure and dependency-free so a test can load it without React.
  */
+import { plural } from "@reelsaw/shared";
 
 export interface MetaClip {
   layout: string | null;
@@ -94,11 +95,11 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
       long.push(`Pauses: ${trimmed.toFixed(1)} s trimmed`);
     }
     if (cuts) {
-      parts.push(`${cuts} cut${cuts === 1 ? "" : "s"}`);
+      parts.push(`${plural(cuts, "cut")}`);
       long.push(`Cuts: ${cuts} applied`);
     }
     if (unverified.length) {
-      parts.push(`▲ ${unverified.length} cut${unverified.length === 1 ? "" : "s"} unverified`);
+      parts.push(`▲ ${plural(unverified.length, "cut")} unverified`);
       long.push(
         `Applied where you set ${unverified.length === 1 ? "it" : "them"}, without a seam check (the audio around ${unverified.length === 1 ? "it" : "them"} couldn’t be matched):`,
         ...unverified.map((r) => `  ${r}`),
@@ -106,7 +107,7 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
       warn = true;
     }
     if (kept) {
-      parts.push(`▲ ${kept} cut${kept === 1 ? "" : "s"} kept`);
+      parts.push(`▲ ${plural(kept, "cut")} kept`);
       long.push(`Kept because removal couldn’t be verified (the audio stays; captions still drop the word):`, ...d.cuts.skipped.map((s) => `  ${s.reason}`));
       warn = true;
     }

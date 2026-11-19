@@ -11,6 +11,7 @@ import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
 import { ConfirmDialog, MoreButton } from "./ui";
 import { useCopyShareLink } from "./ShareLinks";
+import { plural } from "@reelsaw/shared";
 
 interface BatchClip {
   id: string;
@@ -58,7 +59,7 @@ export function BatchBar({
       {
         onSuccess: (r) => {
           onChanged();
-          toast(`${what} ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}${r.skipped ? ` · ${r.skipped} skipped (still rendering)` : ""}`);
+          toast(`${what} ${plural(r.rerendered, "clip")}${r.skipped ? ` · ${r.skipped} skipped (still rendering)` : ""}`);
         },
         onError: (e) => toast.error(e.message),
       },
@@ -66,9 +67,9 @@ export function BatchBar({
   const copyAll = () =>
     navigator.clipboard
       .writeText(clipsText(selected))
-      .then(() => toast(`Title, caption + hashtags of ${selected.length} clip${selected.length === 1 ? "" : "s"} copied`))
+      .then(() => toast(`Title, caption + hashtags of ${plural(selected.length, "clip")} copied`))
       .catch(() => toast.error("Couldn’t copy"));
-  const n = (k: number) => `${k} clip${k === 1 ? "" : "s"}`;
+  const n = (k: number) => `${plural(k, "clip")}`;
   const copyShareLink = useCopyShareLink();
   const exportHref = `/api/projects/${projectId}/export.zip?clips=${done.map((c) => c.id).join(",")}`;
   const later = (fn: () => void) => window.setTimeout(fn, 0);

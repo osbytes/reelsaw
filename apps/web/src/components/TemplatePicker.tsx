@@ -22,6 +22,7 @@ import {
   type ClipLayer,
   type TemplateBumpers,
   type TemplateLayer,
+  plural,
 } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { Modal, Select, Skeleton, SkeletonRegion, type SelectOption } from "./ui";
@@ -41,7 +42,6 @@ export function useLayerTemplates() {
 type Template = NonNullable<ReturnType<typeof useLayerTemplates>["data"]>["templates"][number];
 
 export type ApplyMode = "replace" | "add";
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**
  * Choose a layer template in a form. `value` "" is the lead option's value (default "None"); pass `lead` to replace

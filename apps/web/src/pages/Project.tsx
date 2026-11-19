@@ -33,7 +33,7 @@ import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
 import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
-import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
+import { formatDay, formatTime, masksSourceText, type ProjectEvent, plural } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { describeStageDetail, type StageDetail } from "../lib/stage-detail";
@@ -415,9 +415,7 @@ export function ProjectPage() {
               <b className="min-w-0 flex-1 truncate font-semibold leading-5" title={label}>
                 {label}
               </b>
-              <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums text-ink3">
-                {g.entries.length} event{g.entries.length === 1 ? "" : "s"}
-              </span>
+              <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums text-ink3">{plural(g.entries.length, "event")}</span>
             </button>
             {open && (
               <ol className="mt-1.5 flex flex-col gap-1.5 pb-2">
@@ -555,7 +553,7 @@ export function ProjectPage() {
           {eta && (
             <span
               className="inline-block min-w-[104px] font-mono text-xs tabular-nums leading-5 text-ink3"
-              title={`${STAGE_LABEL[eta.stage] ?? eta.stage}: elapsed${eta.expectedSec !== null ? ` / expected, ${eta.source === "history" ? `from ${eta.samples} finished project${eta.samples === 1 ? "" : "s"} with these models` : "default until a project finishes with these models"}` : ""}`}
+              title={`${STAGE_LABEL[eta.stage] ?? eta.stage}: elapsed${eta.expectedSec !== null ? ` / expected, ${eta.source === "history" ? `from ${plural(eta.samples, "finished project")} with these models` : "default until a project finishes with these models"}` : ""}`}
             >
               {eta.elapsedSec !== null ? formatTime(eta.elapsedSec) : "–:––"}
               {eta.expectedSec !== null ? ` / ~${formatTime(eta.expectedSec)}` : ""}
@@ -571,7 +569,7 @@ export function ProjectPage() {
             download
             title="Zip of every rendered clip with YouTube / TikTok metadata, paste-ready text and a manifest"
           >
-            Export{compact ? "" : ` ${readyCount} clip${readyCount === 1 ? "" : "s"}`}
+            Export{compact ? "" : ` ${plural(readyCount, "clip")}`}
           </a>
         ) : (
           <button className="btn-primary py-2" disabled>
@@ -606,9 +604,9 @@ export function ProjectPage() {
                   className="menu-item block"
                   onSelect={() =>
                     void pendingToast(
-                      `Queuing ${failedClips.length} failed clip${failedClips.length === 1 ? "" : "s"}…`,
+                      `Queuing ${plural(failedClips.length, "failed clip")}…`,
                       rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }),
-                      (r) => (invalidate(), `Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`),
+                      (r) => (invalidate(), `Retrying ${plural(r.rerendered, "failed clip")}`),
                       "Couldn’t retry the failed clips",
                     )
                   }
@@ -783,7 +781,7 @@ export function ProjectPage() {
                 className="btn-ghost text-xs"
                 disabled={retry.isPending}
                 onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}
-                title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space. Fetch it again, then re-render the clips you need.`}
+                title={`Removed on ${formatDay(p.sourceExpiredAt)} to free space. Fetch it again, then re-render the clips you need.`}
               >
                 Source removed · fetch again
               </button>
@@ -876,7 +874,7 @@ export function ProjectPage() {
               <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
               <span>
                 {eta?.expectedSec !== null && eta?.expectedSec !== undefined
-                  ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}`
+                  ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${plural(eta.samples, "project")}` : " · estimate"}`
                   : stageIdx <= 0
                     ? ""
                     : "expected time known after the source is ready"}
@@ -1155,7 +1153,7 @@ export function ProjectPage() {
         onConfirm={() =>
           reanalyze.mutateAsync({ id }).then((r) => {
             invalidate();
-            if (r.kept) toast(`Kept ${r.kept} clip${r.kept === 1 ? "" : "s"} you made or edited`);
+            if (r.kept) toast(`Kept ${plural(r.kept, "clip")} you made or edited`);
           })
         }
       />

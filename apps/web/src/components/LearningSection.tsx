@@ -3,8 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { ConfirmDialog, Skeleton } from "./ui";
-
-const plural = (n: number, w: string) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
+import { plural } from "@reelsaw/shared";
 
 /** Settings → Account: whether Reelsaw records your accept/reject/edit decisions, what it holds, and a way to forget it. */
 export function LearningSection() {

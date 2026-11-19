@@ -216,6 +216,44 @@ function message(opts: { subject: string; preheader: string; title: string; text
   };
 }
 
+/** The billing mails' shape: a lead, bulleted sections (each shown only when it has items), a closing line, the Billing page. */
+function planMail(o: {
+  subject: string;
+  preheader: string;
+  title: string;
+  lead: string;
+  sections: { lead: string; items: string[] }[];
+  tail: string;
+  billingUrl: string;
+  cta: string;
+}): Omit<Mail, "to"> {
+  const sections = o.sections.filter((x) => x.items.length);
+  const text = sections.map((x) => `${x.lead}\n${x.items.map((i) => `- ${i}`).join("\n")}\n\n`).join("");
+  const html = sections
+    .map(
+      (x) =>
+        `<p style="margin:0 0 8px">${escapeHtml(x.lead)}</p><ul style="margin:0 0 12px;padding-left:20px">${x.items.map((i) => `<li style="margin:0 0 6px">${escapeHtml(i)}</li>`).join("")}</ul>`,
+    )
+    .join("");
+  return message({
+    subject: o.subject,
+    preheader: o.preheader,
+    title: o.title,
+    text: `${o.lead}
+
+${text}${o.tail}
+
+${o.billingUrl}
+`,
+    bodyHtml:
+      `<p style="margin:0 0 12px">${escapeHtml(o.lead)}</p>` +
+      html +
+      `<p style="margin:0 0 12px">${escapeHtml(o.tail)}</p>` +
+      ctaButton(o.billingUrl, o.cta) +
+      linkFallback(o.billingUrl),
+  });
+}
+
 /** Branded HTML + plain-text templates. No tracking. */
 export const templates = {
   waitingForApproval: (appUrl: string, name: string, email: string) => {
@@ -252,6 +290,36 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
         linkFallback(url),
     });
   },
+  /** A cancellation was scheduled: when the plan ends and what Free will refuse then (`over`: quota.ts overages sentences). */
+  planEnding: (billingUrl: string, planLabel: string, endsOn: string, over: string[], expect: string[] = []) =>
+    planMail({
+      subject: `Your Reelsaw ${planLabel} plan ends on ${endsOn}`,
+      preheader: `${planLabel} stays until ${endsOn}, then the account moves to Free.`,
+      title: `${planLabel} ends on ${endsOn}`,
+      lead: `Your ${planLabel} plan is canceled. It stays in force until ${endsOn}, then the account moves to the Free plan. Nothing is deleted.`,
+      sections: [
+        { lead: "On that day this account would be over Free's limits:", items: over },
+        { lead: "What else changes on Free:", items: expect },
+      ],
+      tail: "Changed your mind? Renew from the Billing page before then and nothing changes.",
+      billingUrl,
+      cta: "Open billing",
+    }),
+  /** The subscription ended: the account is on Free now, where it is over Free's limits, and what else changed (`expect`). */
+  planEnded: (billingUrl: string, planLabel: string, over: string[], expect: string[] = []) =>
+    planMail({
+      subject: `Your Reelsaw ${planLabel} plan has ended`,
+      preheader: "The account is on the Free plan now. Your projects and clips are all still here.",
+      title: "You're on Free now",
+      lead: `Your ${planLabel} plan has ended and the account is on the Free plan. Your projects and clips are all still here.`,
+      sections: [
+        { lead: "This account is over Free's limits:", items: over },
+        { lead: "What else changes on Free:", items: expect },
+      ],
+      tail: "Pick a plan again any time to lift the limits.",
+      billingUrl,
+      cta: "See plans",
+    }),
   approved: (appUrl: string) => {
     const url = `${appUrl.replace(/\/$/, "")}/login`;
     return message({

@@ -24,11 +24,11 @@ import { BILLING_STATUSES, type BillingInterval, type BillingStatus, type Billin
 import type { Services } from "../../services.js";
 import type { UnitOfWork } from "../../uow.js";
 import type { Logger } from "../../log.js";
-import { limitsDetail, limitUsage, watermarkFor } from "../../quota.js";
+import { limitsDetail, limitUsage, overages, sourceHeightFor, watermarkFor, type Limits, type Overage, type WallUsage } from "../../quota.js";
 import { takeTxLock, txLock } from "../../locks.js";
-import { billingPath } from "@reelsaw/shared";
-import { ALL_LOOKUP_KEYS, PAID_PLANS, PLANS, planByLookupKey, planOf, publicPlan, type Interval } from "./plans.js";
-import { createEntitlements, effectivePlan, LIVE_STATUSES } from "./entitlements.js";
+import { billingPath, plural } from "@reelsaw/shared";
+import { ALL_LOOKUP_KEYS, FREE, PAID_PLANS, PLANS, planByLookupKey, planOf, publicPlan, type Interval } from "./plans.js";
+import { createEntitlements, effectivePlan, grantsOf, LIVE_STATUSES, pendingCancelAt } from "./entitlements.js";
 
 export const SYNC_QUEUE = "billing.sync";
 const SYNC_RETRY_LIMIT = 8;
@@ -110,8 +110,27 @@ type Mapped = Pick<
   | "periodStart"
   | "periodEnd"
   | "cancelAtPeriodEnd"
+  | "cancelAt"
   | "endedAt"
 >;
+
+/**
+ * Whether a sync would change what the row says (the sync's `changed` and the reconcile's "worth a sync"): one
+ * list, so a field the row gains is compared in both places.
+ */
+export function rowDiffers(row: Mapped | null | undefined, next: Mapped): boolean {
+  const t = (d: Date | null | undefined) => d?.getTime() ?? null;
+  return (
+    !row ||
+    row.stripeSubscriptionId !== next.stripeSubscriptionId ||
+    row.status !== next.status ||
+    row.plan !== next.plan ||
+    row.interval !== next.interval ||
+    row.cancelAtPeriodEnd !== next.cancelAtPeriodEnd ||
+    t(row.cancelAt) !== t(next.cancelAt) ||
+    t(row.periodEnd) !== t(next.periodEnd)
+  );
+}
 
 /** Our row shape for a Stripe subscription. The price's lookup key names the plan; an unknown price is kept as `unknown:<id>` and logged. */
 export function mapSubscription(sub: Stripe.Subscription): Mapped & { unknownPrice: boolean } {
@@ -123,6 +142,7 @@ export function mapSubscription(sub: Stripe.Subscription): Mapped & { unknownPri
   // Stripe types its string unions with an escape hatch for values newer than the SDK; narrow to what we store
   const interval: BillingInterval | null = found?.interval ?? (recurring === "year" ? "year" : recurring === "month" ? "month" : null);
   const status = toBillingStatus(sub.status);
+  const periodEnd = sec(item?.current_period_end);
   return {
     stripeSubscriptionId: sub.id,
     stripeCustomerId: idOf(sub.customer),
@@ -133,8 +153,10 @@ export function mapSubscription(sub: Stripe.Subscription): Mapped & { unknownPri
     priceId: price?.id ?? null,
     // the period lives on the item (API versions from 2025 on)
     periodStart: sec(item?.current_period_start),
-    periodEnd: sec(item?.current_period_end),
+    periodEnd,
     cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+    // a cancellation on a date (Dashboard, API, flexible billing) sets only `cancel_at`; the period-end flag sets both
+    cancelAt: sec(sub.cancel_at) ?? (sub.cancel_at_period_end ? periodEnd : null),
     endedAt: sec(sub.ended_at),
     unknownPrice: !found,
   };
@@ -414,18 +436,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       const before = effectivePlan(cur, graceDays, now);
       const after = effectivePlan(values, graceDays, now);
-      const changed =
-        !cur ||
-        cur.status !== next.status ||
-        cur.plan !== next.plan ||
-        cur.interval !== next.interval ||
-        cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd ||
-        cur.periodEnd?.getTime() !== next.periodEnd?.getTime() ||
-        cur.stripeSubscriptionId !== next.stripeSubscriptionId;
+      const changed = rowDiffers(cur, next);
       const base = { userId, email: account.email };
       const ids = { subscriptionId, plan: next.plan, interval: next.interval, status: next.status };
       const audit = async (
-        type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.canceled",
+        type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.cancel_scheduled" | "billing.cancel_undone" | "billing.canceled",
         payload: Record<string, unknown>,
       ) => {
         await u.emit(type, { ...base, ...payload }, { actorId: null });
@@ -440,8 +455,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         await audit("billing.changed", { ...ids, from: { plan: cur.plan, interval: cur.interval } });
       if (cur?.status !== "past_due" && next.status === "past_due")
         await audit("billing.payment_failed", { ...ids, graceEndsAt: new Date(now.getTime() + graceDays * 86_400_000).toISOString() });
-      if ((cur && isLive(cur.status) && !isLive(next.status)) || (!cur?.cancelAtPeriodEnd && next.cancelAtPeriodEnd))
-        await audit("billing.canceled", { ...ids, endsAt: (next.cancelAtPeriodEnd ? next.periodEnd : (next.endedAt ?? now))?.toISOString() ?? null });
+      // one event per transition: scheduling (or moving) a cancellation, taking it back, and the plan actually ending
+      const wasLive = !!cur && isLive(cur.status);
+      const willLive = isLive(next.status);
+      if (willLive && next.cancelAt && cur?.cancelAt?.getTime() !== next.cancelAt.getTime())
+        await audit("billing.cancel_scheduled", { ...ids, endsAt: next.cancelAt.toISOString() });
+      else if (wasLive && willLive && cur.cancelAt && !next.cancelAt) await audit("billing.cancel_undone", ids);
+      if (wasLive && !willLive) await audit("billing.canceled", { ...ids, endedAt: (next.endedAt ?? now).toISOString() });
       // a price no plan matches puts the account on Free without anyone being told: say so once per price
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
@@ -495,14 +515,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       const row = await d.query.billingSubscriptions.findFirst({ where: eq(schema.billingSubscriptions.stripeSubscriptionId, s.id) });
       const m = mapSubscription(s);
       if (!row && !isLive(m.status)) return; // an ended subscription we never recorded: nothing to grant or revoke
-      const differs =
-        !row ||
-        row.status !== m.status ||
-        row.plan !== m.plan ||
-        row.interval !== m.interval ||
-        row.cancelAtPeriodEnd !== m.cancelAtPeriodEnd ||
-        row.periodEnd?.getTime() !== m.periodEnd?.getTime();
-      if (!differs) return;
+      if (!rowDiffers(row, m)) return;
       const r = await sync(s.id, "reconcile");
       if (!r.userId) orphans.push(s.id);
       else if (r.changed) out.synced++;
@@ -604,6 +617,32 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     log.info({ queues: [SYNC_QUEUE, RECONCILE_QUEUE] }, "billing workers listening");
   }
 
+  const freeEnt = { grantsFor: async () => grantsOf(null, config.BILLING_GRACE_DAYS, config.APP_URL) };
+
+  /**
+   * What changes for this account when its plan ends on `at`: Free's limits (with the admin's overrides, as they
+   * will apply), where it would be over them, and the rest that changes, as sentences. One answer for the Billing
+   * page, `get_billing` and both "plan ends" mails. `kept`: projects and storage already read by the caller.
+   */
+  async function freePreview(user: { id: string; role: "user" | "admin" }, at: Date, kept?: WallUsage): Promise<FreePreview> {
+    const d = db();
+    const instance = svc.settings.get();
+    const [free, watermark, height] = await Promise.all([
+      limitsDetail(d, instance, user.id, freeEnt),
+      watermarkFor(d, instance, user, freeEnt),
+      sourceHeightFor(d, user.id, freeEnt),
+    ]);
+    const over = await overages(d, user.id, free, at, kept);
+    const manual = free.limits.MAX_MANUAL_CLIPS_PER_USER;
+    const expect = [
+      "Nothing is deleted: your projects, clips and library stay, and clips already rendered keep no watermark.",
+      ...(watermark.on ? ["New renders and re-renders carry the watermark."] : []),
+      ...(height ? [`Links download at ${height}p for the editor and analysis; clips still render from full-quality video.`] : []),
+      ...(manual > 0 ? [`Adding clips by hand stops after ${plural(manual, "clip")}.`] : []),
+    ];
+    return { at: at.toISOString(), plan: FREE.name, planLabel: FREE.label, limits: free.limits, over, expect };
+  }
+
   /** Everything the Billing page, `get_billing` and `reelsaw billing <user>` show. */
   async function stateFor(user: { id: string; role: "user" | "admin" }) {
     const d = db();
@@ -617,6 +656,9 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) }),
     ]);
     const period = detail.grants?.period ?? null;
+    // a cancellation is scheduled: say now what Free will refuse on the day, while there is time to act
+    const endsAt = pendingCancelAt(row, graceDays);
+    const afterCancel = endsAt ? await freePreview(user, endsAt, usage) : null;
     return {
       enabled: true as const,
       plan: publicPlan(eff.plan),
@@ -629,11 +671,14 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
             periodStart: row.periodStart?.toISOString() ?? null,
             periodEnd: row.periodEnd?.toISOString() ?? null,
             cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+            // only while it is pending: an ended subscription keeps Stripe's cancel_at
+            cancelAt: endsAt?.toISOString() ?? null,
             pastDueSince: row.pastDueSince?.toISOString() ?? null,
             graceEndsAt: row.pastDueSince ? new Date(row.pastDueSince.getTime() + graceDays * 86_400_000).toISOString() : null,
             stripe: !!row.stripeSubscriptionId,
           }
         : null,
+      afterCancel,
       period: period ? { start: period.start.toISOString(), end: period.end.toISOString() } : null,
       limits: detail.limits,
       limitSource: detail.source,
@@ -674,6 +719,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
           periodStart: null,
           periodEnd: null,
           cancelAtPeriodEnd: false,
+          cancelAt: null,
           pastDueSince: null,
           endedAt: null,
           syncedAt: now,
@@ -741,7 +787,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
           id: s.id,
           status: s.status,
           price: s.items.data[0]?.price.lookup_key ?? s.items.data[0]?.price.id ?? null,
-          cancelAtPeriodEnd: s.cancel_at_period_end,
+          cancelAt: s.cancel_at ? new Date(s.cancel_at * 1000).toISOString() : s.cancel_at_period_end ? "period end" : "",
         }))
       : [];
     const events = await d
@@ -780,7 +826,21 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     detachUser,
     cancelDetached,
     inspect,
+    freePreview,
   };
+}
+
+/** What the account gets once its plan ends (stateFor's `afterCancel`). */
+export interface FreePreview {
+  at: string;
+  plan: string;
+  planLabel: string;
+  /** the limits in force on Free, overrides included */
+  limits: Limits;
+  /** where usage would be at or over them, with what each would refuse */
+  over: Overage[];
+  /** the other changes, as sentences */
+  expect: string[];
 }
 
 /** The webhook could not be verified: the HTTP layer answers 400 and Stripe does not retry. */

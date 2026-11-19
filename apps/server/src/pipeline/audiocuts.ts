@@ -16,7 +16,7 @@
  * marked `verified: false` with the reason.
  */
 import { spawn } from "node:child_process";
-import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word } from "@reelsaw/shared";
+import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word, plural } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { supports } from "./language.js";
 
@@ -557,7 +557,7 @@ export async function refineCuts(
       reasons.push(`verification error: ${(err as Error).message.slice(0, 80)}`);
     }
     if (!accepted) {
-      giveUp(`verification failed after ${reasons.length} attempt(s): ${reasons.join("; ")}`);
+      giveUp(`verification failed after ${plural(reasons.length, "attempt")}: ${reasons.join("; ")}`);
       continue;
     }
     deps.log?.debug(

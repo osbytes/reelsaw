@@ -2,6 +2,7 @@
  * GitHub releases + a 90-day commit heatmap. The website, the app, MCP and the CLI all
  * show the same feed; fetch is injected so tests do not hit the network.
  */
+import { utcDay } from "./format.js";
 import { z } from "zod";
 
 /** Same host as `REPO_URL` in index.ts — kept local so this module does not import the barrel. */
@@ -117,12 +118,6 @@ const KIND_HEADING: Record<string, ChangeKind> = {
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_RELEASE_PAGES = 3;
 const MAX_COMMIT_PAGES = 10;
-
-/** UTC calendar day `YYYY-MM-DD`. */
-export function utcDay(iso: string | Date): string {
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-}
 
 export function addUtcDays(day: string, n: number): string {
   const d = new Date(`${day}T00:00:00Z`);

@@ -18,6 +18,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "./db/index.js";
 import { schema } from "./db/index.js";
 import { formatLogLevels, logControl, parseLogLevels, type LogLevel, type LogLevels, type Logger } from "./log.js";
+import { pluralWord } from "@reelsaw/shared";
 
 const KEY = "log_level";
 export const MAX_LOG_OVERRIDE_MS = 24 * 3600_000;
@@ -285,7 +286,7 @@ export interface StructuredLevels {
 /** Build the `info,render=debug` spec from picker input; throws on a module that is not known. A repeated module: the last row wins. */
 export function specFromStructured(input: StructuredLevels, known: readonly string[]): string {
   const unknown = input.modules.filter((m) => !known.includes(m.module)).map((m) => m.module);
-  if (unknown.length) throw new Error(`unknown log module${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`);
+  if (unknown.length) throw new Error(`unknown log ${pluralWord(unknown.length, "module")}: ${unknown.join(", ")}`);
   const byModule = new Map(input.modules.map((m) => [m.module, m.level]));
   return [input.global, ...[...byModule].map(([m, l]) => `${m}=${l}`)].join(",");
 }

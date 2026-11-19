@@ -16,6 +16,7 @@ import { MEDIA_LINK_KINDS, type MediaLinkKind, type MediaLinkRow, type MediaLink
 import { exportPlan, slugify } from "../export.js";
 import { takeTxLock, txLock } from "../locks.js";
 import type { Services } from "../services.js";
+import { plural } from "@reelsaw/shared";
 
 export { MEDIA_LINK_KINDS };
 export type { MediaLinkKind };
@@ -345,11 +346,10 @@ export async function clearStoppedLinks(svc: Services, userId: string): Promise<
   return rows.length;
 }
 
-export const clearMessage = (n: number) =>
-  n ? `Cleared ${n} revoked or expired share link${n === 1 ? "" : "s"}.` : "No revoked or expired share links to clear.";
+export const clearMessage = (n: number) => (n ? `Cleared ${plural(n, "revoked or expired share link")}.` : "No revoked or expired share links to clear.");
 
 export const revokeMessage = (n: number) =>
-  n ? `Revoked ${n} share link${n === 1 ? "" : "s"}; ${n === 1 ? "it stops" : "they stop"} working now.` : "No active share links to revoke.";
+  n ? `Revoked ${plural(n, "share link")}; ${n === 1 ? "it stops" : "they stop"} working now.` : "No active share links to revoke.";
 
 /** What a share-link request resolves to: a file to send, or the status and sentence to answer with. */
 export type LinkHit =

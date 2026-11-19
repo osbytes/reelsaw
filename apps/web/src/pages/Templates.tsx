@@ -4,7 +4,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layers, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { DELETED_PATH, layerTemplateNameSchema, type TemplateBumpers, type TemplateLayer } from "@reelsaw/shared";
+import { DELETED_PATH, layerTemplateNameSchema, type TemplateBumpers, type TemplateLayer, plural } from "@reelsaw/shared";
 import { templateSummary } from "../components/TemplatePicker";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
@@ -41,7 +41,6 @@ interface TemplateRow {
   deletedAt: string | null;
 }
 
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 /** name | what it holds (layers, intro / outro) | updated | actions */
 const COLUMNS: ListColumn[] = [
   { label: "Name" },
@@ -216,11 +215,7 @@ export function TemplatesPage() {
             {templates.map((t) => row(t))}
           </ListTable>
           <ListFooter>
-            {list.isPending ? (
-              <Skeleton className="h-3 w-40" />
-            ) : (
-              `Showing ${templates.length.toLocaleString()} of ${totalTemplates.toLocaleString()} template${totalTemplates === 1 ? "" : "s"}`
-            )}
+            {list.isPending ? <Skeleton className="h-3 w-40" /> : `Showing ${templates.length.toLocaleString()} of ${plural(totalTemplates, "template")}`}
           </ListFooter>
         </section>
       )}

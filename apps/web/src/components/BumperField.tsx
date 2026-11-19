@@ -18,6 +18,7 @@ import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import type { ClipBumpers } from "@reelsaw/shared";
+import { plural } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -610,9 +611,9 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
   const used = [
-    a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "",
-    a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "",
-    a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : "",
+    a.usedBy ? `${plural(a.usedBy, "project")}` : "",
+    a.usedByClips ? `${plural(a.usedByClips, "clip")}` : "",
+    a.usedByTemplates ? `${plural(a.usedByTemplates, "template")}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -1066,7 +1067,7 @@ export function BulkBumpersPopover({
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
           const what = [v.intro !== "keep" ? "intro" : "", v.outro !== "keep" ? "outro" : ""].filter(Boolean).join(" and ");
-          toast(`Updated the ${what} on ${r.updated} clip${r.updated === 1 ? "" : "s"}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
+          toast(`Updated the ${what} on ${plural(r.updated, "clip")}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
           setV({ intro: "keep", outro: "keep" });
           setOpen(false);
           onDone();
@@ -1078,7 +1079,7 @@ export function BulkBumpersPopover({
     <Popover.Root open={open} onOpenChange={setOpen}>
       {openProp === undefined ? (
         <Popover.Trigger asChild>
-          <button className={className} title={`Set the intro and outro of ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`}>
+          <button className={className} title={`Set the intro and outro of ${plural(clipIds.length, "clip")}`}>
             Intro/outro…
           </button>
         </Popover.Trigger>
@@ -1093,9 +1094,7 @@ export function BulkBumpersPopover({
           collisionPadding={12}
           className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
         >
-          <b className="text-[13px]">
-            Intro and outro for {clipIds.length} clip{clipIds.length === 1 ? "" : "s"}
-          </b>
+          <b className="text-[13px]">Intro and outro for {plural(clipIds.length, "clip")}</b>
           <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
           <div className="flex justify-end gap-2">
             <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
@@ -1193,7 +1192,7 @@ export function ProjectBumpersModal({
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
           void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
-          toast(r.rerendered ? `Saved · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Saved");
+          toast(r.rerendered ? `Saved · re-rendering ${plural(r.rerendered, "clip")}` : "Saved");
           setPick({});
           onOpenChange(false);
         },
@@ -1207,7 +1206,7 @@ export function ProjectBumpersModal({
         {row("outro", "Outro", outro, oSec, defaults?.outroAssetId)}
       </div>
       <p className="min-h-8 text-xs text-ink3">
-        {dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}
+        {dirty ? `Re-render ${plural(clipCount, "clip")} now, or save and re-render later.` : "Manage the library on the Library page."}
       </p>
       <div className="flex flex-wrap justify-end gap-2">
         <button className="btn-ghost" onClick={() => onOpenChange(false)}>
