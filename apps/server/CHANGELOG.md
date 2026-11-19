@@ -1,5 +1,19 @@
 # @reelsaw/server
 
+## 0.45.0
+
+### Minor Changes
+
+- [#310](https://github.com/osbytes/reelsaw/pull/310) [`f261c7f`](https://github.com/osbytes/reelsaw/commit/f261c7f1b6e78e23c6b4f288bfd9c9dad0a8013c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Queue visibility and priority: Settings → System → Queue (`reelsaw queue`, `get_queue`) shows how long jobs waited to be picked up in the last hour per stage (median and 95th percentile), which accounts have work queued and at what priority, and waiting jobs in the order workers take them. Admins can set an account's queue priority (Users → Limits, `reelsaw limits <email> --priority N`, `set_user_queue_priority`), and on hosted plans every paid plan now starts jobs ahead of Free (Starter +2, Creator +3, Pro +5).
+
+### Patch Changes
+
+- [#312](https://github.com/osbytes/reelsaw/pull/312) [`b67f90b`](https://github.com/osbytes/reelsaw/commit/b67f90b9cc96ae5207da0704f1454e0b9038a48c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A long link download no longer crashes the server. Ingest buffered yt-dlp's whole stdout, which now carries a progress line per tick; on a long enough download the buffer passed Node's string limit and the uncaught `RangeError` took the process down (the app and its workers), and the reconciler re-queued the same project into the same crash. Commands now keep only bounded output: a caller that reads lines keeps what it needs, and anything else that writes too much is stopped with an error instead of crashing.
+  
+  When yt-dlp gives up on the full-quality download of a clip's window because of a bot check or a refused page, the clip renders from the preview copy right away instead of retrying into the same block and failing, and the project's other clips go straight to the preview copy for the next half hour instead of each trying again. Rate limits and expired media links still retry. Downloads that do not read yt-dlp's progress no longer ask for it, and command output is decoded across chunk boundaries, so non-Latin titles are no longer garbled.
+  
+  Frame sampling (face tracking, on-screen text, speaker detection) no longer fails now and then with `ff_frame_thread_encoder_init`: the single-thread setting reached only the decoder, not the rawvideo encoder.
+
 ## 0.44.0
 
 ### Minor Changes
