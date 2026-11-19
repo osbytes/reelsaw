@@ -1639,6 +1639,21 @@ export function ClipEditor(props: Props) {
   const changed = dirtyCount > 0;
   const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged || layersChanged;
 
+  const deleteClip = () =>
+    delClip.mutateAsync({ id: clip.id }).then(
+      (r) => {
+        guard.allowLeave();
+        onExit();
+        notifyDeleted({
+          items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
+          restorable: r.restorable,
+          storedBytes: r.storedBytes,
+          afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
+        });
+      },
+      (err: Error) => toast.error(`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
+    );
+
   async function save(rerender: boolean): Promise<boolean> {
     try {
       if (styleChanged && styleScope === "all") await updateStyle.mutateAsync({ id: projectId, style, rerender });
@@ -2424,7 +2439,22 @@ export function ClipEditor(props: Props) {
           </a>
         </div>
       ))}
-      <p className="text-[11px] text-ink3">Accept or reject cuts in the project transcript; they apply to every clip that contains them.</p>
+      {cuts.length ? (
+        <p className="text-[11px] text-ink3">Accept or reject cuts in the project transcript; they apply to every clip that contains them.</p>
+      ) : (
+        <p className="text-[11px] leading-snug text-ink3">
+          To cut a stumble or a pause yourself, select it in the project transcript and choose Cut; it applies to every clip that contains it.{" "}
+          <a
+            href={`/p/${projectId}#sel=${range[0].toFixed(2)}-${range[1].toFixed(2)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold text-acc-text no-underline"
+            title="The project transcript with this clip's words selected (new tab)"
+          >
+            Open this clip in the transcript ↗
+          </a>
+        </p>
+      )}
     </div>
   );
 
@@ -2440,7 +2470,7 @@ export function ClipEditor(props: Props) {
 
   const inspector = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ScrollArea className="shrink-0 border-b border-line">
+      <ScrollArea fadeEdges className="shrink-0 border-b border-line">
         <div className="flex w-max gap-1 px-3 py-2">
           {tabs.map(([k, l]) => (
             <button
@@ -2856,7 +2886,8 @@ export function ClipEditor(props: Props) {
       <button
         className={`${hb} hidden text-err sm:grid`}
         disabled={delClip.isPending}
-        onClick={() => setConfirmDelete(true)}
+        // a soft delete with an Undo toast: it asks first only when it would also throw away unsaved edits
+        onClick={() => (changed ? setConfirmDelete(true) : void deleteClip())}
         title="Delete clip"
         aria-label="Delete clip"
       >
@@ -2950,22 +2981,11 @@ export function ClipEditor(props: Props) {
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title="Delete this clip?"
-        body={`“${title || "Untitled clip"}” is hidden from the project. Unsaved edits are discarded. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
+        title="Delete this clip and its unsaved edits?"
+        body={`“${title || "Untitled clip"}” is hidden from the project and your ${plural(dirtyCount, "unsaved edit")} ${dirtyCount === 1 ? "is" : "are"} discarded; Undo brings back the clip, not the edits. ${keepWindow.hint()}`}
         confirm="Delete clip"
         danger
-        onConfirm={() =>
-          delClip.mutateAsync({ id: clip.id }).then((r) => {
-            guard.allowLeave();
-            onExit();
-            notifyDeleted({
-              items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
-              restorable: r.restorable,
-              storedBytes: r.storedBytes,
-              afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
-            });
-          })
-        }
+        onConfirm={deleteClip}
       />
       <ConfirmDialog
         open={styleAll !== null}

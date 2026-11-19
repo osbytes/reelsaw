@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
 import { CHECKOUT_PARAM, deletedProjectsPath, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM, formatDay, formatMb } from "@reelsaw/shared";
-import { Skeleton, SkeletonRegion } from "../../components/ui";
+import { Pending, Skeleton, SkeletonRegion } from "../../components/ui";
 
 const num = new Intl.NumberFormat();
 
@@ -193,7 +193,7 @@ export default function BillingSection() {
                 </ul>
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" className="btn-primary min-w-[9rem]" disabled={portal.isPending} onClick={() => portal.mutate()}>
-                    {portal.isPending ? "…" : `Keep ${d.plan.label}`}
+                    <Pending busy={portal.isPending}>Keep {d.plan.label}</Pending>
                   </button>
                   <span className="text-xs text-ink3">Opens Stripe's portal: choose "Don't cancel subscription".</span>
                 </div>

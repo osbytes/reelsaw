@@ -4,12 +4,14 @@ import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { AssetFinder } from "../components/AssetFinder";
 import { UploadInput, useBumperActions } from "../components/BumperField";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /**
  * Your uploads, the catalog and the providers behind one finder (components/AssetFinder.tsx); Upload sits next to its search box.
  * Deep links: `#asset=<id>` highlights a tile, `?upload=1` opens the file picker, `?kind=audio&q=boom` filters.
  */
 export function LibraryPage() {
+  useDocumentTitle(pageTitle("Library"));
   const nav = useNavigate();
   const loc = useLocation();
   const input = useRef<HTMLInputElement>(null);

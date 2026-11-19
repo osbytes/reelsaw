@@ -5,13 +5,12 @@ import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ConfirmDialog, Modal, MoreButton, ProgressBar, StatusText } from "./ui";
+import { Modal, MoreButton, ProgressBar, StatusText } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
-import { useRestoreWindow } from "../lib/retention";
 import { ClipBumpersDialog } from "./BumperField";
 import { ApplyTemplateToClipsDialog } from "./TemplatePicker";
 import { useMe } from "../lib/account";
@@ -96,13 +95,21 @@ export function ClipCard({
   const [postOpen, setPost] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const copyShareLink = useCopyShareLink();
-  const keepWindow = useRestoreWindow("clip", confirmDelete);
   const trpc = useTRPC();
   const del = useMutation(trpc.clips.delete.mutationOptions());
   const notifyDeleted = useDeletedToast();
+  const deleteClip = () =>
+    del.mutateAsync({ id: clip.id }).then(
+      (r) =>
+        notifyDeleted({
+          items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
+          restorable: r.restorable,
+          storedBytes: r.storedBytes,
+        }),
+      (err: Error) => toast.error(`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
+    );
   const isAdmin = useMe().data?.role === "admin";
   const done = clip.status === "done";
   const working = clip.status === "rendering" || clip.status === "preparing";
@@ -280,8 +287,12 @@ export function ClipCard({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[220px]">
+              {/* grouped: what to post (text, links), files, how it renders, then the rest */}
               <DropdownMenu.Item className="menu-item" onSelect={() => void copy()}>
                 Copy text
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" onSelect={() => setPost(true)}>
+                Caption &amp; hashtags…
               </DropdownMenu.Item>
               {onCopyLink && (
                 <DropdownMenu.Item className="menu-item" onSelect={onCopyLink}>
@@ -299,6 +310,7 @@ export function ClipCard({
               <DropdownMenu.Item className="menu-item" disabled={!done} onSelect={() => setShareOpen(true)}>
                 Share link options…
               </DropdownMenu.Item>
+              {clip.hasCaptions && <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />}
               {clip.hasCaptions &&
                 (["srt", "vtt"] as const).map((f) => (
                   <DropdownMenu.Item key={f} className="menu-item" asChild>
@@ -307,6 +319,7 @@ export function ClipCard({
                     </a>
                   </DropdownMenu.Item>
                 ))}
+              <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               <DropdownMenu.Item className="menu-item" disabled={working || busy || clip.status === "preparing"} onSelect={onRerender}>
                 Re-render
               </DropdownMenu.Item>
@@ -316,17 +329,15 @@ export function ClipCard({
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setTemplateOpen(true)}>
                 Layer template…
               </DropdownMenu.Item>
-              <DropdownMenu.Item className="menu-item" onSelect={() => setPost(true)}>
-                Caption &amp; hashtags…
-              </DropdownMenu.Item>
               {clip.status === "failed" && (
                 <DropdownMenu.Item className="menu-item" onSelect={() => openReport({ projectId, clipId: clip.id })}>
                   Report an issue…
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-              <DropdownMenu.Item className="menu-item-danger" disabled={del.isPending} onSelect={() => setConfirmDelete(true)}>
-                Delete clip…
+              {/* a soft delete: it happens at once and the toast's Undo brings it back, so no dialog first */}
+              <DropdownMenu.Item className="menu-item-danger" disabled={del.isPending} onSelect={deleteClip}>
+                Delete clip
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -369,23 +380,6 @@ export function ClipCard({
         clipIds={[clip.id]}
         withLayers={clip.layers?.length ?? 0}
         rerenderable={clip.status === "done" || clip.status === "failed" ? 1 : 0}
-      />
-      <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title="Delete this clip?"
-        body={`“${clip.title || "Untitled clip"}” is hidden from the project. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
-        confirm="Delete clip"
-        danger
-        onConfirm={() =>
-          del.mutateAsync({ id: clip.id }).then((r) =>
-            notifyDeleted({
-              items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
-              restorable: r.restorable,
-              storedBytes: r.storedBytes,
-            }),
-          )
-        }
       />
     </article>
   );

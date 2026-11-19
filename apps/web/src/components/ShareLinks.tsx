@@ -7,6 +7,7 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Skeleton, SkeletonRegion } from "./ui";
 import { formatDay, plural } from "@reelsaw/shared";
+import { showingCount } from "./ListPage";
 
 type LinkInput =
   | { kind: "clip" | "thumb" | "srt" | "vtt"; clipId: string; ttlDays?: number | null; label?: string }
@@ -305,9 +306,7 @@ export function ShareLinksSection() {
               {/* inside the scroll area, so the next page loads as the list (not the page) scrolls to its end */}
               <div ref={more} />
             </ScrollArea>
-            <div className="flex h-8 items-center text-xs text-ink3">
-              Showing {items.length} of {total}
-            </div>
+            <div className="flex h-8 items-center text-xs text-ink3">{showingCount(items.length, total, "share link")}</div>
           </>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { QuotaNotice, quotaFromError } from "./QuotaNotice";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
@@ -143,6 +143,8 @@ export function TranscriptPanel({
   const viewportRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
+  // whether the playhead's line is on screen: "Resume following" is offered only when it is not, since it would do nothing
+  const [playheadInView, setPlayheadInView] = useState(true);
   const programmaticUntil = useRef(0);
   const justResumed = useRef(false);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
@@ -158,6 +160,17 @@ export function TranscriptPanel({
   const [pick, setPick] = useState<{ start: number; end: number; top: number; left: number } | null>(null);
   // correcting the selected words: the bar turns into a text field (selection kept while typing)
   const [fixText, setFixText] = useState<string | null>(null);
+  // the selection bar is centred on the selection but kept whole inside the panel, by its real width (the bar, its
+  // correction field and its hints are all different widths; a fixed guess let it hang off the left edge)
+  const pickBarRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const bar = pickBarRef.current;
+    const root = rootRef.current;
+    if (!bar || !root || !pick) return;
+    const half = bar.offsetWidth / 2;
+    const left = Math.max(half + 6, Math.min(root.clientWidth - half - 6, pick.left));
+    bar.style.left = `${left}px`;
+  });
   const fixing = useRef(false);
   fixing.current = fixText !== null;
   useEffect(() => setFixText(null), [pick?.start, pick?.end]);
@@ -325,7 +338,12 @@ export function TranscriptPanel({
   useEffect(() => {
     const v = viewportRef.current;
     const a = activeRef.current;
-    if (!following || !v || !a) return;
+    if (!following) {
+      // playback moves on while the reader looks elsewhere: the playhead's line may leave the screen without a scroll
+      setPlayheadInView(!v || !a || isVisibleWithin(v, a, 0));
+      return;
+    }
+    if (!v || !a) return;
     if (isVisibleWithin(v, a, 0) && !justResumed.current) return;
     justResumed.current = false;
     programmaticUntil.current = Date.now() + 900;
@@ -338,8 +356,10 @@ export function TranscriptPanel({
     if (!v) return;
     const stop = () => setFollowing(false);
     const onScroll = () => {
-      if (Date.now() < programmaticUntil.current) return;
       const a = activeRef.current;
+      const inView = !a || isVisibleWithin(v, a, 0);
+      setPlayheadInView(inView);
+      if (Date.now() < programmaticUntil.current) return;
       if (a && !isVisibleWithin(v, a)) setFollowing(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -638,7 +658,7 @@ export function TranscriptPanel({
   return (
     <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
       {/* one scrollable row on phones, wraps on wider screens */}
-      <ScrollArea className="shrink-0 border-y border-line bg-panel">
+      <ScrollArea fadeEdges className="shrink-0 border-y border-line bg-panel">
         <div className="flex w-max items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:w-auto sm:flex-wrap sm:px-5">
           <h2 className="shrink-0 text-[15px] font-bold">Transcript</h2>
           {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
@@ -681,7 +701,9 @@ export function TranscriptPanel({
               <ListChecks className="h-3.5 w-3.5" /> Fixes list
             </button>
           )}
-          <div className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 xl:flex">
+          {/* the key to the marks in the text: only once there are marks, and only where it fits on the same row as the
+              filters (below that it wrapped to a second row and the transcript jumped down when the first fix landed) */}
+          <div className={`hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 ${orderedFlags.length > 0 ? "min-[1600px]:flex" : ""}`}>
             <span>
               <b className="font-mono text-[10px] text-acc-text">Aa</b> name fix
             </span>
@@ -835,6 +857,7 @@ export function TranscriptPanel({
       </div>
       {pick && (
         <div
+          ref={pickBarRef}
           className="absolute z-30 w-max max-w-[calc(100%-12px)] -translate-x-1/2 rounded-[12px] bg-ink p-1 text-xs text-bg shadow-pop"
           style={{ top: pick.top, left: pick.left }}
           onMouseDown={(e) => !(e.target as HTMLElement).closest("input") && e.preventDefault()}
@@ -928,7 +951,8 @@ export function TranscriptPanel({
               </button>
             </div>
           )}
-          {pick.end - pick.start < 8 && (
+          {/* about making a clip from the selection, so not while the bar is a correction field */}
+          {fixText === null && pick.end - pick.start < 8 && (
             <p className="px-2 pb-1 pt-0.5 text-[11px] opacity-70">
               {pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}
             </p>
@@ -945,7 +969,7 @@ export function TranscriptPanel({
           {addCut.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCut.error.message}</p>}
         </div>
       )}
-      {!following && segments.length > 0 && (
+      {!following && !playheadInView && segments.length > 0 && (
         <button
           className="absolute left-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop"
           onClick={resume}

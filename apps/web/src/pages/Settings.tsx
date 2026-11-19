@@ -32,6 +32,7 @@ import {
   RETENTION_FIELDS,
 } from "../components/InstanceSettings";
 import { BILLING_PATH, CHANGELOG_URL, REPO_URL, formatMb } from "@reelsaw/shared";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
@@ -85,6 +86,7 @@ export function SettingsPage() {
   const system = loc.pathname.endsWith("/system") && isAdmin;
   const hasEmail = !!me.data?.emailEnabled;
   const sections = system ? SYSTEM_SECTIONS : accountSections(hasBilling, hasEmail);
+  useDocumentTitle(pageTitle(system ? "System" : "Settings"));
   const ids = sections.map(([id]) => id);
   const active = useActiveSection(ids, loc.pathname === BILLING_PATH ? "billing" : undefined);
   const tab = ({ isActive }: { isActive: boolean }) =>
@@ -148,7 +150,7 @@ const linkClass = (on: boolean) =>
 function SideNav({ sections, active, users }: { sections: Section[]; active: string; users: boolean }) {
   return (
     <div className="md:sticky md:top-0 md:self-start md:pt-1">
-      <ScrollArea className="-mx-4 px-4 md:mx-0 md:px-0">
+      <ScrollArea fadeEdges className="-mx-4 px-4 md:mx-0 md:px-0">
         <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label="Settings sections">
           {sections.map(([id, label]) => (
             <a
@@ -196,18 +198,32 @@ function useActiveSection(ids: readonly string[], landing?: string) {
       setActive(id);
     };
     window.addEventListener("hashchange", onHash);
-    const els = ids.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e);
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (Date.now() < pinnedUntil) return;
-        const seen = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (seen[0]) setActive(seen[0].target.id);
-      },
-      { rootMargin: "-20% 0px -60% 0px", threshold: 0 },
-    );
-    els.forEach((e) => io.observe(e));
+    // The section under a line a quarter of the way down the scroller is the one being read: the last whose top is
+    // above it. Measured over every section on each scroll, looked up then (sections render as their data loads; an
+    // IntersectionObserver set up at mount, which only reports the ones that changed, highlighted the wrong one).
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      if (Date.now() < pinnedUntil) return;
+      const els = ids.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e);
+      const scroller = els[0]?.closest<HTMLElement>("[data-radix-scroll-area-viewport]");
+      if (!scroller) return;
+      // short sections at the end never reach the line; a click on one pins it (above), and at the end of the page
+      // no scroll follows to take it away
+      const box = scroller.getBoundingClientRect();
+      const line = box.top + box.height * 0.25;
+      let pick = els[0];
+      for (const el of els) if (el.getBoundingClientRect().top <= line) pick = el;
+      if (pick) setActive(pick.id);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    // capture: the scroller is a ScrollArea viewport further down the tree, and scroll events do not bubble
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
     return () => {
-      io.disconnect();
+      cancelAnimationFrame(frame);
+      document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("hashchange", onHash);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

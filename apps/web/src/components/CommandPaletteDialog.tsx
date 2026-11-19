@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFuzzy, Highlight, type Fuzzy, type FuseResultMatch } from "../lib/fuzzy";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import {
   ChevronLeft,
   Download,
@@ -110,10 +110,18 @@ function download(href: string) {
   a.remove();
 }
 
+/** An action's name outweighs its hint: "re" finds Report an issue before What's new (whose hint is a releases URL). */
+const ACTION_KEYS = [
+  { name: "label", weight: 3 },
+  { name: "hint", weight: 1 },
+];
+
 export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange: (o: boolean) => void; q: string; setQ: (s: string) => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
+  // the project page this palette was opened on: its actions come first
+  const here = useLocation().pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null;
   const [, toggleTheme] = useTheme();
   const { startProjects, openWithFile } = useUploads();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -152,7 +160,9 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     return () => window.clearTimeout(t);
   }, [q, open]);
   const searching = dq.trim() !== "";
-  const recentQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 30_000 });
+  // refetched on every open (the cached rows show at once): a project's status and clip count change while the
+  // palette is closed, and a page with no project stream (Library, Settings) never invalidates them
+  const recentQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 0 });
   const searchQ = useQuery({
     ...trpc.search.queryOptions({ q: linkMode ? "" : dq.trim(), limit: 15, links: linkMode ? urls.map(linkNeedle) : undefined }),
     enabled: open && searching,
@@ -206,10 +216,10 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
 
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
-  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "clip" | "asset"; id: string; title: string }>(null);
+  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "asset"; id: string; title: string }>(null);
   const [forgetDecisions, setForgetDecisions] = useState(false);
   // projects and clips share one window (DELETED_RETENTION_DAYS)
-  const keepWindow = useRestoreWindow("project", confirm?.kind === "delete" || confirm?.kind === "clip");
+  const keepWindow = useRestoreWindow("project", confirm?.kind === "delete");
   const savedQ = useRef("");
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -331,7 +341,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         );
         acts.push(P("none", "None", <Ban className="h-4 w-4" />, choose("none", "none"), "No " + slot + " on this project"));
         for (const a of library ?? []) acts.push(P(a.id, a.name, <Images className="h-4 w-4" />, choose(a.id, a.name), assetHint(a, defaults), a.thumbnailUrl));
-        return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
+        return ql ? createFuzzy(acts, ACTION_KEYS, { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "asset") {
         const a = library?.find((x) => x.id === target.id);
@@ -381,7 +391,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
             true,
           ),
         );
-        return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
+        return ql ? createFuzzy(acts, ACTION_KEYS, { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "project") {
         const p = known.current.projects.get(target.id);
@@ -396,14 +406,16 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           danger,
           run,
         });
-        acts.push(
-          A(
-            "open",
-            "Open",
-            <ExternalLink className="h-4 w-4" />,
-            go(() => nav(`/p/${p.id}`)),
-          ),
-        );
+        // not for the project this page already shows
+        if (p.id !== here)
+          acts.push(
+            A(
+              "open",
+              "Open",
+              <ExternalLink className="h-4 w-4" />,
+              go(() => nav(`/p/${p.id}`)),
+            ),
+          );
         if (s?.done)
           acts.push(
             A(
@@ -525,15 +537,25 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         acts.push(
           A(
             "delete",
-            "Delete clip…",
+            "Delete clip",
             <Trash2 className="h-4 w-4" />,
-            go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })),
+            // a soft delete: done at once, the toast's Undo brings it back (no dialog first)
+            go(() => {
+              const title = c.title || "Untitled clip";
+              delClip.mutateAsync({ id: c.id }).then(
+                (r) => {
+                  refresh();
+                  notifyDeleted({ items: [{ kind: "clip", id: c.id, title }], restorable: r.restorable, storedBytes: r.storedBytes });
+                },
+                (err: Error) => toast.error(`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
+              );
+            }),
             "Hidden until you restore it from Deleted",
             true,
           ),
         );
       }
-      return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
+      return ql ? createFuzzy(acts, ACTION_KEYS, { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
     }
 
     // ----- a link, or a list of links: act on what already exists, otherwise start -----
@@ -684,10 +706,22 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         }),
       });
     if (!ql) {
-      for (const p of (d?.projects ?? []).slice(0, 6)) out.push(projectItem(p, "Recent projects"));
+      // on a project page, that project first: Enter opens its actions (export, re-render, intro/outro, …)
+      const current = here ? known.current.projects.get(here) : undefined;
+      if (current)
+        out.push({
+          ...projectItem(current, "This project"),
+          hint: (
+            <>
+              {projectHint(current)} · <span className="text-ink2">Enter for its actions</span>
+            </>
+          ),
+          run: () => enter({ kind: "project", id: current.id }),
+        });
+      for (const p of (d?.projects ?? []).filter((x) => x.id !== current?.id).slice(0, 6)) out.push(projectItem(p, "Recent projects"));
       return [...out, ...actions];
     }
-    const actionFuse = createFuzzy(actions, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 });
+    const actionFuse = createFuzzy(actions, ACTION_KEYS, { threshold: 0.4, minMatchCharLength: 1 });
     for (const r of actionFuse.search(ql, 3)) out.push({ ...r.item, label: <Highlight text={String(r.item.label)} matches={r.matches} k="label" /> });
     if (libFuse) {
       for (const r of libFuse.search(ql).slice(0, 5)) {
@@ -731,7 +765,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, linkMode, urls, target, index, fuse, counts, library, libFuse, defaults, pickSec, recentQ.data, searchQ.data]);
+  }, [q, linkMode, urls, target, index, fuse, counts, library, libFuse, defaults, pickSec, recentQ.data, searchQ.data, here]);
 
   useEffect(() => setCursor(0), [q, target]);
   useEffect(() => setPickSec(""), [target]);
@@ -1050,25 +1084,6 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       >
         <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
       </ConfirmDialog>
-      <ConfirmDialog
-        open={confirm?.kind === "clip"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title="Delete this clip?"
-        body={`“${confirm?.title ?? ""}” is hidden from the project. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
-        confirm="Delete clip"
-        danger
-        onConfirm={() => {
-          const c = confirm!;
-          return delClip.mutateAsync({ id: c.id }).then((r) => {
-            refresh();
-            notifyDeleted({
-              items: [{ kind: "clip", id: c.id, title: c.title }],
-              restorable: r.restorable,
-              storedBytes: r.storedBytes,
-            });
-          });
-        }}
-      />
     </>
   );
 }

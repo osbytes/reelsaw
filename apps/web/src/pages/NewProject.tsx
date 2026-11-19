@@ -24,6 +24,7 @@ import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../compon
 import { RefineToggles } from "../components/RefineToggles";
 import { youtubeId } from "../lib/links";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 const LENGTHS = [
   { id: "short", label: "< 30s", min: 10, max: 30 },
@@ -46,6 +47,7 @@ function useDebounced<T>(v: T, ms: number) {
 }
 
 export function NewProjectPage() {
+  useDocumentTitle(pageTitle("New project"));
   const trpc = useTRPC();
   const client = useTRPCClient();
   const nav = useNavigate();

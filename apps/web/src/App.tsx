@@ -28,13 +28,14 @@ import { PendingPage } from "./pages/Pending";
 import { MustChangePasswordPage } from "./pages/MustChangePassword";
 const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
 import { Segmented, Skeleton, SkeletonRegion } from "./components/ui";
+import { ClipEditorSkeleton, ProjectPageSkeleton } from "./components/PageSkeletons";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 import { usePresence } from "./lib/presence";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { reloadIfNewBuild } from "./lib/stale-chunk";
-import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
+import { CommandPaletteProvider, prefetchPalette, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
 import { Toaster } from "sonner";
@@ -230,6 +231,8 @@ function SearchButton() {
   return (
     <button
       onClick={() => open()}
+      onPointerEnter={prefetchPalette}
+      onFocus={prefetchPalette}
       className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]"
       aria-label="Search"
     >
@@ -270,20 +273,23 @@ export function TopBar() {
 
 /** Pages own their scrolling (ScrollArea) so the workspace can split into independent panes.
  *  h-dvh tracks the visible viewport, so a bottom bar stays on screen while the mobile URL bar is showing. */
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, fallback = <PageFallback /> }: { children: React.ReactNode; fallback?: React.ReactNode }) {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col">
         <ErrorBoundary>
-          <Suspense fallback={<PageFallback />}>{children}</Suspense>
+          <Suspense fallback={fallback}>{children}</Suspense>
         </ErrorBoundary>
       </div>
     </div>
   );
 }
 
-/** What shows while a page's code loads (the bar stays; only the content area is a skeleton). */
+/**
+ * What shows while a page's code loads (the bar stays; only the content area is a skeleton). A page with its own
+ * skeleton passes it to Protected as `fallback`, so loading shows one skeleton, not this one and then that.
+ */
 function PageFallback() {
   return (
     <SkeletonRegion label="Loading…" className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
@@ -313,7 +319,7 @@ function AppSkeleton() {
   );
 }
 
-function Protected({ children, bare, admin }: { children: React.ReactNode; bare?: boolean; admin?: boolean }) {
+function Protected({ children, bare, admin, fallback }: { children: React.ReactNode; bare?: boolean; admin?: boolean; fallback?: React.ReactNode }) {
   const { data, isPending } = useSession();
   const me = useMe(!!data);
   // a visible tab in use marks the account present, so what finishes now is not mailed as "while you were away"
@@ -336,11 +342,11 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
         <ErrorBoundary>
-          <Suspense fallback={<PageFallback />}>{children}</Suspense>
+          <Suspense fallback={fallback ?? <ClipEditorSkeleton />}>{children}</Suspense>
         </ErrorBoundary>
       </div>
     );
-  return <Shell>{children}</Shell>;
+  return <Shell fallback={fallback}>{children}</Shell>;
 }
 
 /** The one toast host (sonner), themed with the app tokens so light and dark follow lib/theme.ts. Narrow screens get sonner's full-width bottom layout. */
@@ -511,7 +517,7 @@ export function App() {
             <Route
               path="/p/:id"
               element={
-                <Protected>
+                <Protected fallback={<ProjectPageSkeleton compact={window.innerWidth < 900} width={window.innerWidth} />}>
                   <KeyedProjectPage />
                 </Protected>
               }

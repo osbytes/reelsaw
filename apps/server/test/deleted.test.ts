@@ -95,6 +95,24 @@ describe("listDeleted and purge", { skip: notReady ?? false }, () => {
     }
   });
 
+  it("puts an undone clip back at its own number, and at the end only when a live clip took that number", async () => {
+    const actor = { id: userId, admin: false };
+    const p = await h.makeProject(userId, "done");
+    const first = await h.makeClip(p, 0, "done");
+    await h.makeClip(p, 1, "done");
+    await h.makeClip(p, 2, "done");
+    const indexOf = async (id: string) => (await h.pool.query(`select index from clips where id = $1`, [id])).rows[0].index as number;
+
+    await deleteClip(h.svc, actor, first);
+    await restoreClip(h.svc, actor, first);
+    assert.equal(await indexOf(first), 0, "Undo gives clip #1 back as #1");
+
+    await deleteClip(h.svc, actor, first);
+    await h.makeClip(p, 0, "done"); // a re-analyze or a hand-made clip took #1 meanwhile
+    await restoreClip(h.svc, actor, first);
+    assert.equal(await indexOf(first), 3);
+  });
+
   it("says to restore the project when a clip's project is still deleted, and refuses to delete a live project forever", async () => {
     const actor = { id: userId, admin: false };
     const p = await h.makeProject(userId, "done");

@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { hasMinuteLimits, recordSourceDuration, sourceHeightFor, sourceMinutesExceeded, trackIngestRefusal } from "../quota.js";
@@ -216,6 +217,23 @@ export async function ingest(ctx: StageContext) {
     "source facts",
   );
   if (download) recordDownload(download.proxy, download.sec, probe.durationSec, sourceBytes);
+
+  // an upload has no platform thumbnail: a frame a tenth of the way in (past a black or fading first second) is its
+  // poster on the project page and its tile until clips exist. Best effort: a poster is never worth failing ingest.
+  if (!meta.thumbnail && probe.width) {
+    // its own name: an upload's source path can sit in a folder other ingests share
+    const posterPath = path.join(os.tmpdir(), `reelsaw-poster-${projectId}.jpg`);
+    try {
+      const at = Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
+      await svc.media.ffmpeg(["-y", "-ss", at.toFixed(2), "-i", sourcePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "4", posterPath]);
+      await svc.storage.putFile(keys.sourcePoster(projectId), posterPath);
+      meta = { ...meta, thumbnail: `/media/source/${projectId}/poster.jpg` };
+    } catch (err) {
+      ctx.log.warn({ err }, "source poster skipped");
+    } finally {
+      await fs.rm(posterPath, { force: true });
+    }
+  }
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;

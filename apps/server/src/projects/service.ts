@@ -404,7 +404,11 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
   });
 }
 
-/** Bring back a clip a re-analyze replaced (or that was deleted). It goes to the end of the project's list; a clip that never finished rendering needs a re-render. */
+/**
+ * Bring back a clip a re-analyze replaced (or that was deleted). It keeps its number when no live clip took it
+ * since (an Undo puts clip #1 back as #1), else it goes to the end of the project's list; a clip that never
+ * finished rendering needs a re-render.
+ */
 export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
@@ -413,12 +417,16 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
     if (p.deletedAt)
       throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
     if (!c.deletedAt) return { ok: true, changed: false, clipId, status: c.status };
-    const [{ next } = { next: 0 }] = await u.db
-      .select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` })
+    const [{ next, taken } = { next: 0, taken: false }] = await u.db
+      .select({
+        next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int`,
+        taken: sql<boolean>`coalesce(bool_or(${schema.clips.index} = ${c.index}), false)`,
+      })
       .from(schema.clips)
       .where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
-    await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-    await u.emit("clip.restored", { projectId: c.projectId, clipId, index: next, title: c.title });
+    const index = taken ? next : c.index;
+    await u.db.update(schema.clips).set({ deletedAt: null, index, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    await u.emit("clip.restored", { projectId: c.projectId, clipId, index, title: c.title });
     if (byOwner(actor, p)) await recordDecisions(svc, u, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
     return { ok: true, changed: true, clipId, status: c.status, needsRerender: c.status !== "done" };
   });

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { TemplateEditor } from "../components/TemplateEditor";
 import { ClipEditorSkeleton } from "../components/PageSkeletons";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /** Full-screen template editor route: /templates/:id (docs/specs/layer-templates.md). */
 export function TemplateEditorPage() {
@@ -11,6 +12,7 @@ export function TemplateEditorPage() {
   const nav = useNavigate();
   // the editor owns the document once open: a background refetch must not reset it
   const q = useQuery({ ...trpc.layerTemplates.get.queryOptions({ id }), refetchOnWindowFocus: false });
+  useDocumentTitle(pageTitle(q.data?.name, "Template"));
   if (q.isPending) return <ClipEditorSkeleton />;
   if (!q.data || q.data.deletedAt) {
     const missing = !q.error || q.error.data?.code === "NOT_FOUND" || !!q.data?.deletedAt;

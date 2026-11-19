@@ -23,6 +23,7 @@ import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
 import { useDocumentTitle } from "../lib/title";
+import { Pending } from "../components/ui";
 
 /** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
 export const AFTER_SIGN_IN_KEY = "reelsaw.afterSignIn";
@@ -224,7 +225,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
             <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
           )}
           <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
-            {busy ? "…" : expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}
+            <Pending busy={busy}>{expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}</Pending>
           </button>
           {canResend && !expiredLink && (
             <button

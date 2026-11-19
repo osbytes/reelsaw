@@ -115,7 +115,11 @@ export const RUNTIME_SETTINGS = {
   ),
   MAX_REQUESTS_PER_HOUR: def("limits", int0, "Changes an account may make per hour. 0 = unlimited."),
   MAX_UPLOAD_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest accepted file upload, in MB."),
-  MAX_SOURCE_FILE_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest file a link source may download (yt-dlp --max-filesize), in MB."),
+  MAX_SOURCE_FILE_MB: def(
+    "limits",
+    z.number().int().min(1).max(1_000_000),
+    "Largest video a link may download, in MB; a bigger one is not downloaded and the project stops with a message.",
+  ),
   ALLOW_PRIVATE_SOURCE_URLS: def("limits", z.boolean(), "Let link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard)."),
   MAX_WEBHOOKS_PER_USER: def("limits", int0, "Webhook endpoints an account may add. 0 = unlimited. Admins can override per user on the Users page."),
   ALLOW_PRIVATE_WEBHOOK_URLS: def(

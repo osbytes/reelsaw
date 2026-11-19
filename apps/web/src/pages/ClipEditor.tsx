@@ -9,6 +9,7 @@ import { ClipEditorSkeleton } from "../components/PageSkeletons";
 import { LiveStatusPill } from "../components/LiveStatusPill";
 import { masksSourceText } from "@reelsaw/shared";
 import { useMe } from "../lib/account";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /** Full-screen editor route: /p/:id/clips/:clipId. Live render progress comes from the project's event stream. */
 export function ClipEditorPage() {
@@ -31,6 +32,7 @@ export function ClipEditorPage() {
 
   const p = q.data;
   const clip = p?.clips.find((c) => c.id === clipId);
+  useDocumentTitle(pageTitle(clip?.title, p?.title));
   if (q.isLoading || (tq.isLoading && !!q.data?.transcript)) return <ClipEditorSkeleton />;
   if (!p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
   if (!clip)

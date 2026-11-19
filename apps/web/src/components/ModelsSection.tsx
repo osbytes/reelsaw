@@ -244,11 +244,10 @@ export function ModelsSection() {
           {dirty.length ? `${plural(dirty.length, "change")} to save; each is checked first (key, server, word timestamps)` : ""}
         </span>
         <span className="flex gap-2">
-          {dirty.length > 0 && (
-            <button type="button" className="btn-quiet" onClick={() => setDraft({})}>
-              Discard
-            </button>
-          )}
+          {/* always there, like every panel's footer, so the row does not shift when a change appears */}
+          <button type="button" className="btn-quiet" disabled={!dirty.length || save.isPending} onClick={() => setDraft({})}>
+            Discard
+          </button>
           <button
             type="button"
             className="btn-primary min-w-[6.5rem]"

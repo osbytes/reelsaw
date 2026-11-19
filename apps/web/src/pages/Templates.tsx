@@ -27,8 +27,10 @@ import {
   ListPage,
   ListRow,
   ListTable,
+  showingCount,
 } from "../components/ListPage";
 import { ConfirmDialog, Modal, MoreButton, Skeleton } from "../components/ui";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /** One row of the list (live or deleted), as `layerTemplates.list` returns it. */
 interface TemplateRow {
@@ -55,6 +57,7 @@ const COLUMNS: ListColumn[] = [
  * Deep link: `#template=<id>` highlights a row.
  */
 export function TemplatesPage() {
+  useDocumentTitle(pageTitle("Templates"));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -174,19 +177,17 @@ export function TemplatesPage() {
     </ListRow>
   );
 
+  const newButton = (
+    <button className="btn-primary min-w-[9.5rem] justify-center" disabled={create.isPending} onClick={newTemplate}>
+      {create.isPending && !create.variables?.layers.length ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New template
+    </button>
+  );
+  const empty = !!list.data && templates.length === 0;
   return (
-    <ListPage
-      title="Templates"
-      subtitle="Logos, stickers, text and sounds placed once, fitted to any clip length"
-      actions={
-        <button className="btn-primary min-w-[9.5rem] justify-center" disabled={create.isPending} onClick={newTemplate}>
-          {create.isPending && !create.variables?.layers.length ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New template
-        </button>
-      }
-    >
+    <ListPage title="Templates" subtitle="Logos, stickers, text and sounds placed once, fitted to any clip length" actions={empty ? undefined : newButton}>
       {list.error && <ListError message={list.error.message} />}
-      {list.data && templates.length === 0 && (
-        <ListEmpty icon={Layers} title="No templates yet">
+      {empty && (
+        <ListEmpty icon={Layers} title="No templates yet" action={newButton}>
           A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a
           clip’s layers as a template from the clip editor.
         </ListEmpty>
@@ -214,9 +215,7 @@ export function TemplatesPage() {
               ))}
             {templates.map((t) => row(t))}
           </ListTable>
-          <ListFooter>
-            {list.isPending ? <Skeleton className="h-3 w-40" /> : `Showing ${templates.length.toLocaleString()} of ${plural(totalTemplates, "template")}`}
-          </ListFooter>
+          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : showingCount(templates.length, totalTemplates, "template")}</ListFooter>
         </section>
       )}
 
