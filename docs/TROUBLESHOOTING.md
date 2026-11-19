@@ -344,7 +344,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   lookup failed. On a minutes-limited account, check_source and creating the project refuse it up front too.
   The recording of an ended stream downloads like any video once the site has processed it (`was_live`). Every comparison in that filter ends in `?`
   (`live_status!=?is_upcoming`): many extractors leave `live_status` unset (a direct `.mp4` link) and yt-dlp fails a
-  plain comparison against an unset field. If the filter skips a link the lookup called not live, ingest fails with
+  plain comparison against an unset field. The lookup and the filter are both derived from one table of every `live_status` yt-dlp sets (`LIVE_STATUSES` in `projects/peek.ts`), and `test/live-filter.test.ts` runs the pinned yt-dlp's own `--match-filter` over each status, a direct file and an unknown value, so the two cannot drift apart. If the filter skips a link the lookup called not live, ingest fails with
   cause `platform` and logs `download skipped by the live filter although the lookup said not live`, rather than
   telling the user their link is a live stream.
 - **YouTube bot-check from a datacentre / `YTDLP_PROXY`.** yt-dlp takes one `--proxy`; Reelsaw walks an

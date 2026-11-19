@@ -37,11 +37,28 @@ export const LIVE_SOURCE_MESSAGE =
   "This link is a live stream, one that has not started yet, or one that just ended and is still being processed, so there is no finished video to download. Add it again once its recording is up (a stream that just ended can take a few hours), or upload the file instead (New project → Upload).";
 
 /**
- * yt-dlp `live_status` values with no finished video behind them. `post_live` is a stream that ended but whose
- * recording the site is still processing: no length to check limits against, and a fragment-by-fragment download of
- * the whole stream (a day-long one ran for hours before it was stopped).
+ * Every `live_status` yt-dlp sets (its README, "OUTPUT TEMPLATE"), and whether a finished video is behind it. The lookup
+ * and the download filter are both derived from this, so they cannot disagree. A link whose extractor leaves the field
+ * unset (a direct .mp4 through the generic extractor) is a finished file, and so is a value yt-dlp adds later: refusing
+ * one would refuse ordinary videos, and the download limits still cap whatever it turns out to be.
+ *
+ * `post_live` is a stream that ended but whose recording the site is still processing: no length to check limits
+ * against, and a fragment-by-fragment download of the whole stream (a day-long one ran for hours before it was stopped).
  */
-const UNFINISHED_LIVE_STATUSES = new Set(["is_live", "is_upcoming", "post_live"]);
+export const LIVE_STATUSES = {
+  not_live: "finished",
+  was_live: "finished",
+  is_live: "unfinished",
+  is_upcoming: "unfinished",
+  post_live: "unfinished",
+} as const satisfies Record<string, "finished" | "unfinished">;
+
+const UNFINISHED = new Set(Object.entries(LIVE_STATUSES).flatMap(([status, kind]) => (kind === "unfinished" ? [status] : [])));
+
+/** Whether an info dict's live fields say there is no finished video to download yet. */
+export function isUnfinishedStream(info: { is_live?: boolean | null | undefined; live_status?: string | null | undefined }): boolean {
+  return info.is_live === true || UNFINISHED.has(info.live_status ?? "");
+}
 
 /** The link is a live, scheduled or still-processing stream: refused before anything is downloaded, on every attempt alike. */
 export class LiveSourceError extends Error {
@@ -52,20 +69,21 @@ export class LiveSourceError extends Error {
 }
 
 /**
- * yt-dlp `--match-filter` that skips a live, scheduled or still-processing stream (UNFINISHED_LIVE_STATUSES) instead of
- * recording it until the stream ends. A skipped
- * link exits 0 with no info line and no file, so the download step reads that as this refusal.
+ * yt-dlp `--match-filter` that skips the same links as `isUnfinishedStream`, for when the lookup could not tell, instead
+ * of recording a stream until it ends. A skipped link exits 0 with no info line and no file, so the download step reads
+ * that as this refusal.
  *
  * yt-dlp fails a comparison against a field the extractor left unset unless the operator ends in `?`, and many leave
- * `live_status` unset (a direct .mp4 link through the generic extractor), so every comparison here must carry the `?`
- * (test/peek.test.ts checks it); otherwise ordinary files are refused as live streams.
+ * `live_status` unset (a direct .mp4 link through the generic extractor), so every comparison here carries the `?`;
+ * otherwise ordinary files are refused as live streams. test/live-filter.test.ts runs the real yt-dlp over every status.
  */
-export const NOT_LIVE_FILTER = "!is_live & live_status!=?is_upcoming & live_status!=?post_live";
+export const NOT_LIVE_FILTER = ["!is_live", ...[...UNFINISHED].filter((s) => s !== "is_live").map((s) => `live_status!=?${s}`)].join(" & ");
 
 /**
  * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (some sites).
  * Throws `LiveSourceError` for a live, scheduled or still-processing stream (no length, and a download that would run
- * until the stream ends, or through every fragment of it), and the lookup's own error when it fails. Used when a link is checked (check_source, the New project form), when
+ * until the stream ends, or through every fragment of it), and the lookup's own error when it fails. Used when a link
+ * is checked (check_source, the New project form), when
  * the project is created (a refusal with the upgrade offer instead of a failed project) and again before ingest downloads;
  * the binding check still runs on the probed file.
  *
@@ -89,7 +107,7 @@ async function lookUp(media: Pick<MediaTools, "ytdlp">, url: string, signal?: Ab
     .find((l) => l.trim().startsWith("{"));
   const parsed = jsonLine ? announcedSchema.safeParse(JSON.parse(jsonLine)) : null;
   const info = parsed?.success ? parsed.data : {};
-  const answer = { sec: info.duration ?? null, live: info.is_live === true || UNFINISHED_LIVE_STATUSES.has(info.live_status ?? "") };
+  const answer = { sec: info.duration ?? null, live: isUnfinishedStream(info) };
   lengths.set(url, answer);
   return answer;
 }

@@ -11,9 +11,6 @@ describe("NOT_LIVE_FILTER", () => {
       assert.match(clause, /^\w+\s*(?:!?[*^$~]?=|[<>]=?)\s*\?/, `"${clause}" needs a ? after its operator`);
     }
   });
-  it("skips every status the lookup refuses, for when the lookup could not tell", () => {
-    for (const status of ["is_upcoming", "post_live"]) assert.ok(NOT_LIVE_FILTER.includes(`live_status!=?${status}`), status);
-  });
 });
 
 /** A yt-dlp that answers the metadata lookup with `answer` (a duration, null for none, an info dict, or an error) and counts its runs. */

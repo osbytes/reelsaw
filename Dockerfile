@@ -15,6 +15,7 @@ RUN sh /tmp/download-models.sh /models
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS system
 # yt-dlp is pinned and verified. To bump: take the tag from https://github.com/yt-dlp/yt-dlp/releases,
 # then the linux `yt-dlp` line of that release's SHA2-256SUMS file, and update both args (and THIRD_PARTY.md).
+# CI reads both lines as written (.github/workflows/ci.yml) to run test/live-filter.test.ts on the same yt-dlp.
 # The `yt-dlp` file is a Python zipapp, the same for amd64 and arm64.
 ARG YTDLP_VERSION=2026.08.19
 ARG YTDLP_SHA256=1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
