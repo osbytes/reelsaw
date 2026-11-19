@@ -618,7 +618,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `delete_projects` | Delete several of your projects in one step (the Projects page selection bar's Delete); work in progress stops. |
 | `purge_project` | Permanently remove a deleted project and its files so the storage is freed (find it with list_deleted or list_projects deleted: true). |
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_deleted or list_projects deleted: true); restoring a project that is not deleted changes nothing. |
-| `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it keeps its number unless a live clip took it meanwhile, else it goes to the end of the project's clips. |
+| `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it goes to the end of the project's clips. |
 | `list_deleted` | Restorable deletes (the Deleted page): one newest-first list of projects, clips of live projects, library items and templates. |
 | `purge_clip` | Permanently remove a deleted clip of a live project and its rendered file so the storage is freed (find it with list_deleted). |
 | `purge_asset` | Permanently remove an already-deleted library upload and its files so the storage is freed (find it with list_deleted). |
