@@ -33,6 +33,17 @@ export const SITE = {
  * analytics projects, so the UTM tags (kept as the app's first-touch properties) are what ties a sign-up to the site.
  */
 export function appLink(path: string, cta: string, params: Record<string, string> = {}): string {
-  const q = new URLSearchParams({ ...params, utm_source: "reelsaw.com", utm_medium: "website", utm_content: cta });
+  const q = new URLSearchParams({ ...params, ...utmParams(cta) });
   return `${SITE.app}${path}?${q}`;
 }
+
+/** The UTM tags appLink adds, for a plain GET form into the app (the hero's link box). */
+export function utmParams(cta: string): Record<string, string> {
+  return { utm_source: "reelsaw.com", utm_medium: "website", utm_content: cta };
+}
+
+/**
+ * `/signup?url=<link>`: the app remembers the link and opens New project with it after the first sign-in.
+ * Mirrors SOURCE_URL_PARAM in packages/shared/src/new-project.ts (the site is outside the pnpm workspace).
+ */
+export const SOURCE_URL_PARAM = "url";

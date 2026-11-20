@@ -15,6 +15,31 @@ pnpm typecheck
 pnpm build && pnpm start
 ```
 
+## The demo clips
+
+The home page shows real runs of hosted Reelsaw on Creative Commons BY videos with default settings: the hero
+(`components/hero-reel.tsx`) plays a pick next to the same seconds of its source, with where it came from on the
+source's timeline; "One real run" lays the source next to its clips (`components/clip-strip.tsx`); "See it" is a
+set of deep-linkable tabs (`#see-reframe`, `components/feature-tabs.tsx`) whose Reframe tab shows a two-shot
+followed speaker to speaker, a camera per speaker, and slides stacked over a webcam. All of them read `content/demo.ts` (sources, ranks, reasons, start and end times) and play
+`public/clips/*.mp4` through `components/loop-video.tsx`: muted, fetched when near, paused off screen, posters
+only under `prefers-reduced-motion`.
+
+Swapping in a newer run: update `content/demo.ts` from `get_project` (MCP) and cut the files from the rendered
+clip and the downloaded source (`yt-dlp -f "137+140"`), 8 s each:
+
+```bash
+ffmpeg -i clip.mp4 -t 8 -vf scale=540:960 -c:v libx264 -crf 24 -preset slow -an -movflags +faststart pick-1.mp4
+ffmpeg -ss <clip start> -i source.mp4 -t 8 -vf scale=720:-2 -c:v libx264 -crf 25 -preset slow -an -movflags +faststart pick-1-before.mp4
+ffmpeg -ss 2.3 -i pick-1.mp4 -frames:v 1 -q:v 4 pick-1.jpg      # and the same for pick-1-before
+```
+
+The app screenshots in the Moments, Fixes and Editor tabs (`public/workspace.png`, `transcript-fixes.png`,
+`editor.png`, copied to `docs/assets/` for the README) are the same sources run through a local build: 1459×729,
+dark theme, device scale 1. Workspace is the podcast seeked into its talk (`/p/<id>#t=44`), fixes is the webinar
+with the fixes list open and its name fix selected (`#fix=<id>`), editor is the podcast's clip #2 with the playhead
+mid-clip. Retake them whenever those screens change.
+
 ## The pipeline film
 
 `components/pipeline-film.tsx` is the animation under "How it works": one video going through the five

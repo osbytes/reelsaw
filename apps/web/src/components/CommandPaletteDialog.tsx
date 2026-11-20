@@ -42,7 +42,7 @@ import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { ForgetDecisionsOption } from "./ForgetDecisionsOption";
-import { CHANGELOG_URL, DELETED_PATH, formatTime, plural } from "@reelsaw/shared";
+import { CHANGELOG_URL, DELETED_PATH, formatTime, newProjectPath, plural } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { DeleteAssetDialog } from "./BumperField";
@@ -570,7 +570,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           icon: <Link2 className="h-4 w-4" />,
           label: "New project from this link",
           hint: <span className="truncate font-mono">{urls[0]}</span>,
-          run: go(() => nav(`/new?url=${encodeURIComponent(urls[0]!)}`)),
+          run: go(() => nav(newProjectPath(urls[0]!))),
         });
       } else {
         const fresh: string[] = [];

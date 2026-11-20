@@ -92,6 +92,8 @@ body { @apply bg-bg font-sans text-[15px] text-ink antialiased; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 }
 
+@keyframes see-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
 @utility film { background: repeating-linear-gradient(135deg, var(--film) 0 10px, var(--film2) 10px 11px); }
 
 @utility btn { @apply inline-flex items-center justify-center gap-2 rounded-[10px] px-3 py-[7px] text-[13px] font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50; }

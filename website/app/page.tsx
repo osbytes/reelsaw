@@ -1,25 +1,4 @@
-import Image from "next/image";
-import {
-  ArrowRight,
-  Bot,
-  Captions,
-  Cpu,
-  Database,
-  Download,
-  Film,
-  Layers,
-  ListChecks,
-  Lock,
-  Plug,
-  Scissors,
-  ScanFace,
-  Sparkles,
-  Users,
-  Wrench,
-} from "lucide-react";
-import editor from "@/public/editor.png";
-import transcriptFixes from "@/public/transcript-fixes.png";
-import workspace from "@/public/workspace.png";
+import { Bot, Captions, Cpu, Database, Download, Film, Layers, ListChecks, Lock, Plug, Scissors, ScanFace, Sparkles, Users, Wrench } from "lucide-react";
 import { Code, Command } from "@/components/command";
 import { PipelineFilm } from "@/components/pipeline-film";
 import { RecentReleases } from "@/components/release-list";
@@ -27,8 +6,13 @@ import { JsonLd } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { GitHubMark } from "@/components/logo";
+import { HeroLinkForm } from "@/components/hero-link-form";
+import { HeroReel } from "@/components/hero-reel";
+import { ClipStrip } from "@/components/clip-strip";
+import { FeatureTabs } from "@/components/feature-tabs";
 import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
+import { DEMO_RUN, OTHER_SOURCES } from "@/content/demo";
 import { githubReleases } from "@/lib/github";
 import { SITE, appLink } from "@/lib/site";
 
@@ -178,6 +162,9 @@ export const revalidate = 3600;
 
 const RECENT_RELEASES = 3;
 
+/** The demo source's length in whole minutes. */
+const DEMO_MINUTES = Math.round(DEMO_RUN.source.seconds / 60);
+
 export default async function HomePage() {
   const recent = (await githubReleases())?.releases.slice(0, RECENT_RELEASES) ?? [];
   return (
@@ -191,48 +178,80 @@ export default async function HomePage() {
             className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[520px] bg-[radial-gradient(60%_60%_at_50%_0%,var(--acc-soft),transparent_70%)] opacity-70"
             aria-hidden
           />
-          <div className="container-page flex flex-col items-center gap-8 pt-16 pb-12 text-center sm:pt-24">
-            <p className="chip border border-line bg-panel text-ink2">
-              <Lock className="h-3.5 w-3.5 text-acc-text" aria-hidden />
-              Open source · Hosted or self-hosted · MCP for agents
-            </p>
-            <h1 id="hero-title" className="text-[40px] leading-[1.02] font-extrabold tracking-[-0.02em] sm:text-[60px]">
-              Long videos in.
-              <br />
-              Vertical clips out.
-            </h1>
-            <p className="max-w-[60ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[19px]">
-              Paste a YouTube link or upload a file. Reelsaw transcribes it, finds the most clippable moments, then renders 9:16 clips with word-highlight
-              captions and a hook overlay, ready to post.
-            </p>
-            <div className="flex flex-col items-center gap-3">
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <a href={appLink("/signup", "home_hero")} className="btn-primary h-11 px-5 text-[15px]">
-                  Clip a video free <ArrowRight className="h-4 w-4" aria-hidden />
-                </a>
-                <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-11 px-4 text-sm">
-                  <GitHubMark /> Star on GitHub
-                </a>
-                <a href="#install" className="btn-ghost h-11 px-4 text-sm">
-                  <Cpu className="h-4 w-4" aria-hidden /> Self-host
-                </a>
+          <div className="container-page grid grid-cols-1 items-center gap-12 pt-14 pb-20 sm:pt-20 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:gap-10">
+            <div className="flex flex-col items-center gap-7 text-center lg:items-start lg:text-left">
+              <p className="chip border border-line bg-panel text-ink2">
+                <Lock className="h-3.5 w-3.5 text-acc-text" aria-hidden />
+                Open source · Hosted or self-hosted · MCP for agents
+              </p>
+              <h1 id="hero-title" className="text-[40px] leading-[1.02] font-extrabold tracking-[-0.02em] sm:text-[58px]">
+                Long videos in.
+                <br />
+                Vertical clips out.
+              </h1>
+              <p className="max-w-[54ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[18px]">
+                Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is
+                speaking, and burns in captions and a hook. Every pick comes with its reason.
+              </p>
+              <div className="flex w-full flex-col items-center gap-4 lg:items-start">
+                <HeroLinkForm />
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-11 px-4 text-sm">
+                    <GitHubMark /> Star on GitHub
+                  </a>
+                  <a href="#install" className="btn-ghost h-11 px-4 text-sm">
+                    <Cpu className="h-4 w-4" aria-hidden /> Self-host
+                  </a>
+                </div>
               </div>
-              <p className="text-sm text-ink3">Your first video free, up to 60 minutes. No card, nothing to install.</p>
             </div>
+            <HeroReel />
           </div>
-          <div className="container-page pb-20">
-            <figure className="card overflow-hidden shadow-pop">
-              <Image
-                src={workspace}
-                alt="Reelsaw project workspace: source player and clickable transcript on the left, rendered vertical clips with scores and layout badges on the right"
-                priority
-                sizes="(max-width: 1120px) 100vw, 1120px"
-                className="h-auto w-full"
-              />
-              <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">
-                The project workspace: clips stream in on the right as they render, with score, layout and a copy-ready caption.
-              </figcaption>
-            </figure>
+        </section>
+
+        {/* One real run */}
+        <section id="example" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="example-title">
+          <div className="container-page flex flex-col gap-12">
+            <SectionHeading
+              id="example-title"
+              eyebrow="One real run"
+              title={`A ${DEMO_MINUTES}-minute ${DEMO_RUN.source.kind} in. ${DEMO_RUN.clips} clips out.`}
+              body={`No prompt, no settings, no scrubbing: this is what a stock Reelsaw kept, in its own order, with the reasons it gave. One clip plays at a time: point at another, or swipe on a phone.`}
+            />
+            <ClipStrip />
+            <p className="text-center text-xs leading-relaxed text-ink3">
+              Source:{" "}
+              <a href={DEMO_RUN.source.url} target="_blank" rel="noreferrer" className="prose-link">
+                {DEMO_RUN.source.title}
+              </a>{" "}
+              by {DEMO_RUN.source.author}, CC BY. This run used cloud models; fully local works the same, slower.
+            </p>
+          </div>
+        </section>
+
+        {/* See it */}
+        <section id="see" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="see-title">
+          <div className="container-page flex flex-col gap-12">
+            <SectionHeading
+              id="see-title"
+              eyebrow="See it"
+              title="Nothing is a black box"
+              body="Every automatic decision is shown where you are looking, with a one-click override."
+            />
+            <FeatureTabs />
+            <p className="text-xs leading-relaxed text-ink3">
+              Other sources, all CC BY:{" "}
+              {OTHER_SOURCES.map((src, k) => (
+                <span key={src.url}>
+                  {k > 0 && " · "}
+                  <a href={src.url} target="_blank" rel="noreferrer" className="prose-link">
+                    {src.title}
+                  </a>{" "}
+                  by {src.author}
+                </span>
+              ))}
+              .
+            </p>
           </div>
         </section>
 
@@ -270,60 +289,8 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {/* Demo + screenshots */}
-        <section className="py-20" aria-labelledby="look-title">
-          <div className="container-page flex flex-col gap-12">
-            <SectionHeading
-              id="look-title"
-              eyebrow="See it"
-              title="Reframing, captions and fixes you can inspect"
-              body="Nothing is a black box. Every automatic decision is shown where you are looking, with a one-click override."
-            />
-            <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-              <figure className="card mx-auto w-full max-w-[340px] overflow-hidden">
-                <video
-                  src="/demo-framing.mp4"
-                  poster="/demo-framing-poster.jpg"
-                  controls
-                  playsInline
-                  preload="none"
-                  className="aspect-[9/16] w-full bg-film object-cover"
-                  aria-label="Demo: automatic reframing within one clip, switching between split, face, stack and fit layouts"
-                >
-                  <a href="/demo-framing.mp4">Download the demo video</a>
-                </video>
-                <figcaption className="px-3 py-2.5 text-center text-xs text-ink3">Auto reframing in one clip: split → face → stack → fit</figcaption>
-              </figure>
-              <div className="flex min-w-0 flex-col gap-6">
-                <figure className="card overflow-hidden">
-                  <Image
-                    src={editor}
-                    alt="Clip editor with a live 9:16 preview, captions panel and multi-lane timeline"
-                    sizes="(max-width: 1024px) 100vw, 760px"
-                    className="h-auto w-full"
-                  />
-                  <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">
-                    The clip editor: 9:16 preview, captions panel and a multi-lane timeline with layout sections.
-                  </figcaption>
-                </figure>
-                <figure className="card overflow-hidden">
-                  <Image
-                    src={transcriptFixes}
-                    alt="Transcript with filler-word cuts highlighted inline and a list of fixes to accept or reject"
-                    sizes="(max-width: 1024px) 100vw, 760px"
-                    className="h-auto w-full"
-                  />
-                  <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">
-                    Transcript fixes: filler cuts and name corrections shown inline, each with accept and reject.
-                  </figcaption>
-                </figure>
-              </div>
-            </div>
-          </div>
-        </section>
-
         {/* Features */}
-        <section id="features" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="features-title">
+        <section id="features" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="features-title">
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="features-title"
@@ -346,7 +313,7 @@ export default async function HomePage() {
         </section>
 
         {/* Agents */}
-        <section id="agents" className="scroll-mt-20 py-20" aria-labelledby="agents-title">
+        <section id="agents" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="agents-title">
           <div className="container-page grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-5">
               <p className="eyebrow">Agents and automation</p>

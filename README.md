@@ -42,7 +42,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 <p align="center">
   <img src="docs/assets/editor.png" alt="Clip editor with 9:16 preview, captions panel, and multi-lane timeline" width="450">
   &nbsp;
-  <img src="docs/assets/transcript-fixes.png" alt="Transcript with filler cuts and the fixes list" width="450">
+  <img src="docs/assets/transcript-fixes.png" alt="Transcript with a name fix open and the fixes list" width="450">
 </p>
 
 ## Features

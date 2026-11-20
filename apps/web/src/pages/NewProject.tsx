@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import {
   defaultProjectSettings,
   projectSettingsSchema,
+  SOURCE_URL_PARAM,
   userProjectDefaultsSchema,
   styleSchema,
   type ProjectSettings,
@@ -68,7 +69,7 @@ export function NewProjectPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }),
   });
 
-  // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
+  // prefilled from ⌘K or the website's hero box through sign-up (?url=, newProjectPath) or a single video dropped anywhere in the app
   const [search] = useSearchParams();
   const loc = useLocation();
   const [file, setFileRaw] = useState<File | null>(() => peekPendingFile());
@@ -82,14 +83,14 @@ export function NewProjectPage() {
   // a file handed over from the dropzone that this page never took must not stay behind
   useEffect(() => clearPendingFile, []);
   const [mode, setMode] = useState<"url" | "upload">(() => (file ? "upload" : "url"));
-  const [url, setUrl] = useState(() => search.get("url") ?? "");
+  const [url, setUrl] = useState(() => search.get(SOURCE_URL_PARAM) ?? "");
   useEffect(() => {
     const f = takePendingFile();
     if (f) {
       setFileRaw(f);
       setMode("upload");
     }
-    const u = search.get("url");
+    const u = search.get(SOURCE_URL_PARAM);
     if (u) {
       setUrl(u);
       setMode("url");
