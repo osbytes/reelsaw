@@ -6,13 +6,13 @@
 # runs once on the build machine's own architecture ($BUILDPLATFORM).
 
 # ---------- models: downloaded once, natively ----------
-FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS models
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS models
 RUN apk add --no-cache curl
 COPY scripts/download-models.sh /tmp/download-models.sh
 RUN sh /tmp/download-models.sh /models
 
 # ---------- system: OS packages and media tools (shared by dev and runtime) ----------
-FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS system
+FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS system
 # yt-dlp is pinned and verified. To bump: take the tag from https://github.com/yt-dlp/yt-dlp/releases,
 # then the linux `yt-dlp` line of that release's SHA2-256SUMS file, and update both args (and THIRD_PARTY.md).
 # CI reads both lines as written (.github/workflows/ci.yml) to run test/live-filter.test.ts on the same yt-dlp.
@@ -41,7 +41,7 @@ RUN apt-get update \
 COPY --from=models /models /app/server/models
 
 # ---------- build: once, natively ----------
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS build
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS build
 # the slim image has no CA bundle: Node carries its own, but native tools (sentry-cli below) use the system's
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
@@ -83,7 +83,7 @@ RUN --mount=type=secret,id=sentry_auth_token,required=false \
 
 # ---------- server for one target architecture: drop the other platforms' native binaries ----------
 # A separate stage (not a RUN in `runtime`): deleting files in a later layer wouldn't shrink the image.
-FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS server
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS server
 ARG TARGETARCH
 COPY --from=build /out/server /out/server
 RUN set -eu; \

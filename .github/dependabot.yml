@@ -56,13 +56,15 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # base image digests in the Dockerfile; never the major (Node and Alpine lines are chosen by hand).
+  # Weekly, not monthly: Dependabot has no security updates for digests, so a refreshed digest is
+  # the only way a Node or Debian fix reaches the image.
   # The compose files pull by tag on purpose so operators get Postgres and Speaches patches directly.
   - package-ecosystem: docker
     directory: /
     cooldown:
       default-days: 7
     schedule:
-      interval: monthly
+      interval: weekly
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
