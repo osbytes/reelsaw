@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.45.2
+
+### Patch Changes
+
+- [#316](https://github.com/osbytes/reelsaw/pull/316) [`cb75e77`](https://github.com/osbytes/reelsaw/commit/cb75e77fd38219875dfdc33a9ed6397d8e7da175) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A link pasted into reelsaw.com's hero box now carries through sign-up: after your first sign-in, New project opens with it already pasted.
+
 ## 0.45.1
 
 ### Patch Changes
