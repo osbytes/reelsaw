@@ -283,6 +283,9 @@ in `uow.ts`. Retention per plan (OpenShorts keeps free clips 7 days) still needs
   (`prices.list` by the lookup keys finds every plan) or boot fails, like the models.
 - Sign-up with a plan in mind: `/signup?plan=pro` keeps the plan in the URL through sign-up and
   verification and lands on the Checkout; abandoning it leaves a Free account.
+- Sign-up with a video in mind: the website's hero box sends `/signup?url=<link>`; the link is
+  remembered the same way (localStorage, a day) and the first sign-in opens New project with it pasted
+  (`newProjectPath`, `packages/shared/src/new-project.ts`). A paid plan in the same URL wins.
 
 ## Later
 - Overage: minute packs as one-time Checkouts credited to a `minute_credits` ledger that

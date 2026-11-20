@@ -5,6 +5,9 @@ import {
   signupCreatedNotice,
   billingPlanPath,
   FREE_PLAN,
+  newProjectPath,
+  normalizeSourceUrl,
+  SOURCE_URL_PARAM,
   INTERVAL_PARAM,
   PLAN_PARAM,
   REPO_URL,
@@ -25,7 +28,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { useDocumentTitle } from "../lib/title";
 import { Pending } from "../components/ui";
 
-/** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
+/** Where to go after the next sign-in (a plan picked on the website, or a link pasted into its hero box); kept a day, in localStorage so an email verification link in a new tab still finds it. */
 export const AFTER_SIGN_IN_KEY = "reelsaw.afterSignIn";
 export function takeAfterSignIn(): string | null {
   try {
@@ -50,15 +53,18 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const { data } = useSession();
   const nav = useNavigate();
   const [mode, setMode] = useState<"login" | "signup">(signup ? "signup" : "login");
-  // /signup?plan=pro&interval=year from the pricing page: remembered now, used after the first sign-in
-  const [plan] = useState(() => {
+  // /signup?plan=pro&interval=year from the pricing page, or /signup?url=… from the website's hero box: remembered
+  // now, used after the first sign-in (a signed-in visitor goes through Protected, which takes it straight away)
+  const [{ plan, source }] = useState(() => {
     const q = new URLSearchParams(window.location.search);
-    const plan = q.get(PLAN_PARAM);
-    if (!plan || !/^[a-z0-9_-]{1,40}$/.test(plan)) return null;
+    const raw = q.get(PLAN_PARAM);
+    const plan = raw && /^[a-z0-9_-]{1,40}$/.test(raw) ? raw : null;
     const interval = q.get(INTERVAL_PARAM) === "year" ? "year" : "month";
+    const source = normalizeSourceUrl(q.get(SOURCE_URL_PARAM));
     // Free has nothing to buy: that sign-up goes where everyone else's does (a new project), not to the Billing page
-    if (plan !== FREE_PLAN) rememberAfterSignIn(billingPlanPath(plan, interval));
-    return plan;
+    if (plan && plan !== FREE_PLAN) rememberAfterSignIn(billingPlanPath(plan, interval));
+    else if (source) rememberAfterSignIn(newProjectPath(source));
+    return { plan, source };
   });
   const fromLink = verifyEmailErrorFromSearch(window.location.search);
   const [email, setEmail] = useState(fromLink.email ?? "");
@@ -131,7 +137,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     // manager offers a new strong password, and that sign-in then fails.
     if (mode === "signup" && res.data && res.data.token == null) {
       // the account exists: count it, or the funnel loses every sign-up that has to confirm an email first
-      track("signup_completed", { plan: plan ?? undefined, confirm_email: true });
+      track("signup_completed", { plan: plan ?? undefined, source_url: !!source, confirm_email: true });
       const text = signupCreatedNotice(signupMode);
       setBusy(false);
       setCaptchaToken(null);
@@ -149,7 +155,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       return setError(r.error?.message ?? "Could not continue the authorization");
     }
     setBusy(false);
-    track(mode === "signup" ? "signup_completed" : "signin_completed", { plan: plan ?? undefined });
+    track(mode === "signup" ? "signup_completed" : "signin_completed", { plan: plan ?? undefined, source_url: !!source });
     nav(takeAfterSignIn() ?? "/", { replace: true });
   }
 
@@ -194,6 +200,11 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           )}
           {mode === "signup" && plan && (
             <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>
+          )}
+          {mode === "signup" && !(plan && plan !== FREE_PLAN) && source && (
+            <p className="text-xs leading-relaxed text-ink2">
+              After you sign in, your link is waiting on the New project page: <span className="break-all font-mono text-ink">{source}</span>
+            </p>
           )}
           {mode === "signup" && signupMode === "approval" && (
             <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>
