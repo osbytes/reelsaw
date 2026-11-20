@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.45.3
+
+### Patch Changes
+
+- [#318](https://github.com/osbytes/reelsaw/pull/318) [`1941668`](https://github.com/osbytes/reelsaw/commit/1941668728b4eaabb43df20949e71041e1cb2e41) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Security: the image runs on Node 24.22.3, which fixes the Node.js vulnerabilities reported against 24.22.1.
+
 ## 0.45.2
 
 ### Patch Changes
