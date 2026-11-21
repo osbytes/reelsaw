@@ -7,7 +7,7 @@
  * `list_languages`, apps/server/src/ai/spoken-languages.ts); WHISPER_SPOKEN_LANGUAGES is what is
  * assumed when the model does not say, generated from Whisper's own table (whisper-languages.ts).
  */
-import { WHISPER_LANGUAGES } from "./whisper-languages.js";
+import { WHISPER_LANGUAGE_NAMES, WHISPER_LANGUAGES } from "./whisper-languages.js";
 
 /** "iw" → "he", "jw" → "jv", "zho" → "zh", "pt_BR" → "pt"; undefined for something that is not a language tag. */
 export function canonicalLanguage(tag: string): string | undefined {
@@ -16,6 +16,18 @@ export function canonicalLanguage(tag: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * ISO 639's codes that name no language: "und" (undetermined), "mul" (multiple), "mis" (uncoded), "zxx" (no
+ * linguistic content) and the private-use range qaa-qtz. Closed: fixed by the standard.
+ */
+const NOT_A_LANGUAGE = /^(und|mul|mis|zxx|q[a-t][a-z])$/;
+
+/** A canonical code that names one spoken language: ISO 639's 2- and 3-letter codes, without the special ones. */
+export function spokenCanonical(tag: string): string | undefined {
+  const c = canonicalLanguage(tag);
+  return c && c.length <= 3 && !NOT_A_LANGUAGE.test(c) ? c : undefined;
 }
 
 /** Whisper's languages as canonical codes, in Whisper's order. */
@@ -43,25 +55,42 @@ export function languageLabel(code: string, locale = "en"): string {
 }
 
 let byName: Map<string, string> | undefined;
-/** English names, lower-cased ("german" → "de"), as some models and people give the language by name. */
+/**
+ * English names, lower-cased, as some models (OpenAI's whisper-1) and people give the language by name: Whisper's
+ * own names first ("bengali", "myanmar", "mandarin"), which differ from the standard ones for a few languages,
+ * then the names `Intl` gives ("bangla", "burmese").
+ */
 function codeForName(name: string): string | undefined {
-  byName ??= new Map(WHISPER_SPOKEN_LANGUAGES.map((c) => [languageLabel(c).toLowerCase(), c]));
+  if (!byName) {
+    byName = new Map(WHISPER_SPOKEN_LANGUAGES.map((c) => [languageLabel(c).toLowerCase(), c]));
+    for (const [n, c] of Object.entries(WHISPER_LANGUAGE_NAMES)) byName.set(n, canonicalLanguage(c) ?? c);
+  }
   return byName.get(name);
 }
 
 /**
  * Normalise what a user, a subtitle file or a model calls a language to a canonical code: "en",
  * "en-US", "English", "pt_BR", "jw" → "en" / "pt" / "jv"; empty → undefined. A code outside any
- * model's list keeps its canonical form. Anything else ("Englsh") is undefined, so detection runs
- * instead of a model being sent a language it cannot know.
+ * model's list keeps its canonical form. Anything else ("Englsh", "und", "mul") is undefined, so
+ * detection runs instead of a model being sent a language it cannot know.
  */
 export function spokenLanguageCode(lang: string | null | undefined): string | undefined {
   const l = lang?.trim().toLowerCase();
   if (!l) return undefined;
-  // a name ("german") is also a well-formed 5-8 letter tag, so names are tried first, and only
-  // ISO 639's 2- and 3-letter codes are taken as tags
-  const code = codeForName(l) ?? canonicalLanguage(l);
-  return code && code.length <= 3 ? code : undefined;
+  // a name ("german") is also a well-formed 5-8 letter tag, so names are tried first
+  return codeForName(l) ?? spokenCanonical(l);
+}
+
+/**
+ * A settings object with its `language` as a canonical code, or without it when the value names no language
+ * ("Englsh"), so what every surface stores is a code the model can take or nothing (detect). The one place
+ * settings are normalised: project create and update, and the saved project defaults.
+ */
+export function withSpokenLanguage<T extends { language?: string | null | undefined }>(settings: T): T {
+  if (settings.language === undefined) return settings;
+  const { language, ...rest } = settings;
+  const code = spokenLanguageCode(language);
+  return (code ? { ...rest, language: code } : rest) as T;
 }
 
 /**
@@ -75,7 +104,8 @@ export function spokenLanguageOptions(
   return codes
     .map((value) => {
       const label = languageLabel(value, locale);
-      const native = languageLabel(value, value);
+      // a runtime without the language's own data names it in its default locale instead: no native name then
+      const native = Intl.DisplayNames.supportedLocalesOf([value]).length ? languageLabel(value, value) : value;
       return native !== label && native !== value ? { value, label, native } : { value, label };
     })
     .sort((a, b) => a.label.localeCompare(b.label, locale));

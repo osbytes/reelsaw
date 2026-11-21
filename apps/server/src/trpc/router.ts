@@ -33,7 +33,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN, withSpokenLanguage } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   checkSource,
@@ -552,7 +552,7 @@ const headRouter = router({
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
       const { introAssetId: _i, outroAssetId: _o, ...rest } = input; // intro/outro change only through `bumpers.*`
-      const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
+      const clean = withSpokenLanguage(Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== "")));
       return ctx.svc.tx(async (u) => {
         // the default layer template must be one of the user's live templates
         if (typeof clean.layerTemplateId === "string") await getLayerTemplate(u.db, ctx.user.id, clean.layerTemplateId);

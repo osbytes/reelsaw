@@ -55,7 +55,9 @@ You only see and change your own projects and library. Admins may pass instance:
 const projectDefaultsShape = userProjectDefaultsSchema.omit({ introAssetId: true, outroAssetId: true }).shape;
 const projectDefaultsInput = z
   .object({
-    language: projectDefaultsShape.language.describe("Spoken language code from list_languages, e.g. en; unset = detected"),
+    language: projectDefaultsShape.language.describe(
+      "Spoken language: a code from list_languages (e.g. en) or its English name; unset, or a value that names no language, = detected",
+    ),
     vocabulary: projectDefaultsShape.vocabulary.describe("Names and terms the transcript should spell right"),
     instructions: projectDefaultsShape.instructions.describe("Standing instructions for picking clips"),
     focus: projectDefaultsShape.focus.describe("What to look for in a clip"),

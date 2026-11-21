@@ -79,7 +79,7 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
   const optionsFor = (modelId: string, opts: { providerOptions?: Record<string, JSONObject>; language?: string | null | undefined }) => {
     const base = opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>);
     const k = ai.transcriptionOptionsKey(modelId);
-    const lang = transcriptionLanguageOptions(k, opts.language) as JSONObject;
+    const lang = transcriptionLanguageOptions(k, opts.language, modelId) as JSONObject;
     return Object.keys(lang).length ? { ...base, [k]: { ...(base[k] ?? {}), ...lang } } : base;
   };
   const asr: Asr = {

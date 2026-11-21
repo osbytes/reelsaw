@@ -16,7 +16,15 @@ import {
   transcriptionLanguageOptions,
 } from "../src/pipeline/language.js";
 import { buildMapPrompt } from "../src/pipeline/select.js";
-import { WHISPER_SPOKEN_LANGUAGES, canonicalLanguage, languageLabel, spokenLanguageCode, spokenLanguageOptions } from "@reelsaw/shared";
+import {
+  withSpokenLanguage,
+  WHISPER_LANGUAGE_NAMES,
+  WHISPER_SPOKEN_LANGUAGES,
+  canonicalLanguage,
+  languageLabel,
+  spokenLanguageCode,
+  spokenLanguageOptions,
+} from "@reelsaw/shared";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
 describe("norm (disfluency)", () => {
@@ -74,10 +82,17 @@ describe("transcriptionLanguageOptions", () => {
     assert.deepEqual(transcriptionLanguageOptions("deepgram", "es"), { language: "es" });
     assert.deepEqual(transcriptionLanguageOptions("assemblyai", "fr"), { languageCode: "fr" });
   });
-  it("spells a code Whisper's way only for the Whisper-served providers", () => {
-    assert.deepEqual(transcriptionLanguageOptions("openai", "jv"), { language: "jw" }, "same option as before the codes were canonical: cache keys hold");
-    assert.deepEqual(transcriptionLanguageOptions("groq", "nb"), { language: "no" });
-    assert.deepEqual(transcriptionLanguageOptions("deepgram", "jv"), { language: "jv" });
+  it("spells a code Whisper's way only for Whisper models", () => {
+    assert.deepEqual(
+      transcriptionLanguageOptions("openai", "jv", "openai:whisper-1"),
+      { language: "jw" },
+      "same option as before the codes were canonical: cache keys hold",
+    );
+    assert.deepEqual(transcriptionLanguageOptions("groq", "nb", "groq:whisper-large-v3-turbo"), { language: "no" });
+    assert.deepEqual(transcriptionLanguageOptions("groq", "tagalog", "groq:whisper-large-v3-turbo"), { language: "tl" });
+    assert.deepEqual(transcriptionLanguageOptions("openai", "jv", "openai:gpt-4o-transcribe"), { language: "jv" });
+    assert.deepEqual(transcriptionLanguageOptions("openai", "jv", "openrouter:deepgram/nova-3"), { language: "jv" });
+    assert.deepEqual(transcriptionLanguageOptions("deepgram", "jv", "deepgram:nova-3"), { language: "jv" });
   });
   it("sends nothing when unset (detect) or for a vendor without the option", () => {
     assert.deepEqual(transcriptionLanguageOptions("openai", ""), {});
@@ -100,6 +115,14 @@ describe("spoken language list", () => {
     assert.equal(spokenLanguageCode("  "), undefined);
     assert.equal(spokenLanguageCode("xx-YY"), "xx", "a tag outside the set keeps its primary subtag");
     assert.equal(spokenLanguageCode("Englsh"), undefined, "a misspelt name is detection, not a code the model cannot know");
+    for (const special of ["und", "mul", "zxx", "mis", "qaa"]) assert.equal(spokenLanguageCode(special), undefined, special);
+  });
+  it("takes every name Whisper reports or takes", () => {
+    // OpenAI's whisper-1 reports the detected language by Whisper's name, and five differ from Intl's
+    for (const [name, code] of Object.entries(WHISPER_LANGUAGE_NAMES)) assert.equal(spokenLanguageCode(name), canonicalLanguage(code), name);
+    assert.equal(spokenLanguageCode("Bengali"), "bn");
+    assert.equal(spokenLanguageCode("Bangla"), "bn");
+    assert.equal(spokenLanguageCode("myanmar"), "my");
   });
   it("canonicalises with CLDR's aliases, not a table of ours", () => {
     for (const [from, to] of [
@@ -117,6 +140,7 @@ describe("spoken language list", () => {
   it("takes Whisper's set from its own table, canonicalised", () => {
     assert.equal(WHISPER_SPOKEN_LANGUAGES.length, 100);
     assert.ok(WHISPER_SPOKEN_LANGUAGES.includes("jv") && !WHISPER_SPOKEN_LANGUAGES.includes("jw"));
+    assert.ok(WHISPER_SPOKEN_LANGUAGES.includes("fil"), 'CLDR canonicalises Tagalog "tl" to "fil"');
     assert.ok(WHISPER_SPOKEN_LANGUAGES.includes("yue") && WHISPER_SPOKEN_LANGUAGES.includes("haw"));
   });
   it("has a name for every code, in any locale", () => {
@@ -172,5 +196,14 @@ describe("SENTENCE_END", () => {
   });
   it("does not match an unfinished sentence", () => {
     for (const s of ["東京に行き", "and then", "wait,"]) assert.equal(SENTENCE_END.test(s), false, s);
+  });
+});
+
+describe("withSpokenLanguage", () => {
+  it("stores a code, or nothing for what names no language", () => {
+    assert.deepEqual(withSpokenLanguage({ language: "German", maxClips: 3 }), { language: "de", maxClips: 3 });
+    assert.deepEqual(withSpokenLanguage({ language: "Englsh", maxClips: 3 }), { maxClips: 3 });
+    assert.deepEqual(withSpokenLanguage({ language: "auto-detect" }), {}, "the old free-text placeholder");
+    assert.deepEqual(withSpokenLanguage({ maxClips: 3 }), { maxClips: 3 });
   });
 });

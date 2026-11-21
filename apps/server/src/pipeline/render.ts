@@ -1,3 +1,4 @@
+import { languageForModel } from "../ai/spoken-languages.js";
 import path from "node:path";
 import { capDiagnostics } from "../transcript-limits.js";
 import fs from "node:fs/promises";
@@ -1669,6 +1670,8 @@ export async function planClipCuts(
     .filter((w) => w.end > clip.startSec - 1 && w.start < clip.endSec + 1)
     .map((w) => ({ text: w.text, start: w.start - clip.startSec, end: w.end - clip.startSec }));
   const alignModelId = svc.models.get().align;
+  // the same language for every cut window, and the same one keyFor would see (ai/spoken-languages.ts)
+  const alignLanguage = await languageForModel(svc, alignModelId, transcript?.language);
 
   const refined = await refineCuts(
     {
@@ -1679,7 +1682,7 @@ export async function planClipCuts(
       ffmpegPath: svc.config.FFMPEG_PATH,
       signal,
       transcribe: async (audio) => {
-        const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal, language: transcript?.language });
+        const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal, language: alignLanguage });
         return toWords(res.segments);
       },
     },

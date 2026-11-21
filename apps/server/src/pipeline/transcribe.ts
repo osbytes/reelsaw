@@ -1,3 +1,4 @@
+import { languageForModel } from "../ai/spoken-languages.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { and, eq, asc } from "drizzle-orm";
@@ -154,8 +155,9 @@ export async function transcribe(ctx: StageContext) {
   const provider = svc.ai.transcriptionOptionsKey(transcriptionModel);
   const providerOptions = svc.ai.transcriptionOptions(transcriptionModel) as Record<string, JSONObject>;
   // the language the user set (project settings or their defaults) is sent, not left to detection; asr merges it into
-  // the options, so it is part of the ASR cache key and the chunk step key: changing it transcribes again
-  const spoken = languageCode(project.settings.language);
+  // the options, so it is part of the ASR cache key and the chunk step key: changing it transcribes again. One the
+  // model does not take is left to detection instead of failing every chunk (ai/spoken-languages.ts)
+  const spoken = await languageForModel(svc, transcriptionModel, project.settings.language);
   if (svc.config.TRANSCRIPT_BIAS && entities.length) {
     providerOptions[provider] = { ...(providerOptions[provider] ?? {}), ...(biasProviderOptions(provider, entities) as JSONObject) };
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
