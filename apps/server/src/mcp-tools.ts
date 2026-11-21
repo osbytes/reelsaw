@@ -981,7 +981,7 @@ export const TOOLS = {
   list_languages: {
     title: "List spoken languages",
     description:
-      'The spoken languages the transcription model in force takes: a code from here is what settings.language takes in create_project, update_project and set_project_defaults (unset = the model detects it). Clip titles, hooks, captions and hashtags are written in the video\'s language. source is "model" when the model\'s server listed them (Speaches, Deepgram), "whisper" when it says nothing and Whisper\'s languages are assumed. Returns { model, source, languages: [{ code, name }] }.',
+      'The spoken languages the transcription model in force takes: a code from here is settings.language (create_project, update_project, set_project_defaults; unset = detected). source: "model" when the model\x27s server listed them, "whisper" when Whisper\x27s are assumed. gaps: what does less for that language than for English ("limited" or "none": no caption font for its script, English-only filler removal). Returns { model, source, languages: [{ code, name, gaps: [{ stage, label, level, message }] }] }.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },

@@ -110,7 +110,7 @@ function skipMessage(step: RefineStep, reason: string, language: string | null) 
 const STEP_LANGUAGE_STAGE: Partial<Record<RefineStep, LanguageStage>> = { entities: "entityPhonetics", disfluency: "disfluencyRules" };
 function unsupportedLanguage(step: RefineStep, language: string | null): string | null {
   const stage = STEP_LANGUAGE_STAGE[step];
-  return stage && !supports(stage, language) ? skipReason(language) : null;
+  return stage && !supports(stage, language) ? skipReason(stage, language) : null;
 }
 
 /**

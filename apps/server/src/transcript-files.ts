@@ -34,9 +34,9 @@ export interface CaptionFile {
 export const MAX_SUBTITLE_BYTES = 10 * 1024 * 1024;
 const SUBTITLE_EXTS = [".srt", ".vtt", ".txt"];
 
-function render(lines: CaptionLine[], format: CaptionFormat, words: boolean) {
-  const text = format === "srt" ? toSrt(lines) : toVtt(lines, { wordTimes: words });
-  return { text, lines: lines.filter((l) => (l.text ?? (l.words ?? []).map((w) => w.text).join(" ")).trim()).length };
+function render(lines: CaptionLine[], format: CaptionFormat, words: boolean, lang: string | null | undefined) {
+  const text = format === "srt" ? toSrt(lines, { lang }) : toVtt(lines, { wordTimes: words, lang });
+  return { text, lines: lines.filter((l) => (l.text ?? (l.words ?? []).map((w) => w.text).join("")).trim()).length };
 }
 
 /** The project as `actor` may see it (the owner, an admin, or the operator CLI with null). */
@@ -67,7 +67,7 @@ export async function clipCaptionsFile(
       code: "NOT_FOUND",
       message: "This clip has not been rendered since caption files were added. Re-render it, then export its captions.",
     });
-  const out = render(clip.captions.lines, o.format, !!o.words);
+  const out = render(clip.captions.lines, o.format, !!o.words, clip.captions.language);
   return { format: o.format, ...out, filename: `${String(clip.index + 1).padStart(2, "0")}-${slugify(clip.title)}.${o.format}` };
 }
 
@@ -79,9 +79,12 @@ export async function projectTranscriptFile(
   o: { format: CaptionFormat; words?: boolean | undefined },
 ): Promise<CaptionFile> {
   const project = await projectOf(svc, actor, projectId);
-  const t = await svc.database.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { segments: true, words: true } });
+  const t = await svc.database.db.query.transcripts.findFirst({
+    where: eq(schema.transcripts.projectId, projectId),
+    columns: { segments: true, words: true, language: true },
+  });
   if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "This project has no transcript yet. Export it once the project has been transcribed." });
-  const out = render(linesFromTranscript(t.segments, t.words), o.format, !!o.words);
+  const out = render(linesFromTranscript(t.segments, t.words), o.format, !!o.words, t.language);
   return { format: o.format, ...out, filename: `${slugify(project.title, 80)}-transcript.${o.format}` };
 }
 

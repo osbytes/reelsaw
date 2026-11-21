@@ -130,7 +130,7 @@ describe("cuesToTranscript", () => {
     assert.ok(words[1]!.end - words[1]!.start > words[0]!.end - words[0]!.start);
   });
 
-  it("keeps words in order when cues overlap and splits CJK per character", () => {
+  it("keeps words in order when cues overlap and finds the words of scripts without spaces", () => {
     const { words } = cuesToTranscript([
       { start: 0, end: 4, text: "one two" },
       { start: 2, end: 6, text: "three" },
@@ -138,8 +138,16 @@ describe("cuesToTranscript", () => {
     for (let i = 1; i < words.length; i++) assert.ok(words[i]!.start >= words[i - 1]!.end - 1e-9);
     assert.deepEqual(
       cuesToTranscript([{ start: 0, end: 1, text: "你好 world" }], { language: "zh" }).words.map((w) => w.text),
-      ["你", "好", "world"],
+      ["你好", "world"],
     );
+    // Thai and Japanese have no spaces between words: Intl.Segmenter finds them, and the segment text has no spaces added
+    const th = cuesToTranscript([{ start: 0, end: 2, text: "สวัสดีครับวันนี้อากาศดี" }], { language: "th" });
+    assert.deepEqual(
+      th.words.map((w) => w.text),
+      ["สวัสดี", "ครับ", "วัน", "นี้", "อากาศ", "ดี"],
+    );
+    assert.equal(th.segments[0]!.text, "สวัสดีครับวันนี้อากาศดี");
+    assert.equal(cuesToTranscript([{ start: 0, end: 1, text: "今日はいい天気です。" }], { language: "ja" }).segments[0]!.text, "今日はいい天気です。");
   });
 });
 

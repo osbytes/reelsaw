@@ -24,7 +24,8 @@ import {
 } from "./asr-loops.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { enqueueRefine } from "./refine.js";
-import { languageCode } from "./language.js";
+import { languageCode, languageGaps, gapLine } from "./language.js";
+import { languageFonts } from "../languages.js";
 import { plural } from "@reelsaw/shared";
 
 /**
@@ -302,6 +303,10 @@ export async function transcribe(ctx: StageContext) {
   // every chunk is a saved step, so another attempt replays the same empty answer: fail the run now
   if (!words.length) throw new NonRetryableError("Transcription returned no words. Is the audio silent?");
   const sentences = toSentences(words);
+  const language = spoken ?? languageCode(chunks.find((c) => c.language)?.language) ?? null;
+  // what will work less well for this language, said once now, before anything renders (refine reports its own skips)
+  const gaps = language ? languageGaps(language, await languageFonts(svc)).filter((g) => !REFINE_REPORTS.has(g.stage)) : [];
+  if (gaps.length) ctx.log.info({ language, gaps: gaps.map(gapLine) }, "stages that do less for this language");
 
   await ctx.complete(
     { words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length, loops: flags.length, loopDropped: dropped },
@@ -319,7 +324,7 @@ export async function transcribe(ctx: StageContext) {
         .values({
           projectId,
           // a code ("en"), never the name some models answer with ("english"); the user's setting wins over detection
-          language: spoken ?? languageCode(chunks.find((c) => c.language)?.language) ?? null,
+          language,
           text: words.map((w) => w.text).join(" "),
           words,
           rawWords,
@@ -331,6 +336,7 @@ export async function transcribe(ctx: StageContext) {
           coveredSec: limit,
         })
         .onConflictDoNothing();
+      for (const g of gaps) await u.emit("language.degraded", { projectId, stage: g.stage, language: language!, reason: gapLine(g) });
       await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
     },
   );
@@ -389,5 +395,8 @@ async function appendRest(
   });
   ctx.log.info({ fromSec: r.fromSec, untilSec: r.limit, words: added }, "transcript extended");
 }
+
+/** Stages whose skip refine records itself when it gets to them (pipeline/refine.ts skipMessage). */
+const REFINE_REPORTS = new Set(["disfluencyRules", "entityPhonetics"]);
 
 export { QUEUES };

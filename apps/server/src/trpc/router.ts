@@ -81,7 +81,7 @@ import { bulkUsersInput, userGroupsInput, userListInput } from "../accounts-sche
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { addFontFromUpload, listFonts, removeFonts } from "../fonts.js";
-import { spokenLanguages } from "../ai/spoken-languages.js";
+import { listLanguages } from "../languages.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures } from "../ops/failures.js";
@@ -940,11 +940,12 @@ const restRouter = router({
     list: protectedProcedure.query(({ ctx }) => listFonts(ctx.svc, { admin: ctx.user.role === "admin" })),
   }),
   /**
-   * The spoken languages the transcription model in force takes (ai/spoken-languages.ts), for the project language
-   * picker. The same code serves `list_languages` and `reelsaw languages`.
+   * The spoken languages the transcription model in force takes (ai/spoken-languages.ts), each with what Reelsaw does
+   * less well for it (languages.ts), for the project language picker. The same code serves `list_languages` and
+   * `reelsaw languages`.
    */
   languages: router({
-    list: protectedProcedure.query(({ ctx }) => spokenLanguages(ctx.svc)),
+    list: protectedProcedure.query(({ ctx }) => listLanguages(ctx.svc)),
   }),
   /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
   catalog: router({

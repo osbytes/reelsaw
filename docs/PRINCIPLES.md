@@ -354,6 +354,16 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   ~900-word hand list missed "don't", "gonna" and "noticing"; it is now SCOWL's dictionary
   sizes (`wordlist-english`). `test/word-lists.test.ts` fails on a new long word list in the
   source that is not marked closed.
+- **No stage assumes Latin script or English punctuation.** What a language needs (script,
+  direction, capitals, spaces between words, how a sentence ends, its letters) is its profile,
+  `languageProfile` in `@reelsaw/shared`, read from Unicode and CLDR (`Intl.Locale`,
+  `Intl.Segmenter`, the pinned `cldr-misc-full`), and what a stage does for it is the registry in
+  `pipeline/language.ts`. A stage that joins words, upper-cases, splits sentences or draws text
+  asks those (`joinWords`, `upperCase`, `endsSentence`, `segmentWords`, `capability`), never
+  `.join(" ")`, `toUpperCase()` or `/[.!?]/`; one that does less for a language says so in its
+  registry entry and records a `language.degraded` event. Example: Hindi captions burned in as
+  empty boxes because no installed font drew Devanagari, and nothing said so.
+  `test/language-matrix.test.ts` sweeps every language the transcription model takes.
 - **Operable by default.** Logs are the first debugging tool (see "Logging" under Backend /
   Structure). Every diagnosis you need more than once becomes a `reelsaw` CLI command. Events are
   readable in the activity feed.

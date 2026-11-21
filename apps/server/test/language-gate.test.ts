@@ -69,8 +69,8 @@ describe("supports", () => {
     for (const s of stages) for (const l of ["de", "ja", "German", "zh-CN", "ar"]) assert.equal(supports(s, l), false, `${s} ${l}`);
   });
   it("names the language in the skip reason", () => {
-    assert.equal(skipReason("de"), "not available for de");
-    assert.equal(skipReason("German"), "not available for de");
+    assert.equal(skipReason("disfluencyRules", "de"), "not available for German yet: it works for English only");
+    assert.equal(skipReason("entityPhonetics", "German"), "not available for German yet: it works for English only");
     assert.equal(languageCode("pt-BR"), "pt");
   });
 });
