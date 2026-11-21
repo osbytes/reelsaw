@@ -57,6 +57,15 @@ describe("splitInterface", () => {
     assert.deepEqual(kept, [bug, tag]);
   });
 
+  it("two shirts, one on each side, are scene text but do not make a corner logo interface", () => {
+    const left = r("caption", 0.08, 0.45, 0.38, 0.7, 0.4);
+    const right = r("caption", 0.62, 0.45, 0.92, 0.7, 0.4);
+    const bug = r("watermark", 0.86, 0, 1, 0.07, 0.95);
+    const { kept, ui } = splitInterface([left, right, bug]);
+    assert.deepEqual(kept, [bug]);
+    assert.deepEqual(ui, [left, right]);
+  });
+
   it("keeps a wide band halfway down that crosses the centre (subtitles placed high)", () => {
     const high = r("caption", 0.2, 0.55, 0.8, 0.68, 0.7);
     assert.deepEqual(splitInterface([high]).kept, [high]);

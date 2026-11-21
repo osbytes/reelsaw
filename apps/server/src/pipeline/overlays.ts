@@ -140,8 +140,12 @@ export function splitInterface<O extends Box>(overlays: O[]): { kept: O[]; ui: O
     const cy = (o.y1 + o.y2) / 2;
     return cy > 0.2 && cy < 0.75;
   };
-  const side = overlays.filter((o) => (offCentre(o) || clearOfCentre(o)) && midSide(o));
-  const ui = side.length >= 2 ? overlays.filter((o) => offCentre(o) && (midSide(o) || o.x1 <= EDGE_MARGIN || o.x2 >= 1 - EDGE_MARGIN)) : side;
+  // only narrow side text says "this video shows an interface"; a wide block clear of the centre (two guests'
+  // shirts) is scene text on its own and must not turn the corner logos into interface
+  const side = overlays.filter((o) => offCentre(o) && midSide(o));
+  const wide = overlays.filter((o) => !offCentre(o) && clearOfCentre(o) && midSide(o));
+  const narrow = side.length >= 2 ? overlays.filter((o) => offCentre(o) && (midSide(o) || o.x1 <= EDGE_MARGIN || o.x2 >= 1 - EDGE_MARGIN)) : side;
+  const ui = overlays.filter((o) => narrow.includes(o) || wide.includes(o));
   return { kept: overlays.filter((o) => !ui.includes(o)), ui };
 }
 

@@ -89,11 +89,12 @@ function firstArray(parsed: unknown): unknown[] {
  * else a number. `taken` are titles already on the project (clips the user kept).
  */
 export function distinctTitles<T extends { title: string; hook: string }>(clips: T[], taken: string[] = []): T[] {
+  // letters and digits decide ("Title!" = "title"); a title with none (emoji only) is compared as written
   const key = (t: string) =>
     t
       .toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim();
+      .trim() || t.trim();
   const seen = new Set(taken.map(key));
   return clips.map((c) => {
     let title = c.title;

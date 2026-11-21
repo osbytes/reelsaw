@@ -798,16 +798,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     clip.id,
     log,
   );
-  // speech level: one linear gain to CLIP_LUFS for the body, measured on the range being rendered
-  const loudness: Loudness | null = await measureLoudness(svc.media, sourcePath, at, duration, ctx.signal).catch((err) => {
-    if (ctx.signal.aborted) throw err;
-    log.warn({ err }, "could not measure clip loudness; audio kept at its source level");
-    return null;
-  });
+  const srcHasAudio = (await svc.media.ffprobe(sourcePath)).hasAudio;
+  // speech level: one linear gain to CLIP_LUFS for the body, measured on the range being rendered (a source
+  // without sound has nothing to measure)
+  const loudness: Loudness | null = srcHasAudio
+    ? await measureLoudness(svc.media, sourcePath, at, duration, ctx.signal).catch((err) => {
+        if (ctx.signal.aborted) throw err;
+        log.warn({ err }, "could not measure clip loudness; audio kept at its source level");
+        return null;
+      })
+    : null;
   const gainDb = speechGainDb(loudness);
-  log.debug({ loudness, gainDb }, "speech level");
-  const srcHasAudio =
-    bumpers.intro || bumpers.outro || music.length || style.fadeIn > 0 || style.fadeOut > 0 ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
+  log.debug({ loudness, gainDb, srcHasAudio }, "speech level");
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean, withOverlays: boolean, transitions: TransitionPlan): { graph: string; audioMap: string[] } => {
     // the tail joins the intro / outro and burns in the fades; it runs when there is either

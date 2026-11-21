@@ -38,3 +38,17 @@ describe("distinctTitles", () => {
     assert.equal(out[1], xs[1]);
   });
 });
+
+describe("distinctTitles without letters", () => {
+  it("different emoji-only titles are different", () => {
+    const out = distinctTitles([
+      { title: "🔥🔥🔥", hook: "x" },
+      { title: "😱", hook: "y" },
+      { title: "🔥🔥🔥", hook: "z" },
+    ]);
+    assert.deepEqual(
+      out.map((c) => c.title),
+      ["🔥🔥🔥", "😱", "z"],
+    );
+  });
+});

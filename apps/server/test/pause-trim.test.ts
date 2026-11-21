@@ -72,3 +72,19 @@ test("nothing to trim, nothing reported", () => {
   const { pcm, segments, duration } = pcmOf([{ sec: 20, kind: "speech" }]);
   assert.deepEqual(planPauseTrim(segments, pcm, duration, { maxPause: 0.6 }), { cuts: [], keptSound: 0 });
 });
+
+test("speech level ignores the quiet between words, so game sound under the voice is not a pause", async () => {
+  const { speechLevelDb } = await import("../src/audio/vad.ts");
+  // a segment that is half loud syllables, half near-silence between words: the reference is the syllables
+  const { pcm, duration } = pcmOf([
+    { sec: 0.3, kind: "speech" },
+    { sec: 0.3, kind: "quiet" },
+    { sec: 0.3, kind: "speech" },
+    { sec: 0.3, kind: "quiet" },
+    { sec: 0.3, kind: "speech" },
+    { sec: 0.3, kind: "quiet" },
+  ]);
+  const db = speechLevelDb([{ start: 0, end: duration }], pcm);
+  // the 0.3 amplitude tone is about -13.5 dBFS RMS; a whole-segment average would sit 3 dB lower
+  assert.ok(db > -15, `speech level ${db.toFixed(1)} dB`);
+});

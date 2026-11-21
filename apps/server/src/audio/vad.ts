@@ -129,7 +129,7 @@ export interface PauseTrim {
   wouldRemoveSec?: number;
 }
 
-/** A gap is a pause only when it is this much quieter than the clip's speech. */
+/** A gap is a pause only when it is this much quieter than the clip's speech (speechLevelDb). */
 export const PAUSE_QUIET_DB = 15;
 /** Pause trimming that would remove more than this share of a clip is not trimming pauses. */
 export const PAUSE_MAX_SHARE = 0.25;
@@ -137,7 +137,7 @@ export const PAUSE_MAX_SHARE = 0.25;
 /**
  * Which pauses to cut. "No speech" is not "a pause": in gameplay, reactions and trailers the time
  * between words is the content (game sound, music, action), and cutting it turned half-minute moments
- * into clips of a few seconds. A gap is cut only when it is quiet (PAUSE_QUIET_DB under the median speech level), and when
+ * into clips of a few seconds. A gap is cut only when it is quiet (PAUSE_QUIET_DB under the speech level, speechLevelDb), and when
  * the quiet gaps still add up to more than PAUSE_MAX_SHARE of the clip, the clip is not a talking clip
  * with pauses and nothing is cut: a wrong automatic edit is worse than a missed one.
  */
@@ -149,8 +149,7 @@ export function planPauseTrim(
 ): PauseTrim {
   const candidates = pauseCuts(segments, duration, { maxPause: opts.maxPause });
   if (!candidates.length) return { cuts: [], keptSound: 0 };
-  const levels = segments.map((s) => levelDb(pcm, s.start, s.end)).sort((a, b) => a - b);
-  const speechDb = levels[Math.floor(levels.length / 2)]!;
+  const speechDb = speechLevelDb(segments, pcm);
   const quietBelow = speechDb - (opts.quietDb ?? PAUSE_QUIET_DB);
   const cuts = candidates.filter((c) => levelDb(pcm, c.start, c.end) <= quietBelow);
   const keptSound = candidates.length - cuts.length;
@@ -158,4 +157,17 @@ export function planPauseTrim(
   if (removed > (opts.maxShare ?? PAUSE_MAX_SHARE) * duration)
     return { cuts: [], keptSound, skipped: "mostly-sound", wouldRemoveSec: Number(removed.toFixed(2)) };
   return { cuts, keptSound };
+}
+
+/**
+ * How loud the clip's speech is: the 75th percentile of 100 ms frame levels inside speech segments. Frames, not
+ * whole segments, so the quiet gaps between words inside a segment don't drag the reference down; a high quantile,
+ * so a mumbled stretch doesn't either, and game sound that is truly under the voice reads as such.
+ */
+export function speechLevelDb(segments: SpeechSegment[], pcm: Float32Array, frameSec = 0.1): number {
+  const frames: number[] = [];
+  for (const s of segments) for (let t = s.start; t + frameSec <= s.end + 1e-6; t += frameSec) frames.push(levelDb(pcm, t, t + frameSec));
+  if (!frames.length) for (const s of segments) frames.push(levelDb(pcm, s.start, s.end));
+  frames.sort((a, b) => a - b);
+  return frames[Math.min(frames.length - 1, Math.floor(0.75 * frames.length))] ?? -120;
 }

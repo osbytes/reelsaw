@@ -263,7 +263,17 @@ export function snapCandidate(
       start = Math.max(0, done.start - PAD_START);
       end = Math.min(durationSec || done.end + PAD_END, done.end + PAD_END);
     }
-    ({ start, end } = padWithinGaps(thought.words, { start, end }, { start: speechStart, end: speechEnd }));
+    const fit = padWithinGaps(thought.words, { start, end }, { start: speechStart, end: speechEnd });
+    if (fit.start !== start || fit.end !== end)
+      thought.log?.debug(
+        {
+          from: [Number(start.toFixed(2)), Number(end.toFixed(2))],
+          to: [Number(fit.start.toFixed(2)), Number(fit.end.toFixed(2))],
+          title: c.title.slice(0, 60),
+        },
+        "clip padding kept out of the neighbouring words",
+      );
+    ({ start, end } = fit);
   }
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }

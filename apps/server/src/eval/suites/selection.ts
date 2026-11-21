@@ -542,12 +542,23 @@ export const selectionSuite: Suite = {
         const bad: string[] = [];
         if (!c) bad.push("candidate dropped");
         else {
-          const lastIdx = words.map((w, i) => ((w.start + w.end) / 2 < c.endSec - 0.35 ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
-          const signal = sentenceEndAfter(words, lastIdx);
-          if (!signal) bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
-          // the end pad is breathing room, not the start of what comes next
-          const leaked = words.slice(lastIdx + 1).filter((w) => w.start < c.endSec);
-          if (leaked.length) bad.push(`takes the next words along: "${leaked.map((w) => w.text).join(" ")}"`);
+          // the last word the clip plays is the last one starting before its end (what the render keeps; the end
+          // pad varies, so it is not "the end minus 0.35 s")
+          const lastIdx = words.findLastIndex((w) => w.start < c.endSec);
+          if (!sentenceEndAfter(words, lastIdx)) {
+            // the end pad is breathing room, not the start of what comes next: a sentence end a few words back
+            // means the clip took the next sentence's first words along
+            let sentEnd = lastIdx - 1;
+            while (sentEnd >= Math.max(0, lastIdx - 3) && !sentenceEndAfter(words, sentEnd)) sentEnd--;
+            if (sentEnd >= Math.max(0, lastIdx - 3))
+              bad.push(
+                `takes the next words along: "${words
+                  .slice(sentEnd + 1, lastIdx + 1)
+                  .map((w) => w.text)
+                  .join(" ")}"`,
+              );
+            else bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
+          }
           if (Math.abs(c.endSec - k.expectEnd) > k.tolerance)
             bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
           if (c.startSec > k.windowStart + 0.5) bad.push(`starts at ${c.startSec}, after ${k.windowStart}`);
