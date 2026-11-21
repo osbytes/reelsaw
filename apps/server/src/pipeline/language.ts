@@ -70,8 +70,8 @@ const STAGES: Record<LanguageStage, { label: string; check: Check }> = {
     label: "captions",
     check: (p, _name, fonts) => {
       if (!fonts) return { level: "full", message: "fonts not checked" };
-      if (!fonts.system)
-        return { level: "limited", message: "this server could not list its fonts (fontconfig), so it cannot tell whether captions draw this language" };
+      // no fontconfig (a dev machine): unknown, not a gap, as the render treats it (render.ts fontGapEvent)
+      if (!fonts.system) return { level: "full", message: "fonts not checked: this server could not list them (fontconfig)" };
       const letters = p.letters || p.sample;
       const { missing, uploadedCover } = glyphGap(letters, fonts);
       if (!missing.length) return { level: "full", message: `drawn with the installed fonts (${scriptName(p)})` };
