@@ -8,7 +8,7 @@ import { requestRender } from "./lifecycle.js";
  *
  * Runs as its own queue job (`clip.prepare`) so it is resumable; afterwards the clip is rendered.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import { schema } from "../db/index.js";
@@ -24,6 +24,7 @@ import {
   extractJson,
   mapChunk,
   normalizeCandidate,
+  distinctTitles,
   scoreBatches,
   scoreItem,
   scoreSample,
@@ -289,6 +290,20 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       .for("update");
     if (!cur || !needsPrepare(cur)) return log.info("clip deleted or prepared meanwhile; nothing to write");
     const patch = preparedPatch(clip, cur, prepared);
+    if (patch.title !== undefined) {
+      // a new clip's title is the model's packaging: it must not repeat a title the project already has
+      const others = await u.db
+        .select({ title: schema.clips.title })
+        .from(schema.clips)
+        .where(and(eq(schema.clips.projectId, projectId), ne(schema.clips.id, clipId), isNull(schema.clips.deletedAt)));
+      const title =
+        distinctTitles(
+          [{ title: patch.title, hook: patch.hook ?? cur.hook }],
+          others.map((o) => o.title),
+        )[0]?.title ?? patch.title;
+      if (title !== patch.title) log.debug({ from: patch.title, to: title }, "clip retitled: title already used");
+      patch.title = title.slice(0, 120);
+    }
     const bounds = { startSec: patch.startSec ?? cur.startSec, endSec: patch.endSec ?? cur.endSec };
     // the project's layer template, placed against the final bounds; a clip that already has layers keeps them, and
     // an intro / outro the user already chose for it wins over the template's

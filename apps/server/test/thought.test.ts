@@ -117,3 +117,28 @@ describe("finishThought: start", () => {
     assert.equal(r.changes[0]!.action, "left");
   });
 });
+
+describe("clip padding stays between words", () => {
+  // "…and you succeed. If you…" spoken without a pause; the 0.35 s end pad took "If you" along
+  it("the end pad never reaches the next sentence's first word", async () => {
+    const { snapCandidate } = await import("../src/pipeline/analyze.js");
+    const { defaultProjectSettings } = await import("@reelsaw/shared");
+    const ws = words(Array.from({ length: 50 }, (_, i) => (i === 49 ? "succeed.@0.1" : i % 10 === 9 ? "again.@0.1" : "word")).join(" ") + " If you want more");
+    const sentenceEnds = ws.flatMap((w, i) => (/\.$/.test(w.text) ? [i] : []));
+    const segments = sentenceEnds.map((e, k) => ({ start: ws[k ? sentenceEnds[k - 1]! + 1 : 0]!.start, end: ws[e]!.end, text: "" }));
+    const lastEnd = ws[49]!.end;
+    const c = snapCandidate(
+      { title: "t", hook: "h", startSec: 0, endSec: lastEnd, score: 80, reason: "" },
+      segments,
+      [],
+      { ...defaultProjectSettings, minClipSeconds: 10, maxClipSeconds: 60 },
+      ws.at(-1)!.end,
+      { words: ws },
+    );
+    assert.ok(c);
+    const next = ws[50]!;
+    assert.ok(c.endSec < next.start, `clip ends at ${c.endSec}, "If" starts at ${next.start}`);
+    assert.ok(c.endSec >= lastEnd, "the sentence itself is kept whole");
+    assert.equal(text(ws, c.startSec, c.endSec).split(" ").at(-1), "succeed.");
+  });
+});

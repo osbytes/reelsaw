@@ -16,6 +16,7 @@
  * marked `verified: false` with the reason.
  */
 import { spawn } from "node:child_process";
+import { CommandError } from "../media.js";
 import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word, plural } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { supports } from "./language.js";
@@ -63,7 +64,7 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.stderr.on("data", (d: Buffer) => (err += d.toString()));
     p.on("error", reject);
-    p.on("close", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg (${code}): ${err.slice(-300)}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new CommandError("ffmpeg", code, err, sig))));
   });
 }
 

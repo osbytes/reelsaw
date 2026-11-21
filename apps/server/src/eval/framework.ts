@@ -11,6 +11,7 @@
  *    metrics; a run fails when a baseline-passing case fails or a metric gets worse than its tolerance.
  */
 import fs from "node:fs/promises";
+import { CommandError } from "../media.js";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -137,7 +138,7 @@ export function exec(cmd: string, args: string[]): Promise<Buffer> {
     p.stdout.on("data", (d: Buffer) => out.push(d));
     p.stderr.on("data", (d: Buffer) => (err += d.toString()));
     p.on("error", reject);
-    p.on("close", (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`${path.basename(cmd)} exited ${code}: ${err.slice(-400)}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new CommandError(path.basename(cmd), code, err, sig))));
   });
 }
 

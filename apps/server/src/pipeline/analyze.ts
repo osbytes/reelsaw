@@ -31,6 +31,7 @@ import {
   type ScoreInput,
   type ScoreResult,
   type SelectContext,
+  distinctTitles,
 } from "./select.js";
 import { isAbortError } from "./steps.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
@@ -153,6 +154,27 @@ function nearest(values: number[], target: number, tolerance: number): number | 
   return best;
 }
 
+/**
+ * The breathing room around a clip (and a scene cut it snapped to) stays in the gap between words: it never
+ * reaches the next sentence's first word or the previous one's last. A fast talker starts the next word within
+ * the 0.35 s end pad, and clips ended on the opening words of the next sentence ("If you",
+ * "To have", "Does that"). `speech` is the span the clip is about; a padded
+ * edge is pulled back to `GAP_MARGIN` short of the neighbouring word, never inside `speech`.
+ */
+const GAP_MARGIN = 0.05;
+export function padWithinGaps(
+  words: ReadonlyArray<{ start: number; end: number }>,
+  padded: { start: number; end: number },
+  speech: { start: number; end: number },
+): { start: number; end: number } {
+  let { start, end } = padded;
+  const next = words.find((w) => w.start >= speech.end - 0.01);
+  if (next && next.start < end + GAP_MARGIN) end = Math.max(speech.end, next.start - GAP_MARGIN);
+  const prev = words.findLast((w) => w.end <= speech.start + 0.01);
+  if (prev && prev.end > start - GAP_MARGIN) start = Math.min(speech.start, prev.end + GAP_MARGIN);
+  return { start, end };
+}
+
 export function snapCandidate(
   c: ClipCandidate,
   segments: TranscriptSegment[],
@@ -177,6 +199,9 @@ export function snapCandidate(
     // in a pause or after the last sentence (outro music): end with the last thing said
     else if (prevEnd !== undefined && prevEnd > start) end = prevEnd;
   }
+  // where the speech starts and ends; the padding and scene snapping below go around it
+  let speechStart = start;
+  let speechEnd = end;
   // scene cuts within 0.6s make cleaner edits than mid-shot cuts
   const sc = nearest(sceneCuts, start, 0.6);
   if (sc !== undefined && sc <= start) start = sc;
@@ -191,16 +216,20 @@ export function snapCandidate(
     const limit = start + settings.maxClipSeconds;
     const fit = ends.filter((e) => e <= limit && e > start + settings.minClipSeconds).pop();
     if (fit === undefined) return null;
+    speechEnd = fit;
     end = fit + 0.35;
   }
   if (end - start < settings.minClipSeconds) {
     // too short: grow forward to the first sentence end that satisfies the minimum (small models
     // often pick a single punchy sentence); then backwards if the video ran out
     const grown = ends.find((e) => e - start >= settings.minClipSeconds && e - start <= settings.maxClipSeconds);
-    if (grown !== undefined) end = Math.min(durationSec || grown + 0.35, grown + 0.35);
-    else {
+    if (grown !== undefined) {
+      speechEnd = grown;
+      end = Math.min(durationSec || grown + 0.35, grown + 0.35);
+    } else {
       const back = starts.filter((st) => end - st >= settings.minClipSeconds && end - st <= settings.maxClipSeconds).pop();
       if (back === undefined) return null;
+      speechStart = back;
       start = Math.max(0, back - 0.25);
     }
   }
@@ -229,9 +258,22 @@ export function snapCandidate(
       );
     }
     if (done.changes.some((ch) => ch.action !== "left")) {
+      speechStart = done.start;
+      speechEnd = done.end;
       start = Math.max(0, done.start - PAD_START);
       end = Math.min(durationSec || done.end + PAD_END, done.end + PAD_END);
     }
+    const fit = padWithinGaps(thought.words, { start, end }, { start: speechStart, end: speechEnd });
+    if (fit.start !== start || fit.end !== end)
+      thought.log?.debug(
+        {
+          from: [Number(start.toFixed(2)), Number(end.toFixed(2))],
+          to: [Number(fit.start.toFixed(2)), Number(fit.end.toFixed(2))],
+          title: c.title.slice(0, 60),
+        },
+        "clip padding kept out of the neighbouring words",
+      );
+    ({ start, end } = fit);
   }
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }
@@ -635,7 +677,7 @@ export async function analyze(ctx: StageContext) {
     );
   // the project's layer template (brand overlays, music bed, CTA, intro / outro), materialised on every new clip against its own length
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
-  const rows = chosen.map(({ c, id, r, total }, index) => ({
+  const picks = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
     projectId,
     index, // position among the new picks; the hand-off offsets it past the clips that exist when it commits
@@ -653,6 +695,11 @@ export async function analyze(ctx: StageContext) {
     hashtags: c.hashtags.map((h) => h.replace(/^#/, "")),
     status: "pending" as const,
   }));
+  const rows = distinctTitles(
+    picks,
+    kept.map((k) => k.title),
+  );
+  for (const [i, r] of rows.entries()) if (r.title !== picks[i]!.title) log.debug({ from: picks[i]!.title, to: r.title }, "clip retitled: title already used");
   log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit

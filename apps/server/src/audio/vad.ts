@@ -107,3 +107,67 @@ export function pauseCuts(
   if (duration - (last.end + edge) >= minCut) cuts.push({ start: last.end + edge, end: duration });
   return cuts.map((c) => ({ start: Number(c.start.toFixed(3)), end: Number(c.end.toFixed(3)) }));
 }
+
+/** RMS level of `pcm` (VAD_SR mono) between two times, in dBFS; digital silence is -120. */
+export function levelDb(pcm: Float32Array, start: number, end: number): number {
+  const a = Math.max(0, Math.floor(start * VAD_SR));
+  const b = Math.min(pcm.length, Math.ceil(end * VAD_SR));
+  if (b <= a) return -120;
+  let sum = 0;
+  for (let i = a; i < b; i++) sum += pcm[i]! * pcm[i]!;
+  const rms = Math.sqrt(sum / (b - a));
+  return rms > 1e-6 ? 20 * Math.log10(rms) : -120;
+}
+
+export interface PauseTrim {
+  cuts: Array<{ start: number; end: number }>;
+  /** gaps without speech that were not quiet (game audio, music, laughter): content, kept */
+  keptSound: number;
+  /** why no pause was trimmed although some could have been */
+  skipped?: "mostly-sound";
+  /** what trimming would have removed when skipped */
+  wouldRemoveSec?: number;
+}
+
+/** A gap is a pause only when it is this much quieter than the clip's speech (speechLevelDb). */
+export const PAUSE_QUIET_DB = 15;
+/** Pause trimming that would remove more than this share of a clip is not trimming pauses. */
+export const PAUSE_MAX_SHARE = 0.25;
+
+/**
+ * Which pauses to cut. "No speech" is not "a pause": in gameplay, reactions and trailers the time
+ * between words is the content (game sound, music, action), and cutting it turned half-minute moments
+ * into clips of a few seconds. A gap is cut only when it is quiet (PAUSE_QUIET_DB under the speech level, speechLevelDb), and when
+ * the quiet gaps still add up to more than PAUSE_MAX_SHARE of the clip, the clip is not a talking clip
+ * with pauses and nothing is cut: a wrong automatic edit is worse than a missed one.
+ */
+export function planPauseTrim(
+  segments: SpeechSegment[],
+  pcm: Float32Array,
+  duration: number,
+  opts: { maxPause: number; quietDb?: number; maxShare?: number },
+): PauseTrim {
+  const candidates = pauseCuts(segments, duration, { maxPause: opts.maxPause });
+  if (!candidates.length) return { cuts: [], keptSound: 0 };
+  const speechDb = speechLevelDb(segments, pcm);
+  const quietBelow = speechDb - (opts.quietDb ?? PAUSE_QUIET_DB);
+  const cuts = candidates.filter((c) => levelDb(pcm, c.start, c.end) <= quietBelow);
+  const keptSound = candidates.length - cuts.length;
+  const removed = cuts.reduce((n, c) => n + c.end - c.start, 0);
+  if (removed > (opts.maxShare ?? PAUSE_MAX_SHARE) * duration)
+    return { cuts: [], keptSound, skipped: "mostly-sound", wouldRemoveSec: Number(removed.toFixed(2)) };
+  return { cuts, keptSound };
+}
+
+/**
+ * How loud the clip's speech is: the 75th percentile of 100 ms frame levels inside speech segments. Frames, not
+ * whole segments, so the quiet gaps between words inside a segment don't drag the reference down; a high quantile,
+ * so a mumbled stretch doesn't either, and game sound that is truly under the voice reads as such.
+ */
+export function speechLevelDb(segments: SpeechSegment[], pcm: Float32Array, frameSec = 0.1): number {
+  const frames: number[] = [];
+  for (const s of segments) for (let t = s.start; t + frameSec <= s.end + 1e-6; t += frameSec) frames.push(levelDb(pcm, t, t + frameSec));
+  if (!frames.length) for (const s of segments) frames.push(levelDb(pcm, s.start, s.end));
+  frames.sort((a, b) => a - b);
+  return frames[Math.min(frames.length - 1, Math.floor(0.75 * frames.length))] ?? -120;
+}

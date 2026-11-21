@@ -879,8 +879,14 @@ export interface ClipDiagnostics {
   renderedAt: string;
   /** caption words re-timed by forced alignment */
   captionTiming?: { aligned: number; total: number; medianShiftMs: number; ms: number };
-  /** silence trimmed by the pause setting */
-  pauses?: { cuts: number; removedSec: number; maxPause: number };
+  /**
+   * silence trimmed by the pause setting. `keptSound`: gaps without speech that were not quiet (game
+   * audio, music) and so were kept; `skipped: "mostly-sound"`: nothing trimmed because the quiet gaps
+   * would have removed `wouldRemoveSec`, too much of the clip for pauses
+   */
+  pauses?: { cuts: number; removedSec: number; maxPause: number; keptSound?: number; skipped?: "mostly-sound"; wouldRemoveSec?: number };
+  /** the source range's measured loudness (LUFS, dBTP) and the gain that brought the speech to -14 LUFS */
+  loudness?: { inputLufs: number; inputPeak: number; gainDb: number };
   layout: string;
   cuts: {
     /**
