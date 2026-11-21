@@ -25,7 +25,7 @@ export async function transcribeCached(
   // options go under the key the model reads: "gateway:openai/whisper-1" and the compatible provider speak OpenAI options
   const provider = a.transcriptionOptionsKey(modelId);
   const providerOptions = {
-    [provider]: { ...(a.transcriptionOptions(modelId)[provider] ?? {}), ...extraOptions, ...transcriptionLanguageOptions(provider, language) },
+    [provider]: { ...(a.transcriptionOptions(modelId)[provider] ?? {}), ...extraOptions, ...transcriptionLanguageOptions(provider, language, modelId) },
   } as Record<string, JSONObject>;
   return ctx.cached(["asr", modelId, providerOptions, audio], async () => {
     const t0 = Date.now();
