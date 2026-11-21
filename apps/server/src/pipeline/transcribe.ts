@@ -190,8 +190,10 @@ export async function transcribe(ctx: StageContext) {
     const row = await ctx.db.query.transcriptChunks.findFirst({
       where: and(eq(schema.transcriptChunks.projectId, projectId), eq(schema.transcriptChunks.index, i)),
     });
-    // a row from a run that cut the audio elsewhere (another chunk length) is a different stretch: transcribe it again
-    if (row && Math.abs(row.offsetSec - offsets[i]!) < 1) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
+    // a row from a run that cut the audio elsewhere (another chunk length) is a different stretch, and one heard in
+    // another language than the one now set (a run before the setting changed) has the wrong words: transcribe again
+    const sameLanguage = !spoken || languageCode(row?.language) === spoken;
+    if (row && Math.abs(row.offsetSec - offsets[i]!) < 1 && sameLanguage) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
     if (row) await ctx.db.delete(schema.transcriptChunks).where(eq(schema.transcriptChunks.id, row.id));
     let result = await svc.asr.transcribe(audio, {
       modelId: transcriptionModel,
@@ -240,7 +242,8 @@ export async function transcribe(ctx: StageContext) {
         projectId,
         index: i,
         offsetSec: offsets[i]!,
-        language: result.language ?? null,
+        // the language it was transcribed in: the one sent, else the one the model detected (see the reuse above)
+        language: spoken ?? result.language ?? null,
         text: result.text,
         segments: result.segments.map((sg) => ({ text: sg.text, start: sg.startSecond, end: sg.endSecond })),
       })

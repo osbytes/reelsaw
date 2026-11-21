@@ -178,7 +178,7 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
 
   const restarted = await svc.tx(async (u) => {
     const [p] = await u.db
-      .select({ status: schema.projects.status })
+      .select({ status: schema.projects.status, settings: schema.projects.settings })
       .from(schema.projects)
       .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such project" });
@@ -196,7 +196,8 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .where(eq(schema.transcripts.projectId, projectId))
       .for("update");
     const values = {
-      language: language ?? prev?.language ?? null,
+      // the file's language, else the one the project is set to (as transcribe does), else the transcript's
+      language: language ?? languageCode(p.settings?.language) ?? prev?.language ?? null,
       text: segments.map((s) => s.text).join(" "),
       words,
       rawWords: words,

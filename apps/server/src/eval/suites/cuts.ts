@@ -58,7 +58,8 @@ export const cutsSuite: Suite = {
         const hear = async (audio: Uint8Array) => {
           calls++;
           const t = Date.now();
-          const r = await transcribeCached(ctx, modelId, audio);
+          // the cut search sends the transcript's language (render.ts); every fixture is English speech
+          const r = await transcribeCached(ctx, modelId, audio, {}, "en");
           if (Date.now() - t > 200) uncached++;
           return r.words;
         };
