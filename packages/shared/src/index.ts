@@ -951,7 +951,7 @@ export const projectSettingsSchema = styleSchema.extend({
     ),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
-  language: z.string().max(10).optional().describe("Spoken language code (e.g. en), sent to the transcription model; unset = detected"),
+  language: z.string().max(10).optional().describe("Spoken language code (e.g. en, from list_languages), sent to the transcription model; unset = detected"),
   /** "Find clips about …": restricts selection to this topic and adds a relevance score. */
   focus: z.string().max(300).optional().describe("Only pick clips about this topic (max 300 chars)"),
   instructions: z.string().max(2000).optional().describe("Free-text guidance for picking and titling clips (max 2000 chars)"),

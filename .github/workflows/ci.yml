@@ -40,6 +40,8 @@ jobs:
       - run: pnpm exec biome ci
       # .env.example, docs/CONFIG.md and the CLI/suite tables are generated from the code (pnpm docs:gen)
       - run: pnpm docs:check
+      # packages/shared/src/whisper-languages.ts is Whisper's own table at a pinned commit (the script regenerates it)
+      - run: pnpm languages:check
       - run: pnpm --filter @reelsaw/web build
       - run: pnpm --filter @reelsaw/server bundle
       # the Dockerfile's pinned, checksummed yt-dlp, so test/live-filter.test.ts runs the real --match-filter

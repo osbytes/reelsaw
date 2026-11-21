@@ -27,6 +27,13 @@ export function supports(stage: LanguageStage, lang: string | null | undefined):
 }
 
 /**
+ * Whisper's own spelling of a canonical code, for the Whisper-served providers: its table predates the
+ * standard "jv" for Javanese, and it has one code where people also use another (Norwegian "no" for
+ * Bokmål "nb", Tagalog "tl" for Filipino "fil"). Closed: fixed by Whisper's table (whisper-languages.ts).
+ */
+const WHISPER_SPELLING: Record<string, string> = { jv: "jw", nb: "no", fil: "tl" };
+
+/**
  * The provider options that tell a transcription model which language is spoken, under the
  * `providerOptions` key it reads (AiService.transcriptionOptionsKey). Without them every model
  * auto-detects, and a wrong guess on the first seconds (music, a greeting in another language)
@@ -38,6 +45,7 @@ export function transcriptionLanguageOptions(provider: string, lang: string | nu
   switch (provider) {
     case "openai": // also the OpenAI-compatible provider (Speaches, whisper.cpp servers): ai/compat-transcription.ts forwards it
     case "groq":
+      return { language: WHISPER_SPELLING[code] ?? code };
     case "deepgram":
       return { language: code };
     case "assemblyai":

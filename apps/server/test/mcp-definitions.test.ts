@@ -58,6 +58,7 @@ const EXPECTED = [
   "list_deleted",
   "list_failures",
   "list_fonts",
+  "list_languages",
   "list_layer_templates",
   "list_media_links",
   "list_projects",

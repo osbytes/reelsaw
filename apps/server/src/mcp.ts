@@ -636,6 +636,8 @@ export function createMcpServer(
 
   server.registerTool("list_fonts", TOOLS.list_fonts, () => run(() => api.fonts.list()));
 
+  server.registerTool("list_languages", TOOLS.list_languages, () => run(() => api.languages.list()));
+
   server.registerTool("add_font", TOOLS.add_font, (input) => run(() => api.admin.fonts.add(input)));
 
   server.registerTool("remove_fonts", TOOLS.remove_fonts, (input) => run(() => api.admin.fonts.remove(input)));
