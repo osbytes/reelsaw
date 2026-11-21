@@ -22,7 +22,7 @@ export function LanguageCombobox({
 }) {
   const code = spokenLanguageCode(value) ?? DETECT;
   const options = useMemo(() => {
-    const list = spokenLanguageOptions();
+    const list = spokenLanguageOptions().map(({ native, ...o }) => (native ? { ...o, hint: native, keywords: [native] } : o));
     const known = code === DETECT || list.some((o) => o.value === code);
     return [{ value: DETECT, label: "Detect automatically" }, ...(known ? [] : [{ value: code, label: languageLabel(code) }]), ...list];
   }, [code]);

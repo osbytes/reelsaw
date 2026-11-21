@@ -99,6 +99,8 @@ describe("spoken language list", () => {
     assert.equal(languageLabel("jw"), "Javanese");
     const opts = spokenLanguageOptions();
     assert.equal(opts.length, SPOKEN_LANGUAGES.length);
+    assert.equal(opts.find((o) => o.value === "de")?.native, "Deutsch");
+    assert.equal(opts.find((o) => o.value === "en")?.native, undefined, "no native name when it is the same");
     assert.deepEqual(
       opts.map((o) => o.label),
       [...opts.map((o) => o.label)].sort((a, b) => a.localeCompare(b, "en")),

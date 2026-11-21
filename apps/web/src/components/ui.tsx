@@ -330,7 +330,8 @@ export function Select({
   );
 }
 
-export type ComboboxOption = { value: string; label: string; hint?: string };
+/** `keywords`: other words the filter matches (another name, a code), not shown. */
+export type ComboboxOption = { value: string; label: string; hint?: string; keywords?: string[] };
 
 /**
  * The one single-choice picker with typeahead, for plain lists that are too long for a `Select`
@@ -392,6 +393,7 @@ export function Combobox({
                   <Command.Item
                     key={o.value}
                     value={`${o.label} ${o.value}`}
+                    {...(o.keywords ? { keywords: o.keywords } : {})}
                     onSelect={() => {
                       onValueChange(o.value);
                       setOpen(false);
