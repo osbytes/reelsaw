@@ -1,3 +1,4 @@
+import { isClientDisconnect } from "./lib/disconnect.js";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
@@ -388,6 +389,14 @@ export function createApp(svc: Services) {
         c.get("log").warn({ uploadId: id, bytes: received, reason: err.message }, "upload rejected: storage limit");
         trackQuotaRefusal(svc.telemetry, session.user.id, err, session.via === "session" ? "web" : "api");
         return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
+      }
+      // the browser or script went away mid-file (a dropped connection, a closed tab): nothing of ours failed
+      if (isClientDisconnect(err, c.req.raw.signal)) {
+        c.get("log").warn(
+          { uploadId: id, bytes: received, expected: length || undefined, code: (err as NodeJS.ErrnoException).code },
+          "upload aborted by the client",
+        );
+        return c.json({ error: "The upload was interrupted before the whole file arrived. Try again." }, 400);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);
