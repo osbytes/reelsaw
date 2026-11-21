@@ -64,7 +64,14 @@ export function spokenLanguageCode(lang: string | null | undefined): string | un
   return ALIASES[base] ?? base;
 }
 
-/** The set as picker options, sorted by name in `locale`. */
-export function spokenLanguageOptions(locale = "en"): Array<{ value: SpokenLanguage; label: string }> {
-  return SPOKEN_LANGUAGES.map((value) => ({ value, label: languageLabel(value, locale) })).sort((a, b) => a.label.localeCompare(b.label, locale));
+/**
+ * The set as picker options, sorted by name in `locale`. `native` is the language's name for itself
+ * ("Deutsch"), when the runtime knows it and it differs, so a speaker finds their language either way.
+ */
+export function spokenLanguageOptions(locale = "en"): Array<{ value: SpokenLanguage; label: string; native?: string }> {
+  return SPOKEN_LANGUAGES.map((value) => {
+    const label = languageLabel(value, locale);
+    const native = languageLabel(value, BCP47[value] ?? value);
+    return native !== label && native !== value ? { value, label, native } : { value, label };
+  }).sort((a, b) => a.label.localeCompare(b.label, locale));
 }
