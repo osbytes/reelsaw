@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { processedEndSec, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { partialUntil } from "../src/quota.js";
 import { appendTranscript, chunksFrom, transcriptCovers } from "../src/pipeline/transcribe.js";
+import { partialPrecheckSentence } from "../src/projects/service.js";
 
 const CHUNK = 600;
 
@@ -91,5 +92,21 @@ describe("appendTranscript", () => {
       out.words.map((x) => x.text),
       ["hello", "world", "and", "go", "now"],
     );
+  });
+});
+
+describe("partialPrecheckSentence", () => {
+  it("says what is clipped and which allowance set it, never a minutes-left number rounded to chunks", () => {
+    // 25 minutes left, 10-minute chunks: 20 are clipped; the sentence must not claim 20 are left
+    const s = partialPrecheckSentence(20 * 60, 90 * 60, "month", true);
+    assert.equal(
+      s,
+      "This video is 90 minutes. Reelsaw clips the first 20 minutes now, as far as this period's minutes go. Upgrade any time to clip the rest; Reelsaw picks up where it stopped.",
+    );
+    assert.doesNotMatch(s, /left/);
+  });
+  it("names the day's limit when that is what cut it, and the first video's allowance when that did", () => {
+    assert.match(partialPrecheckSentence(30 * 60, 90 * 60, "day", false), /as far as today's minutes go\. Reelsaw clips the rest when your minutes reset\.$/);
+    assert.match(partialPrecheckSentence(3600, 134 * 60, "first_video", true), /clips the first 60 minutes now, free as your first video\./);
   });
 });

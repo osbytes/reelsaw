@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { and, eq, asc, gte, lt } from "drizzle-orm";
+import { and, eq, asc } from "drizzle-orm";
 import type { JSONObject } from "@ai-sdk/provider";
 import type { TranscriptFlag, Word } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
@@ -141,19 +141,10 @@ export async function transcribe(ctx: StageContext) {
   const doneIdx = new Set(done.map((c) => c.index));
   const needed = chunksFrom(offsets, acc, fromSec);
   if (!needed.length) throw new Error(`No audio past ${Math.round(fromSec)}s to transcribe`);
-  // An extension's chunks start where the transcript ends; a row there from before this run was cut from the shorter
-  // audio of the partial run (or a sliver of it), so it is not this chunk's words: transcribe those again. Rows this run
-  // wrote (an attempt that crashed) are kept.
-  if (existing && project.runStartedAt)
-    await ctx.db
-      .delete(schema.transcriptChunks)
-      .where(
-        and(
-          eq(schema.transcriptChunks.projectId, projectId),
-          gte(schema.transcriptChunks.offsetSec, fromSec - 0.5),
-          lt(schema.transcriptChunks.createdAt, project.runStartedAt),
-        ),
-      );
+  // Rows already there are reused by index (transcribeChunk) whatever run wrote them: a partial run's chunks end on the
+  // chunk boundaries an extension cuts at (partialUntil), its sliver past the limit never gets a row (chunksFrom), and a
+  // row cut at another offset is transcribed again. No row is deleted by age: an attempt's saved steps (job_steps) would
+  // be reused without writing the row back, and the run would fail on the count below.
 
   // the model in force when this stage starts; every chunk of this run uses it even if an admin switches meanwhile
   const transcriptionModel = svc.models.get().transcription;

@@ -8,8 +8,17 @@
  */
 import { z } from "zod";
 
-/** The request header the sign-up form sends the first-touch attribution in (JSON of `Attribution`). */
+/**
+ * The request header the sign-up form sends the first-touch attribution in: JSON of `Attribution`, percent-encoded
+ * (`encodeAttributionHeader`), because a header value must be ISO-8859-1 and a campaign tag can be any text: a raw
+ * emoji there makes the browser refuse to send the sign-up at all.
+ */
 export const ATTRIBUTION_HEADER = "x-reelsaw-attribution";
+
+/** The ATTRIBUTION_HEADER value for `a`: ASCII whatever the tags hold. */
+export function encodeAttributionHeader(a: Attribution): string {
+  return encodeURIComponent(JSON.stringify(a));
+}
 
 /** URL parameters the app reads attribution from (the website's links carry the site_* ones). */
 export const ATTRIBUTION_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "site_ref", "site_landing", "site_id"] as const;
@@ -47,9 +56,9 @@ export function attributionFromSearch(search: string): Attribution | null {
 
 /** The ATTRIBUTION_HEADER value read back, null when it is missing, too long or not the shape (it is only a hint). */
 export function parseAttributionHeader(value: string | null | undefined): Attribution | null {
-  if (!value || value.length > 4096) return null;
+  if (!value || value.length > 16_384) return null;
   try {
-    const r = attributionSchema.safeParse(JSON.parse(value));
+    const r = attributionSchema.safeParse(JSON.parse(decodeURIComponent(value)));
     return r.success && Object.keys(r.data).length ? r.data : null;
   } catch {
     return null;

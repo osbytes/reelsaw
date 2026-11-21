@@ -641,39 +641,51 @@ export function partialUntil(durationSec: number, fromSec: number, roomSec: numb
  * Seconds of source the account's minutes cover right now (the tightest of the day and month limits), null when no
  * minutes limit applies. For a new video (`exceptProjectId` = its own row when it exists, left out of the counts):
  * while the first-video allowance is unused it is the room, when it is larger than what the month has left
- * (`firstVideo`). With `extension`, the room for more of a video already counted.
+ * (`firstVideo`). With `extension`, the room for more of a video already counted. `binding` = the limit that sets the
+ * room (the day's or the month's; the month's on a tie, as it resets later), so offers and sentences name the right
+ * one and its reset.
  */
 export async function minutesRoomSec(
   db: Db,
   instance: InstanceLimits,
   userId: string,
   o: { exceptProjectId?: string | undefined; extension?: boolean; ent?: Entitlements | null | undefined } = {},
-): Promise<{ sec: number | null; firstVideo: boolean }> {
+): Promise<{ sec: number | null; firstVideo: boolean; binding: MinutesLimitKey | null }> {
   const d = await limitsDetail(db, instance, userId, o.ent);
   const l = d.limits;
-  let sec: number | null = null;
+  // the tightest room so far and the limit that set it (an object: closures assigning `let`s defeat narrowing)
+  const r: { sec: number | null; binding: MinutesLimitKey | null } = { sec: null, binding: null };
   let firstVideo = false;
-  const take = (s: number) => {
-    sec = sec === null ? s : Math.min(sec, s);
+  const take = (s: number, key: MinutesLimitKey) => {
+    if (r.sec === null || s < r.sec || (s === r.sec && key === "MAX_SOURCE_MINUTES_PER_MONTH")) {
+      r.sec = s;
+      r.binding = key;
+    }
   };
-  if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) take(Math.max(0, l.MAX_SOURCE_MINUTES_PER_DAY - (await minutesToday(db, userId, o.exceptProjectId))) * 60);
+  if (l.MAX_SOURCE_MINUTES_PER_DAY > 0)
+    take(Math.max(0, l.MAX_SOURCE_MINUTES_PER_DAY - (await minutesToday(db, userId, o.exceptProjectId))) * 60, "MAX_SOURCE_MINUTES_PER_DAY");
   if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
     const m = await monthlyMinutes(db, userId, periodFor(d.grants).start, d.grants, o.exceptProjectId);
     const monthLeft = Math.max(0, l.MAX_SOURCE_MINUTES_PER_MONTH - m.used);
     // the first video is free up to its allowance whatever the month has left; past it, the start that fits is still free
     if (!o.extension && m.firstPending && m.firstFree > monthLeft) {
-      firstVideo = true;
-      take(m.firstFree * 60);
-    } else take(monthLeft * 60);
+      take(m.firstFree * 60, "MAX_SOURCE_MINUTES_PER_MONTH");
+      firstVideo = r.binding === "MAX_SOURCE_MINUTES_PER_MONTH";
+    } else take(monthLeft * 60, "MAX_SOURCE_MINUTES_PER_MONTH");
   }
-  return { sec, firstVideo };
+  return { sec: r.sec, firstVideo, binding: r.binding };
 }
+
+/** The two minutes limits; `minutesRoomSec` says which one binds. */
+export type MinutesLimitKey = Extract<LimitKey, "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_SOURCE_MINUTES_PER_MONTH">;
 
 /** What a new video of `durationSec` is admitted as: all of it (`until` null), or its start (`until` = the end of the part processed). */
 export interface SourceAdmission {
   until: number | null;
   /** the start is processed because of the first-video allowance, not the month's minutes */
   firstVideo: boolean;
+  /** the limit that cut it to its start (null when all of it is processed) */
+  binding: MinutesLimitKey | null;
 }
 
 /**
@@ -693,10 +705,10 @@ export async function admitSource(
 ): Promise<SourceAdmission> {
   const room = await minutesRoomSec(db, instance, userId, { exceptProjectId: projectId ?? undefined, ent });
   const plan = partialUntil(durationSec, 0, room.sec, chunkSec);
-  if (plan !== "none") return { until: plan.until, firstVideo: plan.until !== null && room.firstVideo };
+  if (plan !== "none") return { until: plan.until, firstVideo: plan.until !== null && room.firstVideo, binding: plan.until !== null ? room.binding : null };
   const over = await minutesOver(db, instance, userId, projectId, durationSec, ent);
   // the room said less than a chunk fits, so a limit is passed; the fallback is only for a limit raised in between
-  if (!over) return { until: null, firstVideo: false };
+  if (!over) return { until: null, firstVideo: false, binding: null };
   throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
@@ -801,21 +813,23 @@ export async function predictAdmission(
 ): Promise<{ admission: SourceAdmission } | { refused: QuotaError }> {
   const room = await minutesRoomSec(db, instance, userId, { ent });
   const plan = partialUntil(durationSec, 0, room.sec, chunkSec);
-  if (plan !== "none") return { admission: { until: plan.until, firstVideo: plan.until !== null && room.firstVideo } };
+  if (plan !== "none")
+    return { admission: { until: plan.until, firstVideo: plan.until !== null && room.firstVideo, binding: plan.until !== null ? room.binding : null } };
   const over = await minutesOver(db, instance, userId, null, durationSec, ent);
-  if (!over) return { admission: { until: null, firstVideo: false } };
+  if (!over) return { admission: { until: null, firstVideo: false, binding: null } };
   return { refused: new QuotaError(over.message, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }) };
 }
 
-/** The minutes limit that binds this account (the month's, else the day's) and its offer: the plan to move to, or a request for more on the top plan. */
+/** The minutes limit that binds (`binding` from minutesRoomSec; else the month's, else the day's) and its offer: the plan to move to, or a request for more on the top plan, and when it resets. */
 export async function minutesOffer(
   db: Db,
   instance: InstanceLimits,
   userId: string,
   ent?: Entitlements | null,
+  binding?: MinutesLimitKey | null,
 ): Promise<{ key: LimitKey; refusal: QuotaRefusal; resetsOn: Date }> {
   const d = await limitsDetail(db, instance, userId, ent);
-  const key: LimitKey = d.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? "MAX_SOURCE_MINUTES_PER_MONTH" : "MAX_SOURCE_MINUTES_PER_DAY";
+  const key = binding ?? defaultMinutesKey(d);
   return { key, refusal: quotaRefusal(d, key), resetsOn: key === "MAX_SOURCE_MINUTES_PER_MONTH" ? periodFor(d.grants).end : new Date(nextMidnightUtc()) };
 }
 
@@ -830,9 +844,10 @@ export async function extensionRefusal(
   remainingSec: number,
   roomSec: number,
   ent?: Entitlements | null,
+  binding?: MinutesLimitKey | null,
 ): Promise<QuotaError> {
   const d = await limitsDetail(db, instance, userId, ent);
-  const key: LimitKey = d.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? "MAX_SOURCE_MINUTES_PER_MONTH" : "MAX_SOURCE_MINUTES_PER_DAY";
+  const key = binding ?? defaultMinutesKey(d);
   const resets =
     key === "MAX_SOURCE_MINUTES_PER_MONTH"
       ? ` this period. Resets on ${formatDay(periodFor(d.grants).end, { year: false, utc: true })}.`
@@ -840,6 +855,10 @@ export async function extensionRefusal(
   const sentence = `The rest of this video is ${plural(Math.round(remainingSec / 60), "minute")} and you have ${plural(Math.floor(roomSec / 60), "minute")} left${resets}`;
   return new QuotaError(`${sentence}${hint(d, key)}`, quotaRefusal(d, key, sentence), key);
 }
+
+/** With no room measured: the month's limit when there is one, else the day's. */
+const defaultMinutesKey = (d: LimitsDetail): MinutesLimitKey =>
+  d.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? "MAX_SOURCE_MINUTES_PER_MONTH" : "MAX_SOURCE_MINUTES_PER_DAY";
 
 /** The monthly minutes allowance as the New Project form states it; null when no minutes limit applies. */
 export interface MinutesAllowance {

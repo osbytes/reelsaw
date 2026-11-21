@@ -11,7 +11,7 @@ type Public = {
   posthog: { key: string; host: string } | null;
 };
 
-import { ATTRIBUTION_HEADER, type Attribution, attributionFromSearch, attributionSchema } from "@reelsaw/shared";
+import { ATTRIBUTION_HEADER, type Attribution, attributionFromSearch, attributionSchema, encodeAttributionHeader } from "@reelsaw/shared";
 
 type PH = typeof import("posthog-js").default;
 type SB = typeof import("@sentry/browser");
@@ -47,7 +47,7 @@ const landingUtm: Attribution = (() => {
 
 /** Headers for the sign-up request: the first touch, so the server's `user.signed_up` carries where the account came from. */
 export function attributionHeaders(): Record<string, string> {
-  return Object.keys(landingUtm).length ? { [ATTRIBUTION_HEADER]: JSON.stringify(landingUtm) } : {};
+  return Object.keys(landingUtm).length ? { [ATTRIBUTION_HEADER]: encodeAttributionHeader(landingUtm) } : {};
 }
 /** calls made before init finished, run in order once it has (bounded: an instance without keys never inits) */
 const pending: Array<() => void> = [];

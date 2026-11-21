@@ -1060,13 +1060,18 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
   if ("refused" in r) return refused(r.refused);
   const until = r.admission.until;
   if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance };
-  const offer = await minutesOffer(db, s, userId, svc.entitlements);
+  const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
   const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
   const partial: SourcePartial = {
     minutes: Math.round(until / 60),
     totalMinutes: Math.round(durationSec / 60),
     firstVideo: r.admission.firstVideo,
-    sentence: partialPrecheckSentence(until, durationSec, r.admission.firstVideo, !!upgrade, allowance?.perMonth ?? null),
+    sentence: partialPrecheckSentence(
+      until,
+      durationSec,
+      r.admission.firstVideo ? "first_video" : r.admission.binding === "MAX_SOURCE_MINUTES_PER_DAY" ? "day" : "month",
+      !!upgrade,
+    ),
     upgrade,
   };
   // the same moment a refusal used to warn at: whoever pastes a long video, and what they are offered instead
@@ -1079,14 +1084,17 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
   return { minutes, partial, fits: true, message: null, quota: null, allowance };
 }
 
-/** What New project says about a video only the start of which the minutes cover. */
-export function partialPrecheckSentence(untilSec: number, durationSec: number, firstVideo: boolean, canUpgrade: boolean, perMonth: number | null): string {
+/**
+ * What New project says about a video only the start of which the minutes cover. `untilSec` is whole transcription
+ * chunks, a little under the minutes left, so the sentence says what is clipped and which allowance set it (the first
+ * video's, today's or this period's minutes), never a "minutes left" number it would get wrong.
+ */
+export function partialPrecheckSentence(untilSec: number, durationSec: number, why: "first_video" | "day" | "month", canUpgrade: boolean): string {
   const now = Math.round(untilSec / 60);
   const total = Math.round(durationSec / 60);
-  const why = firstVideo ? `Your first video is free up to ${plural(now, "minute")}` : `Your plan has ${plural(now, "minute")} left`;
+  const reason = why === "first_video" ? "free as your first video" : why === "day" ? "as far as today's minutes go" : "as far as this period's minutes go";
   const rest = canUpgrade ? "Upgrade any time to clip the rest; Reelsaw picks up where it stopped." : "Reelsaw clips the rest when your minutes reset.";
-  void perMonth;
-  return `This video is ${plural(total, "minute")}. ${why}, so Reelsaw clips the first ${now} now. ${rest}`;
+  return `This video is ${plural(total, "minute")}. Reelsaw clips the first ${plural(now, "minute")} now, ${reason}. ${rest}`;
 }
 
 /**
@@ -1096,7 +1104,7 @@ export function partialPrecheckSentence(untilSec: number, durationSec: number, f
  */
 export async function partialSourceOf(
   svc: Services,
-  p: Pick<typeof schema.projects.$inferSelect, "userId" | "durationSec" | "sourceLimitSec" | "extendFromSec" | "status" | "runReason">,
+  p: Pick<typeof schema.projects.$inferSelect, "id" | "userId" | "durationSec" | "sourceLimitSec" | "extendFromSec" | "status" | "runReason">,
 ): Promise<PartialSource | null> {
   if (p.sourceLimitSec === null || p.durationSec === null) return null;
   const processedSec = processedEndSec(p) ?? 0;
@@ -1104,12 +1112,17 @@ export async function partialSourceOf(
   const remainingSec = Math.max(0, Math.round((p.durationSec - processedSec) * 10) / 10);
   const db = svc.database.db;
   const s = svc.settings.get();
-  const extending = p.runReason === "extend" && (WORKING as readonly string[]).includes(p.status);
+  // from the state, not the run's reason (a retry or re-pick of an extension has another): the rest's words are not in
+  // yet, or its picks are not made yet, while the project works
+  const [t] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  const extending =
+    (WORKING as readonly string[]).includes(p.status) &&
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !transcriptCovers(t.coveredSec, p.sourceLimitSec)));
   const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
   const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
   const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;
   const covered = extendableSec !== null && extendableSec >= remainingSec - 0.5;
-  const offer = covered ? null : await minutesOffer(db, s, p.userId, svc.entitlements);
+  const offer = covered ? null : await minutesOffer(db, s, p.userId, svc.entitlements, room.binding);
   const primary = offer?.refusal.primary;
   const upgrade = primary?.kind === "upgrade" ? { label: primary.label, href: primary.href } : null;
   const m = (sec: number) => Math.round(sec / 60);
@@ -1122,7 +1135,11 @@ export async function partialSourceOf(
         ? `${head} Your minutes cover ${m(extendableSec)} more now${upgrade ? `; upgrade to clip all ${m(remainingSec)}` : ""}.`
         : upgrade
           ? `${head} Upgrade to clip the remaining ${plural(m(remainingSec), "minute")}.`
-          : `${head} The remaining ${plural(m(remainingSec), "minute")} can be clipped when your minutes reset on ${formatDay(offer!.resetsOn, { year: false, utc: true })}.`;
+          : `${head} The remaining ${plural(m(remainingSec), "minute")} can be clipped when your minutes reset ${
+              offer!.key === "MAX_SOURCE_MINUTES_PER_DAY"
+                ? `at ${offer!.resetsOn.toISOString().slice(11, 16)} UTC`
+                : `on ${formatDay(offer!.resetsOn, { year: false, utc: true })}`
+            }.`;
   return { processedSec, durationSec: p.durationSec, remainingSec, extending, extendableSec, upgrade, sentence };
 }
 
@@ -1166,7 +1183,8 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
     const fromSec = Math.min(p.durationSec, p.sourceLimitSec);
     const room = await minutesRoomSec(u.db, svc.settings.get(), p.userId, { extension: true, ent: svc.entitlements });
     const plan = partialUntil(p.durationSec, fromSec, room.sec, chunkSec);
-    if (plan === "none") throw await extensionRefusal(u.db, svc.settings.get(), p.userId, p.durationSec - fromSec, room.sec ?? 0, svc.entitlements);
+    if (plan === "none")
+      throw await extensionRefusal(u.db, svc.settings.get(), p.userId, p.durationSec - fromSec, room.sec ?? 0, svc.entitlements, room.binding);
     const untilSec = plan.until ?? p.durationSec;
     await recordSourceExtension(u.db, p.userId, p.id, untilSec - fromSec);
     // moments picked before (even ones deleted since) mean the old part is done: the new picks go only in the new part.

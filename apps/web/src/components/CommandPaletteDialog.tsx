@@ -46,6 +46,7 @@ import { CHANGELOG_URL, DELETED_PATH, formatTime, newProjectPath, plural } from 
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { DeleteAssetDialog } from "./BumperField";
+import { downloadClip } from "./DownloadClipButton";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
@@ -530,7 +531,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
               "download",
               "Download clip",
               <Download className="h-4 w-4" />,
-              go(() => download(`${c.videoUrl}?download`)),
+              go(() => downloadClip({ id: c.id, videoUrl: c.videoUrl!, watermark: c.watermark }, c.projectId, "palette_download")),
               "The rendered mp4",
             ),
           );

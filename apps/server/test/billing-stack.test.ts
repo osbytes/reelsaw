@@ -99,7 +99,7 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(long.partial?.minutes, 60);
     assert.equal(long.partial?.totalMinutes, 94);
     assert.equal(long.partial?.firstVideo, true);
-    assert.match(long.partial?.sentence ?? "", /^This video is 94 minutes\. Your first video is free up to 60 minutes, so Reelsaw clips the first 60 now\./);
+    assert.match(long.partial?.sentence ?? "", /^This video is 94 minutes\. Reelsaw clips the first 60 minutes now, free as your first video\./);
     assert.equal(long.partial?.upgrade?.label, "Starter: 100 minutes a month for $12");
     assert.deepEqual(long.allowance && { perMonth: long.allowance.perMonth, left: long.allowance.left, firstVideoFree: long.allowance.firstVideoFree }, {
       perMonth: 20,
