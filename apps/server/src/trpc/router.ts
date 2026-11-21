@@ -397,7 +397,7 @@ async function saveFlags(
   const db = u.db;
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
-  const segments = toSentences(words);
+  const segments = toSentences(words, undefined, t.language);
   await writeTranscript(u, p.id, t, { words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") });
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
@@ -1753,7 +1753,7 @@ const restRouter = router({
           for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected"))
             ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
           const words = applyFlags(raw, live);
-          const segments = toSentences(words);
+          const segments = toSentences(words, undefined, t.language);
           await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
           const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
           await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed.length, rerendered });

@@ -37,6 +37,7 @@ import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
 import { outputLanguage, outputLanguageRule } from "./language.js";
+import { sentenceRules } from "./thought.js";
 import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment, plural } from "@reelsaw/shared";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
@@ -250,9 +251,15 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     };
     const found = await mapSelection(ctx, o, { inside, sc, clipId, modelId, unitMs, concurrency, log });
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };
+    const rules = sentenceRules(transcript.words, transcript.language);
     const snapped = found
       .map((c) =>
-        snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, { words: transcript.words, log, bounds: [clip.startSec, clip.endSec] }),
+        snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, {
+          words: transcript.words,
+          log,
+          bounds: [clip.startSec, clip.endSec],
+          rules,
+        }),
       )
       .filter((c): c is ClipCandidate => !!c && c.startSec >= clip.startSec - 1 && c.endSec <= clip.endSec + 1);
     log.info(

@@ -180,7 +180,7 @@ export async function mergeRefine(
       flags = [...(kind === "entity" ? flags : kept), ...incoming].sort((a, b) => a.wordIndex - b.wordIndex);
     }
     const words = applyFlags(raw, flags);
-    const segments = toSentences(words);
+    const segments = toSentences(words, undefined, t.language);
     const refine: RefineStatus = { ...t.refine, [step]: result.status };
     await tx
       .update(schema.transcripts)

@@ -25,7 +25,7 @@ import {
   spokenLanguageCode,
   spokenLanguageOptions,
 } from "@reelsaw/shared";
-import { SENTENCE_END } from "../src/pipeline/transcript.js";
+import { endsSentence } from "@reelsaw/shared";
 
 describe("norm (disfluency)", () => {
   it("keeps non-ASCII letters", () => {
@@ -189,13 +189,12 @@ describe("output language", () => {
   });
 });
 
-describe("SENTENCE_END", () => {
+describe("endsSentence", () => {
   it("matches full-width and other-script terminators", () => {
-    for (const s of ["東京に行きました。", "本当ですか？", "すごい！", "यह सही है।", "هل هذا صحيح؟", "他说：「好。」", "ok."])
-      assert.ok(SENTENCE_END.test(s), s);
+    for (const s of ["東京に行きました。", "本当ですか？", "すごい！", "यह सही है।", "هل هذا صحيح؟", "他说：「好。」", "ok."]) assert.ok(endsSentence(s), s);
   });
   it("does not match an unfinished sentence", () => {
-    for (const s of ["東京に行き", "and then", "wait,"]) assert.equal(SENTENCE_END.test(s), false, s);
+    for (const s of ["東京に行き", "and then", "wait,"]) assert.equal(endsSentence(s), false, s);
   });
 });
 

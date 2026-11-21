@@ -4,7 +4,8 @@
  * "a stage that assumes Latin script and English punctuation": a new language, a new font or a new stage lands here.
  *
  *   - always: the profile is consistent (a script, letters of that script, a direction, punctuation), every stage has
- *     an answer, words segment and join back without losing or adding spaces;
+ *     an answer, words segment and join back without losing or adding spaces, and sentence ends are found with the
+ *     language's own punctuation and, in a transcript without any, from its pauses alone;
  *   - LANGUAGE_MATRIX_RENDER=1 (CI's `language-matrix` job, inside the image's own `system` stage): the installed
  *     fonts draw every letter, upper-cased too, and the CLDR sample burns in through the shipped ffmpeg / libass
  *     without "failed to find any fallback with glyph". LANGUAGE_MATRIX_FRAMES=<dir> keeps one frame per language.
@@ -22,6 +23,8 @@ import { defaultStyle, joinWords, languageLabel, languageProfile, segmentWords, 
 import { buildAss } from "../src/pipeline/captions.js";
 import { capabilities, LANGUAGE_STAGES } from "../src/pipeline/language.js";
 import { missingGlyphs, systemGlyphs } from "../src/fonts.js";
+import { sentenceEndAfter, sentenceRules } from "../src/pipeline/thought.js";
+import { toSentences } from "../src/pipeline/transcript.js";
 
 const execFileAsync = promisify(execFile);
 const LANGUAGES = [...WHISPER_SPOKEN_LANGUAGES];
@@ -82,6 +85,44 @@ describe("language matrix: segmentation", () => {
       assert.equal(joinWords(seg, code).replace(/\s/g, ""), text.replace(/\s/g, ""), "no letters lost");
       if (p.spaced) assert.equal(joinWords(seg, code), text, "spaced scripts round-trip exactly");
       else assert.ok(!joinWords(seg, code).includes(" "), "no spaces added to a script written without them");
+    });
+  }
+});
+
+describe("language matrix: sentence boundaries", () => {
+  for (const code of LANGUAGES) {
+    it(`${code}: sentence ends found with its punctuation, and from pauses alone without it`, () => {
+      const p = languageProfile(code);
+      const letters = [...p.letters].filter((c) => /\p{L}/u.test(c));
+      // three sentences of five words in the language's letters; words 0.3 s apart inside, 0.9 s between sentences
+      const texts = Array.from({ length: 15 }, (_, i) => letters.slice((i * 2) % letters.length, ((i * 2) % letters.length) + 3).join(""));
+      const timed = (ts: string[]) => {
+        let t = 0;
+        return ts.map((text, i) => {
+          const w = { text, start: t, end: t + 0.3 };
+          t = w.end + (i % 5 === 4 ? 0.9 : 0.04);
+          return w;
+        });
+      };
+      const ends = [4, 9];
+      // the language's own full stop: the one of its terminals in its script, else the first it lists
+      const script = p.script ? new RegExp(`[${(SCRIPT_PARTS[p.script] ?? [p.script]).map((s) => `\\p{scx=${s}}`).join("")}]`, "u") : undefined;
+      const stop = (script && [...p.terminals].find((c) => script.test(c))) || [...p.terminals][0]!;
+      const punctuated = timed(texts.map((t, i) => (ends.includes(i) ? t + stop : t)));
+      const rules = sentenceRules(punctuated, code);
+      assert.equal(rules.punctuated, true, `"${stop}" counts as punctuation`);
+      for (const i of ends) assert.equal(sentenceEndAfter(punctuated, i, rules), "punctuation", `"${punctuated[i]!.text}" ends a sentence`);
+      assert.deepEqual(
+        toSentences(punctuated, undefined, code).map((s) => s.end),
+        [punctuated[4]!.end, punctuated[9]!.end, punctuated[14]!.end],
+      );
+      // no punctuation (as most STT returns Hindi): the pauses decide, and nothing else ends a sentence mid-way
+      const bare = timed(texts);
+      const bareRules = sentenceRules(bare, code);
+      assert.equal(bareRules.punctuated, false);
+      const found = bare.flatMap((_, i) => (i < bare.length - 1 && sentenceEndAfter(bare, i, bareRules) ? [i] : []));
+      assert.deepEqual(found, ends);
+      assert.equal(toSentences(bare, undefined, code).length, 3);
     });
   }
 });

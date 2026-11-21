@@ -289,7 +289,7 @@ export async function transcribe(ctx: StageContext) {
       c.offsetSec,
     );
     // a chunk that straddles where the transcript ends (another chunk length) gives only the words past it
-    const heard = toWords(segs, { collapseLoops: false }).filter((w) => w.start >= fromSec - 0.05);
+    const heard = toWords(segs, { collapseLoops: false, language: spoken ?? languageCode(c.language) }).filter((w) => w.start >= fromSec - 0.05);
     const collapsed = collapseDecoderLoopsWithStats(heard);
     const offset = rawWords.length;
     rawWords.push(...heard);
@@ -302,8 +302,8 @@ export async function transcribe(ctx: StageContext) {
   const words = applyFlags(rawWords, flags);
   // every chunk is a saved step, so another attempt replays the same empty answer: fail the run now
   if (!words.length) throw new NonRetryableError("Transcription returned no words. Is the audio silent?");
-  const sentences = toSentences(words);
   const language = spoken ?? languageCode(chunks.find((c) => c.language)?.language) ?? null;
+  const sentences = toSentences(words, undefined, language);
   // what will work less well for this language, said once now, before anything renders (refine reports its own skips)
   const gaps = language ? languageGaps(language, await languageFonts(svc)).filter((g) => !REFINE_REPORTS.has(g.stage)) : [];
   if (gaps.length) ctx.log.info({ language, gaps: gaps.map(gapLine) }, "stages that do less for this language");
@@ -362,7 +362,7 @@ async function appendRest(
     // only onto the transcript these words continue: one that moved meanwhile was extended by the run that moved it
     if (t.coveredSec !== null && Math.abs(t.coveredSec - r.fromSec) < 0.5) {
       const merged = appendTranscript(t, { rawWords: r.rawWords, flags: r.flags });
-      const segments = toSentences(merged.words);
+      const segments = toSentences(merged.words, undefined, t.language);
       added = r.rawWords.length;
       await u.db
         .update(schema.transcripts)

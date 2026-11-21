@@ -141,9 +141,10 @@ export function upperCase(text: string, lang: string | null | undefined): string
 
 /**
  * Ends a sentence: Unicode's Sentence_Terminal ("." "?" "!" "।" "。" "؟" "။" …) before any closing quotes and
- * brackets. The property, not a typed list, so every script's full stop counts.
+ * brackets. The property, not a typed list, so every script's full stop counts; plus the ellipsis (U+2026), which
+ * Unicode leaves out but a speaker trailing off ends on.
  */
-const TERMINAL = /\p{Sentence_Terminal}[\p{Pe}\p{Pf}"'’”]*$/u;
+const TERMINAL = /[\p{Sentence_Terminal}…][\p{Pe}\p{Pf}"'’”]*$/u;
 export const endsSentence = (text: string) => TERMINAL.test(text);
 /** Ends a clause: Unicode's Terminal_Punctuation that does not end a sentence ("," ";" ":" "،" "、" "，"). */
 const CLAUSE = /(?!\p{Sentence_Terminal})\p{Terminal_Punctuation}[\p{Pe}\p{Pf}"'’”]*$/u;

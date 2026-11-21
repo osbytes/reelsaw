@@ -271,6 +271,18 @@ project again: the language is sent to the transcription model in its own option
 `languageCode` for AssemblyAI) instead of being guessed, and becomes `transcripts.language`. To add
 a language, add its data for the stage and list it in `ONLY_FOR` in `language.ts`.
 
+### Clips start or end mid-sentence in a language without punctuation
+
+The project's events say "clip edges: the transcript has almost no punctuation, so clips start and end on
+pauses between sentences". Most STT models return Hindi (and some other languages) with no sentence
+punctuation, so the clip-edge code (`pipeline/thought.ts`, `sentenceRules`) has only pauses to go on, and
+in a script without capitals that is a weak signal: on real STT timing a third of sentence ends have no
+gap at all. The selection eval measures it (`hindi-unpunctuated/edges-unpunctuated`: about 0.4 of clip
+edges land on a sentence, against 0.97 once the transcript has its full stops). What helps: a
+transcription model that punctuates the language (try another one with `reelsaw test-model`), or
+importing subtitles that carry punctuation (`import_transcript`). Trim the edges in the clip editor
+meanwhile. Any script's full stop counts (Unicode Sentence_Terminal: "।", "。", "؟", …).
+
 ### Captions show empty boxes (tofu) for a language
 
 The clip's events say "N characters in this clip have no font on this server and show as empty
