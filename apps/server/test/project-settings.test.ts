@@ -36,7 +36,9 @@ describe("project intro/outro resolution", () => {
     const rows = [asset(me.userId), asset(me.userId), { ...asset(me.userId), deletedAt: new Date() }, asset(other.userId)];
     await db.insert(schema.assets).values(rows);
     [dflt, picked, removed, foreign] = rows.map((r) => r.id) as [string, string, string, string];
-    await db.insert(schema.userSettings).values({ userId: me.userId, projectDefaults: { introAssetId: dflt, outroAssetId: dflt } });
+    await db
+      .insert(schema.userSettings)
+      .values({ userId: me.userId, projectDefaults: { introAssetId: dflt, outroAssetId: dflt, language: "de", focus: "cooking" } });
   });
   after(async () => {
     await p.query(`delete from "user" where id = any($1)`, [[me.userId, other.userId]]);
@@ -47,6 +49,14 @@ describe("project intro/outro resolution", () => {
     const s = await resolveProjectSettings(db, me.userId, {});
     assert.equal(s.introAssetId, dflt);
     assert.equal(s.outroAssetId, dflt);
+  });
+  it("clears a default the caller left unset on purpose (New project's Detect automatically)", async () => {
+    const kept = await resolveProjectSettings(db, me.userId, { language: undefined });
+    assert.equal(kept.language, "de", "an undefined value does not shadow the default");
+    const s = await resolveProjectSettings(db, me.userId, {}, ["language", "focus"]);
+    assert.equal(s.language, undefined);
+    assert.equal(s.focus, undefined);
+    assert.equal((await resolveProjectSettings(db, me.userId, { language: "fr" }, ["language"])).language, "fr", "a given value wins over clear");
   });
   it("honours an explicit null as none, and drops its seconds", async () => {
     const s = await resolveProjectSettings(db, me.userId, { introAssetId: null, introSec: 4 });

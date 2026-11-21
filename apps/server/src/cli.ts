@@ -71,7 +71,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   check-source <url> [--user <email|id>] | --minutes <n> [--user <email|id>]
  *                                           would a project from this link (or a file this long) be accepted for the account now:
  *                                           its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source)
- *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
+ *   create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
  *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
@@ -841,15 +841,16 @@ ${usage}`);
       process.exitCode = 1;
     } else console.log(r.fits ? "fits" : "fits so far (length unknown)");
   },
-  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
+  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {
-    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]…";
+    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…";
     if (!pos[0]) throw new Error(usage);
-    const { settings } = settingsFlags(usage);
+    const { settings, clear } = settingsFlags(usage);
     const input = createProjectInputSchema.safeParse({
       sourceUrl: pos[0],
       title: flag("title"),
       settings: Object.keys(settings).length ? settings : undefined,
+      ...(clear.length ? { clear } : {}),
     });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));
