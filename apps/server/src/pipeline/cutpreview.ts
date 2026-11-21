@@ -10,6 +10,7 @@
  */
 import { languageForModel } from "../ai/spoken-languages.js";
 import { spawn } from "node:child_process";
+import { CommandError } from "../media.js";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -45,7 +46,7 @@ function ffmpeg(bin: string, args: string[], signal?: AbortSignal): Promise<Buff
     p.stdout.on("data", (d: Buffer) => out.push(d));
     p.stderr.on("data", (d: Buffer) => (err += d.toString()));
     p.on("error", reject);
-    p.on("close", (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg (${code}): ${err.slice(-300)}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new CommandError(bin, code, err, sig))));
   });
 }
 

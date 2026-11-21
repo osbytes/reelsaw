@@ -2429,6 +2429,11 @@ export function ClipEditor(props: Props) {
           ? `${plural(nCut, "cut")} applied${nUnverified ? ` (▲ ${nUnverified} without a seam check)` : ""}${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}`
           : "No disfluencies in this range."}
         {pauses?.cuts ? ` ${plural(pauses.cuts, "pause")} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).` : ""}
+        {pauses?.skipped === "mostly-sound"
+          ? ` Pauses kept: most of this clip is sound without speech (gameplay, music), and trimming it would have removed ${(pauses.wouldRemoveSec ?? 0).toFixed(1)}s.`
+          : pauses?.keptSound
+            ? ` ${plural(pauses.keptSound, "gap")} without speech kept because ${pauses.keptSound === 1 ? "it isn’t" : "they aren’t"} quiet.`
+            : ""}
       </p>
       {cuts.map(({ f, label, tone, reason }) => (
         <div

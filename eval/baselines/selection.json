@@ -1,5 +1,12 @@
 {
-  "updatedAt": "2026-11-21T22:06:27.911Z",
+  "updatedAt": "2026-11-21T22:33:54.269Z",
+  "acceptedRegressions": [
+    {
+      "metric": "punctuatedEdges",
+      "reason": "edge scoring now reads the first and last word played, as main's padWithinGaps keeps pads between words",
+      "at": "2026-11-21T22:33:54.269Z"
+    }
+  ],
   "cases": {
     "repair-mmss": true,
     "apollo/chunking": true,
@@ -94,7 +101,7 @@
       "better": "higher"
     },
     "punctuatedEdges": {
-      "value": 0.94,
+      "value": 0.93,
       "better": "higher"
     }
   }

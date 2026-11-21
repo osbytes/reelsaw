@@ -74,8 +74,11 @@ function edgeCases(name: string, t: TranscriptFixture): CaseResult[] {
       const s0 = (t.durationSec - 40) * ((k + 0.5) / 40) + (((k * 7919) % 300) / 100 - 1.5);
       const c = snapCandidate(cand(Math.max(0, s0), s0 + 35), segs, [], settings, t.durationSec, { words, rules });
       if (!c) continue;
-      const okStart = c.startSec === 0 || starts.some((x) => Math.abs(x - (c.startSec + 0.25)) < 0.02);
-      const okEnd = Math.abs(c.endSec - t.durationSec) < 0.02 || ends.some((x) => Math.abs(x - (c.endSec - 0.35)) < 0.02);
+      // the first and last word the clip plays (the pads vary: snapCandidate keeps them in the gaps between words)
+      const first = words.find((x) => (x.start + x.end) / 2 > c.startSec);
+      const last = words.findLast((x) => x.start < c.endSec);
+      const okStart = !!first && starts.some((x) => Math.abs(x - first.start) < 0.02);
+      const okEnd = !!last && ends.some((x) => Math.abs(x - last.end) < 0.02);
       edges += 2;
       on += (okStart ? 1 : 0) + (okEnd ? 1 : 0);
       if (!okStart) misses.push(`start ${c.startSec}`);
@@ -622,9 +625,23 @@ export const selectionSuite: Suite = {
         const bad: string[] = [];
         if (!c) bad.push("candidate dropped");
         else {
-          const lastIdx = words.map((w, i) => ((w.start + w.end) / 2 < c.endSec - 0.35 ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
-          const signal = sentenceEndAfter(words, lastIdx, rules);
-          if (!signal) bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
+          // the last word the clip plays is the last one starting before its end (what the render keeps; the end
+          // pad varies, so it is not "the end minus 0.35 s")
+          const lastIdx = words.findLastIndex((w) => w.start < c.endSec);
+          if (!sentenceEndAfter(words, lastIdx, rules)) {
+            // the end pad is breathing room, not the start of what comes next: a sentence end a few words back
+            // means the clip took the next sentence's first words along
+            let sentEnd = lastIdx - 1;
+            while (sentEnd >= Math.max(0, lastIdx - 3) && !sentenceEndAfter(words, sentEnd, rules)) sentEnd--;
+            if (sentEnd >= Math.max(0, lastIdx - 3))
+              bad.push(
+                `takes the next words along: "${words
+                  .slice(sentEnd + 1, lastIdx + 1)
+                  .map((w) => w.text)
+                  .join(" ")}"`,
+              );
+            else bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
+          }
           if (Math.abs(c.endSec - k.expectEnd) > k.tolerance)
             bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
           if (c.startSec > k.windowStart + 0.5) bad.push(`starts at ${c.startSec}, after ${k.windowStart}`);

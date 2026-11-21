@@ -18,6 +18,7 @@
  * render of the new clips. Minutes per profile instead of a full pipeline each.
  */
 import fs from "node:fs/promises";
+import { CommandError } from "../media.js";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -143,7 +144,7 @@ function sh(cmd: string, args: string[], opts: { cwd?: string; input?: string; q
     });
     if (opts.input !== undefined) p.stdin!.end(opts.input);
     p.on("error", reject);
-    p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} ${args.join(" ")} exited ${code}: ${err.slice(-800)}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(out) : reject(new CommandError(`${cmd} ${args.join(" ")}`, code, err, sig))));
   });
 }
 

@@ -18,7 +18,8 @@ import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
 import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, tightenOverlays, dropFaceOverlaps, mergeRegions } from "./overlays.js";
-import { speechSegments, pauseCuts } from "../audio/vad.js";
+import { speechSegments, planPauseTrim } from "../audio/vad.js";
+import { measureLoudness, speechGainDb, PEAK_LIMITER, type Loudness } from "../audio/loudness.js";
 import { clipPcm } from "../audio/pcm.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
@@ -631,13 +632,21 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   let pauseInfo: ClipDiagnostics["pauses"];
   let cuts: CutRange[] = cutResult.cuts;
   const maxPause = settings.pauses === "off" ? 0 : settings.pauses === "tight" ? 0.35 : 0.6;
-  if (speechProbs && maxPause > 0) {
+  if (speechProbs && clipAudio && maxPause > 0) {
     try {
       const segs = speechSegments(speechProbs);
-      const silence = pauseCuts(segs, duration, { maxPause });
-      cuts = mergeRanges([...cuts, ...silence]);
-      pauseInfo = { cuts: silence.length, removedSec: Number(silence.reduce((n, c) => n + c.end - c.start, 0).toFixed(2)), maxPause };
-      if (silence.length) log.info(pauseInfo, "trimming pauses");
+      const trim = planPauseTrim(segs, clipAudio, duration, { maxPause });
+      cuts = mergeRanges([...cuts, ...trim.cuts]);
+      pauseInfo = {
+        cuts: trim.cuts.length,
+        removedSec: Number(trim.cuts.reduce((n, c) => n + c.end - c.start, 0).toFixed(2)),
+        maxPause,
+        ...(trim.keptSound ? { keptSound: trim.keptSound } : {}),
+        ...(trim.skipped ? { skipped: trim.skipped, wouldRemoveSec: trim.wouldRemoveSec } : {}),
+      };
+      if (trim.skipped) log.info(pauseInfo, "pauses kept: mostly sound without speech");
+      else if (trim.cuts.length) log.info(pauseInfo, "trimming pauses");
+      else if (trim.keptSound) log.debug(pauseInfo, "gaps without speech kept: not quiet");
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       log.warn({ err }, "pause detection failed; keeping pauses");
@@ -805,8 +814,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     clip.id,
     log,
   );
-  const srcHasAudio =
-    bumpers.intro || bumpers.outro || music.length || style.fadeIn > 0 || style.fadeOut > 0 ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
+  const srcHasAudio = (await svc.media.ffprobe(sourcePath)).hasAudio;
+  // speech level: one linear gain to CLIP_LUFS for the body, measured on the range being rendered (a source
+  // without sound has nothing to measure)
+  const loudness: Loudness | null = srcHasAudio
+    ? await measureLoudness(svc.media, sourcePath, at, duration, ctx.signal).catch((err) => {
+        if (ctx.signal.aborted) throw err;
+        log.warn({ err }, "could not measure clip loudness; audio kept at its source level");
+        return null;
+      })
+    : null;
+  const gainDb = speechGainDb(loudness);
+  log.debug({ loudness, gainDb, srcHasAudio }, "speech level");
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean, withOverlays: boolean, transitions: TransitionPlan): { graph: string; audioMap: string[] } => {
     // the tail joins the intro / outro and burns in the fades; it runs when there is either
@@ -884,7 +903,13 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     }
     // the body's audio as one labelled stream when something has to be mixed in or joined after it
     let bodyAudio = hasCutBranch ? "[ca]" : "0:a:0?";
-    if ((withTail || withMusic) && !hasCutBranch) {
+    if (loudness) {
+      // measured, so the source has audio: the speech gain goes on the body before music and bumpers join it
+      graph += `;${hasCutBranch ? "[ca]" : "[0:a:0]"}volume=${gainDb}dB[cn]`;
+      bodyAudio = "[cn]";
+      audioMap = ["-map", bodyAudio];
+    }
+    if ((withTail || withMusic) && bodyAudio === "0:a:0?") {
       // concat / amix need audio in every slot: the no-cuts branch has optional audio, so give it a guaranteed [ca]
       graph += `;${srcHasAudio ? "[0:a:0]anull[ca]" : `anullsrc=r=48000:cl=stereo,atrim=end=${duration.toFixed(3)}[ca]`}`;
       bodyAudio = "[ca]";
@@ -902,6 +927,12 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       const outroInput = withBumpers && bumpers.outro ? base + (bumpers.intro ? 1 : 0) : undefined;
       graph += `;${bumperConcat({ introInput, outroInput, bodyVideo: "[bodyraw]", bodyAudio, bodySec: outDuration, plan: transitions })}`;
       audioMap = ["-map", "[a]"];
+    }
+    // the finished mix (speech, music, bumpers) never reaches full scale
+    const last = audioMap[1]!;
+    if (last.startsWith("[")) {
+      graph += `;${last}${PEAK_LIMITER}[aout]`;
+      audioMap = ["-map", "[aout]"];
     }
     return { graph, audioMap };
   };
@@ -1084,6 +1115,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),
+    ...(loudness ? { loudness: { inputLufs: loudness.inputLufs, inputPeak: loudness.inputPeak, gainDb } } : {}),
     ...(captionTiming ? { captionTiming } : {}),
     ...(visualLayerCount
       ? { overlays: { used: usedOverlays ? overlayItems.items.length : 0, ...(overlayItems.skipped.length ? { skipped: overlayItems.skipped } : {}) } }

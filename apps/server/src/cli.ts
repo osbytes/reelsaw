@@ -18,6 +18,7 @@ import {
   utcDay,
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
+import { CommandError } from "./media.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
 import { startUpgradeWork, upgradeWork } from "./projects/after-upgrade.js";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
@@ -552,7 +553,7 @@ function ffmpegWav(svc: Services, input: string, start: number, dur: number): Pr
       "pipe:1",
     ]);
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
-    p.on("close", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg exited ${code}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new CommandError("ffmpeg", code, "", sig))));
     p.on("error", reject);
   });
 }

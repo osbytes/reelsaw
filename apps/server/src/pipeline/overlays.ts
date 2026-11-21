@@ -8,7 +8,7 @@
  * a coarse grid, and keep only cells that show text in several different shots.
  */
 import { spawn } from "node:child_process";
-import { rgbFramesToPipe } from "../media.js";
+import { rgbFramesToPipe, CommandError } from "../media.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import type { TextDetector } from "../vision/text.js";
 import { TEXT_INPUT_W, TEXT_INPUT_H } from "../vision/text.js";
@@ -126,18 +126,26 @@ export const EDGE_MARGIN = 0.03;
  * Game and app interface (scores, player lists, menu buttons) is pinned to the screen like burned-in
  * text, so the multi-shot test keeps it. It is content, not something to mask. Subtitles are centred
  * or span the frame; logos, handles and lower thirds sit in the top or bottom band. Narrow text off
- * centre, halfway down a side, is interface. Two or more such regions mean the video shows an
+ * centre, halfway down a side, is interface; so is any block halfway down that stays clear of the
+ * centre line, however wide: no subtitle sits there, and in a multi-shot video it is what a shirt print
+ * or a seat-belt logo in a fixed camera turns into (a region on a passenger's chest was blurred in
+ * every shot of a car interview). Two or more such regions mean the video shows an
  * interface, and then narrow text hugging a side edge in the corners is part of it too (a player
  * list, menu icons); without them a corner box stays a logo.
  */
 export function splitInterface<O extends Box>(overlays: O[]): { kept: O[]; ui: O[] } {
   const offCentre = (o: Box) => o.x2 - o.x1 < 0.25 && Math.abs((o.x1 + o.x2) / 2 - 0.5) > 0.2;
+  const clearOfCentre = (o: Box) => o.x1 > 0.55 || o.x2 < 0.45;
   const midSide = (o: Box) => {
     const cy = (o.y1 + o.y2) / 2;
     return cy > 0.2 && cy < 0.75;
   };
+  // only narrow side text says "this video shows an interface"; a wide block clear of the centre (two guests'
+  // shirts) is scene text on its own and must not turn the corner logos into interface
   const side = overlays.filter((o) => offCentre(o) && midSide(o));
-  const ui = side.length >= 2 ? overlays.filter((o) => offCentre(o) && (midSide(o) || o.x1 <= EDGE_MARGIN || o.x2 >= 1 - EDGE_MARGIN)) : side;
+  const wide = overlays.filter((o) => !offCentre(o) && clearOfCentre(o) && midSide(o));
+  const narrow = side.length >= 2 ? overlays.filter((o) => offCentre(o) && (midSide(o) || o.x1 <= EDGE_MARGIN || o.x2 >= 1 - EDGE_MARGIN)) : side;
+  const ui = overlays.filter((o) => narrow.includes(o) || wide.includes(o));
   return { kept: overlays.filter((o) => !ui.includes(o)), ui };
 }
 
@@ -233,7 +241,7 @@ function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSi
     );
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.on("error", reject);
-    p.on("close", (code) => (code === 0 ? resolve(new Uint8Array(Buffer.concat(chunks))) : reject(new Error(`ffmpeg exited ${code}`))));
+    p.on("close", (code, sig) => (code === 0 ? resolve(new Uint8Array(Buffer.concat(chunks))) : reject(new CommandError("ffmpeg (frame)", code, "", sig))));
   });
 }
 

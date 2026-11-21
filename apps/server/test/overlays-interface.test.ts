@@ -47,6 +47,30 @@ describe("splitInterface", () => {
     assert.deepEqual(kept, [band, lowerThird]);
   });
 
+  it("drops a wide block halfway down one side: a shirt print in a multi-shot car interview, not subtitles", () => {
+    // a two-camera car interview: the passenger's chest, then a channel bug and a corner tag
+    const chest = r("caption", 0.6, 0.429, 0.862, 0.719, 0.43);
+    const bug = r("watermark", 0.833, 0, 1, 0.074, 0.94);
+    const tag = r("caption", 0, 0.889, 0.104, 1, 0.52);
+    const { kept, ui } = splitInterface([chest, bug, tag]);
+    assert.deepEqual(ui, [chest]);
+    assert.deepEqual(kept, [bug, tag]);
+  });
+
+  it("two shirts, one on each side, are scene text but do not make a corner logo interface", () => {
+    const left = r("caption", 0.08, 0.45, 0.38, 0.7, 0.4);
+    const right = r("caption", 0.62, 0.45, 0.92, 0.7, 0.4);
+    const bug = r("watermark", 0.86, 0, 1, 0.07, 0.95);
+    const { kept, ui } = splitInterface([left, right, bug]);
+    assert.deepEqual(kept, [bug]);
+    assert.deepEqual(ui, [left, right]);
+  });
+
+  it("keeps a wide band halfway down that crosses the centre (subtitles placed high)", () => {
+    const high = r("caption", 0.2, 0.55, 0.8, 0.68, 0.7);
+    assert.deepEqual(splitInterface([high]).kept, [high]);
+  });
+
   it("drops one mid-side box but keeps a corner bug when there is no second", () => {
     const bug = r("watermark", 0.7, 0.011, 1, 0.182, 0.95);
     const { kept, ui } = splitInterface([bug, r("caption", 0.688, 0.333, 0.729, 0.407)]);

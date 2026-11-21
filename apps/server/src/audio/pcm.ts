@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { CommandError } from "../media.js";
 import { VAD_SR } from "./vad.js";
 
 /** 16 kHz mono float PCM of a clip's audio (VAD input, and matching a section to the source). */
@@ -31,8 +32,8 @@ export function clipPcm(ffmpegPath: string, source: string, start: number, durat
     );
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.on("error", reject);
-    p.on("close", (code) => {
-      if (code !== 0) return reject(new Error(`ffmpeg exited ${code} extracting clip audio`));
+    p.on("close", (code, sig) => {
+      if (code !== 0) return reject(new CommandError("ffmpeg (clip audio)", code, "", sig));
       const b = Buffer.concat(chunks);
       resolve(new Float32Array(b.buffer, b.byteOffset, Math.floor(b.byteLength / 4)));
     });
