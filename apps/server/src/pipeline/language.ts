@@ -86,10 +86,21 @@ export function languageName(lang: string | null | undefined): string | undefine
  * English packaging. Empty for English and for an undetected language, so those prompts stay as they were.
  */
 export function outputLanguageRule(lang: string | null | undefined, fields: string): string {
-  const code = languageCode(lang);
-  if (!code || code === "en") return "";
-  return `- The video is in ${languageName(code)}. Write ${fields} in ${languageName(code)}, whatever language these instructions are in.
+  const code = outputLanguage(lang);
+  if (!code) return "";
+  // the user's own instructions win: "write the titles in English" for a German video is a choice, not a mistake
+  return `- The video is in ${languageName(code)}. Write ${fields} in ${languageName(code)}, whatever language these instructions are in, unless the user's instructions ask for another language.
 `;
+}
+
+/**
+ * The language a prompt names for the viewer-facing text, as a code: undefined for English and for an undetected
+ * language, whose prompts (and so step keys) stay as they were before the rule existed. Step inputs carry this,
+ * never the raw transcript language, so an English project's saved steps keep their keys.
+ */
+export function outputLanguage(lang: string | null | undefined): string | undefined {
+  const code = languageCode(lang);
+  return code && code !== "en" ? code : undefined;
 }
 
 /** Reason recorded when a stage is skipped for the transcript's language. */

@@ -37,7 +37,7 @@ import type { Logger } from "../log.js";
 import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
-import { outputLanguageRule } from "./language.js";
+import { outputLanguage, outputLanguageRule } from "./language.js";
 import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment, plural } from "@reelsaw/shared";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
@@ -105,7 +105,11 @@ export function describeStep(
 ) {
   return ctx.step(
     "describe",
-    { input: { title, text, ...(language ? { language } : {}) }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION },
+    {
+      input: { title, text, ...(outputLanguage(language) ? { language: outputLanguage(language) } : {}) },
+      model: modelId,
+      promptVersion: DESCRIBE_PROMPT_VERSION,
+    },
     (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text, language),
     { schema: describeSchema, timeoutMs: unitMs, model: modelId, clipId },
   );
@@ -243,7 +247,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       maxSec,
       focus: settings.focus,
       instructions: settings.instructions,
-      ...(transcript.language ? { language: transcript.language } : {}),
+      ...(outputLanguage(transcript.language) ? { language: outputLanguage(transcript.language) } : {}),
     };
     const found = await mapSelection(ctx, o, { inside, sc, clipId, modelId, unitMs, concurrency, log });
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };

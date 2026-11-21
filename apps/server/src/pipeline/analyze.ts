@@ -43,6 +43,7 @@ import { finishThought } from "./thought.js";
 import type { Logger } from "../log.js";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
+import { outputLanguage } from "./language.js";
 
 export { normalizeCandidate, parseClipsLeniently } from "./select.js";
 
@@ -419,7 +420,7 @@ export async function analyze(ctx: StageContext) {
     focus: settings.focus,
     instructions: settings.instructions,
     // only when known: an undefined key keeps the step key (and its saved answers) of projects from before
-    ...(transcript.language ? { language: transcript.language } : {}),
+    ...(outputLanguage(transcript.language) ? { language: outputLanguage(transcript.language) } : {}),
   };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
