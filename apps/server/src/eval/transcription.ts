@@ -112,7 +112,10 @@ for (const modelId of models) {
       } as Record<string, JSONObject>;
       const t0 = Date.now();
       const res = await transcribe({ model, audio, providerOptions, maxRetries: 1 });
-      const words = toWords(res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })));
+      const words = toWords(
+        res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })),
+        { language: "en" },
+      ); // the cases are English
       perCase.push({ c, words, ms: Date.now() - t0 });
     }
     for (const correct of [false, true]) {

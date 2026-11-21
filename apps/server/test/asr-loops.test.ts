@@ -161,19 +161,25 @@ describe("collapseDecoderLoops", () => {
 describe("toWords collapse", () => {
   it("collapses an interpolated prompt-list segment (timestamps look spoken)", () => {
     const phrase = "Chafing Dream Swag Bags Flying Pig Project";
-    const words = toWords([
-      { text: "He'll have us", startSecond: 1799.5, endSecond: 1800 },
-      { text: Array(8).fill(phrase).join(" "), startSecond: 1800, endSecond: 1840 },
-    ]);
+    const words = toWords(
+      [
+        { text: "He'll have us", startSecond: 1799.5, endSecond: 1800 },
+        { text: Array(8).fill(phrase).join(" "), startSecond: 1800, endSecond: 1840 },
+      ],
+      { language: undefined },
+    );
     assert.equal(join(words), `He'll have us ${phrase} ${phrase}`);
   });
   it("collapses a phrase-level 'no' segment, not only word-level ASR", () => {
     const nos = Array(50).fill("no").join(" ");
-    const words = toWords([
-      { text: "The grass.", startSecond: 40, endSecond: 40.4 },
-      { text: nos, startSecond: 40.4, endSecond: 50 },
-      { text: "Michelle did you", startSecond: 50, endSecond: 51 },
-    ]);
+    const words = toWords(
+      [
+        { text: "The grass.", startSecond: 40, endSecond: 40.4 },
+        { text: nos, startSecond: 40.4, endSecond: 50 },
+        { text: "Michelle did you", startSecond: 50, endSecond: 51 },
+      ],
+      { language: undefined },
+    );
     const nNo = words.filter((x) => tokenKey(x.text) === "no").length;
     assert.ok(nNo <= 4, `kept ${nNo} nos`);
     assert.equal(
@@ -182,7 +188,7 @@ describe("toWords collapse", () => {
     );
   });
   it("can skip collapse for callers that want the raw split", () => {
-    const words = toWords([{ text: "no no no no no", startSecond: 0, endSecond: 1 }], { collapseLoops: false });
+    const words = toWords([{ text: "no no no no no", startSecond: 0, endSecond: 1 }], { collapseLoops: false, language: undefined });
     assert.equal(words.length, 5);
   });
 });

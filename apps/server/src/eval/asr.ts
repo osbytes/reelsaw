@@ -40,7 +40,13 @@ export async function transcribeCached(
         audioSec: res.durationInSeconds ?? last?.endSecond,
         costUsd: reportedCost(res.providerMetadata),
       });
-      return { text: res.text, words: toWords(res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond }))) };
+      return {
+        text: res.text,
+        words: toWords(
+          res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })),
+          { language },
+        ),
+      };
     } catch (err) {
       ctx.meter.record({ kind: "stt", model: modelId, ms: Date.now() - t0, ok: false, error: (err as Error).message?.slice(0, 200) });
       throw err;

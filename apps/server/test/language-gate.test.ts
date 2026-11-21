@@ -16,6 +16,7 @@ import {
   transcriptionLanguageOptions,
 } from "../src/pipeline/language.js";
 import { buildMapPrompt } from "../src/pipeline/select.js";
+import { toWords } from "../src/pipeline/transcript.js";
 import {
   withSpokenLanguage,
   WHISPER_LANGUAGE_NAMES,
@@ -186,6 +187,23 @@ describe("output language", () => {
     const c = { title: "t", durationSec: 600, minSec: 15, maxSec: 60 };
     assert.match(buildMapPrompt(chunk, { ...c, language: "es" }), /Write "title", "hook", "caption" and "hashtags" in Spanish/);
     assert.equal(buildMapPrompt(chunk, c), buildMapPrompt(chunk, { ...c, language: "en" }));
+  });
+});
+
+describe("toWords per language", () => {
+  it("splits a phrase without spaces by dictionary, the same for the transcript and a cut's re-transcription", () => {
+    const seg = [{ text: "今日はいい天気です", startSecond: 0, endSecond: 2 }];
+    const ja = toWords(seg, { language: "ja" }).map((w) => w.text);
+    assert.ok(ja.length > 1, JSON.stringify(ja));
+    assert.deepEqual(
+      toWords(seg, { language: "japanese" }).map((w) => w.text),
+      ja,
+      "a stored name splits as its code does",
+    );
+    assert.deepEqual(
+      toWords([{ text: "a b c", startSecond: 0, endSecond: 1 }], { language: "en" }).map((w) => w.text),
+      ["a", "b", "c"],
+    );
   });
 });
 

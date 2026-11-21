@@ -18,15 +18,16 @@ export function looksWordLevel(segments: RawSegment[]): boolean {
 /**
  * Words with times from what the STT model returned. Phrase-level segments are split into words by the language's
  * own rules: spaces for most, a dictionary (Intl.Segmenter) for scripts written without them (Japanese, Thai), where
- * splitting on spaces made a whole sentence one word.
+ * splitting on spaces made a whole sentence one word. `language` is required so every caller splits as the
+ * stored transcript was split (a cut's re-transcription has to match the words it is compared with).
  */
-export function toWords(segments: RawSegment[], opts?: { collapseLoops?: boolean; language?: string | null | undefined }): Word[] {
+export function toWords(segments: RawSegment[], opts: { collapseLoops?: boolean; language: string | null | undefined }): Word[] {
   let words: Word[];
   if (looksWordLevel(segments)) {
     words = segments.map((s) => ({ text: s.text.trim(), start: s.startSecond, end: Math.max(s.endSecond, s.startSecond) })).filter((w) => w.text.length > 0);
   } else {
     words = [];
-    const lang = opts?.language;
+    const lang = opts.language;
     const unspaced = !!lang && !languageProfile(lang).spaced;
     for (const seg of segments) {
       const tokens = unspaced ? segmentWords(seg.text, lang) : seg.text.trim().split(/\s+/).filter(Boolean);
@@ -41,7 +42,7 @@ export function toWords(segments: RawSegment[], opts?: { collapseLoops?: boolean
       }
     }
   }
-  return opts?.collapseLoops === false ? words : collapseDecoderLoops(words);
+  return opts.collapseLoops === false ? words : collapseDecoderLoops(words);
 }
 
 /**

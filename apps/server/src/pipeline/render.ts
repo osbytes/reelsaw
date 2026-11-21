@@ -1700,7 +1700,7 @@ export async function planClipCuts(
       signal,
       transcribe: async (audio) => {
         const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal, language: alignLanguage });
-        return toWords(res.segments);
+        return toWords(res.segments, { language: transcript?.language });
       },
     },
     sourcePath,

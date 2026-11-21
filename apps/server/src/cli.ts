@@ -561,7 +561,7 @@ function ffmpegWav(svc: Services, input: string, start: number, dur: number): Pr
 async function words(svc: Services, audio: Buffer) {
   const id = svc.models.get().align;
   const res = await svc.asr.transcribe(audio, { modelId: id });
-  return { model: id, text: res.text, words: toWords(res.segments) };
+  return { model: id, text: res.text, words: toWords(res.segments, { language: undefined }) }; // the align check speaks no language: split on spaces
 }
 
 async function sourcePath(svc: Services, projectId: string) {
