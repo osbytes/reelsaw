@@ -17,6 +17,7 @@ import { llmContext, type LlmContext } from "./trace.js";
 import type { Logger } from "../log.js";
 import { ASR_CACHE_PREFIX, keys, type Storage } from "../storage/index.js";
 import { mapLimit } from "../lib/batch.js";
+import { transcriptionLanguageOptions } from "../pipeline/language.js";
 
 /** The cache key of one transcription: sha256 over the model, its options and the audio bytes. */
 export function asrCacheKey(modelId: string, providerOptions: Record<string, JSONObject>, audio: Uint8Array): string {
@@ -44,13 +45,18 @@ export interface SttUsage {
 
 export interface Asr {
   /** The cache key `transcribe` would use for these inputs. */
-  keyFor(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject> }): string;
+  keyFor(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject>; language?: string | null | undefined }): string;
   /** Transcribe `audio` with `modelId` (default TRANSCRIPTION_MODEL) and its word-timestamp options. */
   transcribe(
     audio: Uint8Array,
     opts?: {
       modelId?: string;
       providerOptions?: Record<string, JSONObject>;
+      /**
+       * The spoken language ("en", "pt-BR", "German"), sent in the vendor's own option so the model does not guess;
+       * unset = detect. It is merged into `providerOptions`, so it is part of the cache key.
+       */
+      language?: string | null | undefined;
       signal?: AbortSignal | undefined;
       maxRetries?: number;
       functionId?: string;
@@ -69,15 +75,22 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
   let hits = 0;
   let misses = 0;
   const fileFor = (key: string) => path.join(dir, key.slice(0, 2), `${key}.json`);
+  // the language is merged here, once, so no caller can send it to the model but leave it out of the key (or the reverse)
+  const optionsFor = (modelId: string, opts: { providerOptions?: Record<string, JSONObject>; language?: string | null | undefined }) => {
+    const base = opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>);
+    const k = ai.transcriptionOptionsKey(modelId);
+    const lang = transcriptionLanguageOptions(k, opts.language) as JSONObject;
+    return Object.keys(lang).length ? { ...base, [k]: { ...(base[k] ?? {}), ...lang } } : base;
+  };
   const asr: Asr = {
     onUsage: null,
     keyFor(audio, opts = {}) {
       const modelId = opts.modelId ?? defaultModel();
-      return asrCacheKey(modelId, opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>), audio);
+      return asrCacheKey(modelId, optionsFor(modelId, opts), audio);
     },
     async transcribe(audio, opts = {}) {
       const modelId = opts.modelId ?? defaultModel();
-      const providerOptions = opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>);
+      const providerOptions = optionsFor(modelId, opts);
       const key = asrCacheKey(modelId, providerOptions, audio);
       const file = fileFor(key);
       const readLocal = async () => JSON.parse(await fs.readFile(file, "utf8")) as AsrResult;

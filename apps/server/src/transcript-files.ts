@@ -18,6 +18,7 @@ import { enqueueRefine } from "./pipeline/refine.js";
 import { releaseUpload } from "./storage/uploads.js";
 import { bodyChunks, fetchPublic, TooManyRedirectsError, UnsafeUrlError } from "./lib/safe-url.js";
 import type { Actor } from "./projects/service.js";
+import { languageCode } from "./pipeline/language.js";
 
 export type CaptionFormat = "srt" | "vtt";
 
@@ -170,7 +171,7 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
   } catch (err) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Could not read that subtitle file" });
   }
-  const language = input.language?.trim().toLowerCase() || undefined;
+  const language = languageCode(input.language);
   const { words, segments } = cuesToTranscript(parsed.cues, { language });
   if (!words.length) throw new TRPCError({ code: "BAD_REQUEST", message: parsed.warnings[0] ?? "That file has no text to use as a transcript." });
   const log = svc.log.child({ module: "transcript", projectId });

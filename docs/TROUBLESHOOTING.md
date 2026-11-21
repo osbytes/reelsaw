@@ -264,8 +264,11 @@ disfluency word lists, the consonant-skeleton name matcher and the wav2vec2-base
 English-only, so `pipeline/language.ts` (`supports(stage, lang)`) turns them off rather than let them
 find nothing, or the wrong thing, silently. Cuts you make by hand still work and use the slower
 whisper seam check instead of CTC alignment. If the language was detected wrongly (a mixed or very
-short video), set the project's language and re-run; to add a language, add its data for the stage
-and list it in `SUPPORTED` in `language.ts`.
+short video, music or a greeting in another language at the start), set the language in **Project
+defaults** (or `settings.language` when creating the project over MCP or the API) and create the
+project again: the language is sent to the transcription model in its own option (`language`, or
+`languageCode` for AssemblyAI) instead of being guessed, and becomes `transcripts.language`. To add
+a language, add its data for the stage and list it in `SUPPORTED` in `language.ts`.
 
 ## 4. Lessons: small local LLMs
 
