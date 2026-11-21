@@ -215,7 +215,7 @@ describe("request logging middleware", () => {
     const app = new Hono<AppEnv>();
     app.use(requestLogger(log));
     app.post("/api/mcp", () => {
-      // what @hono/mcp throws: the reason only in a JSON-RPC body, the message empty
+      // an HTTPException with the reason only in a JSON-RPC body, the message empty
       throw new HTTPException(404, {
         res: Response.json(
           { jsonrpc: "2.0", error: { code: -32000, message: "Bad Request: Unsupported protocol version (supported versions: 2025-06-18)" } },
