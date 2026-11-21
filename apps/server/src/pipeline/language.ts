@@ -69,6 +69,29 @@ export function transcriptionLanguageOptions(provider: string, lang: string | nu
   }
 }
 
+/** "de" → "German"; the code itself when the runtime has no name for it, undefined when unset. */
+export function languageName(lang: string | null | undefined): string | undefined {
+  const code = languageCode(lang);
+  if (!code) return undefined;
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language", fallback: "none" }).of(code) ?? code;
+  } catch {
+    return code; // not a well-formed tag
+  }
+}
+
+/**
+ * The prompt line that makes a model write the viewer-facing text (titles, hooks, captions, hashtags)
+ * in the video's language: the prompts are English, and without it a Spanish video comes back with
+ * English packaging. Empty for English and for an undetected language, so those prompts stay as they were.
+ */
+export function outputLanguageRule(lang: string | null | undefined, fields: string): string {
+  const code = languageCode(lang);
+  if (!code || code === "en") return "";
+  return `- The video is in ${languageName(code)}. Write ${fields} in ${languageName(code)}, whatever language these instructions are in.
+`;
+}
+
 /** Reason recorded when a stage is skipped for the transcript's language. */
 export function skipReason(lang: string | null | undefined): string {
   return `not available for ${languageCode(lang) ?? "this language"}`;

@@ -24,6 +24,7 @@ import { fmtTs } from "./transcript.js";
 import { abortOpt, callSignal } from "./steps.js";
 import { withLlmContext } from "../ai/trace.js";
 import type { Logger } from "../log.js";
+import { outputLanguageRule } from "./language.js";
 
 // ---------- small helpers ----------
 
@@ -281,6 +282,8 @@ export interface SelectContext {
   maxClips?: number | undefined;
   focus?: string | undefined;
   instructions?: string | undefined;
+  /** spoken language of the transcript ("de"); the viewer-facing text is written in it */
+  language?: string | undefined;
 }
 
 const mapSchema = z.object({ clips: z.array(clipCandidateSchema) });
@@ -306,7 +309,7 @@ Rules:
 - "hook" is a short on-screen text overlay (3-8 words) in the voice of a creator, not a summary.
 - "caption" is the post text for TikTok/Reels/Shorts: 1-2 punchy sentences that make people watch, no hashtags, no emoji spam.
 - Titles must be specific, never generic.
-${opts.exclude ? `\nAlready selected, do NOT overlap these: ${opts.exclude}. Return only additional strong moments, or {"clips":[]} if there are none.\n` : ""}
+${outputLanguageRule(c.language, '"title", "hook", "caption" and "hashtags"')}${opts.exclude ? `\nAlready selected, do NOT overlap these: ${opts.exclude}. Return only additional strong moments, or {"clips":[]} if there are none.\n` : ""}
 Respond with JSON only, exactly this shape (numbers in seconds, not mm:ss):
 {"clips":[{"title":"...","hook":"...","startSec":12.3,"endSec":41.0,"score":70,"reasoning":"...","caption":"...","hashtags":["tag1","tag2"]}]}
 

@@ -36,6 +36,7 @@ import type { Logger } from "../log.js";
 import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
+import { outputLanguageRule } from "./language.js";
 import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment, plural } from "@reelsaw/shared";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
@@ -54,7 +55,7 @@ function segmentsIn(segments: TranscriptSegment[], start: number, end: number) {
   return segments.filter((s) => s.end > start + 0.05 && s.start < end - 0.05);
 }
 
-async function describe(o: LlmOpts, title: string, text: string): Promise<z.infer<typeof describeSchema>> {
+async function describe(o: LlmOpts, title: string, text: string, language?: string | null): Promise<z.infer<typeof describeSchema>> {
   const prompt = `You write packaging for short-form clips (TikTok / Shorts / Reels) cut from a longer video titled "${title}".
 
 Clip transcript:
@@ -65,7 +66,7 @@ Write:
 - "hook": a 3-8 word on-screen text overlay in the voice of a creator, not a summary
 - "caption": the post text, 1-2 sentences that make people watch, no hashtags
 - "hashtags": up to 6, without the # symbol
-
+${outputLanguageRule(language, "all four")}
 Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":["..."]}`;
   try {
     const { output } = await generateText({
@@ -91,11 +92,20 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
 }
 
 /** The title / hook / caption call as one saved clip-scoped step. */
-export function describeStep(ctx: Pick<StageContext, "step">, clipId: string, o: LlmOpts, modelId: string, unitMs: number, title: string, text: string) {
+export function describeStep(
+  ctx: Pick<StageContext, "step">,
+  clipId: string,
+  o: LlmOpts,
+  modelId: string,
+  unitMs: number,
+  title: string,
+  text: string,
+  language?: string | null,
+) {
   return ctx.step(
     "describe",
-    { input: { title, text }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION },
-    (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text),
+    { input: { title, text, ...(language ? { language } : {}) }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION },
+    (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text, language),
     { schema: describeSchema, timeoutMs: unitMs, model: modelId, clipId },
   );
 }
@@ -225,7 +235,15 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     const inside = segmentsIn(segments, clip.startSec, clip.endSec);
     const minSec = Math.max(5, Math.min(settings.minClipSeconds, Math.round(selLen * 0.4)));
     const maxSec = Math.max(minSec + 1, Math.min(settings.maxClipSeconds, Math.ceil(selLen)));
-    const sc: SelectContext = { title: project.title, durationSec, minSec, maxSec, focus: settings.focus, instructions: settings.instructions };
+    const sc: SelectContext = {
+      title: project.title,
+      durationSec,
+      minSec,
+      maxSec,
+      focus: settings.focus,
+      instructions: settings.instructions,
+      ...(transcript.language ? { language: transcript.language } : {}),
+    };
     const found = await mapSelection(ctx, o, { inside, sc, clipId, modelId, unitMs, concurrency, log });
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };
     const snapped = found
@@ -262,7 +280,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     .slice(0, 4000);
   if (mode === "exact" || !pick.caption) {
     await ctx.progress(0.6, "Writing title, hook and caption", { clipId });
-    const d = await describeStep(ctx, clipId, o, modelId, unitMs, project.title, text);
+    const d = await describeStep(ctx, clipId, o, modelId, unitMs, project.title, text, transcript.language);
     pick = normalizeCandidate({ ...pick, title: d.title || pick.title, hook: d.hook || pick.hook, caption: d.caption, hashtags: d.hashtags });
   }
   await ctx.progress(0.8, "Scoring", { clipId });

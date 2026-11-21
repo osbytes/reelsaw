@@ -376,6 +376,8 @@ export async function analyze(ctx: StageContext) {
     maxClips: settings.maxClips,
     focus: settings.focus,
     instructions: settings.instructions,
+    // only when known: an undefined key keeps the step key (and its saved answers) of projects from before
+    ...(transcript.language ? { language: transcript.language } : {}),
   };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;

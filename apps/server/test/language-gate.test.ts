@@ -6,7 +6,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { norm } from "../src/pipeline/disfluency.js";
 import { norm as entityNorm } from "../src/pipeline/entities.js";
-import { languageCode, skipReason, supports, transcriptionLanguageOptions } from "../src/pipeline/language.js";
+import { languageCode, languageName, outputLanguageRule, skipReason, supports, transcriptionLanguageOptions } from "../src/pipeline/language.js";
+import { buildMapPrompt } from "../src/pipeline/select.js";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
 describe("norm (disfluency)", () => {
@@ -68,6 +69,27 @@ describe("transcriptionLanguageOptions", () => {
     assert.deepEqual(transcriptionLanguageOptions("openai", ""), {});
     assert.deepEqual(transcriptionLanguageOptions("openai", null), {});
     assert.deepEqual(transcriptionLanguageOptions("someone-else", "de"), {});
+  });
+});
+
+describe("output language", () => {
+  it("names a language from its code or name", () => {
+    assert.equal(languageName("de"), "German");
+    assert.equal(languageName("pt-BR"), "Portuguese");
+    assert.equal(languageName("Japanese"), "Japanese");
+    assert.equal(languageName(null), undefined);
+  });
+  it("asks for the video's language, and leaves English and undetected prompts unchanged", () => {
+    assert.match(outputLanguageRule("es", "the title"), /The video is in Spanish\. Write the title in Spanish/);
+    assert.equal(outputLanguageRule("en", "the title"), "");
+    assert.equal(outputLanguageRule("en-GB", "the title"), "");
+    assert.equal(outputLanguageRule(undefined, "the title"), "");
+  });
+  it("puts the rule in the clip-finding prompt", () => {
+    const chunk = { start: 0, end: 60, lines: ["[00:00.0 - 00:05.0] Hola a todos"] } as never;
+    const c = { title: "t", durationSec: 600, minSec: 15, maxSec: 60 };
+    assert.match(buildMapPrompt(chunk, { ...c, language: "es" }), /Write "title", "hook", "caption" and "hashtags" in Spanish/);
+    assert.equal(buildMapPrompt(chunk, c), buildMapPrompt(chunk, { ...c, language: "en" }));
   });
 });
 

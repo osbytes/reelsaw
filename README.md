@@ -996,7 +996,7 @@ Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optio
 2. **Constrained LLM correction** (`TRANSCRIPT_CORRECTION=true`): transcript spans that sound like a known entity become candidates; the language model confirms each one in context with a confidence score. Only candidates can change, so the model cannot rewrite the transcript, and word timestamps are kept.
 3. **Review in the UI**: corrections at or above `TRANSCRIPT_AUTO_FIX_CONFIDENCE` (0.85) are applied automatically and shown as "auto-fixed", unless the words they replace are everyday English (contractions and casual spellings like "don't" or "gonna" included), which always wait for review; the rest appear under the transcript line with the confidence and accept/reject buttons. Applying decisions re-renders only the clips whose captions overlap the change.
 
-> **Language:** the filler/repeat rules, the sound-alike name search and the CTC cut aligner are English-only. For a transcript detected as any other language those steps are skipped with a plain-language event ("not available for de") instead of running blind; the language-model checks and the whisper-based cut search still work.
+> **Language:** the filler/repeat rules, the sound-alike name search and the CTC cut aligner are English-only. For a transcript detected as any other language those steps are skipped with a plain-language event ("not available for de") instead of running blind; the language-model checks and the whisper-based cut search still work. The language set in a project's settings (or Project defaults) is sent to the transcription model instead of being detected, and clip titles, hooks, captions and hashtags are written in the video's language.
 
 ### Disfluencies
 
