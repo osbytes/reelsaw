@@ -89,6 +89,8 @@ export class CommandError extends Error {
     public cmd: string,
     public code: number | null,
     public stderr: string,
+    /** the signal that ended the process when it did not exit on its own (code is then null) */
+    public signal: NodeJS.Signals | null = null,
   ) {
     // lead with the lines that say what went wrong; ffmpeg prints a long banner first
     const key = stderr
@@ -96,7 +98,12 @@ export class CommandError extends Error {
       .filter((l) => /error|invalid|fail|cannot|no such|unable|not found|unknown/i.test(l))
       .slice(-6)
       .join("\n");
-    super(`${cmd} exited with ${code}: ${key ? `${key}\n--- tail ---\n` : ""}${stderr.slice(-1200)}`);
+    // "exited with null" said nothing: a process killed from outside (out of memory, a stopped job) has no code
+    const how =
+      code === null
+        ? `was stopped by ${signal ?? "a signal"}${signal === "SIGKILL" ? " (usually the server running out of memory)" : ""}`
+        : `exited with ${code}`;
+    super(`${cmd} ${how}: ${key ? `${key}\n--- tail ---\n` : ""}${stderr.slice(-1200)}`);
   }
 }
 
@@ -261,10 +268,10 @@ export function runRaw(bin: string, args: string[], opts: RunOptions = {}): Prom
       }
     });
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (failure) reject(failure);
       else if (code === 0) resolve({ stdout, stderr });
-      else reject(new CommandError(bin, code, stderr));
+      else reject(new CommandError(bin, code, stderr, signal));
     });
   });
 }

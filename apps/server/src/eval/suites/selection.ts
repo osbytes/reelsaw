@@ -545,6 +545,9 @@ export const selectionSuite: Suite = {
           const lastIdx = words.map((w, i) => ((w.start + w.end) / 2 < c.endSec - 0.35 ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
           const signal = sentenceEndAfter(words, lastIdx);
           if (!signal) bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
+          // the end pad is breathing room, not the start of what comes next
+          const leaked = words.slice(lastIdx + 1).filter((w) => w.start < c.endSec);
+          if (leaked.length) bad.push(`takes the next words along: "${leaked.map((w) => w.text).join(" ")}"`);
           if (Math.abs(c.endSec - k.expectEnd) > k.tolerance)
             bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
           if (c.startSec > k.windowStart + 0.5) bad.push(`starts at ${c.startSec}, after ${k.windowStart}`);

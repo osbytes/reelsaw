@@ -82,6 +82,31 @@ function firstArray(parsed: unknown): unknown[] {
   return [];
 }
 
+/**
+ * Clips of one project get different titles. Chunks of a long transcript are titled by separate model calls,
+ * so the same moment type comes back with the same name ("First Impressions of GTA 6" several times in one
+ * project). Earlier clips (in pick order) keep their title; a repeat takes its own hook when that is new,
+ * else a number. `taken` are titles already on the project (clips the user kept).
+ */
+export function distinctTitles<T extends { title: string; hook: string }>(clips: T[], taken: string[] = []): T[] {
+  const key = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const seen = new Set(taken.map(key));
+  return clips.map((c) => {
+    let title = c.title;
+    if (seen.has(key(title))) {
+      const hook = c.hook.trim();
+      if (hook && !seen.has(key(hook))) title = hook;
+      else for (let n = 2; seen.has(key(title)); n++) title = `${c.title} (${n})`;
+    }
+    seen.add(key(title));
+    return title === c.title ? c : { ...c, title };
+  });
+}
+
 /** Fix the usual small-model slips even when the schema validated: 0-1 scores, timestamps pasted into hooks. */
 export function normalizeCandidate(c: ClipCandidate): ClipCandidate {
   const score = c.score <= 1 ? c.score * 100 : c.score <= 10 && Number.isInteger(c.score) ? c.score * 10 : c.score;

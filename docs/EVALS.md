@@ -195,7 +195,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | `framing` | nothing (runs offline) | speaker crops centre faces and avoid burned-in text; tripod camera settles on the face |
 | `asr-loops` | nothing (runs offline) | ASR decoder-loop collapse: runaway unigram/n-gram repeats are trimmed; short emphatic repeats and 2-copy phrases are kept |
 | `scenes` | media | shot-cut detection on real footage (dark/low-contrast included): precision and recall vs hand-verified cuts |
-| `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause |
+| `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause, inserted sound without speech kept |
 | `alignment` | nothing (runs offline) | wav2vec2 forced alignment: deleted words land inside cuts verified clean by ear; spans ordered and in bounds |
 | `speakers` | media | active speaker detection (mouth motion × audio envelope synchrony) vs known talkers, incl. a drinking listener |
 | `overlays` | media | burned-in captions/watermarks: per-frame detection recall and whole-video aggregation (no scene text) |

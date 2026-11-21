@@ -47,7 +47,7 @@ Impact and effort are scored 1–5. Rank is ordered by roughly impact ÷ effort.
 | 7 | **Brand templates** (caption style, fonts, logo, hook style presets) | 3 | 2 | Saved JSON presets |
 | 8 | **Multi-aspect export** (1:1, 4:5, 16:9) | 3 | 2 | The layout engine is already parametric |
 | 9 | **Per-scene reframe overrides** | 4 | 3 | Scene cuts already exist |
-| 10 | **Audio enhancement** (loudness normalise, denoise) | 3 | 1–3 | ffmpeg `loudnorm` + `afftdn`/`arnndn` is cheap. Regenerative enhancement like Studio Sound is hard |
+| 10 | **Audio enhancement** (loudness normalise, denoise) | 3 | 1–3 | ffmpeg `loudnorm` + `afftdn`/`arnndn` is cheap. Regenerative enhancement like Studio Sound is hard. *Status (2026-11-21): loudness done (−14 LUFS linear gain plus a peak limiter, `audio/loudness.ts`); denoise not yet.* |
 | 11 | **Publishing / scheduling** (YouTube Data API, TikTok Content Posting API) | 3 | 3 | OAuth and app review overhead |
 | 12 | **B-roll insertion** (stock API such as Pexels, or user library, matched by LLM keywords) | 3 | 4 | High polish, but quality is hard to get right |
 | 13 | Translation + translated captions | 3 | 2 | LLM translation of the caption track is cheap. **Dubbing** costs 4 (TTS plus timing) |

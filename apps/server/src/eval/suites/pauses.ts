@@ -1,18 +1,22 @@
 /**
- * pauses: Silero VAD + pause trimming on real speech with known silences spliced in.
- * For each speech fixture, a silence of known length is inserted at a known time; the detector must
- * find that gap (±0.15 s) and the planned cut must leave exactly maxPause of it, while cutting
- * little else (natural pauses already in the speech may be shortened, words must not be).
+ * pauses: Silero VAD + pause trimming on real speech with known gaps spliced in.
+ * For each speech fixture, a gap of known length is inserted at a known time; the detector must
+ * find that gap (±0.15 s). A silent gap is a pause: the planned cut must leave exactly maxPause of it,
+ * while cutting little else (natural pauses already in the speech may be shortened, words must not
+ * be). A gap of loud sound without speech (game audio, music: pink noise at speech level) is content
+ * and must be kept whole.
  */
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { loadVad, speechSegments, pauseCuts, VAD_SR, type Vad } from "../../audio/vad.js";
+import { loadVad, speechSegments, planPauseTrim, VAD_SR, type Vad } from "../../audio/vad.js";
 import type { CaseResult, Suite } from "../framework.js";
 
-const CASES = [
+const CASES: Array<{ fixture: string; at: number; silence: number; fill?: "sound" }> = [
   { fixture: "cuts/pay-repeat/audio.wav", at: 1.0, silence: 1.5 },
   { fixture: "cuts/into-coarticulated/audio.wav", at: 2.4, silence: 2.0 },
   { fixture: "cuts/into-coarticulated/audio.wav", at: 1.2, silence: 0.8 },
+  { fixture: "cuts/pay-repeat/audio.wav", at: 1.0, silence: 1.5, fill: "sound" },
+  { fixture: "cuts/into-coarticulated/audio.wav", at: 2.4, silence: 2.0, fill: "sound" },
 ];
 const MAX_PAUSE = 0.6;
 
@@ -20,7 +24,7 @@ let vad: Vad | undefined;
 
 export const pausesSuite: Suite = {
   name: "pauses",
-  description: "voice activity detection + pause trimming: inserted silences found and shortened to the target pause",
+  description: "voice activity detection + pause trimming: inserted silences found and shortened to the target pause, inserted sound without speech kept",
   needs: [],
   async run(ctx) {
     const cfg = ctx.config();
@@ -32,16 +36,20 @@ export const pausesSuite: Suite = {
     const out: CaseResult[] = [];
     for (const c of CASES) {
       const wav = path.join(ctx.fixtures(""), c.fixture);
-      const id = `${path.basename(path.dirname(c.fixture))}+${c.silence}s@${c.at}`;
+      const id = `${path.basename(path.dirname(c.fixture))}+${c.silence}s${c.fill ? ` ${c.fill}` : ""}@${c.at}`;
       if (!existsSync(wav)) {
         out.push({ id, pass: false, skipped: "fixture missing" });
         continue;
       }
-      const graph = `[0:a]aresample=${VAD_SR},atrim=0:${c.at},asetpts=PTS-STARTPTS[a];anullsrc=r=${VAD_SR}:cl=mono,atrim=0:${c.silence}[s];[0:a]aresample=${VAD_SR},atrim=${c.at},asetpts=PTS-STARTPTS[b];[a][s][b]concat=n=3:v=0:a=1[o]`;
+      const graph = `[0:a]aresample=${VAD_SR},atrim=0:${c.at},asetpts=PTS-STARTPTS[a];${c.fill === "sound" ? `anoisesrc=r=${VAD_SR}:color=pink:amplitude=0.15` : `anullsrc=r=${VAD_SR}:cl=mono`},atrim=0:${c.silence}[s];[0:a]aresample=${VAD_SR},atrim=${c.at},asetpts=PTS-STARTPTS[b];[a][s][b]concat=n=3:v=0:a=1[o]`;
       const raw = await ctx.exec(cfg.FFMPEG_PATH, [
         "-hide_banner",
         "-loglevel",
         "error",
+        // the speech fixtures are ~5 s; looped 3x the clip is ~15 s, the length of a real (short) clip, so
+        // the pause plan's share-of-clip guard sees what it sees in production
+        "-stream_loop",
+        "2",
         "-i",
         wav,
         "-filter_complex",
@@ -57,7 +65,7 @@ export const pausesSuite: Suite = {
       const pcm = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
       const duration = pcm.length / VAD_SR;
       const segs = speechSegments(await vad.probabilities(pcm));
-      const cuts = pauseCuts(segs, duration, { maxPause: MAX_PAUSE });
+      const cuts = planPauseTrim(segs, pcm, duration, { maxPause: MAX_PAUSE }).cuts;
       // the inserted gap: the silence between speech segments that overlaps [at, at+silence]
       const gap = segs
         .slice(1)
@@ -69,7 +77,7 @@ export const pausesSuite: Suite = {
       const other = cuts.reduce((n, k) => n + k.end - k.start, 0) - cutInGap;
       const foundOk = !!gap && Math.abs(gapLen - c.silence) <= 0.35; // gap also includes the speaker's own pause around the splice
       // pauses only slightly over the target are left alone (cuts under 0.15 s add a jump for nothing)
-      const keptOk = keptInGap >= Math.min(gapLen, MAX_PAUSE) - 0.05 && keptInGap <= MAX_PAUSE + 0.16;
+      const keptOk = c.fill === "sound" ? cutInGap === 0 : keptInGap >= Math.min(gapLen, MAX_PAUSE) - 0.05 && keptInGap <= MAX_PAUSE + 0.16;
       out.push({
         id,
         pass: foundOk && keptOk,
@@ -79,7 +87,7 @@ export const pausesSuite: Suite = {
           : !foundOk
             ? `gap ${gapLen.toFixed(2)}s vs inserted ${c.silence}s`
             : !keptOk
-              ? `kept ${keptInGap.toFixed(2)}s, want ${MAX_PAUSE}`
+              ? `kept ${keptInGap.toFixed(2)}s, want ${c.fill === "sound" ? gapLen.toFixed(2) : MAX_PAUSE}`
               : "",
       });
     }

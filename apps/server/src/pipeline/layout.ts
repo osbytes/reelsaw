@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
-import { rgbFramesToPipe } from "../media.js";
+import { rgbFramesToPipe, CommandError } from "../media.js";
 import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
@@ -167,8 +167,8 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       i++;
     }
   }
-  const code = await new Promise<number | null>((r) => ff.on("close", r));
-  if (code !== 0 && !samples.length) throw new Error(`frame sampling failed (${code}): ${stderr.slice(-500)}`);
+  const [code, sig] = await new Promise<[number | null, NodeJS.Signals | null]>((r) => ff.on("close", (c, s) => r([c, s])));
+  if (code !== 0 && !samples.length) throw new CommandError("ffmpeg (frame sampling)", code, stderr, sig);
   return samples;
 }
 

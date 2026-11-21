@@ -62,6 +62,11 @@ The start mirrors it: the nearest sentence start within 3 s (earlier first), els
 at debug as `clip end moved to finish the sentence` with `from`, `to`, `action` and `reason`
 (`punctuation`, `pause`, `capital`).
 
+The clip then gets breathing room (0.25 s before, 0.35 s after, or out to a scene cut within 0.6 s), but
+only inside the gap between words: the padding stops 0.05 s short of the next sentence's first word and
+the previous sentence's last (`padWithinGaps` in `analyze.ts`). Without that, a fast talker's next words
+("If you", "Does that") came along at the end of clips.
+
 Precision over recall: a missed extension leaves the old boundary, a wrong one cuts a thought. Add a
 word to `CONNECTOR_WORDS` only when a real clip ended on it.
 
