@@ -3,10 +3,11 @@
  * drive Reelsaw over `POST /api/mcp` with an API key. Tools are thin wrappers over the tRPC
  * procedures, called through `appRouter.createCaller`, so ownership checks, validation and the
  * unit-of-work rules are the same as for the web app. One stateless server per request: there is
- * no session to keep, the database holds all state.
+ * no session to keep, the database holds all state. Clients on the 2026-07-28 protocol (a
+ * per-request envelope, no `initialize`) and on the 2025 revisions (2024-10-07 … 2025-11-25,
+ * served statelessly, so GET/DELETE answer 405) are both served by the SDK's `createMcpHandler`.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPTransport } from "@hono/mcp";
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { QuotaError, trackQuotaRefusal } from "./quota.js";
@@ -214,14 +215,14 @@ export function createMcpServer(
     run(() => api.projects.update({ id, title, settings, clear, metadata })),
   );
 
-  server.registerTool("wait_for_project", TOOLS.wait_for_project, ({ id, timeoutSeconds }, extra) =>
+  server.registerTool("wait_for_project", TOOLS.wait_for_project, ({ id, timeoutSeconds }, mcpCtx) =>
     run(async () => {
       const deadline = Date.now() + timeoutSeconds * 1000;
       for (;;) {
         const p = await api.projects.get({ id });
         const finished = p.status === "done" || p.status === "failed";
         const timedOut = Date.now() >= deadline;
-        if (finished || timedOut || extra.signal.aborted) {
+        if (finished || timedOut || mcpCtx.mcpReq.signal.aborted) {
           return {
             id: p.id,
             status: p.status,
@@ -785,8 +786,18 @@ export function createMcpServer(
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
   touchLastActive(svc.database.db, svc.log, user.id);
-  const server = createMcpServer(svc, user, access, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
-  const transport = new StreamableHTTPTransport({ enableJsonResponse: true }); // no sessionIdGenerator: stateless;
-  await server.connect(transport);
-  return (await transport.handleRequest(c)) ?? c.text("Not found", 404);
+  const requestId = (c as HonoContext<AppEnv>).get("requestId");
+  return serveMcpRequest(
+    c.req.raw,
+    () => createMcpServer(svc, user, access, c.req.raw, requestId),
+    (err) => svc.log.debug({ module: "mcp", requestId, err }, "mcp request refused or failed"),
+  );
+}
+
+/**
+ * One MCP HTTP request, in whichever protocol era it speaks: 2026-07-28 (per-request envelope) or a 2025 revision
+ * (served statelessly). Either way each exchange gets a fresh server from `factory`.
+ */
+export function serveMcpRequest(request: Request, factory: () => McpServer, onerror?: (err: Error) => void): Promise<Response> {
+  return createMcpHandler(factory, onerror ? { onerror } : {}).fetch(request);
 }

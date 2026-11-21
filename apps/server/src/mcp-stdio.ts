@@ -10,15 +10,10 @@
  *
  * stdout is the protocol channel, so nothing else may write to it; logs go to stderr.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodRawShape } from "zod";
+import { McpServer, type CallToolResult, type ServerContext, type ToolAnnotations } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { Client, StreamableHTTPClientTransport, type Transport } from "@modelcontextprotocol/client";
+import { z, type ZodRawShape } from "zod";
 import { createLogger, type Logger } from "./log.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail } from "./mcp-tools.js";
 
@@ -54,7 +49,7 @@ export interface StdioBridge {
 }
 
 type ToolConfig = { title?: string; description?: string; inputSchema?: ZodRawShape; annotations?: ToolAnnotations };
-type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+type Extra = ServerContext;
 
 /**
  * The bridge server: the full tool catalogue, each tool forwarding to the remote instance. Listing
@@ -86,7 +81,7 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
     tlog.debug({ args: argSummary(args) }, "mcp tool call");
     try {
       const c = await client();
-      const res = (await c.callTool({ name, arguments: args }, undefined, { signal: extra.signal, timeout: CALL_TIMEOUT_MS })) as CallToolResult;
+      const res = (await c.callTool({ name, arguments: args }, { signal: extra.mcpReq.signal, timeout: CALL_TIMEOUT_MS })) as CallToolResult;
       tlog[res.isError ? "warn" : "info"]({ ok: !res.isError, forwarded: true }, "mcp tool");
       return res;
     } catch (err) {
@@ -98,7 +93,8 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
   for (const [name, config] of Object.entries(TOOLS) as Array<[string, ToolConfig]>) {
     // the SDK passes (args, extra) to a tool with an input schema and only (extra) to one without
     const { inputSchema, ...rest } = config;
-    if (inputSchema) server.registerTool(name, { ...rest, inputSchema }, (args, extra) => forward(name, args as Record<string, unknown>, extra));
+    if (inputSchema)
+      server.registerTool(name, { ...rest, inputSchema: z.object(inputSchema) }, (args, extra) => forward(name, args as Record<string, unknown>, extra));
     else server.registerTool(name, rest, (extra) => forward(name, {}, extra));
   }
 
@@ -115,11 +111,15 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
 export async function runMcpStdio(env: StdioEnv): Promise<void> {
   const log = createLogger({ LOG_LEVEL: env.CLI_LOG_LEVEL ?? "warn", LOG_FORMAT: "json" }, { module: "mcp-stdio" }, process.stderr);
   const bridge = createStdioBridge(env, log);
+  // the client closing stdin ends the session, whichever protocol era it opened with
   const closed = new Promise<void>((resolve) => {
-    bridge.server.server.onclose = () => resolve();
+    process.stdin.once("end", resolve);
+    process.stdin.once("close", resolve);
   });
-  await bridge.server.connect(new StdioServerTransport());
+  // one connection, one instance: the bridge serves 2025 clients (initialize) and 2026-07-28 ones alike
+  const handle = serveStdio(() => bridge.server, { onerror: (err) => log.debug({ err }, "mcp stdio message refused") });
   log.info({ url: resolveUrl(env).origin }, "mcp stdio bridge started");
   await closed;
+  await handle.close().catch(() => {});
   await bridge.close();
 }

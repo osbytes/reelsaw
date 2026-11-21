@@ -489,7 +489,9 @@ Design and decisions: [docs/specs/ee.md](docs/specs/ee.md).
 
 ## MCP: drive Reelsaw from an agent
 
-Reelsaw is an MCP server (Model Context Protocol, Streamable HTTP) at `/api/mcp`. With
+Reelsaw is an MCP server (Model Context Protocol, Streamable HTTP) at `/api/mcp`. It speaks the
+2026-07-28 protocol and every 2025 revision (2024-10-07 through 2025-11-25), so newer and older
+clients both connect; `reelsaw mcp` (stdio) does the same. With
 `MCP_OAUTH=true` (on at app.reelsaw.com), a client needs only the address: you sign in and approve
 it in the browser, and **Settings → API keys and MCP** shows the command and connector address.
 

@@ -8,8 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { pino } from "pino";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createStdioBridge } from "../src/mcp-stdio.js";
 import { INSTRUCTIONS, TOOL_NAMES } from "../src/mcp-tools.js";
 
