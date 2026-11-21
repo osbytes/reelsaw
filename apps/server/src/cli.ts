@@ -211,6 +211,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules
  *                                           and list_signup_rules / manage_signup_rules); hold = needs approval
  *                                           without saying why; rm takes ids or their first 8 characters
+ *   languages                               the spoken languages the transcription model in force takes, for a
+ *                                           project's language (same as the language pickers and list_languages)
  *   fonts [list | add <file> | rm <family|id…>]
  *                                           fonts for captions, hooks and text layers (same as Settings → System →
  *                                           Captions and list_fonts / add_font / remove_fonts); add reads a .ttf, .otf,
@@ -257,6 +259,7 @@ import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailur
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { changeSignupRules, listSignupRules } from "./signup-rules.js";
 import { addFont, listFonts, removeFonts } from "./fonts.js";
+import { spokenLanguages } from "./ai/spoken-languages.js";
 import { SIGNUP_RULE_ACTIONS, SIGNUP_RULE_KINDS } from "./signup-rules-schema.js";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -1334,6 +1337,13 @@ ${usage}`);
             .map(([k, v]) => `${k} = ${v}`)
             .join("; "),
       );
+  },
+  languages: async (svc) => {
+    const { model, source, languages } = await spokenLanguages(svc);
+    console.log(
+      `${languages.length} spoken languages for ${model} (${source === "model" ? "listed by the model's server" : "the model does not say; Whisper's"})`,
+    );
+    for (const l of languages) console.log(`${l.code.padEnd(4)}  ${l.name}`);
   },
   fonts: async (svc) => {
     const usage = "usage: reelsaw fonts [list] | add <file> | rm <family|id…>";
@@ -3043,7 +3053,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|languages|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

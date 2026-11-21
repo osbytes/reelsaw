@@ -655,6 +655,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `list_signup_rules` | Admins only: the sign-up rules in front of SIGNUP_MODE, oldest first (at most 500). |
 | `manage_signup_rules` | Admins only: add and remove sign-up rules in one call (ids from list_signup_rules). |
 | `list_fonts` | The fonts captions, hooks and text layers can use: built in, or uploaded by an admin. |
+| `list_languages` | The spoken languages the transcription model in force takes: a code from here is what settings.language takes in create_project, update_project and set_project_defaults (unset = the model detects it). |
 | `add_font` | Admins only: turn an upload (POST /api/upload with the file; .ttf, .otf, .woff, .woff2, up to 30 MB) into a font every account can pick. |
 | `remove_fonts` | Admins only: remove uploaded fonts for good (ids from list_fonts; built-in fonts cannot be removed). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
@@ -782,6 +783,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
+| `reelsaw languages` | the spoken languages the transcription model in force takes, for a project's language (same as the language pickers and list_languages) |
 | `reelsaw fonts [list \| add <file> \| rm <family\|id…>]` | fonts for captions, hooks and text layers (same as Settings → System → Captions and list_fonts / add_font / remove_fonts); add reads a .ttf, .otf, .woff or .woff2 inside the container (docker compose cp it in first) |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |

@@ -16,7 +16,7 @@ import {
   transcriptionLanguageOptions,
 } from "../src/pipeline/language.js";
 import { buildMapPrompt } from "../src/pipeline/select.js";
-import { SPOKEN_LANGUAGES, languageLabel, spokenLanguageCode, spokenLanguageOptions } from "@reelsaw/shared";
+import { WHISPER_SPOKEN_LANGUAGES, canonicalLanguage, languageLabel, spokenLanguageCode, spokenLanguageOptions } from "@reelsaw/shared";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
 describe("norm (disfluency)", () => {
@@ -74,6 +74,11 @@ describe("transcriptionLanguageOptions", () => {
     assert.deepEqual(transcriptionLanguageOptions("deepgram", "es"), { language: "es" });
     assert.deepEqual(transcriptionLanguageOptions("assemblyai", "fr"), { languageCode: "fr" });
   });
+  it("spells a code Whisper's way only for the Whisper-served providers", () => {
+    assert.deepEqual(transcriptionLanguageOptions("openai", "jv"), { language: "jw" }, "same option as before the codes were canonical: cache keys hold");
+    assert.deepEqual(transcriptionLanguageOptions("groq", "nb"), { language: "no" });
+    assert.deepEqual(transcriptionLanguageOptions("deepgram", "jv"), { language: "jv" });
+  });
   it("sends nothing when unset (detect) or for a vendor without the option", () => {
     assert.deepEqual(transcriptionLanguageOptions("openai", ""), {});
     assert.deepEqual(transcriptionLanguageOptions("openai", null), {});
@@ -89,16 +94,42 @@ describe("spoken language list", () => {
     assert.equal(spokenLanguageCode("Cantonese"), "yue");
     assert.equal(spokenLanguageCode("haw"), "haw");
     assert.equal(spokenLanguageCode("iw"), "he");
-    assert.equal(spokenLanguageCode("jv"), "jw");
+    assert.equal(spokenLanguageCode("jw"), "jv", "Whisper's old code is canonicalised");
+    assert.equal(spokenLanguageCode("deu"), "de");
+    assert.equal(spokenLanguageCode("zho"), "zh");
     assert.equal(spokenLanguageCode("  "), undefined);
     assert.equal(spokenLanguageCode("xx-YY"), "xx", "a tag outside the set keeps its primary subtag");
+    assert.equal(spokenLanguageCode("Englsh"), undefined, "a misspelt name is detection, not a code the model cannot know");
+  });
+  it("canonicalises with CLDR's aliases, not a table of ours", () => {
+    for (const [from, to] of [
+      ["iw", "he"],
+      ["in", "id"],
+      ["ji", "yi"],
+      ["jw", "jv"],
+      ["cmn", "zh"],
+      ["heb", "he"],
+      ["pt_BR", "pt"],
+    ])
+      assert.equal(canonicalLanguage(from!), to, from);
+    assert.equal(canonicalLanguage("not a tag"), undefined);
+  });
+  it("takes Whisper's set from its own table, canonicalised", () => {
+    assert.equal(WHISPER_SPOKEN_LANGUAGES.length, 100);
+    assert.ok(WHISPER_SPOKEN_LANGUAGES.includes("jv") && !WHISPER_SPOKEN_LANGUAGES.includes("jw"));
+    assert.ok(WHISPER_SPOKEN_LANGUAGES.includes("yue") && WHISPER_SPOKEN_LANGUAGES.includes("haw"));
   });
   it("has a name for every code, in any locale", () => {
-    for (const c of SPOKEN_LANGUAGES) assert.notEqual(languageLabel(c), c, c);
+    for (const c of WHISPER_SPOKEN_LANGUAGES) assert.notEqual(languageLabel(c), c, c);
     assert.equal(languageLabel("de", "de"), "Deutsch");
-    assert.equal(languageLabel("jw"), "Javanese");
+    assert.equal(languageLabel("jv"), "Javanese");
     const opts = spokenLanguageOptions();
-    assert.equal(opts.length, SPOKEN_LANGUAGES.length);
+    assert.equal(opts.length, WHISPER_SPOKEN_LANGUAGES.length);
+    assert.deepEqual(
+      spokenLanguageOptions(["es", "de"], "de").map((o) => o.label),
+      ["Deutsch", "Spanisch"],
+      "a model's own list, named in the viewer's locale",
+    );
     assert.equal(opts.find((o) => o.value === "de")?.native, "Deutsch");
     assert.equal(opts.find((o) => o.value === "en")?.native, undefined, "no native name when it is the same");
     assert.deepEqual(
