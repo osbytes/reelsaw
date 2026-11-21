@@ -43,6 +43,7 @@ type State = {
 };
 type SourceCheck = {
   minutes: number | null;
+  partial: { minutes: number; totalMinutes: number; firstVideo: boolean; sentence: string; upgrade: { label: string; href: string } | null } | null;
   fits: boolean | null;
   message: string | null;
   quota: { key: string; primary?: { kind: string; label: string } } | null;
@@ -89,15 +90,17 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.match(me.watermark.upgrade?.href ?? "", /\/settings\/billing$/);
   });
 
-  it("checkSource warns before a first video longer than the free 60 minutes, and says what fits", async () => {
+  it("checkSource accepts a first video longer than the free 60 minutes as its first 60, and offers the plan for the rest", async () => {
     const long = (await trpc(user.cookie, "projects.checkSource", { durationSec: 94 * 60 }, "GET")).data as SourceCheck;
-    assert.equal(long.fits, false);
+    // not refused: the start the first-video allowance covers is processed, the rest when the minutes are there
+    assert.equal(long.fits, true);
     assert.equal(long.minutes, 94);
-    assert.match(
-      long.message ?? "",
-      /^This video is 94 minutes\. Your first video is free up to 60 minutes, and after that your plan covers 20 minutes a month\. Try a video under 60 minutes\./,
-    );
-    assert.equal(long.quota?.primary?.kind === "upgrade" ? long.quota.primary.label : "", "Starter: 100 minutes a month for $12");
+    assert.equal(long.message, null);
+    assert.equal(long.partial?.minutes, 60);
+    assert.equal(long.partial?.totalMinutes, 94);
+    assert.equal(long.partial?.firstVideo, true);
+    assert.match(long.partial?.sentence ?? "", /^This video is 94 minutes\. Reelsaw clips the first 60 minutes now, free as your first video\./);
+    assert.equal(long.partial?.upgrade?.label, "Starter: 100 minutes a month for $12");
     assert.deepEqual(long.allowance && { perMonth: long.allowance.perMonth, left: long.allowance.left, firstVideoFree: long.allowance.firstVideoFree }, {
       perMonth: 20,
       left: 20,

@@ -38,6 +38,7 @@ const EXPECTED = [
   "dismiss_failures",
   "export_decisions",
   "export_project",
+  "extend_project",
   "forget_decisions",
   "get_billing",
   "get_clip",

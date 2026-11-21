@@ -388,19 +388,26 @@ them), so a single-user box stays as it is:
   with per-user overrides on the Users page. Storage counts sources, uploads (an upload already copied into
   a project counts once), rendered clips and intros/outros, and is checked on every way a file arrives. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
-  plan, else the UTC calendar month. On an account with a minutes limit, a link whose site reports its
-  length is refused when the project is created (with the upgrade offer), so no project is made for it.
-  Otherwise the length is checked again before the download and once the file is probed, so an over-long
-  video fails the project with that reason, once, without being fetched again. The first video of a plan with a free allowance is the first
-  one whose length is known. New Project checks before you submit: once a link is pasted (or a file picked, by its
-  length) it says what your minutes cover, and a video that would be refused shows the reason and the upgrade
-  offer, with its price, before anything is created or uploaded. Agents ask the same with `check_source`, operators
-  with `reelsaw check-source`.
+  plan, else the UTC calendar month. A video longer than the account's minutes cover is not refused: Reelsaw
+  processes its start (whole 10-minute transcription chunks; a Free account's long first video gets its first
+  60 minutes) and the project says how much is left. "Clip the rest" (`extend_project`, `reelsaw
+  extend-project`) processes more when the minutes are there, and an upgrade or a raised limit does it by
+  itself. It picks up where it stopped: the transcript gets the new words appended (fixes and decisions on the
+  part already done stay), and new clips are picked only in the new part, around the clips you have. An
+  extension's minutes count in the period it runs in. Only a video of which not even 10 minutes fit is refused:
+  a link whose site reports its length when the project is created (with the upgrade offer), otherwise before
+  the download or once the file is probed, once, without being fetched again. The first video of a plan with a
+  free allowance is the first one whose length is known. New Project checks before you submit: once a link is
+  pasted (or a file picked, by its length) it says what your minutes cover, how much of a long video is clipped
+  now, and the reason and the upgrade offer, with its price, for a video that would be refused, before anything
+  is created or uploaded. Agents ask the same with `check_source`, operators with `reelsaw check-source`.
 - **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
   `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan
   removes it, and an admin can switch it per user on the Users page (Limits). Decided at render time,
-  so a re-render after the change applies it. Clips already rendered keep what they were rendered with.
-  On a hosted instance, a project whose finished clips carry it names the plan that takes it off and its price.
+  so a re-render after the change applies it. Clips already rendered keep what they were rendered with until
+  a plan change takes the watermark off: then the account's watermarked clips (its 20 most recent projects)
+  are rendered again without it, by themselves. On a hosted instance, a project whose finished clips carry it
+  names the plan that takes it off and its price, and Download on a watermarked clip asks first.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
@@ -563,7 +570,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | Tool | What it does |
 | --- | --- |
 | `list_projects` | Your projects, most recently updated first. |
-| `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
+| `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip; partial (non-null): only the video's start was processed (extend_project clips more). |
 | `check_source` | Before create_project: would this video be accepted now? |
 | `create_project` | Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. |
 | `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. |
@@ -595,6 +602,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `resend_webhook_delivery` | Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). |
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
+| `extend_project` | Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `retry_projects` | Resume several failed projects, each from its furthest completed stage (as retry_project). |
 | `rerender_projects` | Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), for instance after a change to your default intro/outro. |
@@ -703,6 +711,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw check-source <url> [--user <email\|id>] \| --minutes <n> [--user <email\|id>]` | would a project from this link (or a file this long) be accepted for the account now: its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source) |
 | `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
+| `reelsaw extend-project <projectId>` | clip more of a video only the start of which was processed (projects.extend and extend_project) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
 | `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
 | `reelsaw delete-project <projectId> [--forget-decisions]` | delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged |

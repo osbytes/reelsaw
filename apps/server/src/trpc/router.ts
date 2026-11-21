@@ -49,6 +49,8 @@ import {
   purgeOwnedClip,
   purgeOwnedProject,
   reanalyzeProject,
+  extendProject,
+  partialSourceOf,
   refineInput,
   refineProject,
   restoreClip,
@@ -238,6 +240,8 @@ function publicProject(p: schema.Project) {
     sourceUrl: p.sourceUrl,
     sourceMeta: p.sourceMeta,
     durationSec: p.durationSec,
+    /** only the start of the video is processed (its minutes covered that much): [0, sourceLimitSec); null = all of it. `partial` on projects.get says what finishes it */
+    sourceLimitSec: p.sourceLimitSec,
     width: p.width,
     height: p.height,
     status: p.status,
@@ -1473,7 +1477,9 @@ const restRouter = router({
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
       // clips deleted or replaced by a re-analyze, restorable with clips.restore until the purge
       const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
-      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers };
+      // a partly processed video: what was processed, what is left and what finishes it (Clip the rest, or the plan)
+      const partial = await partialSourceOf(ctx.svc, p);
+      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers, partial };
     }),
 
     create: protectedProcedure
@@ -1502,6 +1508,14 @@ const restRouter = router({
     retry: protectedProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ ctx, input }) => retryOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+
+    /**
+     * Process more of a partly processed video: as much of the rest as the account's minutes cover now, picking up
+     * where it stopped (extendProject). A quota refusal with the upgrade offer when no minutes are left.
+     */
+    extend: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx, input }) => extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
     refine: protectedProcedure

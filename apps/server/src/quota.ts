@@ -357,7 +357,7 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
     const [{ n } = { n: 0 }] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.sourceUsage)
-      .where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, since)));
+      .where(and(eq(schema.sourceUsage.userId, userId), ownRow, gte(schema.sourceUsage.createdAt, since)));
     if (n >= l.MAX_NEW_PROJECTS_PER_HOUR)
       refuse(
         d,
@@ -457,6 +457,7 @@ export async function monthlyMinutes(
     .where(
       and(
         eq(schema.sourceUsage.userId, userId),
+        ownRow,
         isNotNull(schema.sourceUsage.durationSec),
         exceptProjectId ? sql`${schema.sourceUsage.projectId} <> ${exceptProjectId}` : undefined,
       ),
@@ -467,7 +468,7 @@ export async function monthlyMinutes(
   // the first video was longer than the allowance: it counts whole (the check that admitted it said so)
   const firstMinutes = (first.durationSec ?? 0) / 60;
   const credit = first.createdAt >= start && firstMinutes <= free ? firstMinutes : 0;
-  return { used: Math.max(0, total - credit), firstFree: free, firstPending: false };
+  return { used: Math.max(0, wholeMs(total - credit)), firstFree: free, firstPending: false };
 }
 
 /**
@@ -558,7 +559,7 @@ export function storedBytesSql(userId: SQL): SQL {
  * `users-sort-stack.test.ts` checks the order matches the numbers the list shows.
  */
 export const allTimeUsageSql = {
-  projects: (userId: SQL) => sql`(select count(*) from source_usage where user_id = ${userId})`,
+  projects: (userId: SQL) => sql`(select count(*) from source_usage where user_id = ${userId} and part = 0)`,
   sourceMinutes: (userId: SQL) => sql`(select coalesce(sum(duration_sec), 0) / 60.0 from source_usage where user_id = ${userId})`,
   clipsRendered: (userId: SQL) => sql`(select count(*) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.status = 'done')`,
   storedBytes: storedBytesSql,
@@ -575,9 +576,12 @@ export async function projectStoredBytes(db: Db, projectId: string): Promise<num
   return Number(r?.bytes ?? 0);
 }
 
+/** A project's own row in the usage ledger (part 0); the other parts are extensions of a partly processed video. */
+const ownRow = eq(schema.sourceUsage.part, 0);
+
 /** Insert at create so hourly creates and first-video-free survive a later delete. */
 export async function recordProjectCreated(db: Db, userId: string, projectId: string, createdAt: Date) {
-  await db.insert(schema.sourceUsage).values({ userId, projectId, createdAt }).onConflictDoNothing();
+  await db.insert(schema.sourceUsage).values({ userId, projectId, part: 0, createdAt }).onConflictDoNothing();
 }
 
 /** The project's first finish, once (a re-render finishes again and changes nothing). Kept through purge and forgetting. */
@@ -585,12 +589,127 @@ export async function recordProjectFinished(db: Db, projectId: string, eventId: 
   await db
     .update(schema.sourceUsage)
     .set({ firstDoneEventId: eventId })
-    .where(and(eq(schema.sourceUsage.projectId, projectId), isNull(schema.sourceUsage.firstDoneEventId)));
+    .where(and(eq(schema.sourceUsage.projectId, projectId), ownRow, isNull(schema.sourceUsage.firstDoneEventId)));
 }
 
-/** Fill duration after ingest; the row already exists from create. */
+/** Fill the seconds processed after ingest (the whole video, or the start a partial project covers); the row already exists from create. */
 export async function recordSourceDuration(db: Db, projectId: string, durationSec: number) {
-  await db.update(schema.sourceUsage).set({ durationSec }).where(eq(schema.sourceUsage.projectId, projectId));
+  await db
+    .update(schema.sourceUsage)
+    .set({ durationSec })
+    .where(and(eq(schema.sourceUsage.projectId, projectId), ownRow));
+}
+
+/** The seconds the project's own ledger row records, or null before ingest has measured the video (a re-fetch keeps what was admitted). */
+export async function recordedSourceSec(db: Db, projectId: string): Promise<number | null> {
+  const [r] = await db
+    .select({ sec: schema.sourceUsage.durationSec })
+    .from(schema.sourceUsage)
+    .where(and(eq(schema.sourceUsage.projectId, projectId), ownRow));
+  return r?.sec ?? null;
+}
+
+/**
+ * Record an extension of a partly processed video: a new ledger row (the next part) for the seconds it adds, dated now,
+ * so its minutes count in the period it was asked for. Call it under the account's quota lock, in the unit of work that
+ * moves the project's limit.
+ */
+export async function recordSourceExtension(db: Db, userId: string, projectId: string, addedSec: number): Promise<void> {
+  const [r] = await db
+    .select({ n: sql<number>`coalesce(max(${schema.sourceUsage.part}), 0)::int` })
+    .from(schema.sourceUsage)
+    .where(eq(schema.sourceUsage.projectId, projectId));
+  await db.insert(schema.sourceUsage).values({ userId, projectId, part: (r?.n ?? 0) + 1, durationSec: addedSec, createdAt: new Date() });
+}
+
+/**
+ * What to process of a video `durationSec` long, from `fromSec` (0 for a new video), with `roomSec` seconds of the
+ * account's minutes: all of the rest (`until: null`), the start of it that fits in whole transcription chunks
+ * (`until` = the new end, so a later extension starts on a chunk boundary and reuses every chunk already transcribed),
+ * or "none" when less than one chunk fits. `roomSec` null = no minutes limit.
+ */
+export function partialUntil(durationSec: number, fromSec: number, roomSec: number | null, chunkSec: number): { until: number | null } | "none" {
+  const rest = durationSec - fromSec;
+  // half a second of slack: a 60:00.3 video is "60 minutes" on every screen that rounds it
+  if (roomSec === null || rest <= roomSec + 0.5) return { until: null };
+  const chunks = Math.floor(roomSec / chunkSec);
+  if (chunks < 1) return "none";
+  return { until: fromSec + chunks * chunkSec };
+}
+
+/**
+ * Seconds of source the account's minutes cover right now (the tightest of the day and month limits), null when no
+ * minutes limit applies. For a new video (`exceptProjectId` = its own row when it exists, left out of the counts):
+ * while the first-video allowance is unused it is the room, when it is larger than what the month has left
+ * (`firstVideo`). With `extension`, the room for more of a video already counted. `binding` = the limit that sets the
+ * room (the day's or the month's; the month's on a tie, as it resets later), so offers and sentences name the right
+ * one and its reset.
+ */
+export async function minutesRoomSec(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  o: { exceptProjectId?: string | undefined; extension?: boolean; ent?: Entitlements | null | undefined } = {},
+): Promise<{ sec: number | null; firstVideo: boolean; binding: MinutesLimitKey | null }> {
+  const d = await limitsDetail(db, instance, userId, o.ent);
+  const l = d.limits;
+  // the tightest room so far and the limit that set it (an object: closures assigning `let`s defeat narrowing)
+  const r: { sec: number | null; binding: MinutesLimitKey | null } = { sec: null, binding: null };
+  let firstVideo = false;
+  const take = (s: number, key: MinutesLimitKey) => {
+    if (r.sec === null || s < r.sec || (s === r.sec && key === "MAX_SOURCE_MINUTES_PER_MONTH")) {
+      r.sec = s;
+      r.binding = key;
+    }
+  };
+  if (l.MAX_SOURCE_MINUTES_PER_DAY > 0)
+    take(Math.max(0, l.MAX_SOURCE_MINUTES_PER_DAY - (await minutesToday(db, userId, o.exceptProjectId))) * 60, "MAX_SOURCE_MINUTES_PER_DAY");
+  if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
+    const m = await monthlyMinutes(db, userId, periodFor(d.grants).start, d.grants, o.exceptProjectId);
+    const monthLeft = Math.max(0, l.MAX_SOURCE_MINUTES_PER_MONTH - m.used);
+    // the first video is free up to its allowance whatever the month has left; past it, the start that fits is still free
+    if (!o.extension && m.firstPending && m.firstFree > monthLeft) {
+      take(m.firstFree * 60, "MAX_SOURCE_MINUTES_PER_MONTH");
+      firstVideo = r.binding === "MAX_SOURCE_MINUTES_PER_MONTH";
+    } else take(monthLeft * 60, "MAX_SOURCE_MINUTES_PER_MONTH");
+  }
+  return { sec: r.sec, firstVideo, binding: r.binding };
+}
+
+/** The two minutes limits; `minutesRoomSec` says which one binds. */
+export type MinutesLimitKey = Extract<LimitKey, "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_SOURCE_MINUTES_PER_MONTH">;
+
+/** What a new video of `durationSec` is admitted as: all of it (`until` null), or its start (`until` = the end of the part processed). */
+export interface SourceAdmission {
+  until: number | null;
+  /** the start is processed because of the first-video allowance, not the month's minutes */
+  firstVideo: boolean;
+  /** the limit that cut it to its start (null when all of it is processed) */
+  binding: MinutesLimitKey | null;
+}
+
+/**
+ * Admit a new video under the minutes limits: whole when it fits, else the start the account's minutes cover (in whole
+ * transcription chunks of `chunkSec`), and refused (the QuotaExceededError with the sentence and the upgrade offer)
+ * only when less than one chunk fits. `projectId` = its own row, left out of the counts (null before it is created).
+ * The binding call runs at ingest under the account's quota lock; create and check_source ask the same question first.
+ */
+export async function admitSource(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  projectId: string | null,
+  durationSec: number,
+  chunkSec: number,
+  ent?: Entitlements | null,
+): Promise<SourceAdmission> {
+  const room = await minutesRoomSec(db, instance, userId, { exceptProjectId: projectId ?? undefined, ent });
+  const plan = partialUntil(durationSec, 0, room.sec, chunkSec);
+  if (plan !== "none") return { until: plan.until, firstVideo: plan.until !== null && room.firstVideo, binding: plan.until !== null ? room.binding : null };
+  const over = await minutesOver(db, instance, userId, projectId, durationSec, ent);
+  // the room said less than a chunk fits, so a limit is passed; the fallback is only for a limit raised in between
+  if (!over) return { until: null, firstVideo: false, binding: null };
+  throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
 /** Which minutes limit a video of `durationSec` would pass, with the sentence; `projectId` (when it exists) is left out of the counts. */
@@ -664,24 +783,82 @@ export async function hasMinuteLimits(db: Db, instance: InstanceLimits, userId: 
 
 /**
  * Before creating a project from a link whose length the site announced: refuse now, as a quota refusal with the upgrade
- * offer, instead of creating a project that ingest would fail. Advisory (no lock): ingest checks again, bound, on the file.
+ * offer, instead of creating a project that ingest would fail. A video whose start fits is not refused: it is admitted
+ * as its start (the returned admission). Advisory (no lock): ingest decides again, bound, on the file.
  */
-export async function checkAnnouncedMinutes(db: Db, instance: InstanceLimits, userId: string, durationSec: number, ent?: Entitlements | null): Promise<void> {
-  const over = await minutesOver(db, instance, userId, null, durationSec, ent);
-  if (over) refuse(over.d, over.key, over.message, { firstVideo: over.firstVideo });
-}
-
-/** What a source would meet if it were added now: the minutes limit it passes (with the sentence and offer), else null. */
-export async function sourceMinutesRefusal(
+export async function checkAnnouncedMinutes(
   db: Db,
   instance: InstanceLimits,
   userId: string,
   durationSec: number,
+  chunkSec: number,
   ent?: Entitlements | null,
-): Promise<QuotaError | null> {
-  const over = await minutesOver(db, instance, userId, null, durationSec, ent);
-  return over ? new QuotaError(over.message, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }) : null;
+): Promise<SourceAdmission> {
+  const r = await predictAdmission(db, instance, userId, durationSec, chunkSec, ent);
+  if ("refused" in r) throw r.refused;
+  return r.admission;
 }
+
+/**
+ * What a source would be admitted as if it were added now (admitSource's answer, without a project): all of it, its
+ * start, or refused with the minutes limit it passes (the sentence and the offer).
+ */
+export async function predictAdmission(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  durationSec: number,
+  chunkSec: number,
+  ent?: Entitlements | null,
+): Promise<{ admission: SourceAdmission } | { refused: QuotaError }> {
+  const room = await minutesRoomSec(db, instance, userId, { ent });
+  const plan = partialUntil(durationSec, 0, room.sec, chunkSec);
+  if (plan !== "none")
+    return { admission: { until: plan.until, firstVideo: plan.until !== null && room.firstVideo, binding: plan.until !== null ? room.binding : null } };
+  const over = await minutesOver(db, instance, userId, null, durationSec, ent);
+  if (!over) return { admission: { until: null, firstVideo: false, binding: null } };
+  return { refused: new QuotaError(over.message, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }) };
+}
+
+/** The minutes limit that binds (`binding` from minutesRoomSec; else the month's, else the day's) and its offer: the plan to move to, or a request for more on the top plan, and when it resets. */
+export async function minutesOffer(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  ent?: Entitlements | null,
+  binding?: MinutesLimitKey | null,
+): Promise<{ key: LimitKey; refusal: QuotaRefusal; resetsOn: Date }> {
+  const d = await limitsDetail(db, instance, userId, ent);
+  const key = binding ?? defaultMinutesKey(d);
+  return { key, refusal: quotaRefusal(d, key), resetsOn: key === "MAX_SOURCE_MINUTES_PER_MONTH" ? periodFor(d.grants).end : new Date(nextMidnightUtc()) };
+}
+
+/**
+ * "Clip the rest" refused because less than one chunk of minutes is left: the sentence, the offer and its link (for
+ * MCP and the CLI), like every other minutes refusal.
+ */
+export async function extensionRefusal(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  remainingSec: number,
+  roomSec: number,
+  ent?: Entitlements | null,
+  binding?: MinutesLimitKey | null,
+): Promise<QuotaError> {
+  const d = await limitsDetail(db, instance, userId, ent);
+  const key = binding ?? defaultMinutesKey(d);
+  const resets =
+    key === "MAX_SOURCE_MINUTES_PER_MONTH"
+      ? ` this period. Resets on ${formatDay(periodFor(d.grants).end, { year: false, utc: true })}.`
+      : ` today. Resets at ${hhmm(nextMidnightUtc())}.`;
+  const sentence = `The rest of this video is ${plural(Math.round(remainingSec / 60), "minute")} and you have ${plural(Math.floor(roomSec / 60), "minute")} left${resets}`;
+  return new QuotaError(`${sentence}${hint(d, key)}`, quotaRefusal(d, key, sentence), key);
+}
+
+/** With no room measured: the month's limit when there is one, else the day's. */
+const defaultMinutesKey = (d: LimitsDetail): MinutesLimitKey =>
+  d.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? "MAX_SOURCE_MINUTES_PER_MONTH" : "MAX_SOURCE_MINUTES_PER_DAY";
 
 /** The monthly minutes allowance as the New Project form states it; null when no minutes limit applies. */
 export interface MinutesAllowance {
@@ -706,6 +883,14 @@ export async function minutesAllowance(db: Db, instance: InstanceLimits, userId:
 const minutesToday = (db: Db, userId: string, exceptProjectId?: string) =>
   minutesSince(db, userId, new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z"), exceptProjectId);
 
+/**
+ * Minutes rounded to the millisecond. The ledger stores seconds as `real` (float4) and sums them in SQL, so a total
+ * less the first video's credit (the same row read back as a double) leaves a few 1e-8 of a minute: "5 minutes a
+ * month" read as 4 left (floor) and admitted one transcription chunk less. Every minutes count the limits read goes
+ * through this.
+ */
+const wholeMs = (minutes: number) => Math.round(minutes * 60_000) / 60_000;
+
 /** Minutes of source video the account added since `start` (by project creation time; a project counts once its length is known). Survives delete and purge. */
 export async function minutesSince(db: Db, userId: string, start: Date, exceptProjectId?: string) {
   const [{ m } = { m: 0 }] = await db
@@ -718,7 +903,7 @@ export async function minutesSince(db: Db, userId: string, start: Date, exceptPr
         exceptProjectId ? sql`${schema.sourceUsage.projectId} <> ${exceptProjectId}` : undefined,
       ),
     );
-  return Number(m);
+  return wholeMs(Number(m));
 }
 
 /** What each limit counts right now, for the admin Limits dialog and the Billing page: kept projects, minutes since 00:00 UTC and since the period started, projects in the last hour, jobs in flight, renders and re-runs asked for in the last hour, MB stored. */
@@ -782,7 +967,7 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
     db
       .select({
         id: SU.userId,
-        projects: sql<number>`(count(*) filter (where ${SU.createdAt} >= ${since}))::int`,
+        projects: sql<number>`(count(*) filter (where ${SU.createdAt} >= ${since} and ${SU.part} = 0))::int`,
         sourceMinutes: sql<number>`coalesce(sum(${SU.durationSec}) filter (where ${SU.createdAt} >= ${since}), 0) / 60.0`,
       })
       .from(SU)

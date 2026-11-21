@@ -74,6 +74,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
  *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
+ *   extend-project <projectId>              clip more of a video only the start of which was processed (projects.extend and extend_project)
  *   reanalyze <projectId> [--set key=value]…
  *                                           pick clips again from the existing transcript, optionally with new selection settings; clips made or edited
  *                                           by hand stay (same as projects.reanalyze and reanalyze_project)
@@ -311,6 +312,7 @@ import {
   purgeOwnedClip,
   purgeOwnedProject,
   reanalyzeProject,
+  extendProject,
   refineProject,
   restoreClip,
   restoreProject,
@@ -853,6 +855,15 @@ ${usage}`);
     if (!pos[0]) throw new Error("usage: reelsaw retry <projectId>");
     const r = await retryOwnedProject(svc, null, pos[0]);
     console.log(`resumed ${pos[0]} at ${r.queue}`);
+  },
+  /** Clip more of a partly processed video: `reelsaw extend-project <projectId>`. Same function as projects.extend and the extend_project tool. */
+  async "extend-project"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw extend-project <projectId>");
+    const r = await extendProject(svc, null, pos[0]);
+    const m = (sec: number) => Math.round(sec / 60);
+    console.log(
+      `processing minutes ${m(r.fromSec)}–${m(r.untilSec)} of ${m(r.durationSec)}${r.whole ? " (the rest of the video)" : "; run it again when more minutes are available"}`,
+    );
   },
   /** Pick clips again: `reelsaw reanalyze <projectId> [--set key=value]…`. Same function as projects.reanalyze and the reanalyze_project tool. */
   async reanalyze(svc) {
@@ -2991,7 +3002,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

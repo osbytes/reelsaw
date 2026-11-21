@@ -27,19 +27,27 @@ import {
   type ProjectSettingsPatch,
   type SectionAdjustFields,
   type SectionMode,
+  type PartialSource,
+  formatDay,
   plural,
+  processedEndSec,
 } from "@reelsaw/shared";
 import {
   checkAnnouncedMinutes,
   checkProjectQuota,
   checkRestoreQuota,
+  extensionRefusal,
   hasMinuteLimits,
   minutesAllowance,
+  minutesOffer,
+  minutesRoomSec,
+  partialUntil,
+  predictAdmission,
   projectStoredBytes,
   QuotaError,
   recordProjectCreated,
+  recordSourceExtension,
   refusalEvent,
-  sourceMinutesRefusal,
   type MinutesAllowance,
 } from "../quota.js";
 import type { QuotaRefusal } from "@reelsaw/shared";
@@ -53,6 +61,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
+import { transcriptCovers } from "../pipeline/transcribe.js";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -93,8 +102,14 @@ export function retryQueueFor(s: {
   stage: string | null;
   sourceKey: string | null;
   sourceExpired?: boolean;
+  /** the transcript has every word up to the project's limit (false: an extension stopped before its words were in) */
+  transcriptCovers?: boolean;
+  /** an extension is waiting for its picks (`extend_from_sec`): the clips that exist are the old part's, not this run's */
+  extending?: boolean;
 }): QueueName {
   if (s.sourceExpired) return QUEUES.ingest;
+  if (s.transcript && s.transcriptCovers === false) return QUEUES.transcribe;
+  if (s.transcript && s.extending) return s.refineDone ? QUEUES.analyze : QUEUES.refineEntities;
   const picked = s.clips.some((c) => c.origin === "ai");
   if (s.clips.length && !(s.stage === "analyze" && !picked)) return QUEUES.render;
   if (s.transcript && s.refineDone) return QUEUES.analyze;
@@ -124,12 +139,14 @@ export async function retryProject(
       sourceExpiredAt: schema.projects.sourceExpiredAt,
       stage: schema.projects.stage,
       status: schema.projects.status,
+      sourceLimitSec: schema.projects.sourceLimitSec,
+      extendFromSec: schema.projects.extendFromSec,
     })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p || (opts.onlyIfFailed && p.status !== "failed")) return null;
   const [transcript] = await u.db
-    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine })
+    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine, coveredSec: schema.transcripts.coveredSec })
     .from(schema.transcripts)
     .where(eq(schema.transcripts.projectId, p.id))
     .for("update");
@@ -143,7 +160,16 @@ export async function retryProject(
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-  const queue = retryQueueFor({ clips, transcript: !!transcript, refineDone, stage: p.stage, sourceKey: p.sourceKey, sourceExpired: !!p.sourceExpiredAt });
+  const queue = retryQueueFor({
+    clips,
+    transcript: !!transcript,
+    refineDone,
+    stage: p.stage,
+    sourceKey: p.sourceKey,
+    sourceExpired: !!p.sourceExpiredAt,
+    transcriptCovers: !transcript || transcriptCovers(transcript.coveredSec, p.sourceLimitSec),
+    extending: p.extendFromSec !== null,
+  });
 
   if (queue === QUEUES.render) {
     await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
@@ -479,8 +505,15 @@ export { keepReason };
 export async function reanalyzeProject(svc: Services, actor: Actor, projectId: string, patch?: ProjectSettingsPatch) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
-    const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
+    const transcript = await u.db.query.transcripts.findFirst({
+      where: eq(schema.transcripts.projectId, p.id),
+      columns: { projectId: true, coveredSec: true },
+    });
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+    // picking again before the rest of the video's words are in would pick from the old part only, and its picks
+    // would be replaced again by the extension's
+    if (!transcriptCovers(transcript.coveredSec, p.sourceLimitSec))
+      throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
     const merged = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
@@ -515,7 +548,8 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
             replaced.map((c) => c.id),
           ),
         );
-    await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
+    // a re-pick covers everything processed, so an extension waiting for its picks is folded into it
+    await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings, extendFromSec: null }, continueActive: true });
     await u.emit("stage.started", {
       projectId: p.id,
       stage: "analyze",
@@ -897,7 +931,8 @@ export async function createProject(svc: Services, userId: string, input: Create
       }),
     ]);
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
-    if (announced) await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.entitlements).catch(quotaReached);
+    if (announced)
+      await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
     title ||= peek.title ?? "";
   }
@@ -960,9 +995,25 @@ export const checkSourceInput = z
   })
   .refine((v) => !!v.sourceUrl !== (v.durationSec !== undefined), { message: "Give sourceUrl or durationSec, not both" });
 
+/** A video that will be processed only from its start (see `PartialSource`): what is processed now and how to get the rest. */
+export interface SourcePartial {
+  /** minutes processed from the start */
+  minutes: number;
+  /** the whole video, in minutes */
+  totalMinutes: number;
+  /** the first-video allowance covers the start (else the minutes left this period) */
+  firstVideo: boolean;
+  /** what the New project form says, above the button that creates it */
+  sentence: string;
+  /** the plan that covers the whole video, when there is one */
+  upgrade: { label: string; href: string } | null;
+}
+
 export interface SourceCheck {
   /** the video's length in minutes, when it is known (a link whose site does not say has none) */
   minutes: number | null;
+  /** the video is accepted, but only its start is processed now; null when all of it is (or it is refused) */
+  partial: SourcePartial | null;
   /** false: creating the project now would be refused (message and quota say why and what to do; no quota for a live stream); null: the length is unknown, so ingest decides */
   fits: boolean | null;
   message: string | null;
@@ -992,11 +1043,11 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
           })
         : null),
   ]);
-  if (durationSec === "live") return { minutes: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance };
+  if (durationSec === "live") return { minutes: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
-    return { minutes, fits: false, message: err.message, quota: err.quota ?? null, allowance };
+    return { minutes, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance };
   };
   try {
     await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
@@ -1004,10 +1055,204 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     if (err instanceof QuotaError) return refused(err);
     throw err;
   }
-  if (!durationSec) return { minutes, fits: null, message: null, quota: null, allowance };
-  const over = await sourceMinutesRefusal(db, s, userId, durationSec, svc.entitlements);
-  return over ? refused(over) : { minutes, fits: true, message: null, quota: null, allowance };
+  if (!durationSec) return { minutes, partial: null, fits: null, message: null, quota: null, allowance };
+  const r = await predictAdmission(db, s, userId, durationSec, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
+  if ("refused" in r) return refused(r.refused);
+  const until = r.admission.until;
+  if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance };
+  const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
+  const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
+  const partial: SourcePartial = {
+    minutes: Math.round(until / 60),
+    totalMinutes: Math.round(durationSec / 60),
+    firstVideo: r.admission.firstVideo,
+    sentence: partialPrecheckSentence(
+      until,
+      durationSec,
+      r.admission.firstVideo ? "first_video" : r.admission.binding === "MAX_SOURCE_MINUTES_PER_DAY" ? "day" : "month",
+      !!upgrade,
+    ),
+    upgrade,
+  };
+  // the same moment a refusal used to warn at: whoever pastes a long video, and what they are offered instead
+  svc.telemetry.capture("quota.partial_offered", userId, {
+    surface,
+    firstVideo: partial.firstVideo,
+    minutes: partial.minutes,
+    totalMinutes: partial.totalMinutes,
+  });
+  return { minutes, partial, fits: true, message: null, quota: null, allowance };
 }
+
+/**
+ * What New project says about a video only the start of which the minutes cover. `untilSec` is whole transcription
+ * chunks, a little under the minutes left, so the sentence says what is clipped and which allowance set it (the first
+ * video's, today's or this period's minutes), never a "minutes left" number it would get wrong.
+ */
+export function partialPrecheckSentence(untilSec: number, durationSec: number, why: "first_video" | "day" | "month", canUpgrade: boolean): string {
+  const now = Math.round(untilSec / 60);
+  const total = Math.round(durationSec / 60);
+  const reason = why === "first_video" ? "free as your first video" : why === "day" ? "as far as today's minutes go" : "as far as this period's minutes go";
+  const rest = canUpgrade ? "Upgrade any time to clip the rest; Reelsaw picks up where it stopped." : "Reelsaw clips the rest when your minutes reset.";
+  return `This video is ${plural(total, "minute")}. Reelsaw clips the first ${plural(now, "minute")} now, ${reason}. ${rest}`;
+}
+
+/**
+ * A partly processed video's state for its screen, `get_project` and `reelsaw project`: what was processed, what is left,
+ * what "Clip the rest" would process now and the plan that covers the rest when the minutes do not. Null for a project
+ * that covers its whole video.
+ */
+export async function partialSourceOf(
+  svc: Services,
+  p: Pick<typeof schema.projects.$inferSelect, "id" | "userId" | "durationSec" | "sourceLimitSec" | "extendFromSec" | "status" | "runReason">,
+): Promise<PartialSource | null> {
+  if (p.sourceLimitSec === null || p.durationSec === null) return null;
+  const processedSec = processedEndSec(p) ?? 0;
+  // to the tenth of a second: a float difference (601.4 - 540) would show as 61.39999999999998 on every surface
+  const remainingSec = Math.max(0, Math.round((p.durationSec - processedSec) * 10) / 10);
+  const db = svc.database.db;
+  const s = svc.settings.get();
+  // from the state, not the run's reason (a retry or re-pick of an extension has another): the rest's words are not in
+  // yet, or its picks are not made yet, while the project works
+  const [t] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  const extending =
+    (WORKING as readonly string[]).includes(p.status) &&
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !transcriptCovers(t.coveredSec, p.sourceLimitSec)));
+  const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
+  const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
+  const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;
+  const covered = extendableSec !== null && extendableSec >= remainingSec - 0.5;
+  const offer = covered ? null : await minutesOffer(db, s, p.userId, svc.entitlements, room.binding);
+  const primary = offer?.refusal.primary;
+  const upgrade = primary?.kind === "upgrade" ? { label: primary.label, href: primary.href } : null;
+  const m = (sec: number) => Math.round(sec / 60);
+  const head = `Reelsaw clipped the first ${m(processedSec)} of ${plural(m(p.durationSec), "minute")}.`;
+  const sentence = extending
+    ? `Clipping more of the video, up to minute ${m(processedSec)} of ${m(p.durationSec)}.`
+    : covered
+      ? `${head} Clip the remaining ${plural(m(remainingSec), "minute")} now.`
+      : extendableSec !== null
+        ? `${head} Your minutes cover ${m(extendableSec)} more now${upgrade ? `; upgrade to clip all ${m(remainingSec)}` : ""}.`
+        : upgrade
+          ? `${head} Upgrade to clip the remaining ${plural(m(remainingSec), "minute")}.`
+          : `${head} The remaining ${plural(m(remainingSec), "minute")} can be clipped when your minutes reset ${
+              offer!.key === "MAX_SOURCE_MINUTES_PER_DAY"
+                ? `at ${offer!.resetsOn.toISOString().slice(11, 16)} UTC`
+                : `on ${formatDay(offer!.resetsOn, { year: false, utc: true })}`
+            }.`;
+  return { processedSec, durationSec: p.durationSec, remainingSec, extending, extendableSec, upgrade, sentence };
+}
+
+export interface ExtendResult {
+  /** the second the new part starts at */
+  fromSec: number;
+  /** where processing now ends (the whole video when `whole`) */
+  untilSec: number;
+  durationSec: number;
+  /** the rest of the video is covered: nothing will be left after this run */
+  whole: boolean;
+}
+
+/**
+ * Process more of a partly processed video: as much of the rest as the account's minutes cover now (all of it, or
+ * whole transcription chunks of it), refused with the upgrade offer when not even one chunk fits. Picks up where it
+ * stopped: the transcript gets the new words appended (fixes and decisions on the old part stay), refine runs again
+ * (carrying decisions over), and analyze picks moments only in the new part around every clip that exists (or the
+ * whole video, when no moments were picked yet). The extension's minutes are a ledger row dated now.
+ * The project may be idle or rendering (its renders go on); a project still in its first run is restarted from
+ * transcription with the new limit. tRPC `projects.extend`, MCP `extend_project`, `reelsaw extend-project` and the
+ * handler that follows an upgrade (`finishPartialProjects`) call this.
+ */
+export async function extendProject(svc: Services, actor: Actor, projectId: string, o: { automatic?: boolean } = {}): Promise<ExtendResult> {
+  const chunkSec = svc.config.TRANSCRIBE_CHUNK_SECONDS;
+  const result = await svc.tx(async (u) => {
+    const owner = await findProject(u.db, actor, projectId, { deleted: false });
+    // advisory locks first (the account's minutes, then this project's retries), then transcript → clips → project
+    await takeTxLock(u.db, txLock.quota(owner.userId));
+    await takeTxLock(u.db, txLock.retry(owner.id));
+    await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, owner.id)).for("update");
+    await lockProjectClips(u, owner.id);
+    const [p] = await u.db
+      .select()
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
+      .for("no key update");
+    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+    if (p.sourceLimitSec === null || p.durationSec === null)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This project already covers the whole video." });
+    const fromSec = Math.min(p.durationSec, p.sourceLimitSec);
+    const room = await minutesRoomSec(u.db, svc.settings.get(), p.userId, { extension: true, ent: svc.entitlements });
+    const plan = partialUntil(p.durationSec, fromSec, room.sec, chunkSec);
+    if (plan === "none")
+      throw await extensionRefusal(u.db, svc.settings.get(), p.userId, p.durationSec - fromSec, room.sec ?? 0, svc.entitlements, room.binding);
+    const untilSec = plan.until ?? p.durationSec;
+    await recordSourceExtension(u.db, p.userId, p.id, untilSec - fromSec);
+    // moments picked before (even ones deleted since) mean the old part is done: the new picks go only in the new part.
+    // None picked yet (the first run had not got that far): the whole processed video is picked from.
+    const [picked] = await u.db
+      .select({ id: schema.clips.id })
+      .from(schema.clips)
+      .where(and(eq(schema.clips.projectId, p.id), eq(schema.clips.origin, "ai")))
+      .limit(1);
+    const extendFromSec = picked ? Math.min(p.extendFromSec ?? fromSec, fromSec) : null;
+    for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await supersedeStages(u, p.id); // a stage still running for the old limit commits nothing
+    await startRun(u, p.id, {
+      reason: "extend",
+      status: "queued",
+      stage: "transcribe",
+      set: { sourceLimitSec: plan.until, extendFromSec },
+      continueActive: true,
+    });
+    await u.emit("project.extended", { projectId: p.id, fromSec, untilSec, durationSec: p.durationSec, ...(o.automatic ? { automatic: true } : {}) });
+    // a source retention removed is fetched again first; ingest keeps what the video was admitted as and hands on
+    await u.enqueue(p.sourceExpiredAt || !p.sourceKey ? QUEUES.ingest : QUEUES.transcribe, { projectId: p.id });
+    const r: ExtendResult & { userId: string } = { fromSec, untilSec, durationSec: p.durationSec, whole: plan.until === null, userId: p.userId };
+    return r;
+  });
+  svc.log
+    .child({ module: "projects", projectId })
+    .info({ fromSec: result.fromSec, untilSec: result.untilSec, whole: result.whole, automatic: !!o.automatic }, "processing more of a partly processed video");
+  svc.telemetry.capture("project.extended", result.userId, {
+    projectId,
+    automatic: !!o.automatic,
+    addedMinutes: Math.round((result.untilSec - result.fromSec) / 60),
+    whole: result.whole,
+  });
+  const { userId: _u, ...out } = result;
+  return out;
+}
+
+/**
+ * After a plan or limits change: process more of the account's partly processed videos, newest first, as far as the
+ * minutes now go (one page; each extension takes its minutes before the next is asked). Stops at the first refusal:
+ * the minutes are used up. A busy project is extended too (extendProject restarts or joins its run).
+ */
+export async function finishPartialProjects(svc: Services, userId: string): Promise<{ extended: number }> {
+  const rows = await svc.database.db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt), isNotNull(schema.projects.sourceLimitSec)))
+    .orderBy(sql`${schema.projects.updatedAt} desc`)
+    .limit(PARTIAL_PAGE);
+  let extended = 0;
+  for (const r of rows) {
+    try {
+      await extendProject(svc, null, r.id, { automatic: true });
+      extended++;
+    } catch (err) {
+      if (err instanceof QuotaError) break;
+      // gone or already whole meanwhile: the next one
+      if (err instanceof TRPCError && (err.code === "NOT_FOUND" || err.code === "BAD_REQUEST")) continue;
+      throw err;
+    }
+  }
+  if (extended)
+    svc.log.child({ module: "projects", userId }).info({ extended, page: PARTIAL_PAGE }, "processing more of partly processed videos after a plan change");
+  return { extended };
+}
+/** How many partly processed videos one plan change resumes; the rest keep their "Clip the rest" button. */
+const PARTIAL_PAGE = 20;
 
 /** Resume a project from its furthest completed stage (the Retry button, retry_project, `reelsaw retry`). */
 export async function retryOwnedProject(svc: Services, actor: Actor, projectId: string) {

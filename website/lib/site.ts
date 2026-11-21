@@ -30,7 +30,9 @@ export const SITE = {
 
 /**
  * A link into the hosted app, tagged with where on the site it was clicked. The site and the app are separate
- * analytics projects, so the UTM tags (kept as the app's first-touch properties) are what ties a sign-up to the site.
+ * analytics projects, so the UTM tags (kept as the app's first-touch properties) are what ties a sign-up to the site;
+ * the visit's own first touch (where it came from, the landing page, this site's analytics id) is added when the link
+ * is followed (lib/attribution.ts).
  */
 export function appLink(path: string, cta: string, params: Record<string, string> = {}): string {
   const q = new URLSearchParams({ ...params, ...utmParams(cta) });
