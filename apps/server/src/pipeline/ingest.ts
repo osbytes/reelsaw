@@ -22,6 +22,81 @@ const UPLOAD_MISSING = "Uploaded source file is missing";
 const FILTER_CONTRADICTION_MESSAGE =
   "Could not download this link: the downloader skipped it as a live stream, but it is not one. This is a Reelsaw problem, not your link. Try again after an update, or upload the file instead (New project → Upload).";
 
+/** A source with sound and no picture at all: every clip's render needs a video stream to frame. */
+export const NO_VIDEO_MESSAGE =
+  "This file has sound but no video, and clips are made from video. Upload the video itself, or an audio file with cover art (the art becomes the picture).";
+
+/**
+ * ffmpeg arguments that turn a source whose only picture is a still (an audio file's cover art, or a video track of one
+ * frame) into a real video: the picture held for `durationSec` at one frame a second, the first audio stream copied
+ * untouched so the transcript's timestamps still line up with the sound. `audio: "aac"` re-encodes a codec mp4 cannot
+ * carry. A keyframe every 10 s keeps a clip's seek cheap.
+ */
+export function stillVideoArgs(picture: string, source: string, durationSec: number, out: string, audio: "copy" | "aac" = "copy"): string[] {
+  return [
+    "-y",
+    "-loop",
+    "1",
+    "-framerate",
+    "1",
+    "-i",
+    picture,
+    "-i",
+    source,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-t",
+    durationSec.toFixed(3),
+    "-vf",
+    "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-tune",
+    "stillimage",
+    "-g",
+    "10",
+    "-pix_fmt",
+    "yuv420p",
+    ...(audio === "copy" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"]),
+    "-movflags",
+    "+faststart",
+    out,
+  ];
+}
+
+/**
+ * The source as a real video when its only picture is a still. Rendered as it is, such a source makes clips with sound
+ * alone: each clip seeks past the one frame, ffmpeg drops the empty video stream, and the thumbnail of the result then
+ * fails, on every retry. Done once, here, so every later stage (framing, render, the editor's preview) sees a video.
+ */
+async function stillAsVideo(ctx: StageContext, sourcePath: string): Promise<string> {
+  const { media } = ctx.svc;
+  const probe = await media.ffprobe(sourcePath);
+  if (!probe.still || !probe.hasAudio || !(probe.durationSec > 0)) return sourcePath;
+  await ctx.progress(0.65, "Turning the cover art into video");
+  const dir = path.dirname(sourcePath);
+  const picture = path.join(dir, "still.png");
+  const out = path.join(dir, "source.still.mp4");
+  try {
+    await media.ffmpeg(["-y", "-i", sourcePath, "-map", "0:v:0", "-frames:v", "1", picture], { signal: ctx.signal });
+    await media
+      .ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out), { signal: ctx.signal })
+      .catch(() => media.ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out, "aac"), { signal: ctx.signal }));
+    const video = path.join(dir, "source.mp4");
+    await fs.rm(sourcePath, { force: true });
+    await fs.rename(out, video);
+    ctx.log.info({ durationSec: probe.durationSec, width: probe.width, height: probe.height }, "still source made into video");
+    return video;
+  } finally {
+    await fs.rm(picture, { force: true });
+    await fs.rm(out, { force: true });
+  }
+}
+
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
   return sourceScratchMB(knownBytes);
@@ -182,6 +257,7 @@ export async function ingest(ctx: StageContext) {
       await ctx.progress(0.3, "Copying your upload");
       await svc.storage.ensureLocal(upload.storageKey, sourcePath);
     }
+    sourcePath = await stillAsVideo(ctx, sourcePath);
     sourceKey = keys.source(projectId, path.extname(sourcePath) || ".mp4");
     await ctx.progress(0.7, "Storing source");
     await svc.storage.putFile(sourceKey, sourcePath);
@@ -199,6 +275,7 @@ export async function ingest(ctx: StageContext) {
   await ctx.progress(0.9, "Probing media");
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new NonRetryableError("Source has no audio track; nothing to transcribe");
+  if (!probe.width || !probe.height) throw new NonRetryableError(NO_VIDEO_MESSAGE);
   const sourceBytes = (await fs.stat(sourcePath)).size;
   // the exact bytes the transcript's timestamps refer to; a stored source already hashed keeps its hash
   if (!(stored && typeof meta.sha256 === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
