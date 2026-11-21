@@ -259,17 +259,31 @@ report.
 
 ### Disfluency/name fixes skipped for language X
 
-The project's events show "Filler and repeat removal skipped: not available for de" (or "Name fixes
-skipped …"). The transcript's detected language (`transcripts.language`) is not English. The
+The project's events show "Filler and repeat removal skipped: not available for German yet: it works
+for English only" (or "Name fixes skipped …"); `reelsaw languages` lists the same gaps per language. The transcript's detected language (`transcripts.language`) is not English. The
 disfluency word lists, the consonant-skeleton name matcher and the wav2vec2-base-960h aligner are
-English-only, so `pipeline/language.ts` (`supports(stage, lang)`) turns them off rather than let them
+English-only, so the registry in `pipeline/language.ts` (`capability(stage, lang)`) turns them off rather than let them
 find nothing, or the wrong thing, silently. Cuts you make by hand still work and use the slower
 whisper seam check instead of CTC alignment. If the language was detected wrongly (a mixed or very
 short video, music or a greeting in another language at the start), set the language in **Project
 defaults** (or `settings.language` when creating the project over MCP or the API) and create the
 project again: the language is sent to the transcription model in its own option (`language`, or
 `languageCode` for AssemblyAI) instead of being guessed, and becomes `transcripts.language`. To add
-a language, add its data for the stage and list it in `SUPPORTED` in `language.ts`.
+a language, add its data for the stage and list it in `ONLY_FOR` in `language.ts`.
+
+### Captions show empty boxes (tofu) for a language
+
+The clip's events say "N characters in this clip have no font on this server and show as empty
+boxes", or `reelsaw languages` lists "captions: no font on this server draws <script>". libass draws
+each character with the caption font and falls back, per character, to any installed font that has
+it (uploaded caption fonts included); when none has it, it logs `fontselect: failed to find any
+fallback with glyph 0x…` and draws a box. The image ships Noto for every script the transcription
+model takes (`fonts-noto-core`, the sans faces of `fonts-noto-cjk`), and CI's `language-matrix`
+job renders each language through the image's own ffmpeg to keep it that way. On a custom image
+without them, install a font for the script or upload one under Settings → System → Captions
+(`add_font`, `reelsaw fonts add`): the registry checks uploaded fonts too and names the one that
+covers the script. Check a box by hand: `fc-list :charset=939` (the code point from the log) lists the
+fonts that have it.
 
 ## 4. Lessons: small local LLMs
 

@@ -40,7 +40,8 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
   {
     key: "captions",
     label: "Word-level captions",
-    reelsaw: "Yes: karaoke highlight, AI-picked key words, boxed or outlined, fonts your instance admin uploads, drag positions on a live preview",
+    reelsaw:
+      "Yes: karaoke highlight, AI-picked key words, boxed or outlined, fonts your instance admin uploads, drag positions on a live preview; every script the transcriber takes, from Hindi and Thai to Japanese and Arabic",
   },
   { key: "fillers", label: "Filler and false-start removal", reelsaw: "Yes, for English: jump cuts located by forced alignment, each one reviewable" },
   { key: "dubbing", label: "AI dubbing / translation", reelsaw: "No" },
