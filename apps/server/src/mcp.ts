@@ -194,7 +194,7 @@ export function createMcpServer(
   server.registerTool(
     "create_project",
     TOOLS.create_project,
-    ({ sourceUrl, uploadId, title, metadata, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+    ({ sourceUrl, uploadId, title, metadata, settings, introAssetId, outroAssetId, introSec, outroSec, clear }) =>
       run(async () => {
         // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
         const merged = {
@@ -205,7 +205,7 @@ export function createMcpServer(
           ...(outroSec !== undefined ? { outroSec } : {}),
         };
         return {
-          ...(await api.projects.create({ sourceUrl, uploadId, title, metadata, settings: Object.keys(merged).length ? merged : undefined })),
+          ...(await api.projects.create({ sourceUrl, uploadId, title, metadata, settings: Object.keys(merged).length ? merged : undefined, clear })),
           next: "wait_for_project",
         };
       }),

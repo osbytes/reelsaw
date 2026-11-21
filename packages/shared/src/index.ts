@@ -1097,6 +1097,8 @@ export const createProjectInputSchema = z.object({
   sourceUrl: z.url({ protocol: /^https?$/, message: "Use a link that starts with http:// or https://" }).optional(),
   uploadId: z.string().optional(),
   settings: projectSettingsPatchSchema.optional(),
+  /** Settings your project defaults give that this project leaves unset (language: detect; focus: none), as in an update. */
+  clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 

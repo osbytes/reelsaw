@@ -12,11 +12,13 @@ import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import {
+  CLEARABLE_SETTINGS,
   defaultProjectSettings,
   projectSettingsSchema,
   SOURCE_URL_PARAM,
   userProjectDefaultsSchema,
   styleSchema,
+  type ClearableSetting,
   type ProjectSettings,
   type QuotaRefusal,
   type Style,
@@ -58,10 +60,16 @@ export function NewProjectPage() {
   const me = useMe();
   const uploadCtrl = useRef<AbortController | null>(null);
   const create = useMutation({
-    mutationFn: async (input: { title?: string | undefined; sourceUrl?: string | undefined; file?: File; settings: ProjectSettings }) => {
+    mutationFn: async (input: {
+      title?: string | undefined;
+      sourceUrl?: string | undefined;
+      file?: File;
+      settings: ProjectSettings;
+      clear: ClearableSetting[];
+    }) => {
       uploadCtrl.current = new AbortController();
       const uploadId = input.file ? await postUpload(input.file, setUploadPct, uploadCtrl.current.signal) : undefined;
-      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings });
+      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings, clear: input.clear });
     },
     onSettled: () => setUploadPct(null),
   });
@@ -209,6 +217,9 @@ export function NewProjectPage() {
         sourceUrl: mode === "url" ? url : undefined,
         ...(mode === "upload" && file ? { file } : {}),
         settings: { ...s, ...bumperSettings },
+        // the form starts from the saved defaults, so an optional setting left empty here was cleared on purpose
+        // ("Detect automatically", no focus): without this the server would fill it back in from the defaults
+        clear: CLEARABLE_SETTINGS.filter((k) => s[k] === undefined),
       },
       {
         onSuccess: (p) => {

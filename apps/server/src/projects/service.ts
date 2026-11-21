@@ -942,7 +942,7 @@ export async function createProject(svc: Services, userId: string, input: Create
     // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
     await checkProjectQuota(u.db, svc.settings.get(), userId, { lock: true, ent: svc.entitlements }).catch(quotaReached);
     // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
-    const settings = await resolveProjectSettings(u.db, userId, input.settings);
+    const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
     const [row] = await u.db

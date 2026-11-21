@@ -163,6 +163,11 @@ export const TOOLS = {
       outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
       introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows (1-10)"),
       outroSec: z.number().min(1).max(10).optional().describe("Seconds an outro image shows (1-10)"),
+      clear: z
+        .array(z.enum(CLEARABLE_SETTINGS))
+        .max(CLEARABLE_SETTINGS.length)
+        .optional()
+        .describe("Settings your project defaults give that this project leaves unset, e.g. language (detect it) or focus"),
     },
   },
   update_project: {
