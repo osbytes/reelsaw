@@ -70,6 +70,9 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
       status,
       userId: c.get("userId"),
       ...(level === "warn" && status < 400 ? { ms } : {}),
+      // the MCP SDK answers a refused request (an unsupported protocol version, a malformed envelope) with a 4xx
+      // response rather than a throw: the version the client asked for says what to support next
+      ...(status >= 400 && status < 500 && path === "/api/mcp" ? mcpVersion(c.req.header("mcp-protocol-version")) : {}),
     };
     // a handler that threw a 4xx (an HTTPException: a refused MCP protocol version, a bad body) answered the client as
     // designed: logged at the access level with the reason, not as an error report
@@ -89,8 +92,8 @@ export function isClientRefusal(err: Error): boolean {
 }
 
 /**
- * The reason a refusal gave in its body, for one thrown with an empty message: @hono/mcp puts "Unsupported protocol
- * version (supported versions: …)" in a JSON-RPC body only. Read from a copy, before the response is sent.
+ * The reason a refusal gave in its body, for one thrown with an empty message (a JSON-RPC error body, say). Read from
+ * a copy, before the response is sent.
  */
 export async function refusalBody(res: Response): Promise<string> {
   try {

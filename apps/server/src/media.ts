@@ -44,6 +44,44 @@ export interface ProbeInfo {
   fps?: number | undefined;
   /** frames in the first video stream when the container says (an animated GIF or WebP has more than one) */
   frames?: number | undefined;
+  /**
+   * the only picture is a still: cover art (an audio file's artwork, `attached_pic`) or a video track of one frame.
+   * Rendered as is, a clip's seek lands past that frame and ffmpeg writes sound alone (pipeline/ingest.ts stillAsVideo).
+   */
+  still?: boolean | undefined;
+}
+
+type ProbeStream = {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  duration?: string;
+  r_frame_rate?: string;
+  nb_frames?: string;
+  disposition?: { attached_pic?: number };
+};
+
+/** ProbeInfo from ffprobe's JSON. A real video stream wins over cover art, wherever the container lists it. */
+export function probeInfo(json: { format?: { duration?: string }; streams?: ProbeStream[] }): ProbeInfo {
+  const videos = json.streams?.filter((s) => s.codec_type === "video") ?? [];
+  const video = videos.find((s) => !s.disposition?.attached_pic) ?? videos[0];
+  const audio = json.streams?.find((s) => s.codec_type === "audio");
+  const duration = Number(json.format?.duration ?? video?.duration ?? audio?.duration ?? 0);
+  let fps: number | undefined;
+  if (video?.r_frame_rate) {
+    const [n, d] = video.r_frame_rate.split("/").map(Number);
+    if (n && d) fps = n / d;
+  }
+  const frames = Number(video?.nb_frames);
+  return {
+    durationSec: duration,
+    width: video?.width,
+    height: video?.height,
+    hasAudio: !!audio,
+    fps,
+    ...(frames > 0 ? { frames } : {}),
+    ...(video && (video.disposition?.attached_pic || frames === 1) ? { still: true } : {}),
+  };
 }
 
 export class CommandError extends Error {
@@ -347,26 +385,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
 
     async ffprobe(file) {
       const { stdout } = await run(config.FFPROBE_PATH, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file]);
-      const json = JSON.parse(stdout) as {
-        format?: { duration?: string };
-        streams?: Array<{ codec_type?: string; width?: number; height?: number; duration?: string; r_frame_rate?: string; nb_frames?: string }>;
-      };
-      const video = json.streams?.find((s) => s.codec_type === "video");
-      const audio = json.streams?.find((s) => s.codec_type === "audio");
-      const duration = Number(json.format?.duration ?? video?.duration ?? audio?.duration ?? 0);
-      let fps: number | undefined;
-      if (video?.r_frame_rate) {
-        const [n, d] = video.r_frame_rate.split("/").map(Number);
-        if (n && d) fps = n / d;
-      }
-      return {
-        durationSec: duration,
-        width: video?.width,
-        height: video?.height,
-        hasAudio: !!audio,
-        fps,
-        ...(Number(video?.nb_frames) > 0 ? { frames: Number(video?.nb_frames) } : {}),
-      };
+      return probeInfo(JSON.parse(stdout) as Parameters<typeof probeInfo>[0]);
     },
 
     async extractAudio(input, output, signal, untilSec) {
