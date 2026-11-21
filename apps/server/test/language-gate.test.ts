@@ -16,6 +16,7 @@ import {
   transcriptionLanguageOptions,
 } from "../src/pipeline/language.js";
 import { buildMapPrompt } from "../src/pipeline/select.js";
+import { SPOKEN_LANGUAGES, languageLabel, spokenLanguageCode, spokenLanguageOptions } from "@reelsaw/shared";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
 describe("norm (disfluency)", () => {
@@ -77,6 +78,31 @@ describe("transcriptionLanguageOptions", () => {
     assert.deepEqual(transcriptionLanguageOptions("openai", ""), {});
     assert.deepEqual(transcriptionLanguageOptions("openai", null), {});
     assert.deepEqual(transcriptionLanguageOptions("someone-else", "de"), {});
+  });
+});
+
+describe("spoken language list", () => {
+  it("normalises codes, tags, names and old aliases into the set", () => {
+    assert.equal(spokenLanguageCode("EN"), "en");
+    assert.equal(spokenLanguageCode("pt_BR"), "pt");
+    assert.equal(spokenLanguageCode("german"), "de");
+    assert.equal(spokenLanguageCode("Cantonese"), "yue");
+    assert.equal(spokenLanguageCode("haw"), "haw");
+    assert.equal(spokenLanguageCode("iw"), "he");
+    assert.equal(spokenLanguageCode("jv"), "jw");
+    assert.equal(spokenLanguageCode("  "), undefined);
+    assert.equal(spokenLanguageCode("xx-YY"), "xx", "a tag outside the set keeps its primary subtag");
+  });
+  it("has a name for every code, in any locale", () => {
+    for (const c of SPOKEN_LANGUAGES) assert.notEqual(languageLabel(c), c, c);
+    assert.equal(languageLabel("de", "de"), "Deutsch");
+    assert.equal(languageLabel("jw"), "Javanese");
+    const opts = spokenLanguageOptions();
+    assert.equal(opts.length, SPOKEN_LANGUAGES.length);
+    assert.deepEqual(
+      opts.map((o) => o.label),
+      [...opts.map((o) => o.label)].sort((a, b) => a.localeCompare(b, "en")),
+    );
   });
 });
 

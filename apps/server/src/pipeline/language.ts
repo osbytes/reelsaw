@@ -5,6 +5,8 @@
  * instead of running silently and finding nothing (or the wrong thing). Add a language here only
  * together with the data the stage needs for it.
  */
+import { languageLabel, spokenLanguageCode } from "@reelsaw/shared";
+
 export type LanguageStage = "disfluencyRules" | "entityPhonetics" | "ctcAlign";
 
 const SUPPORTED: Record<LanguageStage, readonly string[]> = {
@@ -13,33 +15,9 @@ const SUPPORTED: Record<LanguageStage, readonly string[]> = {
   ctcAlign: ["en"],
 };
 
-const NAMES: Record<string, string> = {
-  english: "en",
-  german: "de",
-  french: "fr",
-  spanish: "es",
-  italian: "it",
-  portuguese: "pt",
-  dutch: "nl",
-  russian: "ru",
-  japanese: "ja",
-  chinese: "zh",
-  korean: "ko",
-  arabic: "ar",
-  hindi: "hi",
-  turkish: "tr",
-  polish: "pl",
-  ukrainian: "uk",
-  swedish: "sv",
-  indonesian: "id",
-  vietnamese: "vi",
-};
-
-/** "en", "en-US", "English" → "en"; empty/unknown → undefined. */
+/** "en", "en-US", "English" → "en"; empty → undefined. The one normaliser, shared with the web app. */
 export function languageCode(lang: string | null | undefined): string | undefined {
-  const l = lang?.trim().toLowerCase();
-  if (!l) return undefined;
-  return NAMES[l] ?? l.split(/[-_]/)[0];
+  return spokenLanguageCode(lang);
 }
 
 /** Undefined (not detected) is assumed English, which is what every stage was built for. */
@@ -69,15 +47,10 @@ export function transcriptionLanguageOptions(provider: string, lang: string | nu
   }
 }
 
-/** "de" → "German"; the code itself when the runtime has no name for it, undefined when unset. */
+/** "de" → "German"; undefined when unset. */
 export function languageName(lang: string | null | undefined): string | undefined {
   const code = languageCode(lang);
-  if (!code) return undefined;
-  try {
-    return new Intl.DisplayNames(["en"], { type: "language", fallback: "none" }).of(code) ?? code;
-  } catch {
-    return code; // not a well-formed tag
-  }
+  return code ? languageLabel(code) : undefined;
 }
 
 /**

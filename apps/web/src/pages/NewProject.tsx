@@ -23,6 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
+import { LanguageCombobox } from "../components/LanguageCombobox";
 import { youtubeId } from "../lib/links";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { pageTitle, useDocumentTitle } from "../lib/title";
@@ -536,6 +537,13 @@ export function NewProjectPage() {
                     />
                     <span className="text-xs font-normal text-ink3">Also pulled from the video title, description and tags.</span>
                   </label>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[13px] font-semibold text-ink2">Spoken language</span>
+                    <LanguageCombobox className="sm:max-w-xs" value={s.language} onValueChange={(v) => patch({ language: v })} />
+                    <span className="text-xs text-ink3">
+                      Set it when the video opens with music or another language, so the transcript is not guessed wrong.
+                    </span>
+                  </div>
                   <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
                     Extra instructions for the AI
                     <textarea

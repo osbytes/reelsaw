@@ -10,6 +10,7 @@ import { Link } from "react-router";
 import { useBumperLibrary } from "./BumperField";
 import { RefineDefaultsFields } from "./RefineToggles";
 import { TemplateSelect } from "./TemplatePicker";
+import { LanguageCombobox } from "./LanguageCombobox";
 import { fontOptions, useFonts } from "../lib/fonts";
 
 type RefineForm = { refineEntities: "" | "yes" | "no"; refineDisfluency: "" | "yes" | "no"; disfluencyLlm: "" | "yes" | "no"; refineScenes: "" | "yes" | "no" };
@@ -178,10 +179,10 @@ export function ProjectDefaultsSection() {
             maxLength={2000}
           />
         </label>
-        <label className="flex flex-col gap-1 text-xs text-ink2">
-          Language
-          <input className="input" value={f.language} onChange={set("language")} placeholder="auto-detect" maxLength={10} />
-        </label>
+        <div className="flex flex-col gap-1 text-xs text-ink2">
+          Spoken language
+          <LanguageCombobox value={f.language} onValueChange={(v) => pick("language")(v ?? "")} />
+        </div>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Focus topic
           <input className="input" value={f.focus} onChange={set("focus")} placeholder="any" maxLength={300} />
