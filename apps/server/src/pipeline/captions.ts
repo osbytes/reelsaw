@@ -178,7 +178,7 @@ PlayResX: ${width}
 PlayResY: ${height}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
-
+${lang ? `Language: ${lang}\n` : ""}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${captionStyle}

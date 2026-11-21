@@ -98,6 +98,39 @@ jobs:
           bad=$(grep -l '"@reelsaw/' .changeset/*.md | xargs -r grep -L '"@reelsaw/server"' || true)
           [ -z "$bad" ] || { echo "changesets must name @reelsaw/server (web and shared are ignored): $bad"; exit 1; }
 
+  # Every spoken language's captions through the binaries that ship: the image's own `system` stage (Debian's
+  # ffmpeg and libass, the installed fonts) under its `dev` target, which adds the repo and its node_modules.
+  # test/language-matrix.test.ts fails on a letter no installed font draws and on any libass "failed to find any
+  # fallback with glyph"; the frame per language is kept as an artifact.
+  language-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image's dev stage
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dev
+          load: true
+          tags: reelsaw-matrix
+          cache-from: type=gha,scope=language-matrix
+          cache-to: type=gha,mode=max,scope=language-matrix
+      - name: Render every language
+        run: |
+          mkdir -p frames && chmod 777 frames
+          docker run --rm -e LANGUAGE_MATRIX_RENDER=1 -e LANGUAGE_MATRIX_FRAMES=/frames -v "$PWD/frames:/frames" \
+            -w /app/apps/server reelsaw-matrix node --import tsx --test test/language-matrix.test.ts
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: language-matrix-frames
+          path: frames
+          retention-days: 14
+
   # reelsaw.com (website/): its own pnpm root with its own lockfile, so it is checked on its own
   site:
     runs-on: ubuntu-latest

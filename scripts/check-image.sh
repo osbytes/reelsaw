@@ -10,3 +10,5 @@ if [ -n "$FOUND" ]; then
 fi
 echo "check-image: no source in $IMAGE"
 docker run --rm --entrypoint sh "$IMAGE" -c 'ls /app/server/dist /app/server/dist/chunks | head -20; echo version=$REELSAW_VERSION commit=$REELSAW_COMMIT'
+# the image's size, so a release log shows what a change (fonts, models, tools) added
+docker image inspect --format 'size: {{.Size}} bytes unpacked' "$IMAGE" 2>/dev/null || true

@@ -31,9 +31,15 @@ ENV DATA_DIR=/data \
 # otherwise keep serving this layer as first built, so the release workflow passes the ISO week here and
 # the OS packages are refreshed at least weekly (other builds keep the default and reuse the cache).
 ARG OS_PACKAGES_REFRESH=local
+# Captions in every script the transcriber takes: libass falls back from the caption font (built in or uploaded) to
+# an installed font that has the glyph, so these are what Hindi, Thai, Japanese, Tamil, ... draw with. Noto core has
+# one family per script (about 42 MB); of Noto CJK only the sans faces stay (the serif ones are another 45 MB and no
+# caption uses them). test/language-matrix.test.ts renders every language through this stage (CI: language-matrix).
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue fonts-noto-core fonts-noto-cjk ca-certificates curl python3 \
+ && rm -f /usr/share/fonts/opentype/noto/NotoSerifCJK-* \
+ && fc-cache -f \
  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
  && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
  && chmod +x /usr/local/bin/yt-dlp \
