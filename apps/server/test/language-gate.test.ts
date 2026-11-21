@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { norm } from "../src/pipeline/disfluency.js";
 import { norm as entityNorm } from "../src/pipeline/entities.js";
-import { languageCode, skipReason, supports } from "../src/pipeline/language.js";
+import { languageCode, skipReason, supports, transcriptionLanguageOptions } from "../src/pipeline/language.js";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
 describe("norm (disfluency)", () => {
@@ -54,6 +54,20 @@ describe("supports", () => {
     assert.equal(skipReason("de"), "not available for de");
     assert.equal(skipReason("German"), "not available for de");
     assert.equal(languageCode("pt-BR"), "pt");
+  });
+});
+
+describe("transcriptionLanguageOptions", () => {
+  it("uses each vendor's option name with an ISO 639-1 code", () => {
+    assert.deepEqual(transcriptionLanguageOptions("openai", "pt-BR"), { language: "pt" });
+    assert.deepEqual(transcriptionLanguageOptions("groq", "Japanese"), { language: "ja" });
+    assert.deepEqual(transcriptionLanguageOptions("deepgram", "es"), { language: "es" });
+    assert.deepEqual(transcriptionLanguageOptions("assemblyai", "fr"), { languageCode: "fr" });
+  });
+  it("sends nothing when unset (detect) or for a vendor without the option", () => {
+    assert.deepEqual(transcriptionLanguageOptions("openai", ""), {});
+    assert.deepEqual(transcriptionLanguageOptions("openai", null), {});
+    assert.deepEqual(transcriptionLanguageOptions("someone-else", "de"), {});
   });
 });
 

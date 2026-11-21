@@ -23,6 +23,7 @@ import {
 } from "./asr-loops.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { enqueueRefine } from "./refine.js";
+import { languageCode } from "./language.js";
 import { plural } from "@reelsaw/shared";
 
 /**
@@ -152,6 +153,9 @@ export async function transcribe(ctx: StageContext) {
   const entities = extractEntities(project.sourceMeta, project.settings.vocabulary);
   const provider = svc.ai.transcriptionOptionsKey(transcriptionModel);
   const providerOptions = svc.ai.transcriptionOptions(transcriptionModel) as Record<string, JSONObject>;
+  // the language the user set (project settings or their defaults) is sent, not left to detection; asr merges it into
+  // the options, so it is part of the ASR cache key and the chunk step key: changing it transcribes again
+  const spoken = languageCode(project.settings.language);
   if (svc.config.TRANSCRIPT_BIAS && entities.length) {
     providerOptions[provider] = { ...(providerOptions[provider] ?? {}), ...(biasProviderOptions(provider, entities) as JSONObject) };
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
@@ -173,6 +177,7 @@ export async function transcribe(ctx: StageContext) {
       chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS,
       audioSec: Math.round(acc),
       biasHints: entities.length,
+      language: spoken ?? "detect",
     },
     "transcribe start",
   );
@@ -191,6 +196,7 @@ export async function transcribe(ctx: StageContext) {
     let result = await svc.asr.transcribe(audio, {
       modelId: transcriptionModel,
       providerOptions,
+      language: spoken,
       signal,
       maxRetries: 3,
       functionId: "transcribe.chunk",
@@ -208,6 +214,7 @@ export async function transcribe(ctx: StageContext) {
       const retried = await svc.asr.transcribe(audio, {
         modelId: transcriptionModel,
         providerOptions: withoutPrompt(providerOptions, provider),
+        language: spoken,
         signal,
         maxRetries: 3,
         functionId: "transcribe.chunk-retry",
@@ -244,7 +251,7 @@ export async function transcribe(ctx: StageContext) {
   await ctx.progress(0.1, `Transcribing ${plural(needed.length, "chunk")}, ${concurrency} at a time`);
   await ctx.steps(needed, { concurrency, range: [0.1, 0.95], message: (d, t) => `Transcribed chunk ${d}/${t}` }, async (i, _k, signal) => {
     const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-    const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });
+    const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions, language: spoken });
     const timeoutMs = ctx.unitTimeoutMs(transcriptionModel, { audioSec: (offsets[i + 1] ?? acc) - offsets[i]! });
     return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), {
       schema: chunkStepSchema,
@@ -306,7 +313,8 @@ export async function transcribe(ctx: StageContext) {
         .insert(schema.transcripts)
         .values({
           projectId,
-          language: chunks.find((c) => c.language)?.language ?? null,
+          // a code ("en"), never the name some models answer with ("english"); the user's setting wins over detection
+          language: spoken ?? languageCode(chunks.find((c) => c.language)?.language) ?? null,
           text: words.map((w) => w.text).join(" "),
           words,
           rawWords,

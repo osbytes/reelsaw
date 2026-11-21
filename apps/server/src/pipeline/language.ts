@@ -48,6 +48,27 @@ export function supports(stage: LanguageStage, lang: string | null | undefined):
   return code === undefined || SUPPORTED[stage].includes(code);
 }
 
+/**
+ * The provider options that tell a transcription model which language is spoken, under the
+ * `providerOptions` key it reads (AiService.transcriptionOptionsKey). Without them every model
+ * auto-detects, and a wrong guess on the first seconds (music, a greeting in another language)
+ * transcribes or even translates the whole chunk in the wrong language. Unset = detect.
+ */
+export function transcriptionLanguageOptions(provider: string, lang: string | null | undefined): Record<string, unknown> {
+  const code = languageCode(lang);
+  if (!code) return {};
+  switch (provider) {
+    case "openai": // also the OpenAI-compatible provider (Speaches, whisper.cpp servers): ai/compat-transcription.ts forwards it
+    case "groq":
+    case "deepgram":
+      return { language: code };
+    case "assemblyai":
+      return { languageCode: code };
+    default:
+      return {};
+  }
+}
+
 /** Reason recorded when a stage is skipped for the transcript's language. */
 export function skipReason(lang: string | null | undefined): string {
   return `not available for ${languageCode(lang) ?? "this language"}`;

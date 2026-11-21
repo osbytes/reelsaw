@@ -1679,7 +1679,7 @@ export async function planClipCuts(
       ffmpegPath: svc.config.FFMPEG_PATH,
       signal,
       transcribe: async (audio) => {
-        const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal });
+        const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal, language: transcript?.language });
         return toWords(res.segments);
       },
     },

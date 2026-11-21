@@ -109,7 +109,7 @@ export async function planCutPreview(
           language: transcript.language,
           log: svc.log.child({ module: "cut-preview" }),
           ...(svc.aligner ? { align: (pcm: Float32Array, ws2: string[]) => svc.aligner!.align(pcm, ws2) } : {}),
-          transcribe: async (audio) => toWords((await svc.asr.transcribe(audio, { modelId, signal })).segments),
+          transcribe: async (audio) => toWords((await svc.asr.transcribe(audio, { modelId, signal, language: transcript.language })).segments),
         },
         input,
         ws,
