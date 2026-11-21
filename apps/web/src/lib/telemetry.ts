@@ -11,6 +11,8 @@ type Public = {
   posthog: { key: string; host: string } | null;
 };
 
+import { ATTRIBUTION_HEADER, type Attribution, attributionFromSearch, attributionSchema } from "@reelsaw/shared";
+
 type PH = typeof import("posthog-js").default;
 type SB = typeof import("@sentry/browser");
 let ph: PH | null = null;
@@ -18,23 +20,35 @@ let sb: SB | null = null;
 let started: Promise<void> | null = null;
 let ready = false;
 let lastPath = "";
+/** Where the first touch is kept between visits (the sign-up often happens on a later page load than the landing). */
+const FIRST_TOUCH_KEY = "reelsaw.firstTouch";
+
 /**
- * The UTM tags of the URL the app was opened with (the website's links carry them), read when this module loads,
- * before the router can redirect "/" to "/login" and drop the query. Registered once as event properties at init.
+ * First-touch attribution (@reelsaw/shared attribution.ts): the UTM tags and the website's site_* tags of the URL the
+ * app was first opened with, read when this module loads, before the router can redirect "/" to "/login" and drop the
+ * query. Kept in localStorage (first touch wins: a later visit without tags, or with others, does not replace it),
+ * registered once as event properties at init, and sent with the sign-up (`attributionHeaders`).
  */
-const landingUtm: Record<string, string> = (() => {
+const landingUtm: Attribution = (() => {
   try {
-    const q = new URLSearchParams(window.location.search);
-    const out: Record<string, string> = {};
-    for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content"]) {
-      const v = q.get(k);
-      if (v) out[k] = v.slice(0, 100);
-    }
-    return out;
+    const stored = attributionSchema.safeParse(JSON.parse(localStorage.getItem(FIRST_TOUCH_KEY) ?? "null"));
+    if (stored.success && Object.keys(stored.data).length) return stored.data;
+  } catch {
+    // storage blocked or the value is not ours: read the URL instead
+  }
+  try {
+    const now = attributionFromSearch(window.location.search) ?? {};
+    if (Object.keys(now).length) localStorage.setItem(FIRST_TOUCH_KEY, JSON.stringify(now));
+    return now;
   } catch {
     return {};
   }
 })();
+
+/** Headers for the sign-up request: the first touch, so the server's `user.signed_up` carries where the account came from. */
+export function attributionHeaders(): Record<string, string> {
+  return Object.keys(landingUtm).length ? { [ATTRIBUTION_HEADER]: JSON.stringify(landingUtm) } : {};
+}
 /** calls made before init finished, run in order once it has (bounded: an instance without keys never inits) */
 const pending: Array<() => void> = [];
 
@@ -99,7 +113,12 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
     }
     if (t.posthog) {
       ph = (await import("posthog-js")).default;
+      // the website's analytics id (its links carry it) becomes this browser's id when the app has none of its own yet:
+      // with the site and the app on one PostHog project the visit and the sign-up are one person; on two, the same id
+      // in both still joins them
+      const fresh = !hasPosthogIdentity(t.posthog.key);
       ph.init(t.posthog.key, {
+        ...(fresh && landingUtm.site_id ? { bootstrap: { distinctID: landingUtm.site_id } } : {}),
         api_host: t.posthog.host,
         capture_pageview: false,
         capture_pageleave: true,
@@ -120,8 +139,37 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
   return started;
 }
 
+/** posthog-js already has an id stored for this key in this browser (its cookie or localStorage entry). */
+function hasPosthogIdentity(key: string): boolean {
+  const name = `ph_${key}_posthog`;
+  try {
+    if (localStorage.getItem(name)) return true;
+  } catch {
+    // storage blocked: fall through to the cookie
+  }
+  return document.cookie.split("; ").some((c) => c.startsWith(`${name}=`));
+}
+
+/**
+ * A sign-up that must confirm its email first has no session here, but this browser is the one that came from the
+ * website: name it as the new account now, so the visit (its UTM tags, the site's id) joins the account even when the
+ * confirm link opens in another browser. The signed-out pages that follow do not reset it (see `identify(null)`).
+ */
+let signedUpAs: string | null = null;
+export function identifySignup(userId: string) {
+  signedUpAs = userId;
+  whenReady(() => ph?.identify(userId, { role: "user" }));
+}
+
 export function identify(user: { id: string; role: string } | null) {
   whenReady(() => {
+    // the account this browser just created, before its first sign-in: keep the identity that joins the visit to it
+    if (!user && signedUpAs) return;
+    if (user) {
+      // another account signing in here than the one just created: a fresh identity, not a merge of the two
+      if (signedUpAs && signedUpAs !== user.id) ph?.reset();
+      signedUpAs = null;
+    }
     if (!user) {
       // Only a browser that was signed in as someone gets a fresh identity. Every signed-out page load lands here too,
       // and resetting an anonymous visitor would drop the landing UTM tags registered at init and start a new

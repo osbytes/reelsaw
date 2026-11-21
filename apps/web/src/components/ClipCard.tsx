@@ -18,6 +18,7 @@ import { clipMeta, clipText } from "../lib/clipMeta";
 import { summarizeError } from "../lib/errors";
 import { MODE_LABEL } from "./Timeline";
 import { ShareLinkDialog, useCopyShareLink } from "./ShareLinks";
+import { DownloadClipButton } from "./DownloadClipButton";
 
 export interface ClipView {
   id: string;
@@ -272,9 +273,11 @@ export function ClipCard({
           Edit
         </Link>
         {done && clip.videoUrl ? (
-          <a className={`${ghost} text-ink hover:bg-sunk`} href={`${clip.videoUrl}?download`}>
-            Download
-          </a>
+          <DownloadClipButton
+            clip={{ id: clip.id, videoUrl: clip.videoUrl, watermark: clip.watermark }}
+            projectId={projectId}
+            className={`${ghost} text-ink hover:bg-sunk`}
+          />
         ) : (
           <button className={`${ghost} text-ink`} disabled title="Available once the clip is rendered">
             Download

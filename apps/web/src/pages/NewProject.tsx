@@ -671,6 +671,8 @@ export function NewProjectPage() {
 
 type SourceCheck = {
   minutes: number | null;
+  /** accepted, but only the first `minutes` are processed now (the server's SourcePartial) */
+  partial: { minutes: number; totalMinutes: number; firstVideo: boolean; sentence: string; upgrade: { label: string; href: string } | null } | null;
   fits: boolean | null;
   message: string | null;
   quota: QuotaRefusal | null;
@@ -680,6 +682,7 @@ type SourceCheck = {
 /** Under the source: the refusal it would meet (with the upgrade offer), else what the plan's minutes cover. Nothing without a minutes limit. */
 function SourceFit({ fit }: { fit: SourceCheck }) {
   if (fit.fits === false && fit.message) return <QuotaNotice message={fit.message} quota={fit.quota} placement="precheck" />;
+  if (fit.partial) return <PartialFit partial={fit.partial} />;
   const a = fit.allowance;
   if (!a) return null;
   const len = fit.minutes !== null ? `${Math.round(fit.minutes)}-minute video. ` : "";
@@ -690,6 +693,33 @@ function SourceFit({ fit }: { fit: SourceCheck }) {
     <div className="text-xs text-ink3">
       {len}
       {plan}
+    </div>
+  );
+}
+
+/**
+ * A long video the plan's minutes cover only the start of: it is not refused. Says how much is clipped now and offers
+ * the plan that covers all of it (Reelsaw picks up where it stopped after the upgrade, by itself).
+ */
+function PartialFit({ partial }: { partial: NonNullable<SourceCheck["partial"]> }) {
+  const shown = !!partial.upgrade;
+  useEffect(() => {
+    if (shown) track("upgrade_offer_shown", { placement: "partial_precheck", minutes: partial.minutes, totalMinutes: partial.totalMinutes });
+  }, [shown, partial.minutes, partial.totalMinutes]);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="text-[13px] leading-snug text-ink2">{partial.sentence}</p>
+      {partial.upgrade && (
+        <div>
+          <a
+            href={partial.upgrade.href}
+            className="btn-ghost py-1.5 text-xs no-underline"
+            onClick={() => track("upgrade_clicked", { placement: "partial_precheck", minutes: partial.minutes, totalMinutes: partial.totalMinutes })}
+          >
+            {partial.upgrade.label}
+          </a>
+        </div>
+      )}
     </div>
   );
 }

@@ -548,6 +548,7 @@ export function createMcpServer(
   server.registerTool("retry_project", TOOLS.retry_project, ({ id }) => run(() => api.projects.retry({ id })));
 
   server.registerTool("reanalyze_project", TOOLS.reanalyze_project, ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })));
+  server.registerTool("extend_project", TOOLS.extend_project, ({ id }) => run(() => api.projects.extend({ id })));
 
   server.registerTool("refine_project", TOOLS.refine_project, ({ id, steps, vocabulary }) => run(() => api.projects.refine({ id, steps, vocabulary })));
 

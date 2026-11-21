@@ -130,7 +130,8 @@ export interface MediaTools {
   ytdlp(args: string[], opts?: RunOptions & { sections?: boolean }): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
-  extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
+  /** Mono 16 kHz MP3 of the source's audio; `untilSec` stops it there (a partly processed video transcribes only its start). */
+  extractAudio(input: string, output: string, signal?: AbortSignal, untilSec?: number | null): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
   /** Shot cuts (seconds). `floor` = minimum scene score; cuts must also stand out from local motion. */
   /**
@@ -368,8 +369,9 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       };
     },
 
-    async extractAudio(input, output, signal) {
-      await ffmpeg(["-i", input, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal });
+    async extractAudio(input, output, signal, untilSec) {
+      const until = untilSec != null ? ["-t", untilSec.toFixed(3)] : [];
+      await ffmpeg(["-i", input, "-vn", ...until, "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal });
     },
 
     async segmentAudio(input, outPattern, chunkSeconds, signal) {

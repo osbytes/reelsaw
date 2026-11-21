@@ -25,4 +25,15 @@ describe("retryQueueFor", () => {
     assert.equal(retryQueueFor({ ...base, transcript: false }), QUEUES.transcribe);
     assert.equal(retryQueueFor({ ...base, transcript: false, sourceKey: null }), QUEUES.ingest);
   });
+  it("transcribes the rest when an extension stopped before its words were in, clips or not", () => {
+    assert.equal(retryQueueFor({ ...base, clips: [{ origin: "ai" }], stage: "transcribe", transcriptCovers: false }), QUEUES.transcribe);
+  });
+  it("finishes an extension's refine and picks, not just the old part's renders", () => {
+    const extending = { ...base, clips: [{ origin: "ai" }], stage: "analyze", extending: true };
+    assert.equal(retryQueueFor(extending), QUEUES.analyze);
+    assert.equal(retryQueueFor({ ...extending, refineDone: false }), QUEUES.refineEntities);
+  });
+  it("still fetches an expired source first during an extension", () => {
+    assert.equal(retryQueueFor({ ...base, clips: [{ origin: "ai" }], extending: true, transcriptCovers: false, sourceExpired: true }), QUEUES.ingest);
+  });
 });

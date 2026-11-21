@@ -21,6 +21,7 @@ import {
   reframeModeSchema,
   styleOverrideSchema,
   type ClipLayer,
+  processedEndSec,
 } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -32,6 +33,21 @@ import { syncClipRefs, syncClipsRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { byOwner, findProject, NO_CLIP, type Actor } from "../projects/service.js";
 import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/service.js";
+
+/**
+ * A clip's end must be inside what was processed: the video, or the start of a partly processed one (past it there is no
+ * transcript, so no captions or cuts). The one bound check for every clip edit and new clip.
+ */
+function assertWithinProcessed(p: { durationSec: number | null; sourceLimitSec: number | null }, endSec: number, pastVideo: string) {
+  const end = processedEndSec(p);
+  if (end === null || endSec <= end + 0.5) return;
+  if (p.sourceLimitSec !== null && p.durationSec !== null && end < p.durationSec)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Reelsaw has processed the first ${Math.round(end / 60)} minutes of this video so far. Clip the rest of the video to use this part.`,
+    });
+  throw new TRPCError({ code: "BAD_REQUEST", message: pastVideo });
+}
 
 /** Every asset id is one of the owner's library (an id the clip already uses stays valid even if it was removed since). */
 export async function assertOwnedBumpers(
@@ -130,7 +146,7 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     if (boundsChanged) {
       if (endSec - startSec < MIN_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip must be at least ${MIN_CLIP_SECONDS} seconds` });
       if (endSec - startSec > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
-      if (p.durationSec && endSec > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "Clip ends after the video" });
+      assertWithinProcessed(p, endSec, "Clip ends after the video");
     }
     const titleChanged = input.title !== undefined && input.title !== c.title;
     const captionChanged = input.caption !== undefined && input.caption !== c.caption;
@@ -240,7 +256,7 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
     // the owner's allowance of clips of their own (Free: one), under their quota lock; an admin acting on it counts too
     await checkManualClipQuota(u.db, svc.settings.get(), p.userId, svc.entitlements);
-    if (p.durationSec && input.endSec > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "Selection ends after the video" });
+    assertWithinProcessed(p, input.endSec, "Selection ends after the video");
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
     if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });
     const existing = await u.db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id), columns: { index: true } });

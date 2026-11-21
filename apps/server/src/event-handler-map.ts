@@ -7,6 +7,7 @@ import { defineEventHandlers } from "./event-handlers.js";
 import { approvalRequestEmail, approvedEmail, webhookDisabledEmail } from "./notify/account.js";
 import { readyEmail } from "./notify/completion.js";
 import { retryRefusedWork } from "./ops/failures.js";
+import { finishPartialWork } from "./projects/after-upgrade.js";
 
 export const eventHandlerMap = defineEventHandlers({
   // project events
@@ -15,6 +16,6 @@ export const eventHandlerMap = defineEventHandlers({
   "user.signed_up": { approvalRequestEmail },
   "user.approved": { approvedEmail },
   // an admin raised the account's limits: resume what they refused
-  "user.limits_changed": { retryRefusedWork: retryRefusedWork<"user.limits_changed">() },
+  "user.limits_changed": { retryRefusedWork: retryRefusedWork<"user.limits_changed">(), finishPartialWork: finishPartialWork<"user.limits_changed">() },
   "webhook.disabled": { webhookDisabledEmail },
 });

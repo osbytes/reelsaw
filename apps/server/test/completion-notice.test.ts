@@ -186,6 +186,7 @@ describe("event handlers", () => {
         "event.user.signed_up.approvalRequestEmail",
         "event.user.approved.approvedEmail",
         "event.user.limits_changed.retryRefusedWork",
+        "event.user.limits_changed.finishPartialWork",
         "event.webhook.disabled.webhookDisabledEmail",
       ],
     );
@@ -198,12 +199,18 @@ describe("event handlers", () => {
     assert.deepEqual(
       eventHandlerQueues(eventHandlerMap, eeEventHandlerMap)
         .map((q) => q.name)
-        .slice(-6),
+        .slice(-12),
       [
         "event.billing.detached.cancelAtStripe",
         "event.billing.subscribed.retryRefusedWork",
+        "event.billing.subscribed.finishPartialWork",
+        "event.billing.subscribed.rerenderWithoutWatermark",
         "event.billing.changed.retryRefusedWork",
+        "event.billing.changed.finishPartialWork",
+        "event.billing.changed.rerenderWithoutWatermark",
         "event.billing.complimentary.retryRefusedWork",
+        "event.billing.complimentary.finishPartialWork",
+        "event.billing.complimentary.rerenderWithoutWatermark",
         "event.billing.cancel_scheduled.cancelScheduledEmail",
         "event.billing.canceled.planEndedEmail",
       ],

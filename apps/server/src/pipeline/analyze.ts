@@ -5,7 +5,16 @@ import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
-import { NonRetryableError, ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
+import {
+  NonRetryableError,
+  ProjectGoneError,
+  type StageContext,
+  StageTimeoutError,
+  StaleJobError,
+  lockCurrentStage,
+  modelsUsed,
+  stageElapsed,
+} from "./common.js";
 import {
   MAP_PROMPT_VERSION,
   SCORE_PROMPT_VERSION,
@@ -25,7 +34,7 @@ import {
 } from "./select.js";
 import { isAbortError } from "./steps.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
-import { clipCandidateSchema, plural } from "@reelsaw/shared";
+import { clipCandidateSchema, plural, processedEndSec } from "@reelsaw/shared";
 import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import type { ClipCandidate, ProjectSettings, TranscriptSegment, Word } from "@reelsaw/shared";
@@ -317,11 +326,14 @@ export async function analyze(ctx: StageContext) {
   const settings = project.settings;
 
   const log = ctx.log;
+  // An extension of a partly processed video (extendProject) picks moments only in the new part, around every clip
+  // that exists; it clears `extend_from_sec` in the commit that adds them, so a run of this job after it converges.
+  const extendFrom = project.extendFromSec ?? null;
   // Untouched AI picks mean this analysis already committed (a re-analyze replaces every one of them before it
   // queues this job): converge instead of re-picking. Clips the user made or edited were kept: new picks go around them.
   const live = await db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) });
-  const existingClips = live.filter((c) => !keepReason(c));
-  const kept = live.filter((c) => keepReason(c));
+  const existingClips = extendFrom === null ? live.filter((c) => !keepReason(c)) : [];
+  const kept = extendFrom === null ? live.filter((c) => keepReason(c)) : live;
   if (existingClips.length) {
     log.info(
       { clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length },
@@ -340,7 +352,10 @@ export async function analyze(ctx: StageContext) {
   await ctx.start("analyzing");
   const sceneCuts = await ensureSceneCuts(ctx, project, transcript.sceneCuts);
 
-  const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
+  /** where the processed part ends (a partly processed video's limit, else the whole video) */
+  const endSec = processedEndSec(project) ?? transcript.words.at(-1)?.end ?? 0;
+  /** the stretch this run picks in: everything processed, or only the new part of an extension */
+  const durationSec = Math.max(0, endSec - (extendFrom ?? 0));
   const languageId = svc.models.get().language;
   const selfHosted = isSelfHostedModel({ AI_MODEL: languageId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
@@ -369,10 +384,13 @@ export async function analyze(ctx: StageContext) {
   const scoreUnitMs = ctx.unitTimeoutMs(judgeModelId);
   // the pairwise pass is not checkpointed; each of its calls still has a limit
   judge.timeoutMs = scoreUnitMs;
-  const segments = transcript.segments;
+  // an extension reads only the new part, so the windows (and their saved steps) are the rest of the video's
+  const segments = extendFrom === null ? transcript.segments : transcript.segments.filter((sg) => sg.end > extendFrom + 0.5);
+  if (extendFrom !== null && !segments.length) return finishExtensionWithoutPicks(ctx, "No speech in the rest of the video.");
   log.info(
     {
       durationSec,
+      extendFrom,
       segments: segments.length,
       model: languageId,
       judge: judgeId ?? null,
@@ -445,7 +463,7 @@ export async function analyze(ctx: StageContext) {
 
   // 3. pool: snap to sentences/scene cuts, enforce length, drop overlaps (keep the better first guess)
   const snappedIdx = candidates
-    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, durationSec, { words: transcript.words, log }), i }))
+    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log }), i }))
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);
   const snapped = snappedIdx.map((x) => x.c);
@@ -510,6 +528,7 @@ export async function analyze(ctx: StageContext) {
     throw gleanFailed ? new Error(message) : new NonRetryableError(message, "platform");
   };
   if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
+  if (!pooled.length && extendFrom !== null) return finishExtensionWithoutPicks(ctx, "No usable moments in the rest of the video.");
   if (!pooled.length) await failWithCandidates("The model did not return any usable clips. Try widening the clip duration range.");
 
   // 4. rubric scoring
@@ -586,6 +605,7 @@ export async function analyze(ctx: StageContext) {
       { rule: gate.rule, threshold: gate.threshold, n: gate.n, median: gate.median, mad: gate.mad, dropped: gate.dropped, unscored: gate.unscored },
       `score gate: dropped ${gate.dropped} below ${gate.threshold} (${gate.rule})`,
     );
+  if (!chosen.length && extendFrom !== null) return finishExtensionWithoutPicks(ctx, "No moments in the rest of the video were strong enough to clip.");
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
@@ -654,7 +674,12 @@ export async function analyze(ctx: StageContext) {
         .select()
         .from(schema.clips)
         .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
-      converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+      if (extendFrom === null) converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+      else {
+        // the project row is locked: an extension whose picks another run of this job committed has no extend_from_sec now
+        const [p] = await u.db.select({ from: schema.projects.extendFromSec }).from(schema.projects).where(eq(schema.projects.id, projectId));
+        converged = p?.from == null;
+      }
       // when we converge, another run's picks stand and this run inserted none
       return { clips: converged ? 0 : rows.length, ...stageExtra };
     },
@@ -676,12 +701,41 @@ export async function analyze(ctx: StageContext) {
       for (const r of placed) await u.emit("clip.created", { projectId: projectId, clipId: r.id, index: r.index, title: r.title });
       await u.db
         .update(schema.projects)
-        .set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() })
+        .set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, extendFromSec: null, updatedAt: new Date() })
         .where(eq(schema.projects.id, projectId));
       for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
     },
   );
   void db;
+}
+
+/**
+ * An extension that found nothing worth a new clip in the rest of the video: the clips already there stand, the
+ * extension is over (`extend_from_sec` cleared) and the project goes back to rendering what it has (done when it is
+ * all done). Never a failure: the video was processed; it just had nothing more.
+ */
+async function finishExtensionWithoutPicks(ctx: StageContext, message: string): Promise<void> {
+  const { svc, projectId } = ctx;
+  ctx.log.info({ reason: message }, "extension found no new clips");
+  // clips first, then the project row (the stage fence), as everywhere that touches several clips and the project
+  await svc.tx(async (u) => {
+    await lockProjectClips(u, projectId);
+    if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq);
+    const durationSec = await stageElapsed(u.db, projectId, "analyze");
+    await u.db
+      .update(schema.projects)
+      .set({ extendFromSec: null, stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() })
+      .where(eq(schema.projects.id, projectId));
+    await u.emit("stage.completed", {
+      projectId,
+      stage: "analyze",
+      clips: 0,
+      extended: true,
+      nothing: message,
+      ...(durationSec !== undefined ? { durationSec } : {}),
+    });
+    await convergeOnExistingClips(svc, u, projectId);
+  });
 }
 
 /**

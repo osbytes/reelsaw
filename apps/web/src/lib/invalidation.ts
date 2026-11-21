@@ -38,6 +38,8 @@ export const INVALIDATION: Record<ProjectEventType, Rule> = {
   "clip.preview_source": ["project"],
   "job.stalled": [],
   "source.expired": ["project"],
+  "source.partial": ["project", "list"],
+  "project.extended": ["project", "list"],
   "clips.expired": ["project", "list"],
   "project.deleted": ["project", "list"],
   "project.restored": ["project", "list"],

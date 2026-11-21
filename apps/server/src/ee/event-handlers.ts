@@ -9,6 +9,7 @@ import { schema } from "../db/index.js";
 import { templates } from "../email.js";
 import { defineEventHandlers, type EventHandler } from "../event-handlers.js";
 import { retryRefusedWork } from "../ops/failures.js";
+import { finishPartialWork, rerenderWithoutWatermark } from "../projects/after-upgrade.js";
 import { LIVE_STATUSES, pendingCancelAt } from "./billing/entitlements.js";
 import { planOf } from "./billing/plans.js";
 
@@ -77,9 +78,22 @@ export const cancelAtStripe: EventHandler<"billing.detached"> = {
 export const eeEventHandlerMap = defineEventHandlers({
   "billing.detached": { cancelAtStripe },
   // a new or changed plan (or an admin's grant): resume the videos the old plan refused
-  "billing.subscribed": { retryRefusedWork: retryRefusedWork<"billing.subscribed">() },
-  "billing.changed": { retryRefusedWork: retryRefusedWork<"billing.changed">() },
-  "billing.complimentary": { retryRefusedWork: retryRefusedWork<"billing.complimentary">() },
+  // and process the rest of the videos only the start of which the old plan covered, and render the watermarked clips again
+  "billing.subscribed": {
+    retryRefusedWork: retryRefusedWork<"billing.subscribed">(),
+    finishPartialWork: finishPartialWork<"billing.subscribed">(),
+    rerenderWithoutWatermark: rerenderWithoutWatermark<"billing.subscribed">(),
+  },
+  "billing.changed": {
+    retryRefusedWork: retryRefusedWork<"billing.changed">(),
+    finishPartialWork: finishPartialWork<"billing.changed">(),
+    rerenderWithoutWatermark: rerenderWithoutWatermark<"billing.changed">(),
+  },
+  "billing.complimentary": {
+    retryRefusedWork: retryRefusedWork<"billing.complimentary">(),
+    finishPartialWork: finishPartialWork<"billing.complimentary">(),
+    rerenderWithoutWatermark: rerenderWithoutWatermark<"billing.complimentary">(),
+  },
   // a cancellation scheduled, and the plan actually ending: tell the account what Free will refuse
   "billing.cancel_scheduled": { cancelScheduledEmail },
   "billing.canceled": { planEndedEmail },
