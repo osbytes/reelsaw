@@ -13,6 +13,8 @@ export const isCheckoutOutcome = (v: string | null | undefined): v is CheckoutOu
 export const CHECKOUT_PARAM = "checkout";
 export const PLAN_PARAM = "plan";
 export const INTERVAL_PARAM = "interval";
+/** The project an upgrade offer was shown on: Billing passes it to checkout, and only that project is finished and re-rendered by itself after the plan change. */
+export const FROM_PROJECT_PARAM = "from";
 
 export type BillingInterval = "month" | "year";
 
@@ -27,4 +29,12 @@ export function billingPath(outcome?: CheckoutOutcome): string {
 /** The Billing page with a plan to start Checkout for (the website's sign-up buttons end up here). */
 export function billingPlanPath(plan: string, interval: BillingInterval): string {
   return `${BILLING_PATH}?${PLAN_PARAM}=${encodeURIComponent(plan)}&${INTERVAL_PARAM}=${interval}`;
+}
+
+/** An upgrade offer's link (the Billing page, absolute or not) carrying the project it was shown on. */
+export function upgradeFromProject(href: string, projectId: string): string {
+  const [path, query = ""] = href.split("?", 2) as [string, string?];
+  const q = new URLSearchParams(query);
+  q.set(FROM_PROJECT_PARAM, projectId);
+  return `${path}?${q.toString()}`;
 }

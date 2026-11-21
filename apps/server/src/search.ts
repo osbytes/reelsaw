@@ -186,6 +186,7 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
         endSec: schema.clips.endSec,
         outputKey: schema.clips.outputKey,
         thumbnailKey: schema.clips.thumbnailKey,
+        watermark: schema.clips.watermark,
         score: sql<number>`${clipScore}`.mapWith(Number),
       })
       .from(schema.clips)
@@ -212,6 +213,8 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
       score: c.score,
       videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null,
       thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null,
+      /** the last render burned the watermark in (the palette's Download asks about it, like the clip card's) */
+      watermark: c.watermark,
     })),
     truncated,
   };

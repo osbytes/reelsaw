@@ -1,7 +1,9 @@
 /**
  * Settings → Billing (enterprise edition; see ../LICENSE). Loaded lazily and only when me.get says the instance
  * runs billing. Money moves on Stripe-hosted pages: the buttons open Checkout or the Billing Portal; after a
- * return the page refetches until the webhook-driven sync has written the new plan.
+ * return the page refetches until the webhook-driven sync has written the new plan, then welcomes the account to it
+ * (UpgradeWelcome.tsx). An upgrade offer's `?from=` project goes to checkout: only that project is finished and
+ * re-rendered by itself; the others are picked in the welcome dialog or the "Your other projects" section.
  */
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,12 +11,31 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
-import { CHECKOUT_PARAM, deletedProjectsPath, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM, formatDay, formatMb } from "@reelsaw/shared";
+import { CHECKOUT_PARAM, deletedProjectsPath, FROM_PROJECT_PARAM, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM, formatDay, formatMb } from "@reelsaw/shared";
 import { Pending, Skeleton, SkeletonRegion } from "../../components/ui";
+import { UpgradeWelcome, UpgradeWorkPicker } from "./UpgradeWelcome";
 
 const num = new Intl.NumberFormat();
 
 type Interval = "month" | "year";
+
+/** The plan before a Stripe round trip, kept across it so the return can say what changed (this tab only). */
+const BEFORE_KEY = "reelsaw.checkout.planBefore";
+const storedBefore = (): string | null => {
+  try {
+    return sessionStorage.getItem(BEFORE_KEY);
+  } catch {
+    return null;
+  }
+};
+const storeBefore = (plan: string | null) => {
+  try {
+    if (plan) sessionStorage.setItem(BEFORE_KEY, plan);
+    else sessionStorage.removeItem(BEFORE_KEY);
+  } catch {
+    // private mode: the welcome then compares with the plan shown when the page loaded
+  }
+};
 
 export default function BillingSection() {
   const trpc = useTRPC();
@@ -25,10 +46,13 @@ export default function BillingSection() {
   const [interval, setInterval_] = useState<Interval | null>(null);
   // the grid starts on the interval the account pays for, once known
   const intervalShown: Interval = interval ?? (q.data?.subscription?.interval === "year" ? "year" : "month");
+  // the project an upgrade offer was shown on (UpgradeNotice, the Download ask, a refusal): read once, sent with checkout
+  const [fromProjectId] = useState(() => new URLSearchParams(loc.search).get(FROM_PROJECT_PARAM) || undefined);
   const checkout = useMutation({
     ...trpc.billing.checkout.mutationOptions(),
     onSuccess: ({ url, kind }, vars) => {
-      track("checkout_started", { plan: vars.plan, interval: vars.interval ?? "month", kind });
+      track("checkout_started", { plan: vars.plan, interval: vars.interval ?? "month", kind, fromProject: !!vars.fromProjectId });
+      storeBefore(q.data?.plan.name ?? null);
       window.location.assign(url);
     },
     onError: (e) => toast.error(e.message),
@@ -55,7 +79,7 @@ export default function BillingSection() {
     if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
     setInterval_(wantedInterval);
     toast(`Taking you to Stripe for ${p.label}…`);
-    checkout.mutate({ plan: wanted, interval: wantedInterval });
+    checkout.mutate({ plan: wanted, interval: wantedInterval, fromProjectId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wanted, !!q.data]);
 
@@ -63,12 +87,17 @@ export default function BillingSection() {
   const raw = new URLSearchParams(loc.search).get(CHECKOUT_PARAM);
   const outcome = isCheckoutOutcome(raw) ? raw : null;
   const polled = useRef(0);
+  // the welcome opens once the new plan shows (the sync lands after the redirect, or before it)
+  const [waitingFrom, setWaitingFrom] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState<{ before: string } | null>(null);
   useEffect(() => {
     if (!outcome) return;
     if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment");
     else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment");
     else if (outcome === "canceled") toast("Checkout canceled; nothing changed");
-    const planBefore = q.data?.plan.name;
+    const planBefore = storedBefore() ?? q.data?.plan.name;
+    storeBefore(null);
+    if (outcome !== "canceled" && planBefore) setWaitingFrom(planBefore);
     const t = window.setInterval(() => {
       polled.current += 1;
       void qc.invalidateQueries({ queryKey: trpc.billing.get.queryKey() });
@@ -82,6 +111,18 @@ export default function BillingSection() {
   }, [outcome]);
 
   const d = q.data;
+  const planNow = d?.plan.name;
+  const priceOf = (name: string | undefined) => d?.plans.find((p) => p.name === name)?.price?.month ?? 0;
+  // a move to a dearer plan only: a downgrade has nothing to welcome
+  const upgraded = !!waitingFrom && !!planNow && planNow !== waitingFrom && priceOf(planNow) > priceOf(waitingFrom);
+  useEffect(() => {
+    if (!waitingFrom || !planNow || planNow === waitingFrom) return;
+    setWaitingFrom(null);
+    if (!upgraded) return;
+    setWelcome({ before: waitingFrom });
+    track("upgrade_welcome_shown", { plan: planNow, before: waitingFrom });
+  }, [waitingFrom, planNow, upgraded]);
+  const welcomePlan = welcome && d ? d.plans.find((p) => p.name === d.plan.name) : undefined;
   /** the highest plan's queue priority: that plan's cards say "top of the queue" */
   const topPriority = Math.max(1, ...(d?.plans ?? []).map((x) => x.queuePriority));
   const sub = d?.subscription;
@@ -118,6 +159,9 @@ export default function BillingSection() {
 
   return (
     <>
+      {welcome && welcomePlan && d && (
+        <UpgradeWelcome before={d.plans.find((p) => p.name === welcome.before)} after={welcomePlan} onClose={() => setWelcome(null)} />
+      )}
       <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-[15px] font-bold">Plan</h2>
@@ -250,6 +294,8 @@ export default function BillingSection() {
         ) : null}
       </section>
 
+      {d && d.plan.name !== "free" && !welcome && <OtherProjects />}
+
       <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-[15px] font-bold">Plans</h2>
@@ -305,7 +351,7 @@ export default function BillingSection() {
                     <button
                       className={`${d?.plan.name === p.name ? "btn-ghost" : "btn-ink"} h-9 w-full`}
                       disabled={checkout.isPending || !d || (d.plan.name === p.name && (d.subscription?.interval ?? "month") === intervalShown)}
-                      onClick={() => checkout.mutate({ plan: p.name, interval: intervalShown })}
+                      onClick={() => checkout.mutate({ plan: p.name, interval: intervalShown, fromProjectId })}
                     >
                       {checkout.isPending && checkout.variables?.plan === p.name
                         ? "…"
@@ -336,5 +382,19 @@ export default function BillingSection() {
         </p>
       </section>
     </>
+  );
+}
+
+/** The projects a past plan change could still improve (the welcome dialog's list), while there are any. */
+function OtherProjects() {
+  const trpc = useTRPC();
+  const q = useQuery(trpc.projects.upgradeWork.queryOptions());
+  const w = q.data;
+  if (!w || (!w.rerender.projects.length && !w.finish.projects.length)) return null;
+  return (
+    <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
+      <h2 className="text-[15px] font-bold">Your other projects</h2>
+      <UpgradeWorkPicker placement="billing" />
+    </section>
   );
 }

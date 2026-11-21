@@ -30,7 +30,7 @@ export const PRICING: PricingPlan[] = [
     firstVideoFreeMinutes: 60,
     blurb: "Try the whole pipeline on your own video.",
     bullets: [
-      "Your first video free, up to 60 minutes",
+      "Your first video free, up to 60 minutes; a longer one gets its first 60 clipped, and the rest when you upgrade",
       "Then 20 minutes of source video a month",
       "2 GB of storage, 10 projects",
       "Every layout, caption style and the MCP server",

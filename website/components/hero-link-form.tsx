@@ -7,6 +7,8 @@
 
 import { ArrowRight, Link2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { siteDistinctId } from "@/components/analytics";
+import { decorateAppUrl } from "@/lib/attribution";
 import { SITE, SOURCE_URL_PARAM, appLink, utmParams } from "@/lib/site";
 
 const CTA = "home_hero";
@@ -29,10 +31,10 @@ export function HeroLinkForm() {
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!value.trim()) return window.location.assign(appLink("/signup", CTA));
+    if (!value.trim()) return window.location.assign(decorateAppUrl(appLink("/signup", CTA), siteDistinctId()));
     const url = tidy(value);
     if (!url) return setInvalid(true);
-    window.location.assign(appLink("/signup", CTA, { [SOURCE_URL_PARAM]: url }));
+    window.location.assign(decorateAppUrl(appLink("/signup", CTA, { [SOURCE_URL_PARAM]: url }), siteDistinctId()));
   };
 
   return (

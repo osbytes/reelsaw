@@ -22,7 +22,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { ShortcutSheet } from "../components/ShortcutSheet";
 import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
-import { WatermarkOffer } from "../components/WatermarkOffer";
+import { UpgradeNotice } from "../components/UpgradeNotice";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { ProjectTemplateModal } from "../components/TemplatePicker";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
@@ -969,9 +969,16 @@ export function ProjectPage() {
         </div>
       )}
       <div className="flex flex-col gap-3 p-3">
-        {me.data?.watermark?.upgrade && sortedClips.some((c) => c.watermark && c.status === "done") && (
-          <WatermarkOffer text={me.data.watermark.text} offer={me.data.watermark.upgrade} projectId={p.id} />
-        )}
+        <UpgradeNotice
+          partial={p.partial ?? null}
+          watermark={
+            me.data?.watermark?.upgrade && sortedClips.some((c) => c.watermark && c.status === "done")
+              ? { text: me.data.watermark.text, upgrade: me.data.watermark.upgrade }
+              : null
+          }
+          projectId={p.id}
+          onExtended={() => void invalidate()}
+        />
         {sortedClips.map((c) => (
           <ClipCard
             key={c.id}

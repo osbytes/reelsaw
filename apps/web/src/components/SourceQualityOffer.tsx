@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { upgradeFromProject } from "@reelsaw/shared";
 import { track } from "../lib/telemetry";
 
 /**
@@ -30,7 +31,7 @@ export function SourceQualityOffer({
       <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 text-xs text-ink" title={what}>
         <span className="font-mono text-ink3">{height}p preview</span>
         {offer && (
-          <a href={offer.href} className="font-semibold text-acc-text no-underline" title={offer.label} onClick={click}>
+          <a href={upgradeFromProject(offer.href, projectId)} className="font-semibold text-acc-text no-underline" title={offer.label} onClick={click}>
             Upgrade for HD
           </a>
         )}
@@ -42,7 +43,12 @@ export function SourceQualityOffer({
         {height}p preview · clips in HD
       </span>
       {offer && (
-        <a href={offer.href} className="btn-primary pointer-events-auto px-2 py-0.5 text-[11px] no-underline shadow-pop" title={offer.label} onClick={click}>
+        <a
+          href={upgradeFromProject(offer.href, projectId)}
+          className="btn-primary pointer-events-auto px-2 py-0.5 text-[11px] no-underline shadow-pop"
+          title={offer.label}
+          onClick={click}
+        >
           Upgrade for HD
         </a>
       )}

@@ -1,7 +1,16 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { hasMinuteLimits, recordSourceDuration, sourceHeightFor, sourceMinutesExceeded, trackIngestRefusal } from "../quota.js";
+import {
+  QuotaExceededError,
+  type SourceAdmission,
+  admitSource,
+  hasMinuteLimits,
+  recordSourceDuration,
+  recordedSourceSec,
+  sourceHeightFor,
+  trackIngestRefusal,
+} from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -137,10 +146,18 @@ export async function ingest(ctx: StageContext) {
       const { sec: announced, missing } = await announcedDurationOrNull(ctx, project.sourceUrl ?? "");
       // no length up front: the limit is checked only on the file, after the whole download (worth knowing how often)
       if (missing && (await hasMinuteLimits(svc.database.db, svc.settings.get(), project.userId, svc.entitlements))) countMinutesPrecheckSkipped(missing);
-      if (announced) {
+      // (a video admitted before, fetched again after retention, is not decided again)
+      if (announced && (await recordedSourceSec(ctx.db, projectId)) === null) {
         const over = await svc.tx(async (u) => {
           await takeTxLock(u.db, txLock.quota(project.userId));
-          return sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, announced, svc.entitlements);
+          // a long video is not refused while its start fits: only less than one chunk of room refuses before downloading
+          return admitSource(u.db, svc.settings.get(), project.userId, projectId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).then(
+            () => null,
+            (err: unknown) => {
+              if (err instanceof QuotaExceededError) return err;
+              throw err;
+            },
+          );
         });
         if (over) {
           ctx.log.warn({ userId: project.userId, durationSec: announced, reason: over.message }, "source-minutes limit reached before download");
@@ -314,16 +331,36 @@ export async function ingest(ctx: StageContext) {
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
+  // set inside the unit of work (which may run again after a deadlock), read after it commits
+  const decided: { admitted: SourceAdmission | null } = { admitted: null };
   await ctx.complete({ sourceDurationSec: probe.durationSec, title }, async (u) => {
     // the binding minutes check: under the account's quota lock, in the unit that records this length, so two
-    // ingests of one account cannot both pass a cap they jointly exceed (the create-side check is only advisory)
+    // ingests of one account cannot both pass a cap they jointly exceed (the create-side check is only advisory).
+    // A video admitted before (its source fetched again after retention) keeps what it was admitted as.
     await takeTxLock(u.db, txLock.quota(project.userId));
-    const over = await sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, probe.durationSec, svc.entitlements);
-    if (over) {
-      ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over.message }, "source-minutes limit reached");
-      trackIngestRefusal(svc.telemetry, project.userId, over);
-      throw over;
+    decided.admitted = null;
+    const recorded = await recordedSourceSec(u.db, projectId);
+    if (recorded === null) {
+      try {
+        decided.admitted = await admitSource(
+          u.db,
+          svc.settings.get(),
+          project.userId,
+          projectId,
+          probe.durationSec,
+          svc.config.TRANSCRIBE_CHUNK_SECONDS,
+          svc.entitlements,
+        );
+      } catch (err) {
+        if (err instanceof QuotaExceededError) {
+          ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: err.message }, "source-minutes limit reached");
+          trackIngestRefusal(svc.telemetry, project.userId, err);
+        }
+        throw err;
+      }
     }
+    const admitted = decided.admitted;
+    const limit = admitted ? admitted.until : (project.sourceLimitSec ?? null);
     await u.db
       .update(schema.projects)
       .set({
@@ -332,15 +369,32 @@ export async function ingest(ctx: StageContext) {
         sourceExpiredAt: null,
         sourceMeta: meta,
         durationSec: probe.durationSec,
+        sourceLimitSec: limit,
         width: probe.width ?? null,
         height: probe.height ?? null,
         title: sql`case when ${schema.projects.title} = ${project.title} then ${title} else ${schema.projects.title} end`,
         updatedAt: new Date(),
       })
       .where(eq(schema.projects.id, projectId));
-    await recordSourceDuration(u.db, projectId, probe.durationSec);
+    if (admitted) {
+      // the ledger counts what is processed: the whole video, or the start a partial project covers
+      await recordSourceDuration(u.db, projectId, admitted.until ?? probe.durationSec);
+      if (admitted.until !== null) {
+        const reason = admitted.firstVideo ? "first_video" : "minutes";
+        await u.emit("source.partial", { projectId, untilSec: admitted.until, durationSec: probe.durationSec, reason });
+        ctx.log.info({ untilSec: admitted.until, durationSec: probe.durationSec, reason }, "processing the start of the video the minutes cover");
+      }
+    }
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
+  const partial = decided.admitted;
+  if (partial?.until != null)
+    svc.telemetry.capture("source.partial", project.userId, {
+      projectId,
+      firstVideo: partial.firstVideo,
+      processedMinutes: Math.round(partial.until / 60),
+      totalMinutes: Math.round(probe.durationSec / 60),
+    });
   void svc;
 }
 

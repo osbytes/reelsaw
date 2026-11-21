@@ -10,6 +10,8 @@ export const DELETED_PATH = "/deleted";
 export const DELETED_KINDS = ["project", "clip", "asset", "template"] as const;
 export type DeletedKind = (typeof DELETED_KINDS)[number];
 export const deletedProjectsPath = () => DELETED_PATH;
+/** A project's page in the app (`/p/<id>`); links built by hand drifted to a route that does not exist. */
+export const projectPath = (id: string) => `/p/${encodeURIComponent(id)}`;
 /** Deep link to one row on Deleted (`#clip=<id>` and the other kinds). */
 export const deletedItemPath = (kind: DeletedKind, id: string) => `${DELETED_PATH}#${kind}=${encodeURIComponent(id)}`;
 

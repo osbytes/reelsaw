@@ -4,6 +4,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2, Users, CreditCard, Server, Code2 } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
+import { DownloadOfferHost } from "./components/DownloadClipButton";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
@@ -533,6 +534,7 @@ export function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <ReportDialog />
+          <DownloadOfferHost />
           <AppToaster />
           <DeletedToastConfirm />
         </CommandPaletteProvider>

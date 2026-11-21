@@ -16,7 +16,7 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
  * Why a run started. A run is one stretch of work on a project, from the moment it leaves idle
  * (created, or done / failed) until it is done or failed again.
  */
-export const RUN_REASONS = ["created", "retry", "rerender", "refine", "reanalyze", "clip_added"] as const;
+export const RUN_REASONS = ["created", "retry", "rerender", "refine", "reanalyze", "clip_added", "extend"] as const;
 export type RunReason = (typeof RUN_REASONS)[number];
 
 export const PIPELINE_STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
@@ -1233,6 +1233,10 @@ export const PROJECT_EVENT_TYPES = [
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
   "source.expired",
   "clips.expired",
+  /** the account's minutes covered only the start of the video: Reelsaw processes the first `untilSec` seconds (pipeline/ingest.ts) */
+  "source.partial",
+  /** the rest (or more) of a partly processed video is being processed (extendProject); payload { fromSec, untilSec, durationSec } */
+  "project.extended",
   /** soft delete and its undo (projects/service.ts); payload { days } = how long it stays restorable */
   "project.deleted",
   "project.restored",
@@ -1358,6 +1362,8 @@ export const projectEventSchemas = {
     hint: z.string(),
   }),
   "source.expired": event({ days: z.number() }),
+  "source.partial": event({ untilSec: z.number(), durationSec: z.number(), reason: z.enum(["first_video", "minutes"]) }),
+  "project.extended": event({ fromSec: z.number(), untilSec: z.number(), durationSec: z.number(), automatic: z.boolean().optional() }),
   "clips.expired": event({ clips: z.number().int(), clipIds: z.array(z.string()), days: z.number() }),
   "project.deleted": event({ days: z.number(), stopped: z.boolean() }),
   "project.restored": event({}),
@@ -1864,3 +1870,5 @@ export * from "./captions-format.js";
 export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
+export * from "./partial.js";
+export * from "./attribution.js";

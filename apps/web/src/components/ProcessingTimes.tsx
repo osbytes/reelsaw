@@ -3,7 +3,7 @@
  * its finished projects with the current models. Nothing to configure: the runs are the calibration.
  */
 import { useQuery } from "@tanstack/react-query";
-import { formatTime, plural } from "@reelsaw/shared";
+import { formatTime, plural, projectPath } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { Skeleton, SkeletonRegion } from "./ui";
 
@@ -89,7 +89,7 @@ export function ProcessingTimes() {
               {d.recent.map((r) => (
                 <tr key={r.projectId} className="border-t border-line/60">
                   <td className="max-w-[220px] truncate py-1.5 font-sans text-[13px]">
-                    <a href={`/projects/${r.projectId}`} className="text-ink no-underline hover:text-acc-text">
+                    <a href={projectPath(r.projectId)} className="text-ink no-underline hover:text-acc-text">
                       {r.title}
                     </a>
                   </td>

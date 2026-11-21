@@ -20,6 +20,7 @@ const REASON: Record<string, string> = {
   refine: "refine",
   reanalyze: "re-analyze",
   clip_added: "clip added",
+  extend: "clipping more of the video",
 };
 export const reasonLabel = (r: unknown) => (typeof r === "string" ? (REASON[r] ?? r) : null);
 const sec = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -41,6 +42,22 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
   switch (e.type) {
     case "project.created":
       return { text: `Project created${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
+    case "source.partial": {
+      const until = sec(p.untilSec);
+      const total = sec(p.durationSec);
+      if (until === null || total === null) return null;
+      const why = p.reason === "first_video" ? "your first video's free minutes" : "the minutes left on your plan";
+      return { text: `Clipping the first ${Math.round(until / 60)} of ${Math.round(total / 60)} minutes (${why}). Clip the rest any time.`, tone: "warn" };
+    }
+    case "project.extended": {
+      const from = sec(p.fromSec);
+      const until = sec(p.untilSec);
+      if (from === null || until === null) return null;
+      return {
+        text: `${p.automatic ? "Your plan changed: c" : "C"}lipping minutes ${Math.round(from / 60)}–${Math.round(until / 60)}, keeping the clips you have`,
+        tone: "run",
+      };
+    }
     case "stage.started":
       // one-shot event: the fix is saved when it's emitted; only the re-renders are still running
       if (p.stage === "review")

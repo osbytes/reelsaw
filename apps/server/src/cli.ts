@@ -19,6 +19,7 @@ import {
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
+import { startUpgradeWork, upgradeWork } from "./projects/after-upgrade.js";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
@@ -74,6 +75,12 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
  *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
+ *   extend-project <projectId>              clip more of a video only the start of which was processed (projects.extend and extend_project)
+ *   upgrade-work [--user <email|id>]        after a plan change: the account's projects with watermarked clips and its partly processed videos
+ *                                           (same as projects.upgradeWork and list_upgrade_work)
+ *   start-upgrade-work [--rerender id,id] [--finish id,id]
+ *                                           re-render those projects' watermarked clips without it and clip the rest of those videos
+ *                                           (same as projects.startUpgradeWork and start_upgrade_work)
  *   reanalyze <projectId> [--set key=value]…
  *                                           pick clips again from the existing transcript, optionally with new selection settings; clips made or edited
  *                                           by hand stay (same as projects.reanalyze and reanalyze_project)
@@ -311,6 +318,7 @@ import {
   purgeOwnedClip,
   purgeOwnedProject,
   reanalyzeProject,
+  extendProject,
   refineProject,
   restoreClip,
   restoreProject,
@@ -853,6 +861,48 @@ ${usage}`);
     if (!pos[0]) throw new Error("usage: reelsaw retry <projectId>");
     const r = await retryOwnedProject(svc, null, pos[0]);
     console.log(`resumed ${pos[0]} at ${r.queue}`);
+  },
+  /** Clip more of a partly processed video: `reelsaw extend-project <projectId>`. Same function as projects.extend and the extend_project tool. */
+  async "extend-project"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw extend-project <projectId>");
+    const r = await extendProject(svc, null, pos[0]);
+    const m = (sec: number) => Math.round(sec / 60);
+    console.log(
+      `processing minutes ${m(r.fromSec)}–${m(r.untilSec)} of ${m(r.durationSec)}${r.whole ? " (the rest of the video)" : "; run it again when more minutes are available"}`,
+    );
+  },
+  /** What a plan change could do for the account's other projects: `reelsaw upgrade-work [--user <email|id>]`. Same as projects.upgradeWork and list_upgrade_work. */
+  async "upgrade-work"(svc) {
+    const user = await actingUser(svc, flag("user"));
+    const w = await upgradeWork(svc, user.id);
+    const m = (sec: number) => Math.round(sec / 60);
+    if (w.upgradeProject) console.log(`upgrade started from ${w.upgradeProject.id} (${w.upgradeProject.title}): handled by itself`);
+    console.log(
+      w.watermarkOn
+        ? "renders still carry the watermark: nothing to re-render"
+        : `watermarked clips in ${plural(w.rerender.total, "project")}${w.rerender.total > w.rerender.projects.length ? ` (newest ${w.rerender.projects.length} below)` : ""}`,
+    );
+    for (const p of w.rerender.projects) console.log(`  ${p.id}  ${plural(p.clips, "clip")}  ${p.title}`);
+    console.log(
+      `partly processed: ${plural(w.finish.total, "video")}; minutes cover ${w.minutesRoomSec === null ? "any length" : `${m(w.minutesRoomSec)} min`} now`,
+    );
+    for (const p of w.finish.projects) console.log(`  ${p.id}  ${m(p.remainingSec)} of ${m(p.durationSec)} min left${p.busy ? " (working)" : ""}  ${p.title}`);
+  },
+  /** Start the picked ones: `reelsaw start-upgrade-work [--rerender id,id] [--finish id,id]`. Same as projects.startUpgradeWork and start_upgrade_work. */
+  async "start-upgrade-work"(svc) {
+    const list = (v: string | undefined) =>
+      v
+        ? v
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean)
+        : undefined;
+    const rerender = list(flag("rerender"));
+    const finish = list(flag("finish"));
+    if (!rerender?.length && !finish?.length) throw new Error("usage: reelsaw start-upgrade-work [--rerender id,id] [--finish id,id]");
+    const r = await startUpgradeWork(svc, null, { rerender, finish });
+    console.log(r.sentence || "nothing started");
+    for (const x of r.results) if (!x.ok) console.log(`  ${x.action} ${x.id}: ${x.error}`);
   },
   /** Pick clips again: `reelsaw reanalyze <projectId> [--set key=value]…`. Same function as projects.reanalyze and the reanalyze_project tool. */
   async reanalyze(svc) {
@@ -2991,7 +3041,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

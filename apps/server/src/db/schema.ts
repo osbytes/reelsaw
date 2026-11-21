@@ -281,14 +281,20 @@ export const sourceUsage = pgTable(
     userId: text("user_id").notNull(),
     /** the project that consumed the minutes; no FK, so a purge of the project keeps this row */
     projectId: text("project_id").notNull(),
-    /** null until ingest knows the length; minutes only count once it is set */
+    /**
+     * 0 = the project's own row (created with it; first-video-free, hourly creates and the milestones read only these);
+     * 1, 2, … = an extension of a partly processed video (extendProject), dated when it was asked for, so its minutes
+     * count in that period, not the one the project was created in.
+     */
+    part: integer("part").notNull().default(0),
+    /** seconds of source this row processes (part 0: the video, or the start a partial project covers); null until ingest knows the length; minutes only count once it is set */
     durationSec: real("duration_sec"),
-    /** when the project was created (the window minutes and hourly creates count in) */
+    /** when the project was created, or the extension asked for (the window minutes and hourly creates count in) */
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     /** the project's first project.done (events.id), set once; the ready email's "That's 10 projects" counts these */
     firstDoneEventId: bigint("first_done_event_id", { mode: "number" }),
   },
-  (t) => [uniqueIndex("source_usage_project_idx").on(t.projectId), index("source_usage_user_id_idx").on(t.userId, t.createdAt)],
+  (t) => [uniqueIndex("source_usage_project_part_idx").on(t.projectId, t.part), index("source_usage_user_id_idx").on(t.userId, t.createdAt)],
 );
 
 /**
@@ -356,6 +362,13 @@ export const userSettings = pgTable("user_settings", {
   queuePriority: integer("queue_priority"),
   /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
   learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
+  /**
+   * The project an upgrade started from (an offer on its page or its Download) and when checkout began: after the plan
+   * change only that project is finished and rendered without the watermark by itself (projects/after-upgrade.ts);
+   * the others wait for the owner's pick. Read for a day after `upgradeProjectAt`.
+   */
+  upgradeProjectId: text("upgrade_project_id"),
+  upgradeProjectAt: timestamp("upgrade_project_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;
@@ -484,6 +497,17 @@ export const projects = pgTable(
     sourceKey: text("source_key"),
     sourceMeta: jsonb("source_meta").$type<Record<string, unknown>>(),
     durationSec: real("duration_sec"),
+    /**
+     * The pipeline works on [0, source_limit_sec) of the source; null = all of it. Set by ingest when the account's
+     * minutes cover only the start of a long video (a whole number of transcription chunks), raised (or cleared) by
+     * extendProject (projects/service.ts) when the minutes are there. `processedEndSec` in @reelsaw/shared reads it.
+     */
+    sourceLimitSec: real("source_limit_sec"),
+    /**
+     * An extension in flight: the second the new part starts at. Analyze picks moments only after it (the clips that
+     * exist stay) and clears it in the commit that adds the new clips; null = no extension waiting for its picks.
+     */
+    extendFromSec: real("extend_from_sec"),
     width: integer("width"),
     height: integer("height"),
     status: text("status").$type<ProjectStatus>().notNull().default("queued"),
@@ -628,6 +652,8 @@ export const transcripts = pgTable("transcripts", {
   words: jsonb("words").$type<Word[]>().notNull(),
   /** words exactly as the transcriber returned them; `words` is this with accepted flags applied */
   rawWords: jsonb("raw_words").$type<Word[]>(),
+  /** the transcript covers [0, covered_sec) of the source (a partly processed video); null = all of it. Transcribe appends the rest when the project's limit moves past it */
+  coveredSec: real("covered_sec"),
   flags: jsonb("flags").$type<TranscriptFlag[]>().notNull().default([]),
   /** soft-deleted fixes, newest last; kept out of `flags` so nothing downstream applies them. Restorable. */
   /** how text-heavy the source is (slides, documents); presentations skip masking by default */

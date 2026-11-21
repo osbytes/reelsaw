@@ -23,7 +23,7 @@ import { Captcha } from "../components/Captcha";
 import { ThemeToggle } from "../App";
 import { AuthCardHeader } from "../components/AuthCardHeader";
 import { useSystemStatus } from "../lib/account";
-import { track } from "../lib/telemetry";
+import { attributionHeaders, identifySignup, track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
 import { useDocumentTitle } from "../lib/title";
 import { Pending } from "../components/ui";
@@ -121,10 +121,12 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     setError(null);
     setErrorCode(null);
     const fetchOptions = captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined;
+    // a sign-up also sends where it came from (first touch), for the server's user.signed_up event
+    const signUpOptions = { headers: { ...fetchOptions?.headers, ...attributionHeaders() } };
     const res =
       mode === "login"
         ? await signIn.email({ email, password, fetchOptions })
-        : await signUp.email({ email, password, name: name || email.split("@")[0]!, callbackURL: VERIFY_EMAIL_CALLBACK_PATH, fetchOptions });
+        : await signUp.email({ email, password, name: name || email.split("@")[0]!, callbackURL: VERIFY_EMAIL_CALLBACK_PATH, fetchOptions: signUpOptions });
     if (res.error) {
       setBusy(false);
       setCaptchaToken(null);
@@ -136,7 +138,10 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     // to sign-in with the password they just chose. Leaving for a fresh form is where a password
     // manager offers a new strong password, and that sign-in then fails.
     if (mode === "signup" && res.data && res.data.token == null) {
-      // the account exists: count it, or the funnel loses every sign-up that has to confirm an email first
+      // the account exists: count it, or the funnel loses every sign-up that has to confirm an email first. Name this
+      // browser as the account now: the confirm link often opens elsewhere (a mail app), which would leave the visit
+      // that came from the website on an anonymous person nobody signs in as
+      if ("user" in res.data && res.data.user?.id) identifySignup(res.data.user.id);
       track("signup_completed", { plan: plan ?? undefined, source_url: !!source, confirm_email: true });
       const text = signupCreatedNotice(signupMode);
       setBusy(false);

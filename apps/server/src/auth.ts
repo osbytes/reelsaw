@@ -7,7 +7,15 @@ import type { BetterAuthPlugin } from "better-auth";
 import { jwt } from "better-auth/plugins/jwt";
 import { mcp } from "@better-auth/mcp";
 import { eq, sql } from "drizzle-orm";
-import { ACCOUNT_EXISTS_MESSAGE, MUST_CHANGE_PASSWORD_MESSAGE, PENDING_APPROVAL_MESSAGE, unverifiedSignInMessage } from "@reelsaw/shared";
+import {
+  ACCOUNT_EXISTS_MESSAGE,
+  ATTRIBUTION_HEADER,
+  type Attribution,
+  MUST_CHANGE_PASSWORD_MESSAGE,
+  PENDING_APPROVAL_MESSAGE,
+  parseAttributionHeader,
+  unverifiedSignInMessage,
+} from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { Email } from "./email.js";
@@ -108,6 +116,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
   const firstCandidates = new Set<string>();
   // the sign-up rule that decided a sign-up, from `before` to the event `after` writes (same request, same process)
   const ruleOf = new Map<string, { rule: string; ruleAction: "hold" | "allow" }>();
+  /** first-touch attribution from the sign-up request (`before`), for the product event in `after` */
+  const attributionOf = new Map<string, Attribution>();
   return betterAuth({
     baseURL: config.APP_URL,
     secret: config.BETTER_AUTH_SECRET,
@@ -182,6 +192,10 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             const approved = first || rule?.action === "allow" || (rule?.action !== "hold" && mode() === "open");
             const heldBy = rule?.action === "hold" && rule.rule ? ruleLabel(rule.rule) : null;
             if (ruleOf.size > 1000) ruleOf.clear(); // inserts that failed after `before` never reach `after`
+            if (attributionOf.size > 1000) attributionOf.clear();
+            // where the sign-up came from (the form sends the first touch it kept): only for the product event below
+            const attribution = parseAttributionHeader(headers.get(ATTRIBUTION_HEADER));
+            if (attribution) attributionOf.set(user.email, attribution);
             if (rule?.rule && (rule.action === "hold" || rule.action === "allow"))
               ruleOf.set(user.email, { rule: ruleLabel(rule.rule), ruleAction: rule.action });
             return { data: { ...user, ...guard, role: "user", heldBy, approvedAt: approved ? new Date() : null } };
@@ -206,6 +220,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             const signedUp = u;
             const decided = ruleOf.get(u.email);
             ruleOf.delete(u.email);
+            const attribution = attributionOf.get(u.email);
+            attributionOf.delete(u.email);
             await tx()((w) =>
               w.emit(
                 "user.signed_up",
@@ -216,7 +232,14 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode(), rule: decided?.rule }, "sign-up");
             // id and role only: no email or name goes to PostHog
             telemetry?.identify(u.id, { role: u.role ?? "user" });
-            telemetry?.capture("user.signed_up", u.id, { mode: mode(), approved: !!u.approvedAt });
+            // the first touch rides on the event and on the person (set once), so a funnel by source works without the
+            // browser that came from the website being the one that signs in later (a mail app opening the confirm link)
+            telemetry?.capture("user.signed_up", u.id, {
+              mode: mode(),
+              approved: !!u.approvedAt,
+              ...attribution,
+              ...(attribution ? { $set_once: Object.fromEntries(Object.entries(attribution).map(([k, v]) => [`signup_${k}`, v])) } : {}),
+            });
           },
         },
       },

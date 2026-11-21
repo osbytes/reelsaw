@@ -49,6 +49,8 @@ import {
   purgeOwnedClip,
   purgeOwnedProject,
   reanalyzeProject,
+  extendProject,
+  partialSourceOf,
   refineInput,
   refineProject,
   restoreClip,
@@ -71,6 +73,7 @@ import {
   updateClipInput,
 } from "../clips/service.js";
 import { peekUrlMeta } from "../projects/peek.js";
+import { recordUpgradeProject, startUpgradeWork, startUpgradeWorkInput, upgradeWork } from "../projects/after-upgrade.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
 import { flagCounts, listUsers, userGroups } from "../accounts-list.js";
@@ -238,6 +241,8 @@ function publicProject(p: schema.Project) {
     sourceUrl: p.sourceUrl,
     sourceMeta: p.sourceMeta,
     durationSec: p.durationSec,
+    /** only the start of the video is processed (its minutes covered that much): [0, sourceLimitSec); null = all of it. `partial` on projects.get says what finishes it */
+    sourceLimitSec: p.sourceLimitSec,
     width: p.width,
     height: p.height,
     status: p.status,
@@ -621,8 +626,19 @@ const headRouter = router({
     get: protectedProcedure.query(({ ctx }) => billingOf(ctx.svc).stateFor(ctx.user)),
     /** A Stripe Checkout URL for a plan (or, with a live subscription, the Billing Portal's confirm-change page). Open it in a browser. */
     checkout: protectedProcedure
-      .input(z.object({ plan: z.string().min(1).max(40), interval: z.enum(["month", "year"]).default("month") }))
-      .mutation(({ ctx, input }) => billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval)),
+      .input(
+        z.object({
+          plan: z.string().min(1).max(40),
+          interval: z.enum(["month", "year"]).default("month"),
+          fromProjectId: z.string().min(1).max(100).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const r = await billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval);
+        // the project the upgrade starts from is finished and rendered without the watermark by itself (projects/after-upgrade.ts)
+        if (input.fromProjectId) await recordUpgradeProject(ctx.svc.database.db, ctx.user.id, input.fromProjectId);
+        return r;
+      }),
     /** The Stripe Billing Portal (invoices, card, cancel at period end). */
     portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
   }),
@@ -1473,7 +1489,9 @@ const restRouter = router({
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
       // clips deleted or replaced by a re-analyze, restorable with clips.restore until the purge
       const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
-      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers };
+      // a partly processed video: what was processed, what is left and what finishes it (Clip the rest, or the plan)
+      const partial = await partialSourceOf(ctx.svc, p);
+      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers, partial };
     }),
 
     create: protectedProcedure
@@ -1502,6 +1520,14 @@ const restRouter = router({
     retry: protectedProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ ctx, input }) => retryOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+
+    /**
+     * Process more of a partly processed video: as much of the rest as the account's minutes cover now, picking up
+     * where it stopped (extendProject). A quota refusal with the upgrade offer when no minutes are left.
+     */
+    extend: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx, input }) => extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
     refine: protectedProcedure
@@ -1582,6 +1608,14 @@ const restRouter = router({
     retryMany: protectedProcedure
       .input(z.object({ ids: projectIdsInput }))
       .mutation(({ ctx, input }) => retryProjects(ctx.svc, { id: ctx.user.id, admin: false }, input.ids)),
+
+    /** After a plan change: the other projects it could finish or render without the watermark (the welcome dialog, the Billing page). */
+    upgradeWork: protectedProcedure.query(({ ctx }) => upgradeWork(ctx.svc, ctx.user.id)),
+
+    /** Start the picked ones of `upgradeWork`: clip the rest of `finish`, re-render the watermarked clips of `rerender`. */
+    startUpgradeWork: protectedProcedure
+      .input(z.object(startUpgradeWorkInput))
+      .mutation(({ ctx, input }) => startUpgradeWork(ctx.svc, { id: ctx.user.id, admin: false }, input)),
 
     /** The Projects selection bar: re-render every finished or failed clip of several projects. */
     rerenderMany: protectedProcedure

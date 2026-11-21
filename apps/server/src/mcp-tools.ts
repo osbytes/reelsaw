@@ -23,6 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
+import { startUpgradeWorkInput } from "./projects/after-upgrade.js";
 import {
   FAILURE_CAUSES,
   FONT_FILE_EXTS,
@@ -44,7 +45,7 @@ Which tool when:
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look, font and fades for every clip, re-renders; fonts from list_fonts), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
-- recover: retry_project (resume a failed project where it stopped; retry_projects for several) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project) vs rerender_projects (every clip of several projects)
+- recover: retry_project (resume a failed project where it stopped; retry_projects for several) vs reanalyze_project (different clips); extend_project (a long video processed only from its start: clip the rest); render: rerender_clip (one clip) vs rerender_clips (many clips of a project) vs rerender_projects (every clip of several projects)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip), optionally with an intro and outro: save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers and get the template's intro / outro as their own choice), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project / delete_projects, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
@@ -121,14 +122,14 @@ export const TOOLS = {
   get_project: {
     title: "Get project",
     description:
-      "One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. Returns the project object. For one clip's full detail use get_clip, for the words get_transcript, for the pipeline history get_project_events.",
+      "One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip; partial (non-null): only the video's start was processed (extend_project clips more). Returns the project object. For one clip's full detail use get_clip, for the words get_transcript, for the pipeline history get_project_events.",
     inputSchema: { id: projectId() },
     annotations: { readOnlyHint: true },
   },
   check_source: {
     title: "Check source",
     description:
-      "Before create_project: would this video be accepted now? Give sourceUrl (its length is looked up, nothing is downloaded) or durationSec for a file. Returns { minutes, fits, message, quota, allowance }; fits false means create_project would be refused, message says why, quota.primary is the upgrade offer (a link for a person). fits null: the length is unknown.",
+      "Before create_project: would this video be accepted now? Give sourceUrl (its length is looked up, nothing is downloaded) or durationSec for a file. Returns { minutes, partial, fits, message, quota, allowance }; fits false means create_project would be refused, message says why, quota.primary is the upgrade offer (a link for a person). fits null: the length is unknown. partial: accepted, but only its first partial.minutes are processed now (extend_project later).",
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or durationSec"),
       durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you will upload, in seconds; give this or sourceUrl"),
@@ -519,6 +520,25 @@ export const TOOLS = {
       source: z.boolean().default(false).describe("Include the source video file (default false)"),
     },
     annotations: { readOnlyHint: true },
+  },
+  extend_project: {
+    title: "Clip the rest of a video",
+    description:
+      "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade via billing_checkout_url fromProjectId does it itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
+    inputSchema: { id: projectId() },
+  },
+  list_upgrade_work: {
+    title: "List work an upgrade unlocks",
+    description:
+      "After a plan change: your other projects it could improve. Returns { watermarkOn, upgradeProject, rerender, finish, minutesRoomSec }: rerender = projects with watermarked clips (empty while your renders still carry it), finish = videos only partly processed (remainingSec; busy = working), upgradeProject = the one the upgrade was for (handled by itself), minutesRoomSec = video your minutes cover now (null = no cap). Newest 50 of each, with totals. Nothing starts until start_upgrade_work.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  start_upgrade_work: {
+    title: "Start work an upgrade unlocks",
+    description:
+      "Start the picked projects from list_upgrade_work: finish clips the rest of each video as far as the minutes go (like extend_project), rerender renders each project's watermarked clips again without the watermark. Each project on its own, so one refusal (minutes, the hour's re-render limit) leaves the others started. Returns { rerenderedClips, extendedProjects, failed, sentence, results: [{ id, action, ok, error? }] }; then wait_for_project.",
+    inputSchema: startUpgradeWorkInput,
   },
   retry_project: {
     title: "Retry project",
@@ -996,6 +1016,12 @@ export const TOOLS = {
     inputSchema: {
       plan: z.string().min(1).max(40).describe("Plan name from get_billing (e.g. creator, pro)"),
       interval: z.enum(["month", "year"]).default("month").describe("Billing interval: month (default) or year"),
+      fromProjectId: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("The project the upgrade is for: once the plan changes it is finished and rendered without the watermark by itself"),
     },
   },
   list_transcript_flags: {

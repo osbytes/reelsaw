@@ -960,7 +960,7 @@ export function TranscriptPanel({
           {createClip.error &&
             (quotaFromError(createClip.error) ? (
               <div className="max-w-[420px] whitespace-normal px-2 pb-1">
-                <QuotaNotice message={createClip.error.message} quota={quotaFromError(createClip.error)} />
+                <QuotaNotice message={createClip.error.message} quota={quotaFromError(createClip.error)} projectId={projectId} />
               </div>
             ) : (
               <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>
