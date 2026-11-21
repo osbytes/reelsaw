@@ -127,7 +127,12 @@ FROM system AS runtime
 ARG REELSAW_VERSION=dev
 ARG REELSAW_COMMIT=unknown
 ARG REELSAW_BUILT_AT=unknown
+# The container starts as root (the entrypoint) and drops to node with setpriv, which keeps root's HOME=/root.
+# node cannot write there, so fontconfig (every ffmpeg run that draws text) printed "No writable cache
+# directories" over the head of each error, and yt-dlp could not keep its cache. An explicit HOME reaches the
+# app, the `reelsaw` CLI and the health check alike.
 ENV NODE_ENV=production \
+    HOME=/home/node \
     WEB_DIST=/app/web \
     REELSAW_VERSION=${REELSAW_VERSION} \
     REELSAW_COMMIT=${REELSAW_COMMIT} \
