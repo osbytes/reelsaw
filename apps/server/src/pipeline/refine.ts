@@ -110,7 +110,7 @@ function skipMessage(step: RefineStep, reason: string, language: string | null) 
 const STEP_LANGUAGE_STAGE: Partial<Record<RefineStep, LanguageStage>> = { entities: "entityPhonetics", disfluency: "disfluencyRules" };
 function unsupportedLanguage(step: RefineStep, language: string | null): string | null {
   const stage = STEP_LANGUAGE_STAGE[step];
-  return stage && !supports(stage, language) ? skipReason(language) : null;
+  return stage && !supports(stage, language) ? skipReason(stage, language) : null;
 }
 
 /**
@@ -180,7 +180,7 @@ export async function mergeRefine(
       flags = [...(kind === "entity" ? flags : kept), ...incoming].sort((a, b) => a.wordIndex - b.wordIndex);
     }
     const words = applyFlags(raw, flags);
-    const segments = toSentences(words);
+    const segments = toSentences(words, undefined, t.language);
     const refine: RefineStatus = { ...t.refine, [step]: result.status };
     await tx
       .update(schema.transcripts)

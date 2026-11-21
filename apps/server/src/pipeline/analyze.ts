@@ -39,10 +39,11 @@ import { clipCandidateSchema, plural, processedEndSec } from "@reelsaw/shared";
 import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import type { ClipCandidate, ProjectSettings, TranscriptSegment, Word } from "@reelsaw/shared";
-import { finishThought } from "./thought.js";
+import { finishThought, sentenceRules, type SentenceRules } from "./thought.js";
 import type { Logger } from "../log.js";
 import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
+import { languageCode, outputLanguage } from "./language.js";
 
 export { normalizeCandidate, parseClipsLeniently } from "./select.js";
 
@@ -181,7 +182,7 @@ export function snapCandidate(
   sceneCuts: number[],
   settings: ProjectSettings,
   durationSec: number,
-  thought: { words?: Word[]; log?: Logger; bounds?: [number, number] } = {},
+  thought: { words?: Word[]; log?: Logger; bounds?: [number, number]; rules?: SentenceRules } = {},
 ): ClipCandidate | null {
   const starts = segments.map((s) => s.start);
   const ends = segments.map((s) => s.end);
@@ -243,6 +244,7 @@ export function snapCandidate(
       minSec: settings.minClipSeconds - PAD_START - PAD_END,
       maxSec: settings.maxClipSeconds - PAD_START - PAD_END,
       bounds: thought.bounds ? [thought.bounds[0] + PAD_START, thought.bounds[1] - PAD_END] : undefined,
+      ...(thought.rules ? { rules: thought.rules } : {}),
     });
     for (const ch of done.changes) {
       thought.log?.debug(
@@ -418,6 +420,8 @@ export async function analyze(ctx: StageContext) {
     maxClips: settings.maxClips,
     focus: settings.focus,
     instructions: settings.instructions,
+    // only when known: an undefined key keeps the step key (and its saved answers) of projects from before
+    ...(outputLanguage(transcript.language) ? { language: outputLanguage(transcript.language) } : {}),
   };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
@@ -504,8 +508,11 @@ export async function analyze(ctx: StageContext) {
   }));
 
   // 3. pool: snap to sentences/scene cuts, enforce length, drop overlaps (keep the better first guess)
+  // how sentences end in this transcript: its language's punctuation, or its pauses where STT left punctuation out
+  const rules = sentenceRules(transcript.words, transcript.language);
+  if (!rules.punctuated) await unpunctuatedEvent(svc, projectId, transcript.language, rules, log);
   const snappedIdx = candidates
-    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log }), i }))
+    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules }), i }))
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);
   const snapped = snappedIdx.map((x) => x.c);
@@ -825,4 +832,27 @@ export async function listClips(db: Db, projectId: string) {
     where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)),
     orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)],
   });
+}
+
+/**
+ * Says once per pick that this transcript has almost no sentence punctuation (most STT output for Hindi, for one), so
+ * clips start and end on the pauses its speaker makes between sentences instead (pipeline/language.ts,
+ * sentenceBoundaries): a softer signal than a full stop, and the user should know why an edge may land mid-thought.
+ */
+export async function unpunctuatedEvent(
+  svc: Pick<Services, "events">,
+  projectId: string,
+  language: string | null | undefined,
+  rules: SentenceRules,
+  log: Logger,
+): Promise<void> {
+  log.info({ language, pauseSec: Number(rules.pauseSec.toFixed(2)) }, "transcript has almost no punctuation: clip edges use pauses");
+  await svc.events
+    .emit("language.degraded", {
+      projectId,
+      stage: "sentenceBoundaries",
+      language: languageCode(language) ?? "und",
+      reason: `clip edges: the transcript has almost no punctuation, so clips start and end on pauses between sentences (${rules.pauseSec.toFixed(2)} s or longer) instead of full stops`,
+    })
+    .catch(() => {});
 }

@@ -2,7 +2,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Word } from "@reelsaw/shared";
-import { finishThought, sentenceEndAfter, isConnector } from "../src/pipeline/thought.js";
+import { finishThought, sentenceEndAfter, sentenceRules, isConnector } from "../src/pipeline/thought.js";
 
 /** "text@gap" tokens: each word is 0.4 s long, `gap` seconds of silence follows it (default 0.05). */
 function words(spec: string): Word[] {
@@ -140,5 +140,28 @@ describe("clip padding stays between words", () => {
     assert.ok(c.endSec < next.start, `clip ends at ${c.endSec}, "If" starts at ${next.start}`);
     assert.ok(c.endSec >= lastEnd, "the sentence itself is kept whole");
     assert.equal(text(ws, c.startSec, c.endSec).split(" ").at(-1), "succeed.");
+  });
+});
+
+describe("sentenceRules: the transcript's language and punctuation", () => {
+  it("ends a sentence on any script's full stop", () => {
+    const ws = words("यह@0.05 बात@0.05 है।@0.05 और@0.05 यह");
+    assert.equal(sentenceEndAfter(ws, 2, sentenceRules(ws, "hi")), "punctuation");
+    const ja = words("今日は@0.05 晴れです。@0.05 明日は");
+    assert.equal(sentenceEndAfter(ja, 1, sentenceRules(ja, "ja")), "punctuation");
+  });
+  it("keeps English connectors and capitals to English and cased scripts", () => {
+    const hi = sentenceRules(words("यह बात"), "hi");
+    assert.equal(hi.connectors, false);
+    assert.equal(hi.capitals, false);
+    const de = sentenceRules(words("Das ist"), "de");
+    assert.equal(de.connectors, false);
+    assert.equal(de.capitals, true);
+    const en = sentenceRules(words("this is"), undefined);
+    assert.equal(en.connectors && en.capitals, true);
+  });
+  it("tells a transcript without punctuation from one with it", () => {
+    assert.equal(sentenceRules(words("a b c d e f g h i j k l m n o p q r s t"), "en").punctuated, false);
+    assert.equal(sentenceRules(words("a b c. d e f g h i j k l m n o p q r s t"), "en").punctuated, true);
   });
 });

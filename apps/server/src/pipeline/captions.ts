@@ -7,6 +7,9 @@ import {
   monotonicWords,
   emphasisKey,
   captionYAt,
+  languageProfile,
+  upperCase,
+  wordJoiner,
   type Word,
   type Style,
   type RenderedCaptions,
@@ -14,6 +17,8 @@ import {
 } from "@reelsaw/shared";
 
 export interface CaptionOptions {
+  /** the spoken language (a code; undefined = detected as nothing): how words join, upper-case and line direction */
+  language?: string | null | undefined;
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
   watermark?: string;
   /** the logo is composited above the text (render.ts `watermarkLogo`): the text goes smaller and sits right under it */
@@ -83,14 +88,21 @@ export const watermarkTextY = () =>
  * The caption lines a render burns in, grouped exactly as `buildAss` groups them, shifted by the
  * intro so the times match the rendered video. Stored on the clip for SRT / VTT export.
  */
-export function renderedCaptions(words: Word[], style: Style, introSec: number, maxLineSeconds?: number): RenderedCaptions {
+export function renderedCaptions(words: Word[], style: Style, introSec: number, maxLineSeconds?: number, language?: string | null): RenderedCaptions {
   const r3 = (n: number) => Number((n + introSec).toFixed(3));
   const lines =
     style.captions === "none"
       ? []
-      : groupLines(monotonicWords(words), style.wordsPerLine, maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
+      : groupLines(
+          monotonicWords(words),
+          style.wordsPerLine,
+          maxLineSeconds ?? lineSecondsFor(style.wordsPerLine),
+          captionMaxChars(style.captionSize),
+          language,
+        );
   return {
     introSec: Number(introSec.toFixed(3)),
+    ...(language ? { language } : {}),
     captions: style.captions,
     lines: lines.map((line, i) => ({
       start: r3(line[0]!.start),
@@ -147,12 +159,18 @@ export function buildAss(input: Word[], opts: CaptionOptions): string {
   const capPosAt = (start: number, end: number) => pos(style.captionX, captionYAt(style, opts.seams ?? [], (start + end) / 2));
   const hookPos = pos(style.hookX, style.hookY);
   const hi = assColor(style.highlightColor);
-  const tx = (t: string) => esc(style.uppercase ? t.toUpperCase() : t);
+  // the language's own capitals (Turkish "i" → "İ"); a script without case is drawn as written
+  const lang = opts.language ?? undefined;
+  const tx = (t: string) => esc(style.uppercase ? upperCase(t, lang) : t);
+  const joiner = wordJoiner(lang);
+  // libass lays a line out left to right unless the style's Encoding is -1 (base direction from the text): right-to-left
+  // scripts need it, or punctuation and numbers land on the wrong side of an Arabic or Hebrew line
+  const encoding = lang && languageProfile(lang).direction === "rtl" ? -1 : 1;
   // "box" = opaque box behind the line (BorderStyle 3), the look most clip tools default to
   const captionStyle =
     style.captions === "box"
-      ? `Style: Caption,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,1`
-      : `Style: Caption,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,1`;
+      ? `Style: Caption,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,${encoding}`
+      : `Style: Caption,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,${encoding}`;
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -160,14 +178,14 @@ PlayResX: ${width}
 PlayResY: ${height}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
-
+${lang ? `Language: ${lang}\n` : ""}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${captionStyle}
-Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,1
-Style: Watermark,${opts.watermarkFont ?? font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,1
-Style: Text,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,1
-Style: TextBox,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,1
+Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,${encoding}
+Style: Watermark,${opts.watermarkFont ?? font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,${encoding}
+Style: Text,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,${encoding}
+Style: TextBox,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,${encoding}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -199,11 +217,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   if (style.showHook && opts.hook && style.hookSeconds > 0) {
     const end = Math.min(style.hookSeconds, Math.max(clipEnd, style.hookSeconds));
-    events.push(`Dialogue: 1,${assTime(0)},${assTime(end)},Hook,,0,0,0,,${hookPos}${esc(opts.hook.toUpperCase())}`);
+    events.push(`Dialogue: 1,${assTime(0)},${assTime(end)},Hook,,0,0,0,,${hookPos}${esc(upperCase(opts.hook, lang))}`);
   }
 
   if (style.captions !== "none" && words.length) {
-    const lines = groupLines(words, style.wordsPerLine, opts.maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
+    const lines = groupLines(words, style.wordsPerLine, opts.maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize), lang);
     const em = style.emphasis ? new Set((opts.emphasis ?? []).map(emphasisKey).filter(Boolean)) : new Set<string>();
     const emColor = assColor(style.emphasisColor);
     const isEm = (w: Word) => em.has(emphasisKey(w.text));
@@ -214,7 +232,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const end = lineDisplayEnd(lines, li);
       const capPos = capPosAt(start, end);
       if (style.captions === "plain" || style.captions === "box") {
-        events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Caption,,0,0,0,,${capPos}${line.map(plainWord).join(" ")}`);
+        events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Caption,,0,0,0,,${capPos}${line.map(plainWord).join(joiner)}`);
         return;
       }
       // karaoke: one event per word, the active word highlighted and slightly bigger
@@ -223,7 +241,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         const wStart = i === 0 ? start : w.start;
         const wEnd = i === line.length - 1 ? end : line[i + 1]!.start;
         if (wEnd <= wStart) continue;
-        const text = line.map((x, j) => (j === i ? `{\\c${hi}\\fscx112\\fscy112}${tx(x.text)}{\\c&HFFFFFF&\\fscx100\\fscy100}` : plainWord(x))).join(" ");
+        const text = line.map((x, j) => (j === i ? `{\\c${hi}\\fscx112\\fscy112}${tx(x.text)}{\\c&HFFFFFF&\\fscx100\\fscy100}` : plainWord(x))).join(joiner);
         events.push(`Dialogue: 0,${assTime(wStart)},${assTime(wEnd)},Caption,,0,0,0,,${capPos}${text}`);
       }
     });

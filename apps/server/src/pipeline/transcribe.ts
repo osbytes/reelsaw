@@ -1,3 +1,4 @@
+import { languageForModel } from "../ai/spoken-languages.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { and, eq, asc } from "drizzle-orm";
@@ -23,6 +24,8 @@ import {
 } from "./asr-loops.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { enqueueRefine } from "./refine.js";
+import { languageCode, languageGaps, gapLine } from "./language.js";
+import { languageFonts } from "../languages.js";
 import { plural } from "@reelsaw/shared";
 
 /**
@@ -152,6 +155,10 @@ export async function transcribe(ctx: StageContext) {
   const entities = extractEntities(project.sourceMeta, project.settings.vocabulary);
   const provider = svc.ai.transcriptionOptionsKey(transcriptionModel);
   const providerOptions = svc.ai.transcriptionOptions(transcriptionModel) as Record<string, JSONObject>;
+  // the language the user set (project settings or their defaults) is sent, not left to detection; asr merges it into
+  // the options, so it is part of the ASR cache key and the chunk step key: changing it transcribes again. One the
+  // model does not take is left to detection instead of failing every chunk (ai/spoken-languages.ts)
+  const spoken = await languageForModel(svc, transcriptionModel, project.settings.language);
   if (svc.config.TRANSCRIPT_BIAS && entities.length) {
     providerOptions[provider] = { ...(providerOptions[provider] ?? {}), ...(biasProviderOptions(provider, entities) as JSONObject) };
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
@@ -173,6 +180,7 @@ export async function transcribe(ctx: StageContext) {
       chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS,
       audioSec: Math.round(acc),
       biasHints: entities.length,
+      language: spoken ?? "detect",
     },
     "transcribe start",
   );
@@ -185,12 +193,15 @@ export async function transcribe(ctx: StageContext) {
     const row = await ctx.db.query.transcriptChunks.findFirst({
       where: and(eq(schema.transcriptChunks.projectId, projectId), eq(schema.transcriptChunks.index, i)),
     });
-    // a row from a run that cut the audio elsewhere (another chunk length) is a different stretch: transcribe it again
-    if (row && Math.abs(row.offsetSec - offsets[i]!) < 1) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
+    // a row from a run that cut the audio elsewhere (another chunk length) is a different stretch, and one heard in
+    // another language than the one now set (a run before the setting changed) has the wrong words: transcribe again
+    const sameLanguage = !spoken || languageCode(row?.language) === spoken;
+    if (row && Math.abs(row.offsetSec - offsets[i]!) < 1 && sameLanguage) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
     if (row) await ctx.db.delete(schema.transcriptChunks).where(eq(schema.transcriptChunks.id, row.id));
     let result = await svc.asr.transcribe(audio, {
       modelId: transcriptionModel,
       providerOptions,
+      language: spoken,
       signal,
       maxRetries: 3,
       functionId: "transcribe.chunk",
@@ -208,6 +219,7 @@ export async function transcribe(ctx: StageContext) {
       const retried = await svc.asr.transcribe(audio, {
         modelId: transcriptionModel,
         providerOptions: withoutPrompt(providerOptions, provider),
+        language: spoken,
         signal,
         maxRetries: 3,
         functionId: "transcribe.chunk-retry",
@@ -233,7 +245,8 @@ export async function transcribe(ctx: StageContext) {
         projectId,
         index: i,
         offsetSec: offsets[i]!,
-        language: result.language ?? null,
+        // the language it was transcribed in: the one sent, else the one the model detected (see the reuse above)
+        language: spoken ?? result.language ?? null,
         text: result.text,
         segments: result.segments.map((sg) => ({ text: sg.text, start: sg.startSecond, end: sg.endSecond })),
       })
@@ -244,7 +257,7 @@ export async function transcribe(ctx: StageContext) {
   await ctx.progress(0.1, `Transcribing ${plural(needed.length, "chunk")}, ${concurrency} at a time`);
   await ctx.steps(needed, { concurrency, range: [0.1, 0.95], message: (d, t) => `Transcribed chunk ${d}/${t}` }, async (i, _k, signal) => {
     const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-    const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });
+    const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions, language: spoken });
     const timeoutMs = ctx.unitTimeoutMs(transcriptionModel, { audioSec: (offsets[i + 1] ?? acc) - offsets[i]! });
     return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), {
       schema: chunkStepSchema,
@@ -276,7 +289,7 @@ export async function transcribe(ctx: StageContext) {
       c.offsetSec,
     );
     // a chunk that straddles where the transcript ends (another chunk length) gives only the words past it
-    const heard = toWords(segs, { collapseLoops: false }).filter((w) => w.start >= fromSec - 0.05);
+    const heard = toWords(segs, { collapseLoops: false, language: spoken ?? languageCode(c.language) }).filter((w) => w.start >= fromSec - 0.05);
     const collapsed = collapseDecoderLoopsWithStats(heard);
     const offset = rawWords.length;
     rawWords.push(...heard);
@@ -289,7 +302,18 @@ export async function transcribe(ctx: StageContext) {
   const words = applyFlags(rawWords, flags);
   // every chunk is a saved step, so another attempt replays the same empty answer: fail the run now
   if (!words.length) throw new NonRetryableError("Transcription returned no words. Is the audio silent?");
-  const sentences = toSentences(words);
+  const language = spoken ?? languageCode(chunks.find((c) => c.language)?.language) ?? null;
+  const sentences = toSentences(words, undefined, language);
+  // what will work less well for this language, said once now, before anything renders (refine reports its own skips)
+  // informational: a font check that cannot run leaves captions unchecked, it never fails the transcription
+  const fonts = language
+    ? await languageFonts(svc, [language]).catch((err: unknown) => {
+        ctx.log.warn({ err }, "could not check the caption fonts for this language");
+        return undefined;
+      })
+    : undefined;
+  const gaps = language ? languageGaps(language, fonts).filter((g) => !REFINE_REPORTS.has(g.stage)) : [];
+  if (gaps.length) ctx.log.info({ language, gaps: gaps.map(gapLine) }, "stages that do less for this language");
 
   await ctx.complete(
     { words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length, loops: flags.length, loopDropped: dropped },
@@ -306,7 +330,8 @@ export async function transcribe(ctx: StageContext) {
         .insert(schema.transcripts)
         .values({
           projectId,
-          language: chunks.find((c) => c.language)?.language ?? null,
+          // a code ("en"), never the name some models answer with ("english"); the user's setting wins over detection
+          language,
           text: words.map((w) => w.text).join(" "),
           words,
           rawWords,
@@ -318,6 +343,7 @@ export async function transcribe(ctx: StageContext) {
           coveredSec: limit,
         })
         .onConflictDoNothing();
+      for (const g of gaps) await u.emit("language.degraded", { projectId, stage: g.stage, language: language!, reason: gapLine(g) });
       await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
     },
   );
@@ -343,7 +369,7 @@ async function appendRest(
     // only onto the transcript these words continue: one that moved meanwhile was extended by the run that moved it
     if (t.coveredSec !== null && Math.abs(t.coveredSec - r.fromSec) < 0.5) {
       const merged = appendTranscript(t, { rawWords: r.rawWords, flags: r.flags });
-      const segments = toSentences(merged.words);
+      const segments = toSentences(merged.words, undefined, t.language);
       added = r.rawWords.length;
       await u.db
         .update(schema.transcripts)
@@ -376,5 +402,8 @@ async function appendRest(
   });
   ctx.log.info({ fromSec: r.fromSec, untilSec: r.limit, words: added }, "transcript extended");
 }
+
+/** Stages whose skip refine records itself when it gets to them (pipeline/refine.ts skipMessage). */
+const REFINE_REPORTS = new Set(["disfluencyRules", "entityPhonetics"]);
 
 export { QUEUES };

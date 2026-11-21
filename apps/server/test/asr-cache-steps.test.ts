@@ -63,10 +63,11 @@ class FakeStore implements Storage {
   }
 }
 
-function fakeAi(calls: { n: number }) {
+function fakeAi(calls: { n: number; options?: unknown[] }) {
   const model = new MockTranscriptionModelV4({
-    doGenerate: async () => {
+    doGenerate: async (o) => {
       calls.n++;
+      calls.options?.push(o.providerOptions);
       return {
         text: "hello there",
         segments: [{ text: "hello there", startSecond: 0, endSecond: 1 }],
@@ -77,10 +78,26 @@ function fakeAi(calls: { n: number }) {
       };
     },
   });
-  return { transcriptionOptions: () => ({}), transcriptionModel: async () => model } as never;
+  return { transcriptionOptions: () => ({}), transcriptionOptionsKey: () => "openai", transcriptionModel: async () => model } as never;
 }
 
 const audio = new Uint8Array([1, 2, 3, 4]);
+
+describe("ASR spoken language", () => {
+  it("sends the language in the vendor's option and keys the cache on it", async () => {
+    const calls = { n: 0, options: [] as unknown[] };
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "asr-lang-"));
+    const asr = createAsr(fakeAi(calls), () => "openai/whisper-1", dir, quiet);
+    await asr.transcribe(audio, { language: "German" });
+    assert.deepEqual(calls.options[0], { openai: { language: "de" } });
+    assert.equal(asr.keyFor(audio, { language: "de" }), asrCacheKey("openai/whisper-1", { openai: { language: "de" } }, audio));
+    assert.notEqual(asr.keyFor(audio, { language: "de" }), asr.keyFor(audio), "another language is another transcription");
+    // unset keeps the detect-everything key, so existing cache entries still hit
+    assert.equal(asr.keyFor(audio, { language: null }), asrCacheKey("openai/whisper-1", {}, audio));
+    assert.equal((await asr.transcribe(audio, { language: "de" })).cached, true);
+    assert.equal(calls.n, 1);
+  });
+});
 
 describe("ASR cache on a shared store", () => {
   it("writes through after a provider call and reads through on a local miss from another host", async () => {

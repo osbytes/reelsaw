@@ -4,7 +4,15 @@
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { projectSettingsSchema, defaultProjectSettings, userProjectDefaultsSchema, type ProjectSettings, type UserProjectDefaults } from "@reelsaw/shared";
+import {
+  projectSettingsSchema,
+  defaultProjectSettings,
+  userProjectDefaultsSchema,
+  type ClearableSetting,
+  withSpokenLanguage,
+  type ProjectSettings,
+  type UserProjectDefaults,
+} from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import { assetVisibleTo } from "../library/visible.js";
 
@@ -14,11 +22,18 @@ export async function userDefaults(db: Db, userId: string): Promise<UserProjectD
   return parsed.success ? parsed.data : {};
 }
 
-export async function resolveProjectSettings(db: Db, userId: string, input: Partial<ProjectSettings> | undefined): Promise<ProjectSettings> {
+export async function resolveProjectSettings(
+  db: Db,
+  userId: string,
+  input: Partial<ProjectSettings> | undefined,
+  clear: readonly ClearableSetting[] = [],
+): Promise<ProjectSettings> {
   const mine = await userDefaults(db, userId);
-  // undefined values in the input must not shadow a saved default
+  // undefined values in the input must not shadow a saved default; `clear` is how a caller says "unset, although my
+  // default has one" (New project's "Detect automatically", an emptied focus)
   const given = Object.fromEntries(Object.entries(input ?? {}).filter(([, v]) => v !== undefined));
-  const merged = { ...defaultProjectSettings, ...mine, ...given };
+  const merged = withSpokenLanguage({ ...defaultProjectSettings, ...mine, ...given });
+  for (const k of clear) if (!(k in given)) delete merged[k];
   // intro/outro ids ride along from the defaults or the caller: keep only the user's own, live assets
   for (const k of ["introAssetId", "outroAssetId"] as const) {
     const id = merged[k];

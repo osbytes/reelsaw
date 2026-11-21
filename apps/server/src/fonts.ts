@@ -321,3 +321,98 @@ export async function uploadedFontFile(svc: Pick<Services, "paths" | "storage" |
   await fs.mkdir(dir, { recursive: true });
   return svc.storage.ensureLocal(row.storageKey, path.join(dir, localName(row)));
 }
+
+// ---------- glyph coverage: which characters the fonts can draw ----------
+
+/** Code point ranges a font (or a set of fonts) has glyphs for, sorted and merged: fontconfig's charset. */
+export type Glyphs = Array<[number, number]>;
+
+/** fontconfig's `%{charset}` ("20-7e a0-17f 384") as ranges. Pure. */
+export function parseCharset(text: string): Glyphs {
+  const out: Glyphs = [];
+  for (const part of text.trim().split(/\s+/)) {
+    const m = /^([0-9a-f]+)(?:-([0-9a-f]+))?$/i.exec(part);
+    if (m) out.push([Number.parseInt(m[1]!, 16), Number.parseInt(m[2] ?? m[1]!, 16)]);
+  }
+  return mergeGlyphs(out);
+}
+
+/** The union of several coverages. Pure. */
+export function mergeGlyphs(...sets: Glyphs[]): Glyphs {
+  const all = sets.flat().sort((a, b) => a[0] - b[0]);
+  const out: Glyphs = [];
+  for (const [a, b] of all) {
+    const last = out[out.length - 1];
+    if (last && a <= last[1] + 1) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+function hasGlyph(set: Glyphs, cp: number): boolean {
+  let lo = 0;
+  let hi = set.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const [a, b] = set[mid]!;
+    if (cp < a) hi = mid - 1;
+    else if (cp > b) lo = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+/** The characters of `text` none of the fonts draws (spaces and invisible format controls need no glyph). Pure. */
+export function missingGlyphs(set: Glyphs, text: string): string[] {
+  const out = new Set<string>();
+  for (const c of text) if (!/[\s\p{Cf}]/u.test(c) && !hasGlyph(set, c.codePointAt(0)!)) out.add(c);
+  return [...out];
+}
+
+const charsetOf = (args: string[]) =>
+  execFileAsync(args[0]!, args.slice(1), { timeout: 30_000, maxBuffer: 32 * 1024 * 1024 }).then(({ stdout }) =>
+    mergeGlyphs(...stdout.split("\n").map(parseCharset)),
+  );
+
+/**
+ * What the fonts installed on this host draw together (`fc-list`): libass falls back from any caption font, uploaded
+ * ones included, to an installed font that has the glyph, so this union is what every caption can show. Read once
+ * per process; null where fontconfig is missing (a dev machine), which means unknown, not "nothing".
+ */
+let systemGlyphsP: Promise<Glyphs | null> | null = null;
+export function systemGlyphs(): Promise<Glyphs | null> {
+  systemGlyphsP ??= charsetOf(["fc-list", "--format", "%{charset}\n"]).catch(() => {
+    systemGlyphsP = null;
+    return null;
+  });
+  return systemGlyphsP;
+}
+
+/** Each uploaded font's coverage (`fc-scan` on its file), cached by id: an upload's file never changes. */
+const uploadedGlyphsCache = new Map<string, Promise<Glyphs | null>>();
+export async function uploadedGlyphs(
+  svc: Pick<Services, "paths" | "storage" | "log">,
+  uploaded: FontState["uploaded"],
+): Promise<Array<{ family: string; glyphs: Glyphs }>> {
+  const dir = fontsDir(svc);
+  const out = await Promise.all(
+    uploaded.map(async (r) => {
+      let p = uploadedGlyphsCache.get(r.id);
+      if (!p) {
+        p = fs
+          .mkdir(dir, { recursive: true })
+          .then(() => svc.storage.ensureLocal(r.storageKey, path.join(dir, localName(r))))
+          .then((file) => charsetOf(["fc-scan", "--format", "%{charset}\n", file]))
+          .catch((err: unknown) => {
+            uploadedGlyphsCache.delete(r.id);
+            svc.log.warn({ err, fontId: r.id }, "could not read an uploaded font's characters");
+            return null;
+          });
+        uploadedGlyphsCache.set(r.id, p);
+      }
+      const glyphs = await p;
+      return glyphs ? { family: r.family, glyphs } : null;
+    }),
+  );
+  return out.filter((x): x is { family: string; glyphs: Glyphs } => x !== null);
+}

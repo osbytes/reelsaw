@@ -392,6 +392,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      cldr-misc-full:
+        specifier: 49.0.0
+        version: 49.0.0(cldr-core@49.0.0)
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -2871,6 +2874,14 @@ packages:
 
   cjs-module-lexer@2.3.0:
     resolution: {integrity: sha512-lmNyBzi6iYiqyrExTctfmjd8tInx+dHu9PBomTfH5RXS53c27JMFJgzNv5TyAnm3PgGf+MLy0+Ws41/HlVxdKQ==}
+
+  cldr-core@49.0.0:
+    resolution: {integrity: sha512-2Z2dYeDO95AbKIG9dIUdZy6DD4f0hhHjTYnaHZj/9JTQ82pX5EsJlCs2BXPWi4vd1d98MwotOivh4Uthxwri4A==}
+
+  cldr-misc-full@49.0.0:
+    resolution: {integrity: sha512-1B1O3pe4v0pbNEZdWbkBLtM3Lue7G9KN9LwV+yoAsFttk81DyQ7nCL6knddyBaSgKpF4+f0C4NHcZPwA6uoEwA==}
+    peerDependencies:
+      cldr-core: 49.0.0
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -6702,6 +6713,12 @@ snapshots:
   cac@7.1.0: {}
 
   cjs-module-lexer@2.3.0: {}
+
+  cldr-core@49.0.0: {}
+
+  cldr-misc-full@49.0.0(cldr-core@49.0.0):
+    dependencies:
+      cldr-core: 49.0.0
 
   cliui@8.0.1:
     dependencies:

@@ -18,6 +18,7 @@ import {
   bumperSecondsSchema,
   formatBytes,
   projectSettingsSchema,
+  withSpokenLanguage,
   styleOverrideSchema,
   styleSchema,
   type ClearableSetting,
@@ -516,8 +517,9 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
       throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
-    const merged = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
-    const write = Object.fromEntries(Object.keys(patch ?? {}).map((k) => [k, merged[k as keyof ProjectSettings]]));
+    const given = withSpokenLanguage(patch ?? {});
+    const merged = projectSettingsSchema.parse({ ...p.settings, ...given });
+    const write = Object.fromEntries(Object.keys(given).map((k) => [k, merged[k as keyof ProjectSettings]]));
     const settings = sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`;
     await lockProjectClips(u, p.id);
     // before listing: an analyze committing its picks right now finishes first and they are replaced below, and one
@@ -617,7 +619,7 @@ export async function updateProject(
 ) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
-    const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
+    const patch = withSpokenLanguage(Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch);
     const bumperKeys = Object.keys(patch).filter((k) => BUMPER_KEYS.has(k));
     if (bumperKeys.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${bumperKeys.join(", ")}: set the intro/outro with set_project_bumpers` });
     // the template new clips get must be one of the owner's live templates (null = none)
@@ -942,7 +944,7 @@ export async function createProject(svc: Services, userId: string, input: Create
     // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
     await checkProjectQuota(u.db, svc.settings.get(), userId, { lock: true, ent: svc.entitlements }).catch(quotaReached);
     // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
-    const settings = await resolveProjectSettings(u.db, userId, input.settings);
+    const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
     const [row] = await u.db

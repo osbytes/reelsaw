@@ -16,6 +16,7 @@
     "mock-ai": "node scripts/mock-ai.mjs",
     "docs:gen": "pnpm --filter @reelsaw/server docs:gen",
     "docs:check": "pnpm --filter @reelsaw/server docs:check",
+    "languages:check": "node packages/shared/scripts/whisper-languages.mjs --check && node packages/shared/scripts/language-data.mjs --check",
     "eval": "pnpm --filter @reelsaw/server eval",
     "models:download": "sh scripts/download-models.sh apps/server/models",
     "changeset": "changeset",

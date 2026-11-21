@@ -43,7 +43,7 @@ Workflow: (check_source when the account may have a minutes limit) → create_pr
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
-- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look, font and fades for every clip, re-renders; fonts from list_fonts), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
+- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look, font and fades for every clip, re-renders; fonts from list_fonts), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with; the spoken language codes are list_languages)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped; retry_projects for several) vs reanalyze_project (different clips); extend_project (a long video processed only from its start: clip the rest); render: rerender_clip (one clip) vs rerender_clips (many clips of a project) vs rerender_projects (every clip of several projects)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
@@ -55,7 +55,9 @@ You only see and change your own projects and library. Admins may pass instance:
 const projectDefaultsShape = userProjectDefaultsSchema.omit({ introAssetId: true, outroAssetId: true }).shape;
 const projectDefaultsInput = z
   .object({
-    language: projectDefaultsShape.language.describe("Spoken language code, e.g. en"),
+    language: projectDefaultsShape.language.describe(
+      "Spoken language: a code from list_languages (e.g. en) or its English name; unset, or a value that names no language, = detected",
+    ),
     vocabulary: projectDefaultsShape.vocabulary.describe("Names and terms the transcript should spell right"),
     instructions: projectDefaultsShape.instructions.describe("Standing instructions for picking clips"),
     focus: projectDefaultsShape.focus.describe("What to look for in a clip"),
@@ -163,6 +165,11 @@ export const TOOLS = {
       outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
       introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows (1-10)"),
       outroSec: z.number().min(1).max(10).optional().describe("Seconds an outro image shows (1-10)"),
+      clear: z
+        .array(z.enum(CLEARABLE_SETTINGS))
+        .max(CLEARABLE_SETTINGS.length)
+        .optional()
+        .describe("Settings your project defaults give that this project leaves unset, e.g. language (detect it) or focus"),
     },
   },
   update_project: {
@@ -968,6 +975,13 @@ export const TOOLS = {
     title: "List fonts",
     description:
       "The fonts captions, hooks and text layers can use: built in, or uploaded by an admin. defaultFamily is what a style without its own font uses (CAPTION_FONT). Set one with update_project_style or update_clip { style: { font } } (null = defaultFamily), a text layer's font, or set_project_defaults { font }. Returns { defaultFamily, fonts: [{ family, label, builtin, id, filename, sizeBytes, createdAt, createdBy }] }.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  list_languages: {
+    title: "List spoken languages",
+    description:
+      'The spoken languages the transcription model in force takes: a code from here is settings.language (create_project, update_project, set_project_defaults; unset = detected). source: "model" when the model\x27s server listed them, "whisper" when Whisper\x27s are assumed. gaps: what does less for that language than for English ("limited" or "none": no caption font for its script, English-only filler removal). Returns { model, source, languages: [{ code, name, gaps: [{ stage, label, level, message }] }] }.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },

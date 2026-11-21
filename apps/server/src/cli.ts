@@ -72,7 +72,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   check-source <url> [--user <email|id>] | --minutes <n> [--user <email|id>]
  *                                           would a project from this link (or a file this long) be accepted for the account now:
  *                                           its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source)
- *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
+ *   create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
  *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
@@ -211,6 +211,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules
  *                                           and list_signup_rules / manage_signup_rules); hold = needs approval
  *                                           without saying why; rm takes ids or their first 8 characters
+ *   languages                               the spoken languages the transcription model in force takes, for a
+ *                                           project's language, each with what works less well for it than for
+ *                                           English (same as the language pickers and list_languages)
  *   fonts [list | add <file> | rm <family|id…>]
  *                                           fonts for captions, hooks and text layers (same as Settings → System →
  *                                           Captions and list_fonts / add_font / remove_fonts); add reads a .ttf, .otf,
@@ -257,6 +260,8 @@ import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailur
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { changeSignupRules, listSignupRules } from "./signup-rules.js";
 import { addFont, listFonts, removeFonts } from "./fonts.js";
+import { listLanguages } from "./languages.js";
+import { gapLine } from "./pipeline/language.js";
 import { SIGNUP_RULE_ACTIONS, SIGNUP_RULE_KINDS } from "./signup-rules-schema.js";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -556,7 +561,7 @@ function ffmpegWav(svc: Services, input: string, start: number, dur: number): Pr
 async function words(svc: Services, audio: Buffer) {
   const id = svc.models.get().align;
   const res = await svc.asr.transcribe(audio, { modelId: id });
-  return { model: id, text: res.text, words: toWords(res.segments) };
+  return { model: id, text: res.text, words: toWords(res.segments, { language: undefined }) }; // the align check speaks no language: split on spaces
 }
 
 async function sourcePath(svc: Services, projectId: string) {
@@ -842,15 +847,16 @@ ${usage}`);
       process.exitCode = 1;
     } else console.log(r.fits ? "fits" : "fits so far (length unknown)");
   },
-  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
+  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {
-    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]…";
+    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…";
     if (!pos[0]) throw new Error(usage);
-    const { settings } = settingsFlags(usage);
+    const { settings, clear } = settingsFlags(usage);
     const input = createProjectInputSchema.safeParse({
       sourceUrl: pos[0],
       title: flag("title"),
       settings: Object.keys(settings).length ? settings : undefined,
+      ...(clear.length ? { clear } : {}),
     });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));
@@ -1333,6 +1339,17 @@ ${usage}`);
             .map(([k, v]) => `${k} = ${v}`)
             .join("; "),
       );
+  },
+  languages: async (svc) => {
+    const { model, source, languages } = await listLanguages(svc);
+    console.log(
+      `${languages.length} spoken languages for ${model} (${source === "model" ? "listed by the model's server" : "the model does not say; Whisper's"})`,
+    );
+    // each language, then what Reelsaw does less well for it than for English (the picker and list_languages show the same)
+    for (const l of languages) {
+      console.log(`${l.code.padEnd(4)}  ${l.name}`);
+      for (const g of l.gaps) console.log(`        ${g.level === "none" ? "✗" : "~"} ${gapLine(g)}`);
+    }
   },
   fonts: async (svc) => {
     const usage = "usage: reelsaw fonts [list] | add <file> | rm <family|id…>";
@@ -3042,7 +3059,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|languages|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

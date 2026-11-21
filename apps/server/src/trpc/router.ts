@@ -33,7 +33,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN, withSpokenLanguage } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   checkSource,
@@ -81,6 +81,7 @@ import { bulkUsersInput, userGroupsInput, userListInput } from "../accounts-sche
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { addFontFromUpload, listFonts, removeFonts } from "../fonts.js";
+import { listLanguages } from "../languages.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_CAUSES, FAILURE_STAGES, dismissFailures, getFailure, listFailures, retryFailures } from "../ops/failures.js";
@@ -396,7 +397,7 @@ async function saveFlags(
   const db = u.db;
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
-  const segments = toSentences(words);
+  const segments = toSentences(words, undefined, t.language);
   await writeTranscript(u, p.id, t, { words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") });
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
@@ -551,7 +552,7 @@ const headRouter = router({
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
       const { introAssetId: _i, outroAssetId: _o, ...rest } = input; // intro/outro change only through `bumpers.*`
-      const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
+      const clean = withSpokenLanguage(Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== "")));
       return ctx.svc.tx(async (u) => {
         // the default layer template must be one of the user's live templates
         if (typeof clean.layerTemplateId === "string") await getLayerTemplate(u.db, ctx.user.id, clean.layerTemplateId);
@@ -937,6 +938,14 @@ const restRouter = router({
    */
   fonts: router({
     list: protectedProcedure.query(({ ctx }) => listFonts(ctx.svc, { admin: ctx.user.role === "admin" })),
+  }),
+  /**
+   * The spoken languages the transcription model in force takes (ai/spoken-languages.ts), each with what Reelsaw does
+   * less well for it (languages.ts), for the project language picker. The same code serves `list_languages` and
+   * `reelsaw languages`.
+   */
+  languages: router({
+    list: protectedProcedure.query(({ ctx }) => listLanguages(ctx.svc)),
   }),
   /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
   catalog: router({
@@ -1744,7 +1753,7 @@ const restRouter = router({
           for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected"))
             ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
           const words = applyFlags(raw, live);
-          const segments = toSentences(words);
+          const segments = toSentences(words, undefined, t.language);
           await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
           const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
           await u.emit("stage.started", { projectId: p.id, stage: "review", changed: changed.length, rerendered });

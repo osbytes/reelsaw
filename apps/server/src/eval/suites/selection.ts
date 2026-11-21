@@ -12,8 +12,9 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word, plural } from "@reelsaw/shared";
-import { sentenceEndAfter } from "../../pipeline/thought.js";
+import { defaultProjectSettings, endsSentence, languageProfile, plural, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
+import { fixedSentenceRules, sentenceEndAfter, sentenceRules, type SentenceRules } from "../../pipeline/thought.js";
+import { toSentences } from "../../pipeline/transcript.js";
 import {
   chunkTranscript,
   excludeRanges,
@@ -42,6 +43,85 @@ interface TranscriptFixture {
   words?: Word[];
   sceneCuts?: number[];
   cases?: Array<{ id: string; propose: [number, number]; expectEnd: number; tolerance: number; windowStart: number }>;
+  /** the spoken language, as production reads it from transcripts.language */
+  language?: string;
+  /** ground-truth sentences of a transcript without punctuation (edgeCases) */
+  sentences?: Array<{ start: number; end: number }>;
+}
+
+/**
+ * Clip edges against the sentences a transcript was spoken in (fixtures with `sentences`): 40 model-like picks across
+ * it go through the real segmenter and snapper, and each edge either lands on a sentence start or end or does not.
+ * Each fixture runs twice, so one run shows before and after:
+ *  - as STT returned it, without punctuation: the fixed English rules every transcript had before (0.6 s pauses,
+ *    segments cut on punctuation alone) against the rules production reads from the transcript (sentenceRules);
+ *  - with the language's own full stop put back at each sentence end ("।" for Hindi), as some STT models return it:
+ *    before, segments were cut on it but the clip-edge code knew only Latin stops; now every Sentence_Terminal counts.
+ * The punctuated run must keep edges on sentences; the unpunctuated one must not get worse, and its number says how
+ * far pauses alone get (in a script without capitals, not far: the gap restored punctuation would close).
+ */
+function edgeCases(name: string, t: TranscriptFixture): CaseResult[] {
+  if (!t.sentences?.length || !t.words?.length) return [];
+  const sentences = t.sentences;
+  const starts = sentences.map((s) => s.start);
+  const ends = sentences.map((s) => s.end);
+  const settings = { ...defaultProjectSettings, minClipSeconds: 15, maxClipSeconds: 60 };
+  const score = (words: Word[], segs: TranscriptSegment[], rules: SentenceRules) => {
+    let edges = 0;
+    let on = 0;
+    const misses: string[] = [];
+    for (let k = 0; k < 40; k++) {
+      const s0 = (t.durationSec - 40) * ((k + 0.5) / 40) + (((k * 7919) % 300) / 100 - 1.5);
+      const c = snapCandidate(cand(Math.max(0, s0), s0 + 35), segs, [], settings, t.durationSec, { words, rules });
+      if (!c) continue;
+      // the first and last word the clip plays (the pads vary: snapCandidate keeps them in the gaps between words)
+      const first = words.find((x) => (x.start + x.end) / 2 > c.startSec);
+      const last = words.findLast((x) => x.start < c.endSec);
+      const okStart = !!first && starts.some((x) => Math.abs(x - first.start) < 0.02);
+      const okEnd = !!last && ends.some((x) => Math.abs(x - last.end) < 0.02);
+      edges += 2;
+      on += (okStart ? 1 : 0) + (okEnd ? 1 : 0);
+      if (!okStart) misses.push(`start ${c.startSec}`);
+      if (!okEnd) misses.push(`end ${c.endSec}`);
+    }
+    return { edges, share: Number((on / (edges || 1)).toFixed(2)), misses };
+  };
+  const result = (id: string, r: ReturnType<typeof score>, pass: boolean): CaseResult => ({
+    id: `${name}/${id}`,
+    pass: pass && r.edges >= 60,
+    metrics: { edges: r.edges, onSentence: r.share, sentences: sentences.length },
+    notes: r.misses.slice(0, 6).join("; "),
+  });
+
+  // as STT returned it
+  const words = t.words;
+  const fixed = fixedSentenceRules(0.6);
+  const rules = sentenceRules(words, t.language);
+  const before = score(words, toSentences(words, undefined, t.language, fixed), fixed);
+  const after = score(words, toSentences(words, undefined, t.language, rules), rules);
+
+  // with the language's full stop at each sentence end: the one of its CLDR terminals in its own script, else "."
+  const p = languageProfile(t.language ?? "en");
+  const script = p.script ? new RegExp(`\\p{scx=${p.script}}`, "u") : undefined;
+  const stop = (script && [...p.terminals].find((c) => script.test(c))) || ".";
+  const lastOf = new Set<number>();
+  let w = 0;
+  for (const s of sentences) {
+    while (w < words.length - 1 && words[w]!.end < s.end - 1e-6) w++;
+    lastOf.add(w);
+  }
+  const stopped = words.map((x, i) => (lastOf.has(i) && !endsSentence(x.text) ? { ...x, text: x.text + stop } : x));
+  const pRules = sentenceRules(stopped, t.language);
+  // before: segments were cut on every script's stop (the old SENTENCE_END), clip edges saw Latin stops only
+  const pBefore = score(stop === "." ? stopped : words, toSentences(stopped, undefined, t.language, fixed), fixed);
+  const pAfter = score(stopped, toSentences(stopped, undefined, t.language, pRules), pRules);
+
+  return [
+    result("edges-unpunctuated-before", before, true),
+    result("edges-unpunctuated", after, after.share >= before.share),
+    result("edges-punctuated-before", pBefore, true),
+    result("edges-punctuated", pAfter, pAfter.share >= 0.9),
+  ];
 }
 
 async function fixtures(ctx: EvalContext) {
@@ -528,7 +608,10 @@ export const selectionSuite: Suite = {
       }
       out.push({ id: `${name}/snapping`, pass: !snapFails.length && tried > 20, metrics: { candidates: tried }, notes: snapFails.slice(0, 4).join("; ") });
 
-      // a clip ends on a complete thought: what the model proposed goes through the real snapper with words
+      out.push(...edgeCases(name, t));
+      // a clip ends on a complete thought: what the model proposed goes through the real snapper with words, under
+      // the sentence rules production reads from this transcript
+      const rules = sentenceRules(t.words ?? [], t.language);
       for (const k of t.cases ?? []) {
         const words = t.words ?? [];
         const c = snapCandidate(
@@ -537,7 +620,7 @@ export const selectionSuite: Suite = {
           t.sceneCuts ?? [],
           { ...settings, minClipSeconds: 20, maxClipSeconds: 60 },
           t.durationSec,
-          { words },
+          { words, rules },
         );
         const bad: string[] = [];
         if (!c) bad.push("candidate dropped");
@@ -545,11 +628,11 @@ export const selectionSuite: Suite = {
           // the last word the clip plays is the last one starting before its end (what the render keeps; the end
           // pad varies, so it is not "the end minus 0.35 s")
           const lastIdx = words.findLastIndex((w) => w.start < c.endSec);
-          if (!sentenceEndAfter(words, lastIdx)) {
+          if (!sentenceEndAfter(words, lastIdx, rules)) {
             // the end pad is breathing room, not the start of what comes next: a sentence end a few words back
             // means the clip took the next sentence's first words along
             let sentEnd = lastIdx - 1;
-            while (sentEnd >= Math.max(0, lastIdx - 3) && !sentenceEndAfter(words, sentEnd)) sentEnd--;
+            while (sentEnd >= Math.max(0, lastIdx - 3) && !sentenceEndAfter(words, sentEnd, rules)) sentEnd--;
             if (sentEnd >= Math.max(0, lastIdx - 3))
               bad.push(
                 `takes the next words along: "${words
@@ -577,8 +660,15 @@ export const selectionSuite: Suite = {
   summarize(results) {
     // passRate covers the invariants; creator picks are a measurement (a miss is a finding, not a bug)
     const inv = results.filter((r) => !r.id.startsWith("creator-picks/"));
+    const edges = (variant: string) => {
+      const rs = results.filter((r) => r.id.endsWith(`/${variant}`));
+      return Number((rs.reduce((n, r) => n + Number(r.metrics?.onSentence ?? 0), 0) / (rs.length || 1)).toFixed(2));
+    };
     return {
       passRate: { value: Number((inv.filter((r) => r.pass).length / (inv.length || 1)).toFixed(2)), better: "higher" },
+      // share of clip edges on a sentence, in transcripts with and without punctuation (edgeCases)
+      unpunctuatedEdges: { value: edges("edges-unpunctuated"), better: "higher" },
+      punctuatedEdges: { value: edges("edges-punctuated"), better: "higher" },
       ...creatorSummary(results, false, "creator"),
       ...creatorSummary(results, true, "creatorLive"),
     };

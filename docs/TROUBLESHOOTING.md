@@ -79,7 +79,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw source-text <projectId> <hide\|keep\|always>` | hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text) |
 | `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]` | change the caption/hook style and fades (fadeIn, fadeOut, bumperTransition, bumperTransitionSec) of the whole project, clearing per-clip overrides and re-rendering (same as projects.updateStyle and update_project_style); values are JSON or text |
 | `reelsaw check-source <url> [--user <email\|id>] \| --minutes <n> [--user <email\|id>]` | would a project from this link (or a file this long) be accepted for the account now: its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source) |
-| `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
+| `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]… [--clear key]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw extend-project <projectId>` | clip more of a video only the start of which was processed (projects.extend and extend_project) |
 | `reelsaw upgrade-work [--user <email\|id>]` | after a plan change: the account's projects with watermarked clips and its partly processed videos (same as projects.upgradeWork and list_upgrade_work) |
@@ -146,6 +146,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
+| `reelsaw languages` | the spoken languages the transcription model in force takes, for a project's language, each with what works less well for it than for English (same as the language pickers and list_languages) |
 | `reelsaw fonts [list \| add <file> \| rm <family\|id…>]` | fonts for captions, hooks and text layers (same as Settings → System → Captions and list_fonts / add_font / remove_fonts); add reads a .ttf, .otf, .woff or .woff2 inside the container (docker compose cp it in first) |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
@@ -258,14 +259,43 @@ report.
 
 ### Disfluency/name fixes skipped for language X
 
-The project's events show "Filler and repeat removal skipped: not available for de" (or "Name fixes
-skipped …"). The transcript's detected language (`transcripts.language`) is not English. The
+The project's events show "Filler and repeat removal skipped: not available for German yet: it works
+for English only" (or "Name fixes skipped …"); `reelsaw languages` lists the same gaps per language. The transcript's detected language (`transcripts.language`) is not English. The
 disfluency word lists, the consonant-skeleton name matcher and the wav2vec2-base-960h aligner are
-English-only, so `pipeline/language.ts` (`supports(stage, lang)`) turns them off rather than let them
+English-only, so the registry in `pipeline/language.ts` (`capability(stage, lang)`) turns them off rather than let them
 find nothing, or the wrong thing, silently. Cuts you make by hand still work and use the slower
 whisper seam check instead of CTC alignment. If the language was detected wrongly (a mixed or very
-short video), set the project's language and re-run; to add a language, add its data for the stage
-and list it in `SUPPORTED` in `language.ts`.
+short video, music or a greeting in another language at the start), set the language in **Project
+defaults** (or `settings.language` when creating the project over MCP or the API) and create the
+project again: the language is sent to the transcription model in its own option (`language`, or
+`languageCode` for AssemblyAI) instead of being guessed, and becomes `transcripts.language`. To add
+a language, add its data for the stage and list it in `ONLY_FOR` in `language.ts`.
+
+### Clips start or end mid-sentence in a language without punctuation
+
+The project's events say "clip edges: the transcript has almost no punctuation, so clips start and end on
+pauses between sentences". Most STT models return Hindi (and some other languages) with no sentence
+punctuation, so the clip-edge code (`pipeline/thought.ts`, `sentenceRules`) has only pauses to go on, and
+in a script without capitals that is a weak signal: on real STT timing a third of sentence ends have no
+gap at all. The selection eval measures it (`hindi-unpunctuated/edges-unpunctuated`: about 0.4 of clip
+edges land on a sentence, against 0.97 once the transcript has its full stops). What helps: a
+transcription model that punctuates the language (try another one with `reelsaw test-model`), or
+importing subtitles that carry punctuation (`import_transcript`). Trim the edges in the clip editor
+meanwhile. Any script's full stop counts (Unicode Sentence_Terminal: "।", "。", "؟", …).
+
+### Captions show empty boxes (tofu) for a language
+
+The clip's events say "N characters in this clip have no font on this server and show as empty
+boxes", or `reelsaw languages` lists "captions: no font on this server draws <script>". libass draws
+each character with the caption font and falls back, per character, to any installed font that has
+it (uploaded caption fonts included); when none has it, it logs `fontselect: failed to find any
+fallback with glyph 0x…` and draws a box. The image ships Noto for every script the transcription
+model takes (`fonts-noto-core`, the sans faces of `fonts-noto-cjk`), and CI's `language-matrix`
+job renders each language through the image's own ffmpeg to keep it that way. On a custom image
+without them, install a font for the script or upload one under Settings → System → Captions
+(`add_font`, `reelsaw fonts add`): the registry checks uploaded fonts too and names the one that
+covers the script. Check a box by hand: `fc-list :charset=939` (the code point from the log) lists the
+fonts that have it.
 
 ## 4. Lessons: small local LLMs
 

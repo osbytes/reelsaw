@@ -12,17 +12,20 @@ import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import {
+  CLEARABLE_SETTINGS,
   defaultProjectSettings,
   projectSettingsSchema,
   SOURCE_URL_PARAM,
   userProjectDefaultsSchema,
   styleSchema,
+  type ClearableSetting,
   type ProjectSettings,
   type QuotaRefusal,
   type Style,
 } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
+import { LanguageCombobox } from "../components/LanguageCombobox";
 import { youtubeId } from "../lib/links";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { pageTitle, useDocumentTitle } from "../lib/title";
@@ -57,10 +60,16 @@ export function NewProjectPage() {
   const me = useMe();
   const uploadCtrl = useRef<AbortController | null>(null);
   const create = useMutation({
-    mutationFn: async (input: { title?: string | undefined; sourceUrl?: string | undefined; file?: File; settings: ProjectSettings }) => {
+    mutationFn: async (input: {
+      title?: string | undefined;
+      sourceUrl?: string | undefined;
+      file?: File;
+      settings: ProjectSettings;
+      clear: ClearableSetting[];
+    }) => {
       uploadCtrl.current = new AbortController();
       const uploadId = input.file ? await postUpload(input.file, setUploadPct, uploadCtrl.current.signal) : undefined;
-      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings });
+      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings, clear: input.clear });
     },
     onSettled: () => setUploadPct(null),
   });
@@ -208,6 +217,9 @@ export function NewProjectPage() {
         sourceUrl: mode === "url" ? url : undefined,
         ...(mode === "upload" && file ? { file } : {}),
         settings: { ...s, ...bumperSettings },
+        // the form starts from the saved defaults, so an optional setting left empty here was cleared on purpose
+        // ("Detect automatically", no focus): without this the server would fill it back in from the defaults
+        clear: CLEARABLE_SETTINGS.filter((k) => s[k] === undefined),
       },
       {
         onSuccess: (p) => {
@@ -536,6 +548,13 @@ export function NewProjectPage() {
                     />
                     <span className="text-xs font-normal text-ink3">Also pulled from the video title, description and tags.</span>
                   </label>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[13px] font-semibold text-ink2">Spoken language</span>
+                    <LanguageCombobox className="sm:max-w-xs" value={s.language} onValueChange={(v) => patch({ language: v })} />
+                    <span className="text-xs text-ink3">
+                      Set it when the video opens with music or another language, so the transcript is not guessed wrong.
+                    </span>
+                  </div>
                   <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
                     Extra instructions for the AI
                     <textarea

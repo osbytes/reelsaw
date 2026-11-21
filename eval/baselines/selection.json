@@ -1,5 +1,12 @@
 {
-  "updatedAt": "2026-10-18T17:15:47.763Z",
+  "updatedAt": "2026-11-21T22:33:54.269Z",
+  "acceptedRegressions": [
+    {
+      "metric": "punctuatedEdges",
+      "reason": "edge scoring now reads the first and last word played, as main's padWithinGaps keeps pads between words",
+      "at": "2026-11-21T22:33:54.269Z"
+    }
+  ],
   "cases": {
     "repair-mmss": true,
     "apollo/chunking": true,
@@ -22,7 +29,19 @@
     "creator-picks/huberman-kanoski": false,
     "creator-picks/huberman-kanoski/live": false,
     "creator-picks/lex-dhh": true,
-    "creator-picks/lex-dhh/live": true
+    "creator-picks/lex-dhh/live": true,
+    "hindi-unpunctuated/chunking": true,
+    "hindi-unpunctuated/snapping": true,
+    "hindi-unpunctuated/edges-unpunctuated-before": true,
+    "hindi-unpunctuated/edges-unpunctuated": true,
+    "hindi-unpunctuated/edges-punctuated-before": true,
+    "hindi-unpunctuated/edges-punctuated": true,
+    "hormozi-unpunctuated/chunking": true,
+    "hormozi-unpunctuated/snapping": true,
+    "hormozi-unpunctuated/edges-unpunctuated-before": true,
+    "hormozi-unpunctuated/edges-unpunctuated": true,
+    "hormozi-unpunctuated/edges-punctuated-before": true,
+    "hormozi-unpunctuated/edges-punctuated": true
   },
   "metrics": {
     "passRate": {
@@ -76,6 +95,14 @@
         "k": 2,
         "n": 3
       }
+    },
+    "unpunctuatedEdges": {
+      "value": 0.59,
+      "better": "higher"
+    },
+    "punctuatedEdges": {
+      "value": 0.93,
+      "better": "higher"
     }
   }
 }

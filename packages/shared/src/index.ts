@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
 
 /** Canonical source repository (app UI, emails, update checks). */
 export const REPO_URL = "https://github.com/osbytes/reelsaw";
@@ -745,6 +746,8 @@ export interface RenderedCaptions {
   /** the caption look that was rendered ("none" = no captions were burned in, lines still exported) */
   captions: "karaoke" | "box" | "plain" | "none";
   lines: RenderedCaptionLine[];
+  /** the spoken language the lines were grouped for (a code): how SRT / VTT export joins their words */
+  language?: string;
 }
 /** The kind of an overlay, "asset" for rows stored before text overlays existed. */
 export const overlayKind = (o: Pick<ClipOverlay, "kind">): "asset" | "text" => o.kind ?? "asset";
@@ -877,6 +880,8 @@ export function mergeTemplateBumpers(
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
+  /** characters this render drew that no font on the server has (they burned in as empty boxes); absent = none or unchecked */
+  missingGlyphs?: string[];
   /** caption words re-timed by forced alignment */
   captionTiming?: { aligned: number; total: number; medianShiftMs: number; ms: number };
   /**
@@ -957,7 +962,13 @@ export const projectSettingsSchema = styleSchema.extend({
     ),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
-  language: z.string().max(10).optional().describe("Spoken language code (e.g. en); unset = detected"),
+  language: z
+    .string()
+    .max(10)
+    .optional()
+    .describe(
+      "Spoken language code (e.g. en, from list_languages; an English name is stored as its code), sent to the transcription model when it takes it; unset = detected",
+    ),
   /** "Find clips about …": restricts selection to this topic and adds a relevance score. */
   focus: z.string().max(300).optional().describe("Only pick clips about this topic (max 300 chars)"),
   instructions: z.string().max(2000).optional().describe("Free-text guidance for picking and titling clips (max 2000 chars)"),
@@ -1097,6 +1108,8 @@ export const createProjectInputSchema = z.object({
   sourceUrl: z.url({ protocol: /^https?$/, message: "Use a link that starts with http:// or https://" }).optional(),
   uploadId: z.string().optional(),
   settings: projectSettingsPatchSchema.optional(),
+  /** Settings your project defaults give that this project leaves unset (language: detect; focus: none), as in an update. */
+  clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 
@@ -1234,6 +1247,8 @@ export const PROJECT_EVENT_TYPES = [
   "source.section_fetched",
   /** the full-quality window could not be fetched for good (the video is gone): the clip rendered from the preview copy */
   "clip.preview_source",
+  /** a stage did less for the video's language than for English, and says how (apps/server/src/pipeline/language.ts) */
+  "language.degraded",
   /** no progress for a long time on a running clip/stage (watchdog) */
   "job.stalled",
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
@@ -1349,6 +1364,8 @@ export const projectEventSchemas = {
     stitched: z.boolean().optional(),
   }),
   "clip.preview_source": event({ clipId: z.string(), height: z.number().int(), reason: z.string() }),
+  /** `stage` is the registry's (captionFont, sentenceBoundaries, …); `reason` the sentence shown; clipId when one clip's render */
+  "language.degraded": event({ stage: z.string(), language: z.string(), reason: z.string(), clipId: z.string().optional() }),
   "job.stalled": event({
     status: z.string(),
     idleMinutes: z.number(),
@@ -1434,15 +1451,27 @@ export const emphasisKey = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}'
  * Group clip-relative words into caption lines. Readability rules (subtitle research, adapted for
  * narrow 9:16 frames): at most `maxWords` words and `maxChars` characters (≈ two short lines), at most
  * `maxSeconds` on screen, break after sentence ends and (for 3+ words) after commas, never across a
- * pause longer than 0.8 s.
+ * pause longer than 0.8 s. `lang` sets how words join and how wide they are (language-profile.ts): a script
+ * written without spaces (Japanese, Thai) joins its words without them, where a word is a short token, so the
+ * width of the text and the time decide; full-width characters count double; every script's full stop and comma
+ * count (Unicode's Sentence_Terminal and Terminal_Punctuation, not just ". , ?").
  */
-export function groupCaptionLines<W extends { text: string; start: number; end: number }>(words: W[], maxWords = 4, maxSeconds = 1.8, maxChars = 28): W[][] {
+export function groupCaptionLines<W extends { text: string; start: number; end: number }>(
+  words: W[],
+  maxWords = 4,
+  maxSeconds = 1.8,
+  maxChars = 28,
+  lang?: string | null,
+): W[][] {
+  const gapWidth = wordJoiner(lang).length;
+  const wordCap = gapWidth ? maxWords : maxWords * 2;
   const lines: W[][] = [];
   let cur: W[] = [];
   let chars = 0;
   for (const w of words) {
     const first = cur[0];
-    const tooLong = first && (cur.length >= maxWords || w.end - first.start > maxSeconds || chars + 1 + w.text.length > maxChars);
+    const width = textWidth(w.text);
+    const tooLong = first && (cur.length >= wordCap || w.end - first.start > maxSeconds || chars + gapWidth + width > maxChars);
     const gap = cur.length && w.start - cur[cur.length - 1]!.end > 0.8;
     if (tooLong || gap) {
       lines.push(cur);
@@ -1450,8 +1479,8 @@ export function groupCaptionLines<W extends { text: string; start: number; end: 
       chars = 0;
     }
     cur.push(w);
-    chars += (chars ? 1 : 0) + w.text.length;
-    if ((/[.!?]$/.test(w.text) && cur.length >= 2) || (/[,;:]$/.test(w.text) && cur.length >= 3)) {
+    chars += (chars ? gapWidth : 0) + width;
+    if ((endsSentence(w.text) && cur.length >= 2) || (endsClause(w.text) && cur.length >= 3)) {
       lines.push(cur);
       cur = [];
       chars = 0;
@@ -1878,3 +1907,6 @@ export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
 export * from "./attribution.js";
+export * from "./languages.js";
+export * from "./whisper-languages.js";
+export * from "./language-profile.js";

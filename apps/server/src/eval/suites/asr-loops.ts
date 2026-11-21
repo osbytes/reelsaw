@@ -101,7 +101,7 @@ export const asrLoopsSuite: Suite = {
 };
 
 function grade(c: Case): CaseResult {
-  const input = c.segments ? toWords(c.segments, { collapseLoops: false }) : expand(c.words ?? []);
+  const input = c.segments ? toWords(c.segments, { collapseLoops: false, language: undefined }) : expand(c.words ?? []);
   const result = collapseDecoderLoopsWithStats(input);
   const out = result.words;
   const flags = flagsFromCollapse(input, result);
