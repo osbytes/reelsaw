@@ -36,6 +36,7 @@ export const INVALIDATION: Record<ProjectEventType, Rule> = {
   "clip.cut_unverified": ["project"],
   "source.section_fetched": [],
   "clip.preview_source": ["project"],
+  "language.degraded": [],
   "job.stalled": [],
   "source.expired": ["project"],
   "source.partial": ["project", "list"],

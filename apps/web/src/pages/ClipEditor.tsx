@@ -73,6 +73,7 @@ export function ClipEditorPage() {
         srcH={p.height ?? 1080}
         settings={p.settings}
         words={t.words}
+        language={t.language ?? p.transcript?.language ?? null}
         rawWords={t.rawWords ?? t.words}
         segments={t.segments}
         flags={t.flags ?? []}

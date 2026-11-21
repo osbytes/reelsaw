@@ -3,8 +3,9 @@
  * Pure functions, no I/O. Times are seconds.
  */
 import type { TranscriptSegment, Word } from "./index.js";
+import { joinWords, languageProfile, segmentWords } from "./language-profile.js";
 
-/** One line of captions to write; `text` defaults to the words joined by spaces. */
+/** One line of captions to write; `text` defaults to the words joined as their language writes them (joinWords). */
 export interface CaptionLine {
   start: number;
   end: number;
@@ -26,8 +27,14 @@ export interface ParsedCues {
 
 export const MAX_CUES = 50_000;
 
-const lineText = (l: CaptionLine) =>
-  (l.text ?? (l.words ?? []).map((w) => w.text).join(" "))
+const lineText = (l: CaptionLine, lang?: string | null) =>
+  (
+    l.text ??
+    joinWords(
+      (l.words ?? []).map((w) => w.text),
+      lang,
+    )
+  )
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((s) => s.trim())
@@ -48,11 +55,11 @@ function stamp(sec: number, sep: "," | "."): string {
 const endOf = (l: CaptionLine) => (l.end > l.start ? l.end : l.start + 0.001);
 
 /** Lines as an SRT file. Lines with no text are left out. */
-export function toSrt(lines: CaptionLine[]): string {
+export function toSrt(lines: CaptionLine[], opts: { lang?: string | null | undefined } = {}): string {
   const out: string[] = [];
   let n = 0;
   for (const l of lines) {
-    const text = lineText(l);
+    const text = lineText(l, opts.lang);
     if (!text) continue;
     n++;
     out.push(`${n}\n${stamp(l.start, ",")} --> ${stamp(endOf(l), ",")}\n${text}\n`);
@@ -66,15 +73,17 @@ const vttEscape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").
  * Lines as a WebVTT file. With `wordTimes` each word after the first carries a timestamp tag
  * (`word <00:00:01.250>next`), the karaoke form players and editors highlight word by word.
  */
-export function toVtt(lines: CaptionLine[], opts: { wordTimes?: boolean } = {}): string {
+export function toVtt(lines: CaptionLine[], opts: { wordTimes?: boolean; lang?: string | null | undefined } = {}): string {
   const out: string[] = ["WEBVTT\n"];
   for (const l of lines) {
-    const text = lineText(l);
+    const text = lineText(l, opts.lang);
     if (!text) continue;
     let body = vttEscape(text);
     const words = (l.words ?? []).filter((w) => w.text.trim());
     if (opts.wordTimes && words.length) {
-      body = words.map((w, i) => (i === 0 ? vttEscape(w.text.trim()) : `<${stamp(Math.max(w.start, l.start), ".")}>${vttEscape(w.text.trim())}`)).join(" ");
+      body = words
+        .map((w, i) => (i === 0 ? vttEscape(w.text.trim()) : `<${stamp(Math.max(w.start, l.start), ".")}>${vttEscape(w.text.trim())}`))
+        .join(opts.lang && !languageProfile(opts.lang).spaced ? "" : " ");
     }
     out.push(`${stamp(l.start, ".")} --> ${stamp(endOf(l), ".")}\n${body}\n`);
   }
@@ -196,14 +205,12 @@ export function parseCaptions(text: string, format: "auto" | "srt" | "vtt" = "au
 
 // ---------- cues → transcript ----------
 
-const CJK = /[぀-ヿ㐀-鿿豈-﫿]/;
-const CJK_LANGUAGES = /^(zh|ja|yue)/i;
-
-/** Whitespace-separated words; CJK text has none, so each character is a word. */
+/**
+ * A cue's words, by its language's own rules (language-profile.ts `segmentWords`: a dictionary for Japanese,
+ * Chinese and Thai, which have no spaces between words). Undetected: by the text's own script.
+ */
 function tokens(text: string, language: string | undefined): string[] {
-  const split = text.split(/\s+/).filter(Boolean);
-  if (!(language && CJK_LANGUAGES.test(language)) && !CJK.test(text)) return split;
-  return split.flatMap((t) => (CJK.test(t) ? (t.match(/[぀-ヿ㐀-鿿豈-﫿]|[^぀-ヿ㐀-鿿豈-﫿]+/g) ?? [t]) : [t]));
+  return segmentWords(text, language ?? null);
 }
 
 /**
@@ -219,7 +226,7 @@ export function cuesToTranscript(cues: Cue[], opts: { language?: string | undefi
   for (const cue of cues) {
     const toks = tokens(cue.text, opts.language);
     if (!toks.length) continue;
-    segments.push({ text: toks.join(" "), start: cue.start, end: cue.end });
+    segments.push({ text: joinWords(toks, opts.language), start: cue.start, end: cue.end });
     const from = cue.start >= lastEnd || lastEnd >= cue.end ? cue.start : lastEnd;
     const span = cue.end - from;
     const total = toks.reduce((n, t) => n + Math.max(1, t.length), 0);

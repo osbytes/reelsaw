@@ -23,7 +23,7 @@ import { clipPcm } from "../audio/pcm.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
-import { normalizeToken } from "@reelsaw/shared";
+import { normalizeToken, upperCase } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import {
   textHeavyRuns,
@@ -77,7 +77,8 @@ import {
   type ClipAudio,
 } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
-import { ensureFontsDir, loadFontState, pickFont } from "../fonts.js";
+import { ensureFontsDir, loadFontState, mergeGlyphs, missingGlyphs, pickFont, systemGlyphs, uploadedGlyphs } from "../fonts.js";
+import { languageCode } from "./language.js";
 import type { Logger } from "../log.js";
 import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
 import {
@@ -733,9 +734,26 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const seams = mergeSeamRuns(
     segments.map((sg) => ({ start: plan.mapTime(sg.start), end: plan.mapTime(sg.end), y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH) })),
   );
+  const textLayers = layers.filter((l): l is TextLayer => l.kind === "text");
+  await fontGapEvent(svc, {
+    projectId,
+    clipId,
+    language: transcript?.language,
+    fontState,
+    families: [captionFont, ...textLayers.map((l) => pickFont(fontsAvailable, l.font, captionFont)), ...(watermark.on ? [instanceFont] : [])],
+    // what is drawn, as it is drawn: the hook and upper-cased captions in their language's capitals
+    text: [
+      ...words.map((w) => (style.uppercase ? upperCase(w.text, transcript?.language) : w.text)),
+      style.showHook && clip.hook ? upperCase(clip.hook, transcript?.language) : "",
+      ...textLayers.map((l) => l.text),
+      watermark.on ? watermark.text : "",
+    ].join(" "),
+    log,
+  });
   await fs.writeFile(
     assPath,
     buildAss(words, {
+      language: transcript?.language,
       width,
       height,
       font: captionFont,
@@ -745,12 +763,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       hook: clip.hook,
       emphasis: clip.emphasis ?? [],
       // a text layer's own font goes through the same fallback, to the clip's caption font
-      texts: textOverlayEvents(
-        layers.filter((l): l is TextLayer => l.kind === "text"),
-        clip.startSec,
-        duration,
-        plan.mapTime,
-      ).map((t) => (t.font ? { ...t, font: pickFont(fontsAvailable, t.font, captionFont) } : t)),
+      texts: textOverlayEvents(textLayers, clip.startSec, duration, plan.mapTime).map((t) =>
+        t.font ? { ...t, font: pickFont(fontsAvailable, t.font, captionFont) } : t,
+      ),
       ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}),
     }),
     "utf8",
@@ -1121,7 +1136,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .for("update");
     if (!cur || cur.gen !== gen) return false;
     // the caption lines as burned in, in the video's own seconds, so an SRT / VTT export matches the file
-    const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.transitions.bodyStartSec);
+    const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.transitions.bodyStartSec, undefined, transcript?.language);
     await u.db
       .update(schema.clips)
       .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermarkShown, error: null, diagnostics, captions, updatedAt: new Date() })
@@ -1732,4 +1747,43 @@ export function mergeRanges(ranges: Array<{ start: number; end: number }>): Arra
     else out.push({ ...r });
   }
   return out;
+}
+
+/**
+ * Characters this clip draws that no font can (installed ones, which libass falls back to from any caption font, and
+ * the uploaded fonts the clip uses): they would burn in as empty boxes, so the render says so in the activity feed
+ * (pipeline/language.ts, captionFont) instead of shipping them silently. Unknown fonts (no fontconfig) say nothing.
+ */
+async function fontGapEvent(
+  svc: Services,
+  o: {
+    projectId: string;
+    clipId: string;
+    language: string | null | undefined;
+    fontState: Awaited<ReturnType<typeof loadFontState>>;
+    families: string[];
+    text: string;
+    log: Logger;
+  },
+) {
+  const system = await systemGlyphs();
+  if (!system) return;
+  const used = new Set(o.families.map((f) => f.toLowerCase()));
+  const uploaded = await uploadedGlyphs(
+    svc,
+    o.fontState.uploaded.filter((r) => used.has(r.family.toLowerCase())),
+  );
+  const missing = missingGlyphs(mergeGlyphs(system, ...uploaded.map((u) => u.glyphs)), o.text);
+  if (!missing.length) return;
+  const shown = missing.slice(0, 8).join(" ") + (missing.length > 8 ? " …" : "");
+  o.log.warn({ missing: missing.length, sample: shown }, "characters with no font: they render as empty boxes");
+  await svc.events
+    .emit("language.degraded", {
+      projectId: o.projectId,
+      clipId: o.clipId,
+      stage: "captionFont",
+      language: languageCode(o.language) ?? "und",
+      reason: `${missing.length === 1 ? "1 character" : `${missing.length} characters`} in this clip have no font on this server and show as empty boxes (${shown}). An admin can add a font that has them (Settings → System → Captions).`,
+    })
+    .catch(() => {});
 }

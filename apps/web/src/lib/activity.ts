@@ -1,4 +1,4 @@
-import { formatTime, type ProjectEvent, plural } from "@reelsaw/shared";
+import { formatTime, languageLabel, type ProjectEvent, plural } from "@reelsaw/shared";
 import { summarizeError } from "./errors";
 
 const STAGE: Record<string, string> = {
@@ -119,6 +119,8 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       const how = p.stitched ? `, joining ${Number(p.downloadedSec ?? 0).toFixed(0)} s of new video to what was already fetched` : "";
       return { text: `Fetched ${span} of the source at ${p.height}p${n}${how}`, tone: "ok" };
     }
+    case "language.degraded":
+      return { text: `${languageLabel(String(p.language))}: ${p.reason}`, tone: "warn" };
     case "clip.preview_source":
       return { text: `The full-quality video couldn't be fetched, so a clip rendered from the ${p.height}p preview: ${p.reason}`, tone: "warn" };
     case "project.deleted":

@@ -483,8 +483,8 @@ export async function createExportZip(
         archive.append(JSON.stringify(c.tiktok, null, 2), { name: `clips/${c.base}.tiktok.json` });
         // the captions as rendered (times include the intro), for platforms that take a caption file; clips rendered before this existed have none
         if (clip.captions) {
-          archive.append(toSrt(clip.captions.lines), { name: `clips/${c.base}.srt` });
-          archive.append(toVtt(clip.captions.lines), { name: `clips/${c.base}.vtt` });
+          archive.append(toSrt(clip.captions.lines, { lang: clip.captions.language }), { name: `clips/${c.base}.srt` });
+          archive.append(toVtt(clip.captions.lines, { lang: clip.captions.language }), { name: `clips/${c.base}.vtt` });
         }
       }
       if (stopped) return;

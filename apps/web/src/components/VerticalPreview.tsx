@@ -19,6 +19,9 @@ import {
   tileCrop,
   defaultStyle,
   captionYAt,
+  languageProfile,
+  upperCase,
+  wordJoiner,
   type ContentRegion,
   type Style,
   type SourceOverlay,
@@ -167,6 +170,9 @@ interface Props {
   framing: Framing;
   style: Style;
   words: PreviewWord[];
+  /** the spoken language (a code), as the renderer reads it: words join without spaces in Japanese or Thai, capitals
+   * are the language's own (Turkish İ), right-to-left scripts lay out right to left */
+  language?: string | null;
   /** split / stack stretches on the words' clock: caption lines there sit on the seam, as the renderer places them */
   seams?: SeamRun[];
   /** clip-relative playback time (drives karaoke + hook visibility) */
@@ -368,6 +374,7 @@ export function VerticalPreview({
   framing,
   style,
   words,
+  language,
   seams,
   time,
   hook,
@@ -458,8 +465,8 @@ export function VerticalPreview({
   }, [source, srcW, srcH]);
 
   const lines = useMemo(
-    () => groupCaptionLines(words, style.wordsPerLine, lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize)),
-    [words, style.wordsPerLine, style.captionSize],
+    () => groupCaptionLines(words, style.wordsPerLine, lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize), language),
+    [words, style.wordsPerLine, style.captionSize, language],
   );
   const lineIdx = lines.findIndex((l, i) => time >= l[0]!.start && time <= lineDisplayEnd(lines, i));
   const line = lineIdx >= 0 ? lines[lineIdx] : alwaysShowHook ? lines[0] : undefined;
@@ -818,7 +825,7 @@ export function VerticalPreview({
                   }}
                 />
               ) : (
-                hook!.toUpperCase()
+                upperCase(hook!, language)
               )}
             </div>
           );
@@ -856,11 +863,12 @@ export function VerticalPreview({
                   textShadow: `0 ${capPx * 0.04}px ${capPx * 0.06}px rgba(0,0,0,0.5)`,
                 }),
           }}
+          dir={language ? languageProfile(language).direction : undefined}
           onPointerDown={(e) => onPointerDown("caption", e)}
           title={draggable ? "Drag to move captions (hold Alt to skip centre snapping)" : undefined}
         >
           {line.map((w, i) => {
-            const t = style.uppercase ? w.text.toUpperCase() : w.text;
+            const t = style.uppercase ? upperCase(w.text, language) : w.text;
             const active = style.captions === "karaoke" && i === activeIdx;
             const isEm = em.has(emphasisKey(w.text));
             return (
@@ -870,7 +878,7 @@ export function VerticalPreview({
                 >
                   {t}
                 </span>
-                {i < line.length - 1 ? " " : ""}
+                {i < line.length - 1 ? wordJoiner(language) : ""}
               </span>
             );
           })}

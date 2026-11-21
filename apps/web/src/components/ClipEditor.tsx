@@ -180,6 +180,8 @@ interface Props {
   settings: ProjectSettings;
   /** cleaned words (what captions say) */
   words: Word[];
+  /** the transcript's language (a code): how the preview joins, upper-cases and lays out captions */
+  language?: string | null;
   /** as-heard words, for the transcript and the hatched cuts on the timeline */
   rawWords: Word[];
   segments: TranscriptSegment[];
@@ -717,6 +719,7 @@ export function ClipEditor(props: Props) {
     srcH,
     settings,
     words,
+    language,
     rawWords,
     segments,
     flags,
@@ -2532,6 +2535,7 @@ export function ClipEditor(props: Props) {
           srcH={srcH}
           style={style}
           words={clipWords}
+          language={language ?? null}
           seams={seams}
           hook={hook}
           emphasis={emphasis}

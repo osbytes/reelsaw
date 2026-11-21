@@ -88,6 +88,7 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "clip.overlay_skipped": "warn",
   "clip.cut_unverified": "warn",
   "clip.preview_source": "warn",
+  "language.degraded": "warn",
   "job.stalled": "warn",
   // account events default to info
   "user.flagged": "warn",
