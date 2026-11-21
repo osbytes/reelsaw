@@ -1,5 +1,19 @@
 # @reelsaw/server
 
+## 0.46.0
+
+### Minor Changes
+
+- [#322](https://github.com/osbytes/reelsaw/pull/322) [`b40f202`](https://github.com/osbytes/reelsaw/commit/b40f2020e31eaf1e264dd93605da7766c279fa11) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The MCP server now speaks the 2026-07-28 protocol as well as the 2025 revisions. Agents and clients on the new protocol were refused with "Unsupported protocol version"; they now connect to `/api/mcp` and to `reelsaw mcp` (stdio) like older clients do.
+
+### Patch Changes
+
+- [#321](https://github.com/osbytes/reelsaw/pull/321) [`1262eea`](https://github.com/osbytes/reelsaw/commit/1262eea0675780370b480a953056f7041bac5e0a) Thanks [@dillonstreator](https://github.com/dillonstreator)! - An audio file with cover art (a podcast episode, a music track) now makes clips with the art as the picture. Before, every clip of such a source came out as sound alone and failed on its thumbnail, retry after retry. A file with sound and no picture at all is now refused when it is added, with a message saying what to upload instead, rather than failing later at render.
+
+- [#323](https://github.com/osbytes/reelsaw/pull/323) [`23085df`](https://github.com/osbytes/reelsaw/commit/23085df2dc6a3a6c9a2e332452fe1ebac0d87e25) Thanks [@dillonstreator](https://github.com/dillonstreator)! - An upload cut off by the browser or the network (a dropped connection, a closed tab) is now logged as a warning, "upload aborted by the client", instead of an error, so it no longer shows up as an error report.
+
+- [#325](https://github.com/osbytes/reelsaw/pull/325) [`bd02f65`](https://github.com/osbytes/reelsaw/commit/bd02f65c1361132d01c3a706178543df1be96974) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The container gives the app a writable home directory. It used to keep root's, which the app's user cannot write, so every ffmpeg run that drew captions printed a "Fontconfig error: No writable cache directories" line per font lookup, filling the start of render error messages and hiding the real cause, and yt-dlp could not keep its cache between downloads.
+
 ## 0.45.3
 
 ### Patch Changes
