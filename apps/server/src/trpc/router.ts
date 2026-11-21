@@ -73,6 +73,7 @@ import {
   updateClipInput,
 } from "../clips/service.js";
 import { peekUrlMeta } from "../projects/peek.js";
+import { recordUpgradeProject, startUpgradeWork, startUpgradeWorkInput, upgradeWork } from "../projects/after-upgrade.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
 import { flagCounts, listUsers, userGroups } from "../accounts-list.js";
@@ -625,8 +626,19 @@ const headRouter = router({
     get: protectedProcedure.query(({ ctx }) => billingOf(ctx.svc).stateFor(ctx.user)),
     /** A Stripe Checkout URL for a plan (or, with a live subscription, the Billing Portal's confirm-change page). Open it in a browser. */
     checkout: protectedProcedure
-      .input(z.object({ plan: z.string().min(1).max(40), interval: z.enum(["month", "year"]).default("month") }))
-      .mutation(({ ctx, input }) => billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval)),
+      .input(
+        z.object({
+          plan: z.string().min(1).max(40),
+          interval: z.enum(["month", "year"]).default("month"),
+          fromProjectId: z.string().min(1).max(100).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const r = await billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval);
+        // the project the upgrade starts from is finished and rendered without the watermark by itself (projects/after-upgrade.ts)
+        if (input.fromProjectId) await recordUpgradeProject(ctx.svc.database.db, ctx.user.id, input.fromProjectId);
+        return r;
+      }),
     /** The Stripe Billing Portal (invoices, card, cancel at period end). */
     portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
   }),
@@ -1596,6 +1608,14 @@ const restRouter = router({
     retryMany: protectedProcedure
       .input(z.object({ ids: projectIdsInput }))
       .mutation(({ ctx, input }) => retryProjects(ctx.svc, { id: ctx.user.id, admin: false }, input.ids)),
+
+    /** After a plan change: the other projects it could finish or render without the watermark (the welcome dialog, the Billing page). */
+    upgradeWork: protectedProcedure.query(({ ctx }) => upgradeWork(ctx.svc, ctx.user.id)),
+
+    /** Start the picked ones of `upgradeWork`: clip the rest of `finish`, re-render the watermarked clips of `rerender`. */
+    startUpgradeWork: protectedProcedure
+      .input(z.object(startUpgradeWorkInput))
+      .mutation(({ ctx, input }) => startUpgradeWork(ctx.svc, { id: ctx.user.id, admin: false }, input)),
 
     /** The Projects selection bar: re-render every finished or failed clip of several projects. */
     rerenderMany: protectedProcedure

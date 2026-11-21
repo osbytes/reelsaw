@@ -391,8 +391,11 @@ them), so a single-user box stays as it is:
   plan, else the UTC calendar month. A video longer than the account's minutes cover is not refused: Reelsaw
   processes its start (whole 10-minute transcription chunks; a Free account's long first video gets its first
   60 minutes) and the project says how much is left. "Clip the rest" (`extend_project`, `reelsaw
-  extend-project`) processes more when the minutes are there, and an upgrade or a raised limit does it by
-  itself. It picks up where it stopped: the transcript gets the new words appended (fixes and decisions on the
+  extend-project`) processes more when the minutes are there. An upgrade started from a project (its
+  offer or its Download) finishes that project and renders its clips without the watermark by itself; the other
+  projects wait for the account's pick in the welcome dialog after checkout or on the Billing page
+  (`list_upgrade_work` / `start_upgrade_work`, `reelsaw upgrade-work` / `start-upgrade-work`), so a plan change
+  never spends the new minutes on videos nobody asked for. It picks up where it stopped: the transcript gets the new words appended (fixes and decisions on the
   part already done stay), and new clips are picked only in the new part, around the clips you have. An
   extension's minutes count in the period it runs in. Only a video of which not even 10 minutes fit is refused:
   a link whose site reports its length when the project is created (with the upgrade offer), otherwise before
@@ -601,6 +604,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `extend_project` | Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). |
+| `list_upgrade_work` | After a plan change: your other projects it could improve. |
+| `start_upgrade_work` | Start the picked projects from list_upgrade_work: finish clips the rest of each video as far as the minutes go (like extend_project), rerender renders each project's watermarked clips again without the watermark. |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `retry_projects` | Resume several failed projects, each from its furthest completed stage (as retry_project). |
 | `rerender_projects` | Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), for instance after a change to your default intro/outro. |
@@ -710,6 +715,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw extend-project <projectId>` | clip more of a video only the start of which was processed (projects.extend and extend_project) |
+| `reelsaw upgrade-work [--user <email\|id>]` | after a plan change: the account's projects with watermarked clips and its partly processed videos (same as projects.upgradeWork and list_upgrade_work) |
+| `reelsaw start-upgrade-work [--rerender id,id] [--finish id,id]` | re-render those projects' watermarked clips without it and clip the rest of those videos (same as projects.startUpgradeWork and start_upgrade_work) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
 | `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
 | `reelsaw delete-project <projectId> [--forget-decisions]` | delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged |

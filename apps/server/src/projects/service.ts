@@ -75,7 +75,7 @@ import { getLayerTemplate } from "../library/templates.js";
 import { clipDecisions, forgetDecisions, recordDecisions } from "../decisions/service.js";
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
-const WORKING = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const;
+export const WORKING = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const;
 const IN_FLIGHT = ["preparing", "pending", "rendering"] as const;
 
 /** Who is asking: the owner, an admin (any project), or the operator CLI (null). */
@@ -1161,7 +1161,7 @@ export interface ExtendResult {
  * whole video, when no moments were picked yet). The extension's minutes are a ledger row dated now.
  * The project may be idle or rendering (its renders go on); a project still in its first run is restarted from
  * transcription with the new limit. tRPC `projects.extend`, MCP `extend_project`, `reelsaw extend-project` and the
- * handler that follows an upgrade (`finishPartialProjects`) call this.
+ * handler that follows an upgrade for the project it started from (after-upgrade.ts `finishPartialWork`) call this.
  */
 export async function extendProject(svc: Services, actor: Actor, projectId: string, o: { automatic?: boolean } = {}): Promise<ExtendResult> {
   const chunkSec = svc.config.TRANSCRIBE_CHUNK_SECONDS;
@@ -1222,37 +1222,6 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
   const { userId: _u, ...out } = result;
   return out;
 }
-
-/**
- * After a plan or limits change: process more of the account's partly processed videos, newest first, as far as the
- * minutes now go (one page; each extension takes its minutes before the next is asked). Stops at the first refusal:
- * the minutes are used up. A busy project is extended too (extendProject restarts or joins its run).
- */
-export async function finishPartialProjects(svc: Services, userId: string): Promise<{ extended: number }> {
-  const rows = await svc.database.db
-    .select({ id: schema.projects.id })
-    .from(schema.projects)
-    .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt), isNotNull(schema.projects.sourceLimitSec)))
-    .orderBy(sql`${schema.projects.updatedAt} desc`)
-    .limit(PARTIAL_PAGE);
-  let extended = 0;
-  for (const r of rows) {
-    try {
-      await extendProject(svc, null, r.id, { automatic: true });
-      extended++;
-    } catch (err) {
-      if (err instanceof QuotaError) break;
-      // gone or already whole meanwhile: the next one
-      if (err instanceof TRPCError && (err.code === "NOT_FOUND" || err.code === "BAD_REQUEST")) continue;
-      throw err;
-    }
-  }
-  if (extended)
-    svc.log.child({ module: "projects", userId }).info({ extended, page: PARTIAL_PAGE }, "processing more of partly processed videos after a plan change");
-  return { extended };
-}
-/** How many partly processed videos one plan change resumes; the rest keep their "Clip the rest" button. */
-const PARTIAL_PAGE = 20;
 
 /** Resume a project from its furthest completed stage (the Retry button, retry_project, `reelsaw retry`). */
 export async function retryOwnedProject(svc: Services, actor: Actor, projectId: string) {

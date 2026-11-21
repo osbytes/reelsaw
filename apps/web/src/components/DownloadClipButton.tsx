@@ -1,12 +1,14 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { upgradeFromProject } from "@reelsaw/shared";
 import { useMe } from "../lib/account";
 import { track } from "../lib/telemetry";
 import { Modal } from "./ui";
 
 /**
  * Downloading a finished clip. When the clip carries the watermark and a plan takes it off, the download asks first:
- * the moment someone downloads is when the watermark matters to them. Upgrading re-renders the account's watermarked
- * clips without it by itself (the server's `rerenderWithoutWatermark` handler), so the offer can promise that.
+ * the moment someone downloads is when the watermark matters to them. The link carries the clip's project
+ * (`upgradeFromProject`), and an upgrade re-renders that project's clips without it by itself (the server's
+ * `rerenderWithoutWatermark` handler); the welcome dialog after checkout offers the account's other projects.
  * Every Download goes through `downloadClip` (the clip card's button, the ⌘K palette's action), and one
  * `DownloadOfferHost` (mounted in App) asks; `upgrade_offer_shown` / `upgrade_clicked` carry the placement it came from.
  */
@@ -62,14 +64,18 @@ export function DownloadOfferHost() {
   return (
     <Modal open onOpenChange={(o) => !o && setAsking(null)} title="Download without the watermark?">
       <p className="text-[13px] leading-snug text-ink2">
-        This clip carries a small {me.data?.watermark?.text ? `“${me.data.watermark.text}” ` : ""}watermark. Upgrade and Reelsaw renders your clips again
-        without it, by itself; download them clean when they finish.
+        This clip carries a small {me.data?.watermark?.text ? `“${me.data.watermark.text}” ` : ""}watermark. Upgrade and Reelsaw renders this project's clips
+        again without it, by itself; you choose which other projects to clean up after checkout.
       </p>
       <div className="flex flex-wrap justify-end gap-2">
         <a className="btn-ghost py-1.5 text-xs no-underline" href={hrefOf(ask.clip)} download="" onClick={() => setAsking(null)}>
           Download with watermark
         </a>
-        <a className="btn-primary py-1.5 text-xs no-underline" href={offer.href} onClick={() => track("upgrade_clicked", props)}>
+        <a
+          className="btn-primary py-1.5 text-xs no-underline"
+          href={upgradeFromProject(offer.href, ask.projectId)}
+          onClick={() => track("upgrade_clicked", props)}
+        >
           {offer.label}
         </a>
       </div>

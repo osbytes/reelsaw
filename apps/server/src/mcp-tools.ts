@@ -23,6 +23,7 @@ import {
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
+import { startUpgradeWorkInput } from "./projects/after-upgrade.js";
 import {
   FAILURE_CAUSES,
   FONT_FILE_EXTS,
@@ -523,8 +524,21 @@ export const TOOLS = {
   extend_project: {
     title: "Clip the rest of a video",
     description:
-      "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade does this by itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
+      "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade via billing_checkout_url fromProjectId does it itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
     inputSchema: { id: projectId() },
+  },
+  list_upgrade_work: {
+    title: "List work an upgrade unlocks",
+    description:
+      "After a plan change: your other projects it could improve. Returns { watermarkOn, upgradeProject, rerender, finish, minutesRoomSec }: rerender = projects with watermarked clips (empty while your renders still carry it), finish = videos only partly processed (remainingSec; busy = working), upgradeProject = the one the upgrade was for (handled by itself), minutesRoomSec = video your minutes cover now (null = no cap). Newest 50 of each, with totals. Nothing starts until start_upgrade_work.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  start_upgrade_work: {
+    title: "Start work an upgrade unlocks",
+    description:
+      "Start the picked projects from list_upgrade_work: finish clips the rest of each video as far as the minutes go (like extend_project), rerender renders each project's watermarked clips again without the watermark. Each project on its own, so one refusal (minutes, the hour's re-render limit) leaves the others started. Returns { rerenderedClips, extendedProjects, failed, sentence, results: [{ id, action, ok, error? }] }; then wait_for_project.",
+    inputSchema: startUpgradeWorkInput,
   },
   retry_project: {
     title: "Retry project",
@@ -1002,6 +1016,12 @@ export const TOOLS = {
     inputSchema: {
       plan: z.string().min(1).max(40).describe("Plan name from get_billing (e.g. creator, pro)"),
       interval: z.enum(["month", "year"]).default("month").describe("Billing interval: month (default) or year"),
+      fromProjectId: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("The project the upgrade is for: once the plan changes it is finished and rendered without the watermark by itself"),
     },
   },
   list_transcript_flags: {

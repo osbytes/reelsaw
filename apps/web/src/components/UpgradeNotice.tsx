@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import type { PartialSource } from "@reelsaw/shared";
+import { upgradeFromProject, type PartialSource } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { track } from "../lib/telemetry";
 import { Pending } from "./ui";
@@ -12,8 +12,9 @@ type Offer = { label: string; href: string };
  * One quiet line above a project's clips for what a plan would change about them: only the start of the video was
  * clipped (the account's minutes covered that much) and/or the finished clips carry the watermark. One upgrade link
  * names every benefit that applies and the plan's price, so two offers never stack. "Clip the rest" shows when the
- * minutes cover more now (projects.extend, the same service as MCP extend_project); upgrading finishes the video and
- * re-renders the clips without the watermark by itself. `upgrade_offer_shown` / `upgrade_clicked` keep placement
+ * minutes cover more now (projects.extend, the same service as MCP extend_project). The link carries this project
+ * (`upgradeFromProject`): upgrading from here finishes this video and re-renders its clips without the watermark by
+ * itself, and the welcome dialog after checkout offers the other projects. `upgrade_offer_shown` / `upgrade_clicked` keep placement
  * "partial_project" (or "watermark" when that is the only reason), with `watermark` saying whether it was part of it.
  */
 export function UpgradeNotice({
@@ -64,7 +65,11 @@ export function UpgradeNotice({
           {upgrade && (
             <>
               {facts.length > 0 && ". "}
-              <a href={upgrade.href} className="font-semibold text-acc-text no-underline" onClick={() => track("upgrade_clicked", props)}>
+              <a
+                href={upgradeFromProject(upgrade.href, projectId)}
+                className="font-semibold text-acc-text no-underline"
+                onClick={() => track("upgrade_clicked", props)}
+              >
                 Upgrade to {benefits} →
               </a>{" "}
               <span className="text-ink3">{upgrade.label}</span>
@@ -86,7 +91,7 @@ export function UpgradeNotice({
           </button>
         )}
       </div>
-      {extend.error && <QuotaNotice message={extend.error.message} quota={quota} />}
+      {extend.error && <QuotaNotice message={extend.error.message} quota={quota} projectId={projectId} />}
     </div>
   );
 }

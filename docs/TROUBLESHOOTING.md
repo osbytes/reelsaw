@@ -82,6 +82,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw extend-project <projectId>` | clip more of a video only the start of which was processed (projects.extend and extend_project) |
+| `reelsaw upgrade-work [--user <email\|id>]` | after a plan change: the account's projects with watermarked clips and its partly processed videos (same as projects.upgradeWork and list_upgrade_work) |
+| `reelsaw start-upgrade-work [--rerender id,id] [--finish id,id]` | re-render those projects' watermarked clips without it and clip the rest of those videos (same as projects.startUpgradeWork and start_upgrade_work) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
 | `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
 | `reelsaw delete-project <projectId> [--forget-decisions]` | delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged |

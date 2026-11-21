@@ -362,6 +362,13 @@ export const userSettings = pgTable("user_settings", {
   queuePriority: integer("queue_priority"),
   /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
   learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
+  /**
+   * The project an upgrade started from (an offer on its page or its Download) and when checkout began: after the plan
+   * change only that project is finished and rendered without the watermark by itself (projects/after-upgrade.ts);
+   * the others wait for the owner's pick. Read for a day after `upgradeProjectAt`.
+   */
+  upgradeProjectId: text("upgrade_project_id"),
+  upgradeProjectAt: timestamp("upgrade_project_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;

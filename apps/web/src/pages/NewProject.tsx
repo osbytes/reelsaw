@@ -699,7 +699,7 @@ function SourceFit({ fit }: { fit: SourceCheck }) {
 
 /**
  * A long video the plan's minutes cover only the start of: it is not refused. Says how much is clipped now and offers
- * the plan that covers all of it (Reelsaw picks up where it stopped after the upgrade, by itself).
+ * the plan that covers all of it (upgrading before the project starts clips the whole video; later, the project page's offer finishes it).
  */
 function PartialFit({ partial }: { partial: NonNullable<SourceCheck["partial"]> }) {
   const shown = !!partial.upgrade;

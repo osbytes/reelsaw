@@ -170,8 +170,23 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
   });
 
+  // two projects with watermarked clips: the checkout names the first, so only it is re-rendered by itself
+  const upgradeFrom = `up-from-${randomUUID().slice(0, 8)}`;
+  const other = `up-other-${randomUUID().slice(0, 8)}`;
+  const clipStatus = async (projectId: string) => String((await pool.query(`select status from clips where project_id = $1`, [projectId])).rows[0]?.status);
+
   it("checkout returns the mock's page; completing it delivers events in reverse and twice, and the plan lands", async () => {
-    const r = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month" });
+    for (const id of [upgradeFrom, other]) {
+      await pool.query(
+        `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings) values ($1, $2, $1, 'url', 'https://example.com/v.mp4', 600, 'done', '{}')`,
+        [id, user.userId],
+      );
+      await pool.query(
+        `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, watermark) values ($1, $2, 0, 'T', 'H', 0, 25, 70, 'r', '[]', 'done', true)`,
+        [`${id}-c`, id],
+      );
+    }
+    const r = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month", fromProjectId: upgradeFrom });
     assert.equal(r.error, undefined, r.error?.message);
     const { url, kind } = r.data as { url: string; kind: string };
     assert.equal(kind, "checkout");
@@ -198,6 +213,30 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(row.rows[0].plan, "creator");
     assert.equal(row.rows[0].interval, "month");
     assert.ok(row.rows[0].period_end > new Date());
+
+    // the upgrade's own project renders again without the watermark by itself; the other one waits for a pick
+    assert.notEqual(
+      await until(
+        () => clipStatus(upgradeFrom),
+        (x) => x !== "done",
+      ),
+      "done",
+      "the upgrade's project is re-rendered",
+    );
+    assert.equal(await clipStatus(other), "done", "another project is not re-rendered by itself");
+    type Work = { watermarkOn: boolean; upgradeProject: { id: string } | null; rerender: { total: number; projects: Array<{ id: string; clips: number }> } };
+    const w = (await trpc(user.cookie, "projects.upgradeWork", undefined, "GET")).data as Work;
+    assert.equal(w.watermarkOn, false);
+    assert.equal(w.upgradeProject?.id, upgradeFrom);
+    assert.deepEqual(
+      w.rerender.projects.map((p) => [p.id, p.clips]),
+      [[other, 1]],
+    );
+    const started = await trpc(user.cookie, "projects.startUpgradeWork", { rerender: [other] });
+    assert.equal(started.error, undefined, started.error?.message);
+    assert.equal((started.data as { rerenderedClips: number }).rerenderedClips, 1);
+    assert.notEqual(await clipStatus(other), "done");
+    await pool.query(`delete from projects where id = any($1)`, [[upgradeFrom, other]]);
   });
 
   it("a second checkout for a live subscription becomes a portal plan change, not a new subscription", async () => {

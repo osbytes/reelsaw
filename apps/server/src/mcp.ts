@@ -549,6 +549,8 @@ export function createMcpServer(
 
   server.registerTool("reanalyze_project", TOOLS.reanalyze_project, ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })));
   server.registerTool("extend_project", TOOLS.extend_project, ({ id }) => run(() => api.projects.extend({ id })));
+  server.registerTool("list_upgrade_work", TOOLS.list_upgrade_work, () => run(() => api.projects.upgradeWork()));
+  server.registerTool("start_upgrade_work", TOOLS.start_upgrade_work, ({ rerender, finish }) => run(() => api.projects.startUpgradeWork({ rerender, finish })));
 
   server.registerTool("refine_project", TOOLS.refine_project, ({ id, steps, vocabulary }) => run(() => api.projects.refine({ id, steps, vocabulary })));
 
@@ -641,7 +643,9 @@ export function createMcpServer(
 
   server.registerTool("get_billing", TOOLS.get_billing, () => run(() => api.billing.get()));
 
-  server.registerTool("billing_checkout_url", TOOLS.billing_checkout_url, ({ plan, interval }) => run(() => api.billing.checkout({ plan, interval })));
+  server.registerTool("billing_checkout_url", TOOLS.billing_checkout_url, ({ plan, interval, fromProjectId }) =>
+    run(() => api.billing.checkout({ plan, interval, fromProjectId })),
+  );
 
   server.registerTool("delete_project", TOOLS.delete_project, ({ id, forgetDecisions }) => run(() => api.projects.delete({ id, forgetDecisions })));
 
