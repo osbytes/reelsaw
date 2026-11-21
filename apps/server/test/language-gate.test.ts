@@ -6,7 +6,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { norm } from "../src/pipeline/disfluency.js";
 import { norm as entityNorm } from "../src/pipeline/entities.js";
-import { languageCode, languageName, outputLanguageRule, skipReason, supports, transcriptionLanguageOptions } from "../src/pipeline/language.js";
+import {
+  languageCode,
+  languageName,
+  outputLanguage,
+  outputLanguageRule,
+  skipReason,
+  supports,
+  transcriptionLanguageOptions,
+} from "../src/pipeline/language.js";
 import { buildMapPrompt } from "../src/pipeline/select.js";
 import { SENTENCE_END } from "../src/pipeline/transcript.js";
 
@@ -84,6 +92,11 @@ describe("output language", () => {
     assert.equal(outputLanguageRule("en", "the title"), "");
     assert.equal(outputLanguageRule("en-GB", "the title"), "");
     assert.equal(outputLanguageRule(undefined, "the title"), "");
+    assert.match(outputLanguageRule("es", "the title"), /unless the user's instructions ask for another language/);
+  });
+  it("leaves English and undetected out of step inputs, so their saved steps keep their keys", () => {
+    for (const l of ["en", "en-US", "English", undefined, null, ""]) assert.equal(outputLanguage(l), undefined, String(l));
+    assert.equal(outputLanguage("Spanish"), "es");
   });
   it("puts the rule in the clip-finding prompt", () => {
     const chunk = { start: 0, end: 60, lines: ["[00:00.0 - 00:05.0] Hola a todos"] } as never;
