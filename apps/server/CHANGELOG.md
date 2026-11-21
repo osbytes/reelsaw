@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.47.0
+
+### Minor Changes
+
+- [#332](https://github.com/osbytes/reelsaw/pull/332) [`5a4f9fb`](https://github.com/osbytes/reelsaw/commit/5a4f9fbeb339272fc78f2f2773d565b8780ccfce) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Clips sound even and end cleanly. Every clip's speech is now brought to −14 LUFS (the level TikTok, Reels and Shorts play at) and the finished mix goes through a peak limiter, so clips no longer range from whisper-quiet to clipping. Pause trimming only cuts quiet gaps: game sound, music or laughter between lines stays, and a clip that is mostly sound without speech (gameplay, trailers) keeps its timing instead of shrinking to a few seconds; the clip's Cuts tab says why. A clip's ending no longer takes along the first words of the next sentence, clips of one project no longer share a title, text printed on a shirt in a multi-camera video is no longer blurred as if it were subtitles, and a render stopped by the server (for example running out of memory) says so instead of "exited with null".
+
+- [#324](https://github.com/osbytes/reelsaw/pull/324) [`663dd68`](https://github.com/osbytes/reelsaw/commit/663dd686477bf36f54af75aee944d740b6b9c083) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A video longer than your minutes cover is no longer refused. Reelsaw clips the start your minutes cover (on Free, a long first video gets its first 60 minutes), and the project shows how much is left. "Clip the rest" (also `extend_project` and `reelsaw extend-project`) processes more when you have the minutes, and upgrading does it for you. It picks up where it stopped: your clips, transcript fixes and decisions stay, and new clips come only from the new part. Upgrading also re-renders your watermarked clips without the watermark, and Download on a watermarked clip now offers that first. Sign-ups now record where they came from, even when the confirmation email is opened in another browser.
+
 ## 0.46.0
 
 ### Minor Changes
