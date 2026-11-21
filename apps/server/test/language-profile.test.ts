@@ -50,6 +50,12 @@ describe("text helpers", () => {
     assert.equal(upperCase("istanbul", "tr"), "İSTANBUL");
     assert.equal(upperCase("istanbul", "en"), "ISTANBUL");
     assert.equal(upperCase("हिन्दी", "hi"), "हिन्दी");
+    // transcripts from before codes hold the model's name for the language
+    assert.equal(upperCase("hook", "english"), "HOOK");
+    assert.equal(upperCase("istanbul", "Turkish"), "İSTANBUL");
+    assert.equal(joinWords(["今日", "は"], "japanese"), "今日は");
+    assert.equal(languageProfile("arabic").direction, "rtl");
+    assert.deepEqual(segmentWords("a b", "Chinese (Simplified)"), ["a", "b"], "a value Intl rejects falls back to Unicode's rules");
   });
   it("finds sentence and clause ends in every script", () => {
     for (const t of ["done.", "बात।", "です。", "هل؟", "end?”", "ပြီ။"]) assert.ok(endsSentence(t), t);
@@ -134,7 +140,8 @@ describe("capability registry", () => {
     const withUpload = capability("captionFont", "hi", { ...latinOnly, uploaded: [{ family: "Mukta", glyphs: parseCharset("900-97f") }] });
     assert.match(withUpload.message, /"Mukta"/);
     assert.equal(capability("captionFont", "en", latinOnly).level, "full");
-    assert.equal(capability("captionFont", "hi", { system: null }).level, "limited");
+    assert.equal(capability("captionFont", "hi", { system: null }).level, "full", "no fontconfig: unchecked, not a gap");
+    assert.deepEqual(languageGaps("en", { system: null }), []);
   });
   it("keeps the English-only stages English-only, and English gap-free", () => {
     assert.deepEqual(languageGaps("en", { system: parseCharset("20-7e") }), []);

@@ -744,9 +744,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     segments.map((sg) => ({ start: plan.mapTime(sg.start), end: plan.mapTime(sg.end), y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH) })),
   );
   const textLayers = layers.filter((l): l is TextLayer => l.kind === "text");
-  await fontGapEvent(svc, {
+  const missingFontChars = await fontGapEvent(svc, {
     projectId,
     clipId,
+    previous: clip.diagnostics?.missingGlyphs,
     language: transcript?.language,
     fontState,
     families: [captionFont, ...textLayers.map((l) => pickFont(fontsAvailable, l.font, captionFont)), ...(watermark.on ? [instanceFont] : [])],
@@ -1114,6 +1115,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     );
   const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
+    ...(missingFontChars ? { missingGlyphs: missingFontChars } : {}),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),
     ...(loudness ? { loudness: { inputLufs: loudness.inputLufs, inputPeak: loudness.inputPeak, gainDb } } : {}),
     ...(captionTiming ? { captionTiming } : {}),
@@ -1795,18 +1797,23 @@ async function fontGapEvent(
     fontState: Awaited<ReturnType<typeof loadFontState>>;
     families: string[];
     text: string;
+    /** what the clip's last render was missing (its diagnostics): the same again is not said again */
+    previous: string[] | undefined;
     log: Logger;
   },
-) {
+): Promise<string[] | undefined> {
   const system = await systemGlyphs();
-  if (!system) return;
+  if (!system) return undefined;
   const used = new Set(o.families.map((f) => f.toLowerCase()));
   const uploaded = await uploadedGlyphs(
     svc,
     o.fontState.uploaded.filter((r) => used.has(r.family.toLowerCase())),
   );
   const missing = missingGlyphs(mergeGlyphs(system, ...uploaded.map((u) => u.glyphs)), o.text);
-  if (!missing.length) return;
+  if (!missing.length) return undefined;
+  const kept = missing.slice(0, MISSING_GLYPHS_KEPT);
+  // a re-render missing the same characters has nothing new to say (a bulk re-render would repeat it per clip)
+  if (o.previous && o.previous.length === kept.length && o.previous.every((c, i) => c === kept[i])) return kept;
   const shown = missing.slice(0, 8).join(" ") + (missing.length > 8 ? " …" : "");
   o.log.warn({ missing: missing.length, sample: shown }, "characters with no font: they render as empty boxes");
   await svc.events
@@ -1818,4 +1825,8 @@ async function fontGapEvent(
       reason: `${missing.length === 1 ? "1 character" : `${missing.length} characters`} in this clip have no font on this server and show as empty boxes (${shown}). An admin can add a font that has them (Settings → System → Captions).`,
     })
     .catch(() => {});
+  return kept;
 }
+
+/** How many of a render's characters without a font its diagnostics keep (enough to tell one render's set from the next). */
+const MISSING_GLYPHS_KEPT = 64;

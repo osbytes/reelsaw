@@ -12,6 +12,7 @@
  *   - word and sentence segmentation: `Intl.Segmenter`.
  */
 import { LANGUAGE_DATA } from "./language-data.js";
+import { spokenLanguageCode } from "./languages.js";
 
 export interface LanguageProfile {
   /** canonical code ("hi") */
@@ -98,10 +99,12 @@ function autonym(code: string): string {
 
 const cache = new Map<string, LanguageProfile>();
 
-/** The profile of a canonical language code (spokenLanguageCode gives one). Pure apart from a cache. */
-export function languageProfile(code: string): LanguageProfile {
-  const hit = cache.get(code);
+/** The profile of a language: a code, a tag or a name ("english"), canonicalised by spokenLanguageCode. Pure apart from a cache. */
+export function languageProfile(tag: string): LanguageProfile {
+  const hit = cache.get(tag);
   if (hit) return hit;
+  // what is stored may be a name ("english": transcripts from before codes) or a tag ("pt-BR"): the code it names
+  const code = spokenLanguageCode(tag) ?? tag;
   const script = scriptOf(code);
   const from = dataSource(code, script);
   const data = from ? LANGUAGE_DATA[from] : undefined;
@@ -121,7 +124,7 @@ export function languageProfile(code: string): LanguageProfile {
     terminals: data?.terminals ?? "",
     sample: [name, letters].filter(Boolean).join(" "),
   };
-  cache.set(code, profile);
+  cache.set(tag, profile);
   return profile;
 }
 
@@ -136,7 +139,8 @@ export function joinWords(texts: readonly string[], lang: string | null | undefi
 /** Upper case as the language writes it (Turkish "i" → "İ"); unchanged for a script without case. */
 export function upperCase(text: string, lang: string | null | undefined): string {
   if (!lang) return text.toUpperCase();
-  return languageProfile(lang).cased ? text.toLocaleUpperCase(lang) : text;
+  const p = languageProfile(lang);
+  return p.cased ? text.toLocaleUpperCase(p.code) : text;
 }
 
 /**
@@ -166,7 +170,12 @@ function segmenter(lang: string, granularity: "word" | "sentence"): Intl.Segment
   const key = `${lang}:${granularity}`;
   let s = segmenters.get(key);
   if (!s) {
-    s = new Intl.Segmenter(lang, { granularity });
+    const code = languageProfile(lang).code;
+    try {
+      s = new Intl.Segmenter(code, { granularity });
+    } catch {
+      s = new Intl.Segmenter("und", { granularity }); // not a tag Intl takes: Unicode's default rules
+    }
     segmenters.set(key, s);
   }
   return s;

@@ -880,6 +880,8 @@ export function mergeTemplateBumpers(
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
+  /** characters this render drew that no font on the server has (they burned in as empty boxes); absent = none or unchecked */
+  missingGlyphs?: string[];
   /** caption words re-timed by forced alignment */
   captionTiming?: { aligned: number; total: number; medianShiftMs: number; ms: number };
   /**
