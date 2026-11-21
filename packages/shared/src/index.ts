@@ -951,7 +951,13 @@ export const projectSettingsSchema = styleSchema.extend({
     ),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
-  language: z.string().max(10).optional().describe("Spoken language code (e.g. en, from list_languages), sent to the transcription model; unset = detected"),
+  language: z
+    .string()
+    .max(10)
+    .optional()
+    .describe(
+      "Spoken language code (e.g. en, from list_languages; an English name is stored as its code), sent to the transcription model when it takes it; unset = detected",
+    ),
   /** "Find clips about …": restricts selection to this topic and adds a relevance score. */
   focus: z.string().max(300).optional().describe("Only pick clips about this topic (max 300 chars)"),
   instructions: z.string().max(2000).optional().describe("Free-text guidance for picking and titling clips (max 2000 chars)"),
@@ -1875,3 +1881,4 @@ export * from "./format.js";
 export * from "./partial.js";
 export * from "./attribution.js";
 export * from "./languages.js";
+export * from "./whisper-languages.js";

@@ -9,6 +9,7 @@ import {
   defaultProjectSettings,
   userProjectDefaultsSchema,
   type ClearableSetting,
+  withSpokenLanguage,
   type ProjectSettings,
   type UserProjectDefaults,
 } from "@reelsaw/shared";
@@ -31,7 +32,7 @@ export async function resolveProjectSettings(
   // undefined values in the input must not shadow a saved default; `clear` is how a caller says "unset, although my
   // default has one" (New project's "Detect automatically", an emptied focus)
   const given = Object.fromEntries(Object.entries(input ?? {}).filter(([, v]) => v !== undefined));
-  const merged = { ...defaultProjectSettings, ...mine, ...given };
+  const merged = withSpokenLanguage({ ...defaultProjectSettings, ...mine, ...given });
   for (const k of clear) if (!(k in given)) delete merged[k];
   // intro/outro ids ride along from the defaults or the caller: keep only the user's own, live assets
   for (const k of ["introAssetId", "outroAssetId"] as const) {

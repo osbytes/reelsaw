@@ -18,6 +18,7 @@ import {
   bumperSecondsSchema,
   formatBytes,
   projectSettingsSchema,
+  withSpokenLanguage,
   styleOverrideSchema,
   styleSchema,
   type ClearableSetting,
@@ -516,8 +517,9 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
       throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
-    const merged = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
-    const write = Object.fromEntries(Object.keys(patch ?? {}).map((k) => [k, merged[k as keyof ProjectSettings]]));
+    const given = withSpokenLanguage(patch ?? {});
+    const merged = projectSettingsSchema.parse({ ...p.settings, ...given });
+    const write = Object.fromEntries(Object.keys(given).map((k) => [k, merged[k as keyof ProjectSettings]]));
     const settings = sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`;
     await lockProjectClips(u, p.id);
     // before listing: an analyze committing its picks right now finishes first and they are replaced below, and one
@@ -617,7 +619,7 @@ export async function updateProject(
 ) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
-    const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
+    const patch = withSpokenLanguage(Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch);
     const bumperKeys = Object.keys(patch).filter((k) => BUMPER_KEYS.has(k));
     if (bumperKeys.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${bumperKeys.join(", ")}: set the intro/outro with set_project_bumpers` });
     // the template new clips get must be one of the owner's live templates (null = none)

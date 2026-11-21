@@ -8,6 +8,7 @@
  *   search     – the production cut search (`refineCuts`) run on just this window (exact, a few seconds)
  *   timestamps – raw word timestamps from the transcript (approximate, may clip a word edge)
  */
+import { languageForModel } from "../ai/spoken-languages.js";
 import { spawn } from "node:child_process";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -101,6 +102,7 @@ export async function planCutPreview(
         .filter((w) => w.end > ws && w.start < we)
         .map((w) => ({ text: w.text, start: w.start - ws, end: w.end - ws }));
       const modelId = svc.models.get().align;
+      const alignLanguage = await languageForModel(svc, modelId, transcript.language);
       const res = await refineCuts(
         {
           ffmpegPath: svc.config.FFMPEG_PATH,
@@ -108,7 +110,7 @@ export async function planCutPreview(
           language: transcript.language,
           log: svc.log.child({ module: "cut-preview" }),
           ...(svc.aligner ? { align: (pcm: Float32Array, ws2: string[]) => svc.aligner!.align(pcm, ws2) } : {}),
-          transcribe: async (audio) => toWords((await svc.asr.transcribe(audio, { modelId, signal, language: transcript.language })).segments),
+          transcribe: async (audio) => toWords((await svc.asr.transcribe(audio, { modelId, signal, language: alignLanguage })).segments),
         },
         input,
         ws,
