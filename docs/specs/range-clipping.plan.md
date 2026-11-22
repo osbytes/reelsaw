@@ -56,10 +56,14 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       fix with its words). Retry, re-pick, "Clip the rest" and clip bounds read `spansCover` / `spanWithin` over the
       ranges. `covered_sec` stays one release, written as before (`legacyCoveredSec`), so a previous-version process
       mid-rollout reads what it expects; dropped with 2.4. Report imports from before spans get `covered` derived.
-- [ ] 1.5 Analyze picks inside **find** ranges only (generalise `extend_from_sec` to "ranges of this run": the
-      ranges whose `run_id` is the current run). **Clip** ranges become clips directly: bounds snapped to the
-      nearest sentence ends within the padding, `origin: "ai"`, `range_id` set, hook and title from the
-      existing titling step. Every picked clip gets its range's `range_id`.
+- [x] 1.5 Analyze picks only in ranges not picked from yet (`project_ranges.picked_at`, set in the commit that adds
+      their clips; re-analyze clears it). A **find** range is searched by today's picker with only its own sentences
+      (plus padding), so no pick reaches time no range asked for. An **exact clip** range is inserted as an AI clip,
+      its ends snapped to sentences inside the padding, and goes through prepare's exact mode (title, hook, caption,
+      scores; bounds kept), which renders it. Every new clip gets `range_id`: the find range it overlaps most (a
+      range shorter than the shortest clip holds a clip that runs into its padding). A whole-range project keeps the
+      extension path; ranges added to a project picked from before converge like an extension (end-to-end with 2.1,
+      which is what adds them).
 - [ ] 1.6 `assertWithinProcessed` (clips/service.ts) checks the clip lies inside a processed range, not before
       `processedEndSec`. `processedEndSec` and the `PartialSource` sentence read the ranges.
 - [ ] 1.7 Surfaces, one service call each:

@@ -233,7 +233,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     caption: "",
     hashtags: [],
   };
-  let note = "Created from a transcript selection.";
+  let note = clip.rangeId ? "One of the project's ranges, kept as one clip." : "Created from a transcript selection.";
 
   if (mode === "ai") {
     await ctx.progress(0.1, "Looking for the best moment in your selection", { clipId });

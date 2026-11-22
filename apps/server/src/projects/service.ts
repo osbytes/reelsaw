@@ -553,7 +553,8 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
             replaced.map((c) => c.id),
           ),
         );
-    // a re-pick covers everything processed, so an extension waiting for its picks is folded into it
+    // a re-pick covers everything processed (every range is picked from again), so an extension waiting for its picks is folded into it
+    await u.db.update(schema.projectRanges).set({ pickedAt: null }).where(eq(schema.projectRanges.projectId, p.id));
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings, extendFromSec: null }, continueActive: true });
     await u.emit("stage.started", {
       projectId: p.id,
