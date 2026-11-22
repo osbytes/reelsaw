@@ -1,5 +1,5 @@
 {
- "recordedAt": "2026-10-18T17:00:13.701Z",
+ "recordedAt": "2026-11-22T04:31:21.250Z",
  "model": "compat:qwen2.5:14b",
  "judge": "compat:qwen2.5:14b",
  "samples": 1,
@@ -10,148 +10,211 @@
  },
  "candidates": [
   {
-   "startSec": 6397.35,
-   "endSec": 6449.39,
-   "title": "Rewiring Cravings",
-   "hook": "Change Your Taste?",
-   "total": 78,
-   "scored": true
+   "startSec": 646.31,
+   "endSec": 672.03,
+   "title": "Why Avoid Non-Stick Pans?",
+   "hook": "Toxic PANS Alert",
+   "total": 80,
+   "scored": true,
+   "mapScore": 80
   },
   {
-   "startSec": 366.95,
-   "endSec": 422.43,
-   "title": "Micro Dosing GLP-1",
-   "hook": "Micro Dosing Trend",
+   "startSec": 6458.31,
+   "endSec": 6481.79,
+   "title": "Milkshake Overload",
+   "hook": "Too sweet for me",
+   "total": 77,
+   "scored": true,
+   "mapScore": 75
+  },
+  {
+   "startSec": 6975.83,
+   "endSec": 7003.63,
+   "title": "Future of Health and Nutrition",
+   "hook": "Generation of Health-Conscious Kids",
+   "total": 74,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 5943.51,
+   "endSec": 5987.07,
+   "title": "The Importance of Gut Health",
+   "hook": "Gut Health Matters",
    "total": 68,
-   "scored": true
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 5802.79,
-   "endSec": 5832.11,
-   "title": "Gut Microbiome's Impact on Brain Health",
-   "hook": "Your gut affects your brain!",
+   "startSec": 6350.55,
+   "endSec": 6387.15,
+   "title": "Cravings & Food Restriction",
+   "hook": "Cravings & Hunger",
    "total": 68,
-   "scored": true
+   "scored": true,
+   "mapScore": 80
   },
   {
-   "startSec": 6772.15,
-   "endSec": 6793.55,
-   "title": "Sugar Lobby's Influence",
-   "hook": "In Bed With Industry?",
-   "total": 68,
-   "scored": true
+   "startSec": 719.91,
+   "endSec": 744.99,
+   "title": "Why Sleep is Crucial",
+   "hook": "Sleep for Success",
+   "total": 61,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 946.63,
-   "endSec": 981.31,
-   "title": "Vagus Nerve's Role in Hunger",
-   "hook": "The Vagus Secret?",
-   "total": 68,
-   "scored": true
-  },
-  {
-   "startSec": 6643.91,
-   "endSec": 6690.59,
-   "title": "The Controversy Over Food Addiction",
-   "hook": "Is There Such Thing?",
-   "total": 64,
-   "scored": true
-  },
-  {
-   "startSec": 5972.79,
-   "endSec": 6005.07,
-   "title": "Why Gut Health Matters",
-   "hook": "Gut health 101",
+   "startSec": 1135.27,
+   "endSec": 1191.15,
+   "title": "Artificial Sweeteners Debate",
+   "hook": "Sweetener Controversy",
    "total": 60,
-   "scored": true
+   "scored": true,
+   "mapScore": 75
   },
   {
-   "startSec": 6924.87,
-   "endSec": 6963.55,
-   "title": "Michael Pollan's Balanced View",
-   "hook": "Pollan on Health Policy",
-   "total": 59,
-   "scored": true
+   "startSec": 6481.19,
+   "endSec": 6511.15,
+   "title": "The Plasticity of Taste",
+   "hook": "Taste can change",
+   "total": 53,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 6668.79,
+   "endSec": 6726.91,
+   "title": "Food Addiction or Just Habit?",
+   "hook": "Is food addiction real?",
+   "total": 49,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 6084.15,
+   "endSec": 6111.63,
+   "title": "Obesity Rates Soaring in the US",
+   "hook": "40% of Adults Obese?",
+   "total": 48,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 6915.59,
+   "endSec": 6942.27,
+   "title": "Changing Attitudes Towards Health",
+   "hook": "Hope for Health Reform",
+   "total": 42,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 963.03,
+   "endSec": 1013.95,
+   "title": "What is Food Noise?",
+   "hook": "Mind Over Matter?",
+   "total": 40,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 6802.63,
+   "endSec": 6834.19,
+   "title": "Hospitals Serving Dreadful Nutrition?",
+   "hook": "Hospital Food Quality",
+   "total": 40,
+   "scored": true,
+   "mapScore": 75
+  },
+  {
+   "startSec": 6276.23,
+   "endSec": 6300.43,
+   "title": "Dopamine & Palatable Foods",
+   "hook": "Food & Dopamine",
+   "total": 38,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 6141.83,
+   "endSec": 6179.95,
+   "title": "How School Lunches Have Changed",
+   "hook": "School lunches used to be healthier",
+   "total": 31,
+   "scored": true,
+   "mapScore": 75
+  },
+  {
+   "startSec": 6761.51,
+   "endSec": 6781.79,
+   "title": "Sugar Lobby's Influence",
+   "hook": "Big sugar vs health orgs",
+   "total": 30,
+   "scored": true,
+   "mapScore": 90
   },
   {
    "startSec": 6543.83,
    "endSec": 6591.47,
-   "title": "Conditioned Taste Aversion Experiment",
-   "hook": "Dopamine Response to Sucrose",
-   "total": 58,
-   "scored": true
+   "title": "Conditioned Taste Aversion",
+   "hook": "Sweets make you sick",
+   "total": 30,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 6272.15,
-   "endSec": 6307.23,
-   "title": "Dopamine and Food Cravings",
-   "hook": "Crave Healthy Foods?",
-   "total": 58,
-   "scored": true
+   "startSec": 625.11,
+   "endSec": 646.91,
+   "title": "GLP-1 Drugs and Brain Penetration",
+   "hook": "Brain Penetration Mystery",
+   "total": 30,
+   "scored": true,
+   "mapScore": 75
   },
   {
-   "startSec": 841.03,
-   "endSec": 898.19,
-   "title": "GLP-1's Mechanism",
-   "hook": "Satiety Through Paracrine?",
-   "total": 46,
-   "scored": true
-  },
-  {
-   "startSec": 6022.79,
-   "endSec": 6056.67,
-   "title": "The Obesity Drug Crisis",
-   "hook": "Heart Attacks & Fenfluramine",
-   "total": 40,
-   "scored": true
-  },
-  {
-   "startSec": 563.83,
-   "endSec": 616.51,
-   "title": "GLP-1 Drugs & Brain Entry",
-   "hook": "Controversial Brain Penetration?",
-   "total": 36,
-   "scored": true
+   "startSec": 915.59,
+   "endSec": 947.23,
+   "title": "GLP-1's Role in Stopping Hunger",
+   "hook": "Feeling Full Fast?",
+   "total": 30,
+   "scored": true,
+   "mapScore": 75
   },
   {
    "startSec": 6844.71,
    "endSec": 6880.27,
-   "title": "The Sugar Lobby's Influence",
-   "hook": "Sugar Industry Tactics",
+   "title": "Sugar Industry Influence",
+   "hook": "Sugar Lobby's PR Move",
+   "total": 30,
+   "scored": true,
+   "mapScore": 75
+  },
+  {
+   "startSec": 1059.83,
+   "endSec": 1113.39,
+   "title": "GLP-1 & Vagus Nerve",
+   "hook": "Vagus Nerve Magic",
    "total": 28,
-   "scored": true
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 6084.15,
-   "endSec": 6115.87,
-   "title": "Obesity Epidemic Growth",
-   "hook": "40% of US Adults Obese?",
-   "total": 90,
-   "scored": false
+   "startSec": 519.11,
+   "endSec": 575.95,
+   "title": "GLP-1 Drugs for Beyond Appetite",
+   "hook": "Controversial Brain Penetration",
+   "total": 20,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 503.27,
-   "endSec": 560.27,
-   "title": "GLP-1 Drugs Side Effects",
-   "hook": "Side Effects of GLP-1 Drugs",
-   "total": 85,
-   "scored": false
-  },
-  {
-   "startSec": 459.75,
-   "endSec": 519.71,
-   "title": "GLP-1 in the Brain",
-   "hook": "GLP-1 & Brain Health",
-   "total": 85,
-   "scored": false
-  },
-  {
-   "startSec": 6462.87,
-   "endSec": 6506.59,
-   "title": "Milkshake Aversion",
-   "hook": "Sweet but Unappealing?",
-   "total": 75,
-   "scored": false
+   "startSec": 671.43,
+   "endSec": 695.71,
+   "title": "Our Place: Non-Toxic Cookware",
+   "hook": "Non-Toxic Cooking",
+   "total": 12,
+   "scored": true,
+   "mapScore": 70
   }
  ]
 }

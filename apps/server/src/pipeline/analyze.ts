@@ -593,7 +593,7 @@ export async function analyze(ctx: StageContext) {
         { input: batch, model: judgeModelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples } },
         async (sig) => {
           const out: z.infer<typeof samplesSchema> = [];
-          for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples));
+          for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples, k));
           return out;
         },
         { schema: samplesSchema, timeoutMs: scoreUnitMs * samples, model: judgeModelId, signal },
