@@ -988,10 +988,13 @@ export const workerInstances = pgTable(
     /** -1 when this filesystem cannot report free space (same as ResourceSnapshot) */
     diskFreeMB: integer("disk_free_mb").notNull().default(-1),
     diskTotalMB: integer("disk_total_mb").notNull().default(0),
-    /** the filesystem DATA_DIR is on (the `.volume-id` marker, disk-leases.ts); processes sharing it share disk leases */
+    /** the filesystem DATA_DIR is on (the `.volume-id` marker, resource-leases.ts); processes sharing it share leases */
     volume: text("volume"),
     /** MB leased to jobs in flight on that volume (every process on it), as of this beat */
     diskLeasedMB: integer("disk_leased_mb").notNull().default(0),
+    /** cores and memory leased to jobs in flight on the same host (every process on the volume), as of this beat */
+    coresLeased: integer("cores_leased").notNull().default(0),
+    memLeasedMB: integer("mem_leased_mb").notNull().default(0),
     gpu: jsonb("gpu").$type<WorkerGpu | null>(),
     renders: jsonb("renders").$type<WorkerRenders>().notNull(),
     queues: text("queues").array().notNull().default(sql`'{}'::text[]`),
@@ -1005,29 +1008,39 @@ export const workerInstances = pgTable(
 export type WorkerInstanceRow = typeof workerInstances.$inferSelect;
 
 /**
- * Disk a job in flight has claimed on a volume (the filesystem DATA_DIR is on, identified by the
- * `.volume-id` marker every process sharing it reads). resources.ts takes one, atomically against the
- * volume's live total, before a stage writes its scratch, and the stage gives it back when it ends; a
- * lease counts while its worker heartbeats and until it expires (the longest a stage job may run), so
- * a crash leaks nothing for long. disk-leases.ts.
+ * What a job in flight has claimed on a host: scratch disk (`mb`), cores (`cores`, the ffmpeg `-threads` it was
+ * granted) and memory (`memMB`). The host is the volume DATA_DIR is on (the `.volume-id` marker every process
+ * sharing it reads). resources.ts takes a lease atomically against the host's live totals, under one advisory
+ * lock per volume; it counts while its worker heartbeats and until it expires (the longest a stage job may
+ * run), so a crash leaks nothing for long. resource-leases.ts, docs/specs/resource-leases.md.
  */
-export const diskLeases = pgTable(
-  "disk_leases",
+export const resourceLeases = pgTable(
+  "resource_leases",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
     volume: text("volume").notNull(),
+    /** the machine (resource-leases.ts machineId): cores and memory are summed per machine, disk per volume */
+    machine: text("machine").notNull(),
     workerId: text("worker_id").notNull(),
     jobId: text("job_id"),
     projectId: text("project_id"),
-    /** the stage that took it: ingest, transcribe, render */
+    /** the account the work is for, when it is one account's (the plan ceilings of slice 3 sum by it) */
+    userId: text("user_id"),
+    /** what took it: ingest, transcribe, render, render-encode, scene-scan, … */
     kind: text("kind").notNull(),
-    mb: integer("mb").notNull(),
+    mb: integer("mb").notNull().default(0),
+    cores: integer("cores").notNull().default(0),
+    memMB: integer("mem_mb").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
-  (t) => [index("disk_leases_volume_idx").on(t.volume, t.expiresAt), index("disk_leases_worker_idx").on(t.workerId)],
+  (t) => [
+    index("resource_leases_volume_idx").on(t.volume, t.expiresAt),
+    index("resource_leases_machine_idx").on(t.machine, t.expiresAt),
+    index("resource_leases_worker_idx").on(t.workerId),
+  ],
 );
-export type DiskLeaseRow = typeof diskLeases.$inferSelect;
+export type ResourceLeaseRow = typeof resourceLeases.$inferSelect;
 
 // ---------- Integrations: share links and webhooks (docs/specs/media-links.md, docs/specs/webhooks.md) ----------
 

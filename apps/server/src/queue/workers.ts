@@ -354,7 +354,11 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
               reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300),
             })
             .catch(() => {});
-        const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
+        const release = await svc.resources.renderSlot({
+          signal: job.signal,
+          onWait: (reason) => log.info({ reason }, "waiting for a render slot"),
+          ids: { jobId: job.id, projectId },
+        });
         try {
           await measured(svc, "render", { projectId, clipId }, () =>
             withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () => {

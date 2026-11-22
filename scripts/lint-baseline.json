@@ -11,10 +11,10 @@
   "correctness/useExhaustiveDependencies": 126,
   "i18n/jsx-text": 863,
   "i18n/string-props": 402,
-  "knip/exports": 315,
+  "knip/exports": 314,
   "knip/types": 218,
   "performance/noImgElement": 3,
-  "style/noNonNullAssertion": 2034,
+  "style/noNonNullAssertion": 2029,
   "suspicious/noArrayIndexKey": 58,
   "suspicious/noConfusingVoidType": 1,
   "suspicious/noExplicitAny": 10

@@ -11,10 +11,224 @@ import {
   RENDER_MEM_MB,
   requiredDiskMB,
   ResourceExhaustedError,
-  type DiskLeaseRequest,
+  cpuCapacity,
+  cpuGrant,
+  sceneScanCpu,
+  MAX_SCENE_SCAN_THREADS,
+  claimOnLive,
+  renderRefusal,
+  NO_LEASES,
+  CPUS_PER_RENDER,
+  RENDER_SLOT_KIND,
+  type HostLeases,
+  type LeaseRequest,
+  type Leaser,
 } from "../src/resources.js";
 import type { Config } from "../src/config.js";
 import type { Logger } from "../src/log.js";
+
+describe("cpuGrant", () => {
+  it("bursts into what is free, between the request's min and max", () => {
+    assert.equal(cpuGrant({ capacity: 5, leased: 0, min: 1, max: 4 }), 4);
+    assert.equal(cpuGrant({ capacity: 5, leased: 4, min: 1, max: 4 }), 1);
+    assert.equal(cpuGrant({ capacity: 5, leased: 2, min: 1, max: 4 }), 3);
+  });
+  it("always grants the min, so fixed-size work never waits on the pool", () => {
+    assert.equal(cpuGrant({ capacity: 5, leased: 9, min: 1, max: 4 }), 1);
+    assert.equal(cpuGrant({ capacity: 5, leased: 5, min: 6, max: 6 }), 6);
+  });
+  it("cleans up nonsense requests", () => {
+    assert.equal(cpuGrant({ capacity: 8, leased: 0, min: 0, max: 0 }), 1);
+    assert.equal(cpuGrant({ capacity: 8, leased: 0, min: 3, max: 2 }), 3);
+  });
+  it("the pool keeps one core back", () => {
+    assert.equal(cpuCapacity(1), 1);
+    assert.equal(cpuCapacity(6), 5);
+  });
+});
+
+describe("sceneScanCpu", () => {
+  it("asks for 1 to the cap, or exactly a pinned SCENE_SCAN_THREADS", () => {
+    assert.deepEqual(sceneScanCpu(0), { min: 1, max: MAX_SCENE_SCAN_THREADS });
+    assert.deepEqual(sceneScanCpu(12), { min: 12, max: 12 });
+  });
+});
+
+const SCOPE = { volume: "vol-1", machine: "boot:m1" };
+
+/**
+ * A ledger shared by several governors, as the database is by the processes of one host: the check and the
+ * record happen in one synchronous step (the locked transaction of resource-leases.ts).
+ */
+function sharedLedger() {
+  const rows = new Map<number, { worker: string; kind: string; mb: number; cores: number; memMB: number }>();
+  let next = 1;
+  const live = (): HostLeases => {
+    const t: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
+    for (const r of rows.values()) {
+      t.mb += r.mb;
+      t.cores += r.cores;
+      t.memMB += r.memMB;
+      t.jobs++;
+      if (r.mb > 0) t.diskJobs++;
+      t.kinds[r.kind] = (t.kinds[r.kind] ?? 0) + 1;
+    }
+    return t;
+  };
+  const leaserFor =
+    (worker: string): Leaser =>
+    async (req: LeaseRequest) => {
+      const c = claimOnLive(req, live());
+      if (!c.ok) return c;
+      const id = next++;
+      rows.set(id, { worker, kind: req.kind, mb: c.mb, cores: c.cores, memMB: c.memMB });
+      return { ...c, release: async () => void rows.delete(id) };
+    };
+  return { rows, live, leaserFor };
+}
+
+describe("claimOnLive", () => {
+  it("grants cores against what is out, and a request may depend on it (a render encode's share)", () => {
+    const live = { ...NO_LEASES, cores: 3, kinds: { render: 2 } };
+    assert.deepEqual(claimOnLive({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 }, live), { ok: true, mb: 0, cores: 2, memMB: 0 });
+    const share = (l: HostLeases) => ({ min: Math.floor(8 / (l.kinds.render ?? 1)), max: Math.floor(8 / (l.kinds.render ?? 1)) });
+    assert.equal((claimOnLive({ kind: "render-encode", cpu: share, capacity: 5 }, live) as { cores: number }).cores, 4);
+  });
+  it("refuses with the admit's reason and the totals it saw, and records nothing to grant", () => {
+    const live = { ...NO_LEASES, mb: 900 };
+    const r = claimOnLive({ kind: "ingest", mb: 500, admit: (l) => (l.mb > 800 ? "too much leased" : null) }, live);
+    assert.deepEqual(r, { ok: false, reason: "too much leased", live });
+  });
+});
+
+describe("renderRefusal", () => {
+  const room = { cpus: 8, memAvailableMB: 64000, memTotalMB: 64000, memLeasedMB: 0, minFreeMemMB: 512 };
+  it("one render may always start", () => {
+    assert.equal(renderRefusal({ ...room, hostRenders: 0, memAvailableMB: 10, memTotalMB: 10 }), null);
+  });
+  it("counts the host's renders, every process's, against its CPUs", () => {
+    assert.equal(renderRefusal({ ...room, hostRenders: 8 / CPUS_PER_RENDER - 1 }), null);
+    assert.match(renderRefusal({ ...room, hostRenders: 8 / CPUS_PER_RENDER }) ?? "", /4 renders running on this host, room for 4/);
+  });
+  it("refuses one more when the renders' leased memory would cross the floor", () => {
+    assert.match(renderRefusal({ ...room, hostRenders: 1, memTotalMB: 2000, memLeasedMB: 1200 }) ?? "", /memory leased to renders/);
+  });
+});
+
+describe("leases on the governor", () => {
+  const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
+  const gov = (extra: Partial<Config> = {}) =>
+    createResourceGovernor(
+      {
+        RENDER_CONCURRENCY: "auto",
+        MAX_CPU_PERCENT: 100,
+        MIN_FREE_MEM_MB: 0,
+        MIN_FREE_DISK_MB: 0,
+        RESOURCE_WAIT_MAX_SECONDS: 0,
+        ...extra,
+      } as unknown as Config,
+      process.cwd(),
+      log,
+    );
+  it("two scans side by side see each other and never take more than the pool between them", async () => {
+    const g = gov();
+    const capacity = g.cpuCapacity();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let a = 0;
+    const first = g.withCpu({ kind: "scene-scan", cpu: sceneScanCpu(0) }, async (cores) => {
+      a = cores;
+      await hold;
+    });
+    await new Promise((r) => setImmediate(r));
+    const b = await g.withCpu({ kind: "scene-scan", cpu: sceneScanCpu(0) }, async (cores) => {
+      assert.equal(g.leases().own, 2);
+      return cores;
+    });
+    assert.equal(a, Math.min(MAX_SCENE_SCAN_THREADS, capacity));
+    assert.equal(b, Math.max(1, Math.min(MAX_SCENE_SCAN_THREADS, capacity - a)));
+    release();
+    await first;
+    assert.deepEqual(g.leases(), { volume: null, machine: null, ownMB: 0, own: 0, ownCores: 0, ownMemMB: 0 });
+  });
+  it("withCpu releases the cores when the work throws", async () => {
+    const g = gov();
+    await assert.rejects(
+      g.withCpu({ kind: "scene-scan", cpu: { min: 1, max: 2 } }, async () => {
+        assert.equal(g.leases().own, 1);
+        throw new Error("decode failed");
+      }),
+      /decode failed/,
+    );
+    assert.equal(g.leases().own, 0);
+    assert.equal(g.leases().ownCores, 0);
+  });
+  it("two processes on one host: a scan in one sees the other's render encode", async () => {
+    const ledger = sharedLedger();
+    const one = gov();
+    const two = gov();
+    one.setLeaser(ledger.leaserFor("one"), SCOPE);
+    two.setLeaser(ledger.leaserFor("two"), SCOPE);
+    const capacity = one.cpuCapacity();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const encode = one.withCpu({ kind: "render-encode", cpu: { min: capacity, max: capacity } }, () => hold);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(ledger.live().cores, capacity);
+    assert.equal(await two.withCpu({ kind: "scene-scan", cpu: sceneScanCpu(0) }, async (cores) => cores), 1);
+    release();
+    await encode;
+    assert.equal(ledger.rows.size, 0, "every lease came back to the ledger");
+  });
+  it("the render slot counts the host's renders, not only this process's, and gives its memory back", async () => {
+    const ledger = sharedLedger();
+    const one = gov();
+    const two = gov();
+    one.setLeaser(ledger.leaserFor("one"), SCOPE);
+    two.setLeaser(ledger.leaserFor("two"), SCOPE);
+    // the other process already runs as many renders as any host may
+    for (let i = 0; i < 64; i++) ledger.rows.set(1000 + i, { worker: "two", kind: RENDER_SLOT_KIND, mb: 0, cores: 0, memMB: 0 });
+    await assert.rejects(one.renderSlot({}), /render slot: \d+ renders running on this host/);
+    for (let i = 0; i < 64; i++) ledger.rows.delete(1000 + i);
+    const done = await one.renderSlot({ ids: { jobId: "j1", projectId: "p1" } });
+    assert.equal(ledger.live().kinds[RENDER_SLOT_KIND], 1);
+    assert.ok(ledger.live().memMB > 0, "a render leases its memory");
+    assert.equal(one.renders().running, 1);
+    done();
+    done(); // twice is once
+    await new Promise((r) => setImmediate(r));
+    assert.equal(ledger.rows.size, 0);
+    assert.equal(one.renders().running, 0);
+  });
+  it("a render stage's disk lease does not count as another render: the encode gets the host's whole share", async () => {
+    const ledger = sharedLedger();
+    const g = gov();
+    g.setLeaser(ledger.leaserFor("one"), SCOPE);
+    const done = await g.renderSlot({});
+    // the render stage claims its scratch under the stage kind "render" (pipeline/render.ts ctx.acquire)
+    ledger.rows.set(5000, { worker: "one", kind: "render", mb: 512, cores: 0, memMB: 0 });
+    assert.equal(await g.withCpu({ kind: "render-encode", cpu: g.renderEncodeCpu() }, async (cores) => cores), g.cpuCapacity());
+    ledger.rows.delete(5000);
+    done();
+  });
+  it("renders share the pool rounded up, so no core sits idle", async () => {
+    const ledger = sharedLedger();
+    const g = gov();
+    g.setLeaser(ledger.leaserFor("one"), SCOPE);
+    ledger.rows.set(6000, { worker: "two", kind: RENDER_SLOT_KIND, mb: 0, cores: 0, memMB: 0 });
+    ledger.rows.set(6001, { worker: "two", kind: RENDER_SLOT_KIND, mb: 0, cores: 0, memMB: 0 });
+    const cores = await g.withCpu({ kind: "render-encode", cpu: g.renderEncodeCpu() }, async (c) => c);
+    assert.equal(cores, Math.max(1, Math.ceil(g.cpuCapacity() / 2)));
+  });
+  it("a pinned RENDER_CONCURRENCY is this process's own count", async () => {
+    const g = gov({ RENDER_CONCURRENCY: 1 } as Partial<Config>);
+    const done = await g.renderSlot({});
+    await assert.rejects(g.renderSlot({}), /RENDER_CONCURRENCY=1/);
+    done();
+    const again = await g.renderSlot({});
+    again();
+  });
+});
 
 const base = { memAvailableMB: 64000, running: 0, minFreeMemMB: 512 };
 describe("renderLimit", () => {
@@ -163,7 +377,7 @@ describe("disk leases in acquire", () => {
     if (!gov) return t.skip("not enough free disk to stage");
     const first = await gov.acquire({ kind: "ingest", needDiskMB: 1000 });
     assert.equal(first.mb, 1000);
-    assert.deepEqual(gov.leases(), { volume: null, ownMB: 1000, own: 1 });
+    assert.deepEqual(gov.leases(), { volume: null, machine: null, ownMB: 1000, own: 1, ownCores: 0, ownMemMB: 0 });
     // 500 MB of room left on paper (statfs still says 1500: nothing was written): a second 1000 MB job must not start
     const waits: string[] = [];
     await assert.rejects(gov.acquire({ kind: "ingest", needDiskMB: 1000, onWait: (r) => waits.push(r) }), (err: unknown) => {
@@ -177,7 +391,7 @@ describe("disk leases in acquire", () => {
     );
     await first.release();
     await first.release(); // idempotent
-    assert.deepEqual(gov.leases(), { volume: null, ownMB: 0, own: 0 });
+    assert.deepEqual(gov.leases(), { volume: null, machine: null, ownMB: 0, own: 0, ownCores: 0, ownMemMB: 0 });
     const second = await gov.acquire({ kind: "ingest", needDiskMB: 1000 });
     assert.equal(second.mb, 1000);
     await second.release();
@@ -214,21 +428,24 @@ describe("disk leases in acquire", () => {
   it("with a shared ledger, the check and the claim go through it, and release gives the claim back", async (t) => {
     const gov = await governorWithRoom(1500);
     if (!gov) return t.skip("not enough free disk to stage");
-    const seen: DiskLeaseRequest[] = [];
+    const seen: LeaseRequest[] = [];
     let released = 0;
     let othersMB = 0;
     gov.setLeaser(async (req) => {
       seen.push(req);
-      if (!leaseFits({ freeMB: req.freeMB, leasedMB: othersMB, requiredMB: req.requiredMB })) return { ok: false, leasedMB: othersMB, jobs: 1 };
-      return { ok: true, release: async () => void released++ };
-    }, "vol-1");
+      const c = claimOnLive(req, { ...NO_LEASES, mb: othersMB, jobs: othersMB ? 1 : 0, diskJobs: othersMB ? 1 : 0 });
+      return c.ok ? { ...c, release: async () => void released++ } : c;
+    }, SCOPE);
     assert.equal(gov.leases().volume, "vol-1");
     const lease = await gov.acquire({ kind: "ingest", needDiskMB: 1000, ids: { jobId: "j1", projectId: "p1" } });
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.mb, 1000);
-    assert.equal(seen[0]!.jobId, "j1");
-    assert.equal(seen[0]!.projectId, "p1");
-    assert.equal(seen[0]!.requiredMB - seen[0]!.mb, gov.floorMB, "required = the floor plus the scratch");
+    const req = seen[0];
+    const admit = req?.admit;
+    assert.ok(req && admit, "a disk claim carries its admit rule");
+    assert.deepEqual(req.ids, { jobId: "j1", projectId: "p1" });
+    assert.equal(admit({ ...NO_LEASES }), null, "fits with nothing else leased");
+    assert.match(admit({ ...NO_LEASES, mb: 10_000_000, diskJobs: 3 }) ?? "", /leased to 3 jobs in flight/);
     assert.equal(gov.leases().ownMB, 1000, "own leases are still counted for the heartbeat");
     await lease.release();
     assert.equal(released, 1);

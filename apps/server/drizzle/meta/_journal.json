@@ -463,6 +463,20 @@
       "when": 1795281677902,
       "tag": "0065_upgrade_project",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1795379925212,
+      "tag": "0066_resource_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795379928315,
+      "tag": "0067_drop_disk_leases",
+      "breakpoints": true
     }
   ]
 }

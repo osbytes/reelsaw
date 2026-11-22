@@ -159,6 +159,13 @@ cannot both pass the free-space check and both run out mid-download: the second 
 first. Processes sharing a volume (the app and worker replicas of one host) share one ledger;
 a worker on another host never contends.
 
+Cores and memory are leased the same way, per machine: every ffmpeg pass that decodes or encodes
+video takes its threads from what the machine's other jobs have left (a shot-cut scan 1 to 4, a
+render encode its share of the machine's renders), and a render leases its memory and its place
+among the machine's renders for as long as it runs. So parallel scans, renders and worker replicas
+on one machine share its cores instead of each assuming it owns them. Settings → System → Workers
+shows the leased cores, memory and disk. Design: [docs/specs/resource-leases.md](docs/specs/resource-leases.md).
+
 Use MinIO for local S3 testing:
 
 ```bash
@@ -645,7 +652,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
 | `test_model` | Admins only: check that a model id works on this instance with one real call (same as Test under Settings → Models). |
 | `list_models` | Admins only: the models each provider offers for language or transcription (the Settings → Models picker), a page per provider, the models in use first. |
-| `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. |
+| `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable); *Leased* = claimed by jobs in flight on its host, GPU, render slots, queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
 | `get_queue` | Admins only: how much work is queued and how fast it is picked up. |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, cause, reason, when); retryable = Retry can help (platform causes only). |

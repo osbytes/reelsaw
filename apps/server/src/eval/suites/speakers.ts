@@ -85,7 +85,7 @@ export const speakersSuite: Suite = {
           .trim()
           .split(",")
           .map(Number);
-        const tl = await activeSpeakers({ faces, ffmpegPath: cfg.FFMPEG_PATH, asd }, media, s0, s1 - s0, c.speakers, speechAt(probs, 0), pcm, {
+        const tl = await activeSpeakers({ faces, ffmpegPath: cfg.FFMPEG_PATH, threads: 2, asd }, media, s0, s1 - s0, c.speakers, speechAt(probs, 0), pcm, {
           srcAspect: srcW! / srcH!,
         });
         const ms = Date.now() - t0;

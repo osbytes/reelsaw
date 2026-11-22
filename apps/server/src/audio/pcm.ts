@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { CommandError } from "../media.js";
+import { CommandError, decodeThreadArgs } from "../media.js";
 import { VAD_SR } from "./vad.js";
 
 /** 16 kHz mono float PCM of a clip's audio (VAD input, and matching a section to the source). */
@@ -13,6 +13,7 @@ export function clipPcm(ffmpegPath: string, source: string, start: number, durat
         "-loglevel",
         "error",
         "-nostdin",
+        ...decodeThreadArgs(1), // audio only
         "-ss",
         start.toFixed(3),
         "-t",

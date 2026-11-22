@@ -110,7 +110,7 @@ export const queueDefs: Array<{ name: QueueName; expireInSeconds: number; retryL
 /** Stages whose LLM time grows with the media: their hard expiry is set per job from the project's duration. */
 const LLM_STAGE_QUEUES: QueueName[] = [QUEUES.analyze, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes];
 
-/** No job may be given longer than this: pg-boss caps a job's expiry at 24 h, and disk leases (disk-leases.ts) live as long. */
+/** No job may be given longer than this: pg-boss caps a job's expiry at 24 h, and resource leases (resource-leases.ts) live as long. */
 export const MAX_JOB_EXPIRE_SECONDS = 24 * 3600;
 
 /** Whether `expireInSecondsFor` sizes this queue's expiry by the project's duration (so enqueue must read it). */

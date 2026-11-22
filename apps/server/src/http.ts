@@ -501,7 +501,7 @@ export function createApp(svc: Services) {
     let key = asset.thumbnailKey ?? keys.assetThumb(asset.sourceKey);
     if (!asset.thumbnailKey || !(await storage.exists(key))) {
       try {
-        key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage, dir: paths.tmp }, asset, undefined);
+        key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a, { threads: "light" }), storage, dir: paths.tmp }, asset, undefined);
         await db.update(schema.assets).set({ thumbnailKey: key }).where(eq(schema.assets.id, asset.id));
       } catch (err) {
         c.get("log").warn({ err, bumperId: asset.id }, "bumper thumbnail failed");

@@ -27,8 +27,10 @@ export const txLock = {
   webhooks: (userId: string) => `webhooks:${userId}`,
   /** an account's share links: the reuse lookup and the insert it falls back to (media-links/service.ts getOrCreateLink) */
   mediaLinks: (userId: string) => `media-links:${userId}`,
-  /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
-  diskVolume: (volume: string) => `disk:${volume}`,
+  /** the resource leases of one host (its volume): a job's claim is checked against the live totals and recorded under it (resource-leases.ts) */
+  leaseVolume: (volume: string) => `leases:${volume}`,
+  /** the cores and memory leased on one machine (resource-leases.ts machineId); taken after leaseVolume */
+  leaseMachine: (machine: string) => `leases-machine:${machine}`,
   /** one retry of a project at a time, so an owner's Retry and an automatic one never both start a run (projects/service.ts retryProject) */
   retry: (projectId: string) => `retry:${projectId}`,
   /** the instance's sign-up rules, counted against MAX_SIGNUP_RULES when some are added (signup-rules.ts) */
