@@ -71,7 +71,7 @@ either; `pnpm docs:check` fails when this file is stale.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AI_MODEL` | `openai:gpt-4o-mini` | Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models. |
+| `AI_MODEL` | `openai:gpt-4o-mini` | Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `opencode:<model>`, `opencode-go:<model>`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models. |
 | `TRANSCRIPTION_MODEL` | `openai:whisper-1` | Default speech-to-text model as `provider:model`, e.g. `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, a Speaches model through OPENAI_BASE_URL, or a compatible router's model (`openrouter:openai/whisper-large-v3-turbo`). It must return word timestamps; boot transcribes a 5-second test clip once to check, and refuses a model that does not (e.g. `openai:gpt-4o-transcribe`). |
 | `TRANSCRIPT_ALIGN_MODEL` | unset | Model that re-aligns cut boundaries on short windows. Unset: TRANSCRIPTION_MODEL. A bigger whisper here is cheap and pays off. |
 
@@ -89,6 +89,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | `ASSEMBLYAI_API_KEY` | unset | AssemblyAI key (transcription). |
 | `AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports. |
 | `VERCEL_OIDC_TOKEN` | unset | Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform). |
+| `OPENCODE_API_KEY` | unset | OpenCode Console key (language models only). One key lists both plans: pay-per-token Zen models as `opencode:<model>` and, with a Go subscription, Go models as `opencode-go:<model>`. Go is meant for coding agents and has 5-hour, weekly and monthly caps. |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/inference` | OpenCode inference root: Zen chats at `<root>/openai/v1` and lists models at `<root>/v1/models`; Go chats at `<root>/go/openai/v1` and lists models at `<root>/go/v1/models`. Change it only for a proxy or a test server. |
 | `OPENAI_COMPATIBLE_BASE_URL` | unset | Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`). |
 | `OPENAI_COMPATIBLE_API_KEY` | unset | Key for the compat server (`ollama` for Ollama). |
 | `OPENAI_COMPATIBLE_NAME` | `compat` | Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>` (`openrouter` gives `openrouter:anthropic/claude-sonnet-4.5`). |
@@ -134,7 +136,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep. |
-| `FACE_MODEL_PATH` | `./models/ultraface-rfb-320.onnx` | UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
+| `FACE_MODEL_PATH` | `./models/yunet-2026may.onnx` | YuNet face detection ONNX model (landmarks included). Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
 | `ASD_MODEL` | `true` | LR-ASD audio-visual active speaker detection: who is talking in a two-person split, so the clip cuts to them. false, or model files missing (a warning at boot), = the older mouth-motion synchrony heuristic. Costs about a second of CPU per second of split footage. |
 | `ASD_MODEL_DIR` | `./models/lr-asd` | LR-ASD model directory (`audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx`). |
 | `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |

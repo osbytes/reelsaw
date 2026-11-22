@@ -23,7 +23,6 @@
  */
 import { spawn } from "node:child_process";
 import type { FaceDetector, FaceBox } from "../vision/faces.js";
-import { FACE_INPUT_W, FACE_INPUT_H } from "../vision/faces.js";
 import { ASD_CROP, ASD_FPS, faceCrop, type AsdModel } from "../vision/asd.js";
 import { mfcc as mfccOf } from "../audio/mfcc.js";
 import { rgbFramesToPipe } from "../media.js";
@@ -90,7 +89,7 @@ export async function activeSpeakers(
 
 // ---------- shared: decoding, seats, the third-face check, turn following ----------
 
-/** Decode size keeping the source's proportions, 480 px tall (faces keep detail; detection gets a downscale). */
+/** Decode size keeping the source's proportions, 480 px tall: the detector and the face crops read the same frame (YuNet takes any size). */
 function decodeSize(srcAspect = 16 / 9) {
   const h = 480;
   return { w: Math.max(2, 2 * Math.round((h * srcAspect) / 2)), h };
@@ -138,35 +137,6 @@ async function decodeFrames(
   }
 }
 
-/** Area-average downscale of a packed RGB24 frame to the face detector's 320×240 input. */
-function toDetectorInput(rgb: Uint8Array, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(FACE_INPUT_W * FACE_INPUT_H * 3);
-  for (let y = 0; y < FACE_INPUT_H; y++) {
-    const y1 = Math.floor((y * h) / FACE_INPUT_H);
-    const y2 = Math.max(y1 + 1, Math.floor(((y + 1) * h) / FACE_INPUT_H));
-    for (let x = 0; x < FACE_INPUT_W; x++) {
-      const x1 = Math.floor((x * w) / FACE_INPUT_W);
-      const x2 = Math.max(x1 + 1, Math.floor(((x + 1) * w) / FACE_INPUT_W));
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      for (let yy = y1; yy < y2; yy++)
-        for (let xx = x1; xx < x2; xx++) {
-          const i = (yy * w + xx) * 3;
-          r += rgb[i]!;
-          g += rgb[i + 1]!;
-          b += rgb[i + 2]!;
-        }
-      const n = (y2 - y1) * (x2 - x1);
-      const o = (y * FACE_INPUT_W + x) * 3;
-      out[o] = r / n;
-      out[o + 1] = g / n;
-      out[o + 2] = b / n;
-    }
-  }
-  return out;
-}
-
 /** 16×16 grayscale thumbnail of a face box, to tell a printed face (never changes) from a still person (blinks, breathes, shifts). */
 function boxThumb(rgb: Uint8Array, w: number, h: number, b: FaceBox): Uint8Array {
   const out = new Uint8Array(256);
@@ -180,11 +150,17 @@ function boxThumb(rgb: Uint8Array, w: number, h: number, b: FaceBox): Uint8Array
   return out;
 }
 
-/** a box belongs to a seat when its centre is within a third of the seat separation (capped at 0.12 for far-apart seats) */
+/**
+ * A box belongs to a seat when its centre is within a third of the seat separation (capped at 0.12 for far-apart
+ * seats) and it is at least half the height of the frame's largest face: a passer-by far behind a speaker, or
+ * behind the empty seat of an off-camera interviewer, is not that speaker (YuNet finds such small faces).
+ */
 function seatBoxes(boxes: FaceBox[], speakers: [number, number]): [FaceBox | null, FaceBox | null] {
   const seatTol = Math.min(0.12, Math.max(0.04, Math.abs(speakers[1] - speakers[0]) / 3));
+  const largest = Math.max(0, ...boxes.map((b) => b.y2 - b.y1));
+  const near = boxes.filter((b) => b.y2 - b.y1 >= 0.5 * largest);
   const pick = (who: 0 | 1) =>
-    boxes
+    near
       .map((bx) => ({ bx, d: Math.abs((bx.x1 + bx.x2) / 2 - speakers[who]) }))
       .filter((x) => x.d < seatTol)
       .sort((p, q) => p.d - q.d)[0]?.bx ?? null;
@@ -322,6 +298,13 @@ function followTurns(
 // ---------- the learned model ----------
 
 const SMOOTH = 6; // ±frames of detections a crop's box is the median of (the reference median-filters its tracks)
+/**
+ * LR-ASD was trained on crops from S3FD boxes; YuNet's are tighter (5-15% shorter than UltraFace's on the same face,
+ * and S3FD's run larger still). Scaling the half-size before cropping restores the framing the model knows. On the
+ * speakers eval every factor from 1.2 to 1.5 passes all six cases and 1.0-1.1 loses the off-camera interviewer
+ * (0.63-0.68); 1.35 is the middle.
+ */
+const BOX_TO_S3FD = 1.35;
 const MIN_TRACK = 13; // shortest stretch of a face worth scoring (~0.5 s)
 
 async function modelSpeakers(
@@ -363,14 +346,14 @@ async function modelSpeakers(
       const med = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
       const cx = med(near.map((b) => ((b.x1 + b.x2) / 2) * w));
       const cy = med(near.map((b) => ((b.y1 + b.y2) / 2) * h));
-      const bs = med(near.map((b) => Math.max((b.x2 - b.x1) * w, (b.y2 - b.y1) * h) / 2));
+      const bs = BOX_TO_S3FD * med(near.map((b) => Math.max((b.x2 - b.x1) * w, (b.y2 - b.y1) * h) / 2));
       faceCrop(rgb, w, h, cx, cy, bs, tmp);
       crops[who][i] = Uint8Array.from(tmp);
     }
   };
   await decodeFrames(deps, source, start, duration, fps, w, h, async (rgb, f) => {
     if (f % 2 === 0) {
-      const boxes = await deps.faces.detect(toDetectorInput(rgb, w, h));
+      const boxes = await deps.faces.detect(rgb, { w, h });
       det[f] = boxes;
       thumbs[f] = boxes.map((b) => boxThumb(rgb, w, h, b));
       const [a, b] = seatBoxes(boxes, speakers);
@@ -484,7 +467,7 @@ async function heuristicSpeakers(
   await decodeFrames(deps, source, start, duration, fps, w, h, async (rgb, f) => {
     const g = new Uint8Array(w * h);
     for (let i = 0; i < w * h; i++) g[i] = (rgb[i * 3]! * 77 + rgb[i * 3 + 1]! * 150 + rgb[i * 3 + 2]! * 29) >> 8;
-    const boxes = await deps.faces.detect(toDetectorInput(rgb, w, h));
+    const boxes = await deps.faces.detect(rgb, { w, h });
     samples.push({ t: f / fps, boxes, thumbs: boxes.map((b) => boxThumb(rgb, w, h, b)) });
     const seats = seatBoxes(boxes, speakers);
     for (const who of [0, 1] as const) {

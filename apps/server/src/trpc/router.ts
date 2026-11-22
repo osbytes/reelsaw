@@ -171,6 +171,7 @@ import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagina
 import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, queuePriorityOf, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
+import { CATALOG_PAGE_MAX } from "../ai/catalog.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
 import { reportCapabilities } from "../report/capabilities.js";
 import { logControl } from "../log.js";
@@ -195,6 +196,15 @@ const modelId = z
   .min(3)
   .max(200)
   .regex(/^[a-z0-9_-]+:[^\s]+$/i, "a model id looks like provider:model, e.g. anthropic:claude-haiku-4.5");
+
+const catalogPageInput = z.object({
+  kind: z.enum(["language", "transcription"]),
+  provider: z.string().trim().min(1).max(60).optional(),
+  q: z.string().max(200).optional(),
+  cursor: z.string().max(20).optional(),
+  limit: z.number().int().min(1).max(CATALOG_PAGE_MAX).optional(),
+  refresh: z.boolean().optional(),
+});
 
 function publicClip(c: schema.Clip) {
   return {
@@ -1220,9 +1230,14 @@ const restRouter = router({
     }),
     models: router({
       get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
-      catalog: adminProcedure
-        .input(z.object({ kind: z.enum(["language", "transcription"]), refresh: z.boolean().optional() }))
-        .query(({ ctx, input }) => ctx.svc.catalog.list(input.kind, { refresh: input.refresh })),
+      /** A page of each provider's models (or one provider's, or the matches for q), the models in use first. Same as list_models / `reelsaw models`. */
+      catalog: adminProcedure.input(catalogPageInput).query(async ({ ctx, input }) => {
+        try {
+          return await ctx.svc.catalog.page(input.kind, { ...input, pin: Object.values(ctx.svc.models.state().current) });
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
+        }
+      }),
       set: adminProcedure
         .input(z.object({ language: modelId.nullable().optional(), transcription: modelId.nullable().optional(), align: modelId.nullable().optional() }))
         .mutation(async ({ ctx, input }) => {

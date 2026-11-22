@@ -348,11 +348,11 @@ describe("stage timeout message", () => {
     const msg = stageTimeoutMessage({ stage: "analyze", done: 13, total: 43, model: "qwen2.5:14b", unitMs: 138_000, kind: "idle", elapsedMs: 30 * 60_000 });
     assert.equal(
       msg,
-      "Finding moments timed out: 13 of 43 parts done in 30 min on qwen2.5:14b (~2.3 min per part). Retry continues where it stopped; a smaller or GPU-backed model is faster.",
+      "Finding moments timed out: 13 of 43 parts done in 30 min on qwen2.5:14b (~2.3 min per part). Retry continues where it stopped; a faster model helps: smaller or GPU-backed when self-hosted, one that does not reason at length in the cloud.",
     );
     assert.equal(
       new StageTimeoutError({ stage: "analyze", done: 0, total: 0, model: "m", unitMs: null, kind: "unit", elapsedMs: 90_000 }).message,
-      "Finding moments timed out: no part finished in 1.5 min on m. Retry continues where it stopped; a smaller or GPU-backed model is faster.",
+      "Finding moments timed out: no part finished in 1.5 min on m. Retry continues where it stopped; a faster model helps: smaller or GPU-backed when self-hosted, one that does not reason at length in the cloud.",
     );
   });
 });

@@ -4,6 +4,7 @@ import { fontFamilySchema } from "@reelsaw/shared";
 import { parseLogLevels } from "./log.js";
 import { parseYtdlpProxies } from "./ytdlp-proxy.js";
 import { bundledAssetPath } from "./lib/assets.js";
+import { OPENCODE_DEFAULT_BASE_URL } from "./ai/provider-ids.js";
 
 const boolTrue = z
   .string()
@@ -169,6 +170,8 @@ export const envSchema = z.object({
   ASSEMBLYAI_API_KEY: z.string().optional(),
   AI_GATEWAY_API_KEY: z.string().optional(),
   VERCEL_OIDC_TOKEN: z.string().optional(),
+  OPENCODE_API_KEY: z.string().optional(),
+  OPENCODE_BASE_URL: z.string().default(OPENCODE_DEFAULT_BASE_URL),
   OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
   OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
   OPENAI_COMPATIBLE_NAME: z.string().default("compat"),
@@ -283,7 +286,7 @@ export const envSchema = z.object({
 
   // face detection for automatic layout (vision/faces.ts)
   FACE_DETECTION: boolTrue,
-  FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ultraface-rfb-320.onnx")),
+  FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/yunet-2026may.onnx")),
   // learned active speaker detection (LR-ASD, vision/asd.ts) for two-person splits; false or a missing model = the
   // mouth-motion synchrony heuristic (pipeline/speaker.ts)
   ASD_MODEL: boolTrue,

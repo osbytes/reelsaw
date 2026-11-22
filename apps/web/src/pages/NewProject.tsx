@@ -29,6 +29,7 @@ import { LanguageCombobox } from "../components/LanguageCombobox";
 import { youtubeId } from "../lib/links";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { pageTitle, useDocumentTitle } from "../lib/title";
+import { useDebounced } from "../lib/useDebounced";
 
 const LENGTHS = [
   { id: "short", label: "< 30s", min: 10, max: 30 },
@@ -40,15 +41,6 @@ const LENGTHS = [
 const SAMPLE = "This is how your captions will look on every clip you make".split(" ");
 const SAMPLE_WORDS: PreviewWord[] = SAMPLE.map((text, i) => ({ text, start: i * 0.38, end: i * 0.38 + 0.34 }));
 const SAMPLE_LOOP = SAMPLE_WORDS.at(-1)!.end + 0.6;
-
-function useDebounced<T>(v: T, ms: number) {
-  const [d, setD] = useState(v);
-  useEffect(() => {
-    const t = setTimeout(() => setD(v), ms);
-    return () => clearTimeout(t);
-  }, [v, ms]);
-  return d;
-}
 
 export function NewProjectPage() {
   useDocumentTitle(pageTitle("New project"));

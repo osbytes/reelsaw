@@ -7,7 +7,7 @@ download tool below, each under its own licence. Weights are fetched at image bu
 
 | Component | Used for | Source (pinned) | Licence |
 | --- | --- | --- | --- |
-| UltraFace RFB-320 (`ultraface-rfb-320.onnx`) | face detection for reframing | [onnx/models](https://github.com/onnx/models/tree/4c46cd00fbdb7cd30b6c1c17ab54f2e1f4f7b177/validated/vision/body_analysis/ultraface) (Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB) | MIT (SPDX header in the model README; upstream repo MIT, Copyright (c) 2019 linzai) |
+| YuNet 2026may (`yunet-2026may.onnx`) | face detection and landmarks for reframing | [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet) (ShiqiYu/libfacedetection.train) | MIT (the model directory's `LICENSE`, Copyright (c) 2020 Shiqi Yu) |
 | PP-OCRv4 text detector (`ppocrv4-det.onnx`) | find burned-in text to avoid | [SWHL/RapidOCR](https://huggingface.co/SWHL/RapidOCR/tree/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4), converted from PaddleOCR | Apache-2.0 (model card; PaddleOCR and RapidOCR are Apache-2.0) |
 | Silero VAD v5.1.2 (`silero-vad.onnx`) | voice activity, silence trimming | [snakers4/silero-vad](https://github.com/snakers4/silero-vad/tree/v5.1.2) | MIT (Copyright (c) 2020-present Silero Team) |
 | wav2vec2-base-960h, int8 ONNX (`wav2vec2-base-960h/`) | CTC forced alignment of cut boundaries | [Xenova/wav2vec2-base-960h](https://huggingface.co/Xenova/wav2vec2-base-960h/tree/a19f851b3d42865797e410752b4c570c871e4825), converted from facebook/wav2vec2-base-960h | Apache-2.0 (facebook/wav2vec2-base-960h model card; the Xenova conversion declares no licence of its own) |

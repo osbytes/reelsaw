@@ -210,7 +210,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // exception: the API's cut preview (pipeline/cutpreview.ts) uses it to show the boundaries a render would cut at.
   const detectors = config.RUN_WORKERS;
   const faces = await step(
-    !config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (UltraFace ONNX)" : "face detector (skipped, no workers in this process)",
+    !config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (YuNet ONNX)" : "face detector (skipped, no workers in this process)",
     async () => {
       if (!config.FACE_DETECTION || !detectors) return null;
       try {
