@@ -37,7 +37,7 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       `parseClock` (now also the clip editor's time fields) and `parseRangeArg` for the CLI. Tests:
       apps/server/test/ranges-plan.test.ts. Named "ranges", not "sections": a clip's framing spans are already
       `sections` in `update_clip`.
-- [x] 1.2 Migration 0068: `project_ranges` (`id`, `project_id`, `start_sec`, `end_sec`, `mode`, `origin` user | api |
+- [x] 1.2 Migration 0070: `project_ranges` (`id`, `project_id`, `start_sec`, `end_sec`, `mode`, `origin` user | api |
       most_replayed | whole, `label`, `ref`, `billed_sec`, `picked_at`, `created_at`; index `(project_id, start_sec)`)
       and `clips.range_id` (set null on delete). `picked_at` rather than a run id: a retry starts a new run but must not
       pick again in ranges already picked from. Backfill: every project with a length gets one `whole` range
@@ -49,7 +49,7 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       unit that records the seconds, under the quota lock, and the ledger records the billed seconds. Tests:
       test/ranges-stack.test.ts (admit, refuse, other projects counted). Left: two ranges ingests of one account
       racing past the cap (a stack test with two concurrent ingests).
-- [x] 1.4 Transcript coverage is spans: `transcripts.covered` (jsonb `[start, end][]`, migration 0069 copies
+- [x] 1.4 Transcript coverage is spans: `transcripts.covered` (jsonb `[start, end][]`, migration 0071 copies
       `[0, coalesce(covered_sec, duration_sec)]`). Transcribe cuts each stretch the ranges need and the transcript lacks
       (`neededSpans` less `covered`) through `ctx.sourceAt`, chunks it on the source clock (rows keyed by offset in
       tenths of a second), and merges the words in time order (`mergeTranscript` moves every flag and soft-deleted
