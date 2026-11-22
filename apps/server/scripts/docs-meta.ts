@@ -269,7 +269,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
   LAYOUT_MIN_FACE_RATIO: ["pipeline", "Share of sampled frames that must contain a face before a clip gets a face-following layout."],
   LAYOUT_MIN_FACE_SIZE: ["pipeline", "Median face height / frame height needed for a face-following layout."],
 
-  FACE_MODEL_PATH: ["local", "UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker."],
+  FACE_MODEL_PATH: [
+    "local",
+    "YuNet face detection ONNX model (landmarks included). Ships in the image; `pnpm models:download` fetches it for runs outside Docker.",
+  ],
   TEXT_DETECTION: ["local", "Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text."],
   TEXT_MODEL_PATH: ["local", "PP-OCRv4 text detector ONNX model."],
   VAD: ["local", "Silero voice activity detection for tightening long pauses. false = never trim silence."],
@@ -576,7 +579,7 @@ export const ENV_OMIT_ALL = ["ALLOW_SIGNUP"];
 export const ENV_VALUE: Record<"root" | "deploy", Record<string, string>> = {
   root: {
     DATABASE_URL: "postgres://reelsaw:reelsaw@localhost:5432/reelsaw",
-    FACE_MODEL_PATH: "apps/server/models/ultraface-rfb-320.onnx",
+    FACE_MODEL_PATH: "apps/server/models/yunet-2026may.onnx",
     TEXT_MODEL_PATH: "apps/server/models/ppocrv4-det.onnx",
     VAD_MODEL_PATH: "apps/server/models/silero-vad.onnx",
     ALIGN_MODEL_DIR: "apps/server/models/wav2vec2-base-960h",

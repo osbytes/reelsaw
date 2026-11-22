@@ -20,7 +20,7 @@ FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00
 ARG YTDLP_VERSION=2026.08.19
 ARG YTDLP_SHA256=1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
 ENV DATA_DIR=/data \
-    FACE_MODEL_PATH=/app/server/models/ultraface-rfb-320.onnx \
+    FACE_MODEL_PATH=/app/server/models/yunet-2026may.onnx \
     TEXT_MODEL_PATH=/app/server/models/ppocrv4-det.onnx \
     VAD_MODEL_PATH=/app/server/models/silero-vad.onnx \
     ALIGN_MODEL_DIR=/app/server/models/wav2vec2-base-960h \

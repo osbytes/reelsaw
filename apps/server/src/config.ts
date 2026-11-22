@@ -286,7 +286,7 @@ export const envSchema = z.object({
 
   // face detection for automatic layout (vision/faces.ts)
   FACE_DETECTION: boolTrue,
-  FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ultraface-rfb-320.onnx")),
+  FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/yunet-2026may.onnx")),
   // burned-in caption / watermark detection (PP-OCRv4 text detector); false = never hide source text
   TEXT_DETECTION: boolTrue,
   // voice activity detection (Silero VAD) for tightening long pauses; false = never trim silence
