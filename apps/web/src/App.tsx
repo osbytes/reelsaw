@@ -58,9 +58,11 @@ export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: stri
 
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="Reelsaw">
+    // the wordmark is an image of the name, so the link's name is "Reelsaw" and matches what it shows (WCAG 2.5.3)
+    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
+      <span className="sr-only sm:hidden">Reelsaw</span>
       <LogoMark />
-      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" aria-hidden>
+      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" role="img" aria-label="Reelsaw">
         reel<span className="mx-px font-medium text-acc-text">/</span>saw
       </span>
     </Link>
@@ -238,7 +240,7 @@ function SearchButton() {
       aria-label="Search"
     >
       <Search className="h-4 w-4 shrink-0" />
-      <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">Search or paste a link…</span>
+      <span className="hidden min-w-0 flex-1 truncate text-left text-ink2 sm:inline">Search or paste a link…</span>
       <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
     </button>
   );
