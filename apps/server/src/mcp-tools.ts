@@ -276,7 +276,7 @@ export const TOOLS = {
   get_clip: {
     title: "Get clip",
     description:
-      "Everything about one clip: text, bounds, scores, emphasis, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links, and what the next render will use with where each comes from: style { own, effective, from: clip|project|default }, framing { own, effective: { mode, adjust, sections }, from }, bumpers { own, effective } (intro/outro), punchIns { on, scale, lastRender: [{ start, end, word }] } (zooms on the key words: style punchIn / punchInScale, set with update_clip or update_project_style). Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
+      "One clip in full: text, bounds, scores, emphasis, layers, render diagnostics, links, and what the next render will use with where each comes from: style { own, effective, from: clip|project|default }, framing { own, effective: { mode, adjust, sections }, from }, bumpers { own, effective } (intro/outro), punchIns { on, scale, lastRender } (key-word zooms). Returns the clip object. Poll it after an edit until status is done.",
     inputSchema: { id: clipId() },
     annotations: { readOnlyHint: true },
   },
@@ -1126,7 +1126,7 @@ export const TOOLS = {
   update_project_style: {
     title: "Update project style",
     description:
-      "Change the caption/hook look and fades for the whole project (font from list_fonts, colors, size, position, words per line, fadeIn/fadeOut, intro/outro bumperTransition, punchIn / punchInScale zooms on the key words). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
+      "Change the caption/hook look and fades of a whole project (font from list_fonts, colors, size, position, words per line, fadeIn/fadeOut, bumperTransition, punchIn zooms). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
     inputSchema: {
       id: projectId(),
       style: styleOverrideSchema.describe("The style fields to change; fields left out keep their value"),
