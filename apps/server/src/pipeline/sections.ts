@@ -30,6 +30,7 @@ import { sessionLock, waitSessionLock } from "../locks.js";
 import { NoEligibleProxyError } from "../ytdlp-proxy.js";
 import { type StageContext, DownloadFailedError } from "./common.js";
 import { describeDownloadFailure, sourceFormat } from "./ingest.js";
+import { ENCODE_PASS_CPU } from "../resources.js";
 
 /** Seconds fetched on each side of a clip: room for a keyframe before the start, and for small bound nudges. */
 export const SECTION_PAD_SEC = 3;
@@ -428,7 +429,9 @@ async function stitch(ctx: StageContext, parts: Piece[], range: Range, dir: stri
   const plan = stitchPlan(range, parts);
   if (!plan) throw new DownloadFailedError("The fetched stretches do not reach across the clip; fetching again");
   const args = stitchArgs(plan, path.join(dir, `stitch-${Math.round(range[0] * 1000)}-${Math.round(range[1] * 1000)}.mp4`));
-  await ctx.svc.media.ffmpeg(args.argv, { signal: ctx.signal });
+  await ctx.svc.resources.withCpu({ kind: "stitch", cpu: ENCODE_PASS_CPU, ids: { projectId: ctx.projectId } }, (threads) =>
+    ctx.svc.media.ffmpeg(args.argv, { signal: ctx.signal, threads }),
+  );
   ctx.log.info({ range, parts: plan.map((s) => ({ a: s.a, b: s.b, file: path.basename(s.source.file) })) }, "stitched a window from stored and fresh parts");
   return { file: args.file, offsetSec: range[0], start: range[0], end: range[1], width: args.width, height: args.height, fps: args.fps, aligned: true };
 }

@@ -19,6 +19,7 @@ import { defaultProjectSettings, type ProjectStatus } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import type { Services } from "../services.js";
+import { ENCODE_PASS_CPU } from "../resources.js";
 
 export interface ScenarioOptions {
   userEmail: string;
@@ -252,25 +253,30 @@ async function makeSource(
   const input = sourceFile
     ? ["-i", sourceFile, "-t", String(spec.durationSec)]
     : ["-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=30`, "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000", "-t", String(spec.durationSec)];
-  await svc.media.ffmpeg([
-    "-y",
-    ...input,
-    "-vf",
-    `scale=-2:${h}`,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "30",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "96k",
-    "-movflags",
-    "+faststart",
-    file,
-  ]);
+  const encode = (threads: number) =>
+    svc.media.ffmpeg(
+      [
+        "-y",
+        ...input,
+        "-vf",
+        `scale=-2:${h}`,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "30",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-movflags",
+        "+faststart",
+        file,
+      ],
+      { threads },
+    );
+  await svc.resources.withCpu({ kind: "scenario-encode", cpu: ENCODE_PASS_CPU }, encode);
   const probe = await svc.media.ffprobe(file);
   const key = keys.source(projectId, ".mp4");
   await svc.storage.putFile(key, file);
@@ -293,29 +299,34 @@ async function makeClips(
     const id = randomUUID();
     const mp4 = path.join(work, `${id}.mp4`);
     const jpg = path.join(work, `${id}.jpg`);
-    await svc.media.ffmpeg([
-      "-y",
-      "-ss",
-      String(start),
-      "-t",
-      String(end - start),
-      "-i",
-      local,
-      "-vf",
-      "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "ultrafast",
-      "-crf",
-      "30",
-      "-c:a",
-      "aac",
-      "-movflags",
-      "+faststart",
-      mp4,
-    ]);
-    await svc.media.ffmpeg(["-y", "-ss", "1", "-i", mp4, "-frames:v", "1", "-vf", "scale=360:-2", jpg]);
+    await svc.resources.withCpu({ kind: "scenario-encode", cpu: ENCODE_PASS_CPU }, (threads) =>
+      svc.media.ffmpeg(
+        [
+          "-y",
+          "-ss",
+          String(start),
+          "-t",
+          String(end - start),
+          "-i",
+          local,
+          "-vf",
+          "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
+          "-c:v",
+          "libx264",
+          "-preset",
+          "ultrafast",
+          "-crf",
+          "30",
+          "-c:a",
+          "aac",
+          "-movflags",
+          "+faststart",
+          mp4,
+        ],
+        { threads },
+      ),
+    );
+    await svc.media.ffmpeg(["-y", "-ss", "1", "-i", mp4, "-frames:v", "1", "-vf", "scale=360:-2", jpg], { threads: "light" });
     const outputKey = keys.clip(projectId, id, 0);
     const thumbnailKey = keys.thumb(projectId, id, 0);
     await svc.storage.putFile(outputKey, mp4);

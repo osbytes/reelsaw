@@ -23,6 +23,7 @@ import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 import { CommandError } from "../media.js";
 import { BOT_CHECK, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
+import { ENCODE_PASS_CPU } from "../resources.js";
 
 export { isPermanentDownloadFailure } from "../ytdlp-errors.js";
 
@@ -91,10 +92,12 @@ async function stillAsVideo(ctx: StageContext, sourcePath: string): Promise<stri
   const picture = path.join(dir, "still.png");
   const out = path.join(dir, "source.still.mp4");
   try {
-    await media.ffmpeg(["-y", "-i", sourcePath, "-map", "0:v:0", "-frames:v", "1", picture], { signal: ctx.signal });
-    await media
-      .ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out), { signal: ctx.signal })
-      .catch(() => media.ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out, "aac"), { signal: ctx.signal }));
+    await media.ffmpeg(["-y", "-i", sourcePath, "-map", "0:v:0", "-frames:v", "1", picture], { signal: ctx.signal, threads: "light" });
+    await ctx.svc.resources.withCpu({ kind: "ingest-encode", cpu: ENCODE_PASS_CPU, ids: { projectId: ctx.projectId } }, (threads) =>
+      media
+        .ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out), { signal: ctx.signal, threads })
+        .catch(() => media.ffmpeg(stillVideoArgs(picture, sourcePath, probe.durationSec, out, "aac"), { signal: ctx.signal, threads })),
+    );
     const video = path.join(dir, "source.mp4");
     await fs.rm(sourcePath, { force: true });
     await fs.rename(out, video);
@@ -319,7 +322,9 @@ export async function ingest(ctx: StageContext) {
     const posterPath = path.join(os.tmpdir(), `reelsaw-poster-${projectId}.jpg`);
     try {
       const at = Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
-      await svc.media.ffmpeg(["-y", "-ss", at.toFixed(2), "-i", sourcePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "4", posterPath]);
+      await svc.media.ffmpeg(["-y", "-ss", at.toFixed(2), "-i", sourcePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "4", posterPath], {
+        threads: "light",
+      });
       await svc.storage.putFile(keys.sourcePoster(projectId), posterPath);
       meta = { ...meta, thumbnail: `/media/source/${projectId}/poster.jpg` };
     } catch (err) {

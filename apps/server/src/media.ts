@@ -120,14 +120,67 @@ export interface EncoderChoice {
 }
 
 /**
- * Decoder/encoder threads plus the two filtergraph pools. `-threads` does not apply to filters;
- * those default to the CPU count, and a 32-core host running several jump-cut graphs then races
- * inside `scale` (`Failed to configure output pad` / EAGAIN on reinit). Filtergraph threads stay at
- * 1: x264/NVENC take the encode cores, and overlay/scale reinit is not safe to parallelise.
+ * The two filtergraph pools, for an encode with a filtergraph. `-threads` does not apply to filters; those
+ * default to the CPU count, and a 32-core host running several jump-cut graphs then races inside `scale`
+ * (`Failed to configure output pad` / EAGAIN on reinit). Filtergraph threads stay at 1: x264/NVENC take the
+ * encode cores (`threads` of `media.ffmpeg`, from a lease), and overlay/scale reinit is not safe to parallelise.
  */
-export function ffmpegThreadArgs(encodeThreads: number): string[] {
-  const t = String(Math.max(1, encodeThreads));
-  return ["-threads", t, "-filter_threads", "1", "-filter_complex_threads", "1"];
+export function filterThreadArgs(): string[] {
+  return ["-filter_threads", "1", "-filter_complex_threads", "1"];
+}
+
+/**
+ * Threads of one `media.ffmpeg` pass: a CPU lease's grant (`resources.withCpu`) for a pass that decodes or
+ * encodes video, or "light" (one thread) for a single frame, a stream copy or an audio pass. Required, so no pass
+ * runs with ffmpeg's default of every core.
+ */
+export type FfmpegThreads = number | "light";
+
+/**
+ * `args` with the thread count placed where ffmpeg reads it: `-threads` is per file and binds to the file that
+ * follows it, so it goes before every input (the decoders) and before the output (the encoder). A caller that
+ * writes its own `-threads` is refused: the lease is the only source of the number. The filtergraph pools are
+ * capped too (`filterThreadArgs`) unless the caller already did, so no pass (a stitched window, a bumper) runs a
+ * filtergraph at the CPU count.
+ */
+export function threadedArgv(args: readonly string[], threads: FfmpegThreads): string[] {
+  if (args.includes("-threads")) throw new Error("media.ffmpeg sets -threads from opts.threads (a CPU lease); remove it from the arguments");
+  const t = String(threads === "light" ? 1 : Math.max(1, Math.floor(threads)));
+  const filters = args.includes("-filter_threads") ? [] : filterThreadArgs();
+  const out: string[] = [];
+  args.forEach((a, i) => {
+    if (a === "-i") out.push("-threads", t);
+    if (i === args.length - 1) out.push(...filters, "-threads", t);
+    out.push(a);
+  });
+  return out;
+}
+
+export interface SceneScanOptions {
+  floor?: number;
+  signal?: AbortSignal;
+  range?: { start: number; duration: number };
+  /** decoder threads: a CPU lease's grant (`resources.withCpu({ kind: "scene-scan", ...sceneScanCpu(pinned) }, …)`) */
+  threads: number;
+}
+
+/**
+ * Thread options of the shot-cut scan, input side. The pass has no encoder, so `-threads` before `-i` sizes the only
+ * thing doing work, the decoder (frame threading is lossless: the scene scores are the same at any count). Placed after
+ * `-i` it would bind to the null output instead and the decoder would fall back to its own default. The filtergraph
+ * stays at one thread, as everywhere (see `filterThreadArgs`).
+ */
+export function sceneScanThreadArgs(threads: number): string[] {
+  return ["-threads", String(Math.max(1, Math.floor(threads))), "-filter_threads", "1"];
+}
+
+/**
+ * The input half of a frame sampler that spawns ffmpeg itself: its decoder's threads, placed before `-ss`/`-i`
+ * (`-threads` binds to the file that follows). A video sampler takes them from a CPU lease (`resources.withCpu`
+ * with SAMPLE_CPU); a single frame or an audio-only pass takes 1. Without it the decoder uses every core.
+ */
+export function decodeThreadArgs(threads: number): string[] {
+  return ["-threads", String(Math.max(1, Math.floor(threads)))];
 }
 
 /**
@@ -164,7 +217,8 @@ export function encoderCandidates(requested: EncoderSetting, platform: NodeJS.Pl
 /** Wrapper around the external media binaries (ffmpeg, ffprobe, yt-dlp). */
 export interface MediaTools {
   run(bin: string, args: string[], opts?: RunOptions): Promise<RunResult>;
-  ffmpeg(args: string[], opts?: { signal?: AbortSignal | undefined; onProgress?: (sec: number) => void }): Promise<RunResult>;
+  /** One ffmpeg pass; `threads` is a CPU lease's grant or "light" (`threadedArgv` places it). */
+  ffmpeg(args: string[], opts: { threads: FfmpegThreads; signal?: AbortSignal | undefined; onProgress?: (sec: number) => void }): Promise<RunResult>;
   /** the H.264 encoder renders use, decided by `check()` from FFMPEG_ENCODER and a probe */
   encoder(): EncoderChoice;
   /** `-c:v …` for the encoder in use (or a named one, for a software retry after a hardware failure) */
@@ -178,12 +232,14 @@ export interface MediaTools {
   /** Mono 16 kHz MP3 of the source's audio; `untilSec` stops it there (a partly processed video transcribes only its start). */
   extractAudio(input: string, output: string, signal?: AbortSignal, untilSec?: number | null): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
-  /** Shot cuts (seconds). `floor` = minimum scene score; cuts must also stand out from local motion. */
   /**
-   * Shot-cut times in seconds. With `range`, only that stretch is decoded and the times are relative to
-   * `range.start` (a clip's cuts on its own clock). Never throws: a failed detection is an empty list.
+   * Shot-cut times in seconds. `floor` = minimum scene score; cuts must also stand out from local motion. With `range`,
+   * only that stretch is decoded and the times are relative to `range.start` (a clip's cuts on its own clock).
+   * `threads` is the decoder thread budget, required so every caller takes it from a CPU lease
+   * (`resources.withCpu`, or the pure `cpuGrant` without a governor). A failed decode throws; a clean
+   * run that found nothing is `[]`.
    */
-  detectScenes(input: string, floor?: number, signal?: AbortSignal, range?: { start: number; duration: number }): Promise<number[]>;
+  detectScenes(input: string, opts: SceneScanOptions): Promise<number[]>;
   /** Verifies every binary executes. */
   check(): Promise<void>;
 }
@@ -355,8 +411,8 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
     );
   };
 
-  const ffmpeg: MediaTools["ffmpeg"] = (args, opts = {}) =>
-    run(config.FFMPEG_PATH, ["-hide_banner", "-nostdin", "-y", ...args], {
+  const ffmpeg: MediaTools["ffmpeg"] = (args, opts) =>
+    run(config.FFMPEG_PATH, ["-hide_banner", "-nostdin", "-y", ...threadedArgv(args, opts.threads)], {
       signal: opts.signal,
       onStderr: opts.onProgress
         ? (line) => {
@@ -397,14 +453,17 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
 
     async extractAudio(input, output, signal, untilSec) {
       const until = untilSec != null ? ["-t", untilSec.toFixed(3)] : [];
-      await ffmpeg(["-i", input, "-vn", ...until, "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal });
+      await ffmpeg(["-i", input, "-vn", ...until, "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal, threads: "light" });
     },
 
     async segmentAudio(input, outPattern, chunkSeconds, signal) {
-      await ffmpeg(["-i", input, "-f", "segment", "-segment_time", String(chunkSeconds), "-c", "copy", "-reset_timestamps", "1", outPattern], { signal });
+      await ffmpeg(["-i", input, "-f", "segment", "-segment_time", String(chunkSeconds), "-c", "copy", "-reset_timestamps", "1", outPattern], {
+        signal,
+        threads: "light",
+      });
     },
 
-    async detectScenes(input, floor = 0.1, signal, range) {
+    async detectScenes(input, { floor = 0.1, signal, range, threads }) {
       // per-frame scene scores on a small copy (fast, and plenty for shot changes), then adaptive
       // peak picking: fixed thresholds miss every cut in dark or low-contrast footage (see scenes.ts).
       // Input seeking (-ss before -i) restarts the output clock at 0, so a range's times are range-relative.
@@ -416,11 +475,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
           [
             "-hide_banner",
             "-nostdin",
-            // one decoder thread and one filter thread: scene scoring runs beside renders and must not take every core
-            "-threads",
-            "1",
-            "-filter_threads",
-            "1",
+            ...sceneScanThreadArgs(threads),
             ...seek,
             "-i",
             input,

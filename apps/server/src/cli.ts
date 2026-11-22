@@ -19,6 +19,7 @@ import {
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { CommandError } from "./media.js";
+import { SAMPLE_CPU, sceneScanCpu } from "./resources.js";
 import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
 import { startUpgradeWork, upgradeWork } from "./projects/after-upgrade.js";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
@@ -1656,8 +1657,8 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
         id: w.id,
         role: w.role,
         status: w.live ? "online" : `gone ${ago(w.lastSeenAgoSec)}`,
-        cpus: w.cpus,
-        mem: `${w.memTotalMB} MB`,
+        cpus: w.coresLeased ? `${w.cpus} (${w.coresLeased} leased)` : w.cpus,
+        mem: `${w.memTotalMB} MB${w.memLeasedMB ? ` (${w.memLeasedMB} MB leased)` : ""}`,
         disk:
           w.diskFreeMB < 0 ? "n/a" : `${w.diskFreeMB} MB free of ${w.diskTotalMB} MB${w.diskLeasedMB ? `, ${w.diskLeasedMB} MB leased to jobs in flight` : ""}`,
         gpu: gpu(w),
@@ -1985,6 +1986,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     let samples = dropStaticFaces(
       await sampleFaces(svc.faces, {
         ffmpegPath: svc.config.FFMPEG_PATH,
+        threads: SAMPLE_CPU.max,
         source,
         startSec: c.startSec + from,
         durationSec: to - from,
@@ -1993,7 +1995,12 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       }),
     ).samples;
     if (svc.text) {
-      const frames = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH }, source, c.startSec + from, to - from);
+      const frames = await sampleClipText(
+        { detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, threads: SAMPLE_CPU.max },
+        source,
+        c.startSec + from,
+        to - from,
+      );
       samples = attachText(
         samples,
         frames.map((f) => ({ t: f.t, all: f.all })),
@@ -2458,7 +2465,10 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     const id = pos[0]!;
     const db = svc.database.db;
     const t0 = Date.now();
-    const cuts = await svc.media.detectScenes(await sourcePath(svc, id));
+    const cuts = await svc.resources.withCpu(
+      { kind: "scene-scan", cpu: sceneScanCpu(svc.config.SCENE_SCAN_THREADS), ids: { projectId: id } },
+      async (threads) => svc.media.detectScenes(await sourcePath(svc, id), { threads }),
+    );
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { sceneCuts: true } });
     console.log(`${cuts.length} shot cuts in ${Date.now() - t0} ms (stored: ${t?.sceneCuts?.length ?? 0})`);
     console.log(

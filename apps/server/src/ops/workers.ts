@@ -11,7 +11,7 @@ import type { Logger } from "../log.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
 import type { QueueName } from "../queue/boss.js";
 import { inflightJobs, listeningQueues } from "../queue/inflight.js";
-import { LEASE_STALE_MS, releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
+import { LEASE_STALE_MS, dropLeakedLeases, hostLeases, releaseWorkerLeases } from "../resource-leases.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
 import { pausedReason, type PausedReason } from "../resources.js";
@@ -77,8 +77,11 @@ export interface WorkerView {
   diskTotalMB: number;
   /** the filesystem its DATA_DIR is on; processes with the same volume share one disk (and its leases) */
   volume: string | null;
-  /** MB of that free space already leased to jobs in flight on the volume (disk-leases.ts) */
+  /** MB of that free space already leased to jobs in flight on the volume (resource-leases.ts) */
   diskLeasedMB: number;
+  /** cores and MB of memory leased to jobs in flight on the same host, by every process on it */
+  coresLeased: number;
+  memLeasedMB: number;
   gpu: WorkerGpu | null;
   renders: WorkerRenders;
   queues: string[];
@@ -106,6 +109,8 @@ export function classifyWorkers(
     diskTotalMB: number;
     volume?: string | null;
     diskLeasedMB?: number;
+    coresLeased?: number;
+    memLeasedMB?: number;
     gpu: WorkerGpu | null;
     renders: WorkerRenders;
     queues: string[] | null;
@@ -133,6 +138,8 @@ export function classifyWorkers(
       diskTotalMB: r.diskTotalMB,
       volume: r.volume ?? null,
       diskLeasedMB: r.diskLeasedMB ?? 0,
+      coresLeased: r.coresLeased ?? 0,
+      memLeasedMB: r.memLeasedMB ?? 0,
       gpu: r.gpu,
       renders: r.renders,
       queues: r.queues ?? [],
@@ -253,11 +260,16 @@ export async function beat(svc: Services): Promise<void> {
   const renders: WorkerRenders = { running: r.running, limit: r.limit, max: svc.resources.maxRenders(), mode: r.mode };
   // what this process takes right now: everything, or without the disk queues while the gate holds them (queue/disk-gate.ts)
   const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
-  // disk promised to jobs in flight on this volume, by every process on it: what a hand-off subtracts from "free"
+  // disk, cores and memory promised to jobs in flight on this host, by every process on it: what a hand-off
+  // subtracts from "free" (disk), and what the next job's lease is granted against
   const lease = svc.resources.leases();
-  const diskLeasedMB = lease.volume
-    ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb
-    : lease.ownMB;
+  // a release whose delete failed left a row behind: drop it before it is counted (resource-leases.ts)
+  if (lease.volume && lease.machine)
+    await dropLeakedLeases(svc, id, svc.resources.ownLeaseIds(), now).catch((err) => svc.log.warn({ err }, "could not drop leaked leases"));
+  const host =
+    lease.volume && lease.machine
+      ? await hostLeases(svc.database.db, { volume: lease.volume, machine: lease.machine, selfId: id, staleMs: LEASE_STALE_MS, now })
+      : { mb: lease.ownMB, cores: lease.ownCores, memMB: lease.ownMemMB };
   const row = {
     role: processRole(svc.config),
     hostname,
@@ -271,7 +283,9 @@ export async function beat(svc: Services): Promise<void> {
     diskFreeMB: snap.diskFreeMB,
     diskTotalMB: snap.diskTotalMB,
     volume: lease.volume,
-    diskLeasedMB,
+    diskLeasedMB: host.mb,
+    coresLeased: host.cores,
+    memLeasedMB: host.memMB,
     gpu: gpuJson,
     renders,
     queues,

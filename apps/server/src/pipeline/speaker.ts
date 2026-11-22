@@ -25,7 +25,7 @@ import { spawn } from "node:child_process";
 import type { FaceDetector, FaceBox } from "../vision/faces.js";
 import { ASD_CROP, ASD_FPS, faceCrop, type AsdModel } from "../vision/asd.js";
 import { mfcc as mfccOf } from "../audio/mfcc.js";
-import { rgbFramesToPipe } from "../media.js";
+import { decodeThreadArgs, rgbFramesToPipe } from "../media.js";
 import { VAD_FRAME_SEC, VAD_SR } from "../audio/vad.js";
 import { dropStaticFaces } from "./layout.js";
 
@@ -59,7 +59,8 @@ export interface SpeakerOptions {
   scoreMargin?: number;
 }
 
-type Deps = { faces: FaceDetector; ffmpegPath: string; signal?: AbortSignal; asd?: AsdModel | null };
+/** `threads`: the decoder's, from a CPU lease (SAMPLE_CPU) */
+type Deps = { faces: FaceDetector; ffmpegPath: string; threads: number; signal?: AbortSignal; asd?: AsdModel | null };
 
 export async function activeSpeakers(
   deps: Deps,
@@ -112,6 +113,7 @@ async function decodeFrames(
       "-loglevel",
       "error",
       "-nostdin",
+      ...decodeThreadArgs(deps.threads),
       "-ss",
       start.toFixed(3),
       "-t",

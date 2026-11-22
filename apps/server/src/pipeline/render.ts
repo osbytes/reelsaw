@@ -87,7 +87,8 @@ import { WATERMARK_LOGO, watermarkPlacement, type TextOverlayEvent } from "./cap
 import { ensureFontsDir, loadFontState, mergeGlyphs, missingGlyphs, pickFont, systemGlyphs, uploadedGlyphs } from "../fonts.js";
 import { languageCode } from "./language.js";
 import type { Logger } from "../log.js";
-import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
+import { filterThreadArgs, type VideoEncoder } from "../media.js";
+import { ENCODE_PASS_CPU, SAMPLE_CPU, sceneScanCpu } from "../resources.js";
 import {
   bumperConcat,
   bumperFrames,
@@ -411,10 +412,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // per-clip text scan: grows/times burned-in text regions, and finds slides to show whole in auto framing
   const needsTextScan = !!svc.text && (overlays.length > 0 || timeline.some((pc) => pc.mode === "auto"));
   const frames = needsTextScan
-    ? await sampleClipText({ detector: svc.text!, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, at, duration).catch((err) => {
-        log.warn({ err }, "per-clip text scan failed; using project regions");
-        return [];
-      })
+    ? await svc.resources
+        .withCpu({ kind: "sample", cpu: SAMPLE_CPU, ids: { projectId: clip.projectId } }, (threads) =>
+          sampleClipText({ detector: svc.text!, ffmpegPath: svc.config.FFMPEG_PATH, threads, signal: ctx.signal }, sourcePath, at, duration),
+        )
+        .catch((err) => {
+          log.warn({ err }, "per-clip text scan failed; using project regions");
+          return [];
+        })
     : [];
   if (overlays.length && svc.text) {
     // the project scan samples the whole video sparsely; this clip may show a longer line or a
@@ -455,25 +460,33 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const sceneCuts =
     cutsFrom === "clip"
       ? (
-          await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: at, duration }).catch((err: unknown) => {
-            if (ctx.signal.aborted) throw err;
-            log.warn({ err }, "shot changes of the clip not detected, rendering without cuts");
-            return [] as number[];
-          })
+          await svc.resources
+            .withCpu({ kind: "scene-scan", cpu: sceneScanCpu(svc.config.SCENE_SCAN_THREADS), ids: { projectId: clip.projectId } }, (threads) =>
+              svc.media.detectScenes(sourcePath, { signal: ctx.signal, range: { start: at, duration }, threads }),
+            )
+            .catch((err: unknown) => {
+              if (ctx.signal.aborted) throw err;
+              log.warn({ err }, "shot changes of the clip not detected, rendering without cuts");
+              return [] as number[];
+            })
         ).filter((c) => c > 0 && c < duration)
       : (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
     await ctx.progress(0.02, `Detecting faces for clip ${clip.index + 1}`, { clipId });
-    samples = await sampleFaces(svc.faces, {
-      ffmpegPath: svc.config.FFMPEG_PATH,
-      source: sourcePath,
-      startSec: at,
-      durationSec: duration,
-      signal: ctx.signal,
-      sampleFps: 4,
-      srcAspect: srcW / srcH,
-    });
+    const faces = svc.faces;
+    samples = await svc.resources.withCpu({ kind: "sample", cpu: SAMPLE_CPU, ids: { projectId: clip.projectId } }, (threads) =>
+      sampleFaces(faces, {
+        ffmpegPath: svc.config.FFMPEG_PATH,
+        threads,
+        source: sourcePath,
+        startSec: at,
+        durationSec: duration,
+        signal: ctx.signal,
+        sampleFps: 4,
+        srcAspect: srcW / srcH,
+      }),
+    );
     const filtered = dropStaticFaces(samples);
     if (filtered.dropped.length) log.info({ dropped: filtered.dropped }, "ignoring static faces (posters/photos)");
     // text boxes seen by the per-clip scan (one pass, no extra decode) tell a content region beside the speaker from a plain talking head
@@ -543,15 +556,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       try {
         const a = trackCenter(sg.decision.track).x;
         const b = trackCenter(sg.decision.track2).x;
-        const tl = await activeSpeakers(
-          { faces: svc.faces, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal, asd: svc.asd },
-          sourcePath,
-          at + sg.start,
-          sg.end - sg.start,
-          [a, b],
-          speechAt(speechProbs, sg.start),
-          clipAudio!.subarray(Math.round(sg.start * VAD_SR), Math.round(sg.end * VAD_SR)),
-          { srcAspect: srcW / srcH },
+        const faces = svc.faces;
+        const tl = await svc.resources.withCpu({ kind: "sample", cpu: SAMPLE_CPU, ids: { projectId: clip.projectId } }, (threads) =>
+          activeSpeakers(
+            { faces, ffmpegPath: svc.config.FFMPEG_PATH, threads, signal: ctx.signal, asd: svc.asd },
+            sourcePath,
+            at + sg.start,
+            sg.end - sg.start,
+            [a, b],
+            speechAt(speechProbs, sg.start),
+            clipAudio!.subarray(Math.round(sg.start * VAD_SR), Math.round(sg.end * VAD_SR)),
+            { srcAspect: srcW / srcH },
+          ),
         );
         const confident = tl.confidence >= 0.5;
         if (tl.fallback) log.warn({ segment: [sg.start, sg.end], err: tl.fallback }, "active speaker model failed; used the synchrony heuristic");
@@ -1049,46 +1065,50 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const outroSec = withBumpers && bumpers.outro ? bumpers.outro.sec : 0;
     const transitions = planTransitions({ style, introSec, bodySec: outDuration, outroSec });
     const { graph, audioMap } = buildGraph(withBumpers, withOverlays, transitions);
-    await svc.media.ffmpeg(
-      [
-        "-ss",
-        at.toFixed(3),
-        "-t",
-        duration.toFixed(3),
-        "-i",
-        sourcePath,
-        ...[...(withOverlays ? overlayItems.items : []), ...logo].flatMap(overlayInputArgs),
-        ...(withOverlays ? music.flatMap((m) => [...(m.loop ? ["-stream_loop", "-1"] : []), "-i", m.path]) : []),
-        ...(withBumpers && bumpers.intro ? ["-i", bumpers.intro.path] : []),
-        ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
-        "-filter_complex",
-        graph,
-        "-map",
-        "[v]",
-        ...audioMap,
-        ...ffmpegThreadArgs(svc.resources.ffmpegThreads()),
-        ...svc.media.videoEncodeArgs(encoder),
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        "30",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "160k",
-        "-ar",
-        "48000",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-        tmpOut,
-      ],
-      // progress counts the bumper seconds too, or the bar would finish early
-      {
-        signal: ctx.signal,
-        onProgress: (sec) => void ctx.progress(sec / transitions.totalSec, `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}),
-      },
+    // the encode's cores are a lease, so a shot-cut scan starting meanwhile sees them taken
+    await svc.resources.withCpu({ kind: "render-encode", cpu: svc.resources.renderEncodeCpu(), ids: { projectId: clip.projectId } }, (threads) =>
+      svc.media.ffmpeg(
+        [
+          "-ss",
+          at.toFixed(3),
+          "-t",
+          duration.toFixed(3),
+          "-i",
+          sourcePath,
+          ...[...(withOverlays ? overlayItems.items : []), ...logo].flatMap(overlayInputArgs),
+          ...(withOverlays ? music.flatMap((m) => [...(m.loop ? ["-stream_loop", "-1"] : []), "-i", m.path]) : []),
+          ...(withBumpers && bumpers.intro ? ["-i", bumpers.intro.path] : []),
+          ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
+          "-filter_complex",
+          graph,
+          "-map",
+          "[v]",
+          ...audioMap,
+          ...filterThreadArgs(),
+          ...svc.media.videoEncodeArgs(encoder),
+          "-pix_fmt",
+          "yuv420p",
+          "-r",
+          "30",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "160k",
+          "-ar",
+          "48000",
+          "-movflags",
+          "+faststart",
+          "-f",
+          "mp4",
+          tmpOut,
+        ],
+        // progress counts the bumper seconds too, or the bar would finish early
+        {
+          threads,
+          signal: ctx.signal,
+          onProgress: (sec) => void ctx.progress(sec / transitions.totalSec, `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}),
+        },
+      ),
     );
     return { introSec, outroSec, transitions };
   };
@@ -1167,7 +1187,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // the thumbnail is a still of the clip itself, so it is taken after the intro
   await svc.media.ffmpeg(
     ["-ss", (attached.transitions.bodyStartSec + outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath],
-    { signal: ctx.signal },
+    { signal: ctx.signal, threads: "light" },
   );
 
   const outputKey = keys.clip(projectId, clip.id, gen);
@@ -1364,7 +1384,8 @@ async function loadBumpers(
       const used = asset.kind === "image" && secs[slot] ? { ...asset, durationSec: secs[slot]! } : asset;
       const file = await ensureNormalised(
         {
-          ffmpeg: (args, o) => svc.media.ffmpeg(args, o),
+          ffmpeg: (args, o) =>
+            svc.resources.withCpu({ kind: "bumper-encode", cpu: ENCODE_PASS_CPU, ids: { projectId } }, (threads) => svc.media.ffmpeg(args, { ...o, threads })),
           encodeArgs: svc.media.videoEncodeArgs(),
           log: ctx.log,
           storage: svc.storage,

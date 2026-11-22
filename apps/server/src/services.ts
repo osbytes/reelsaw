@@ -4,7 +4,7 @@ import { loadConfig, makePaths, ConfigError, type Config, type Paths } from "./c
 import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { reclaimScratch } from "./storage/sweep.js";
-import { createDiskLeaser, LEASE_STALE_MS, releaseWorkerLeases, volumeId } from "./disk-leases.js";
+import { createLeaser, LEASE_STALE_MS, machineId, releaseWorkerLeases, volumeId } from "./resource-leases.js";
 import { claimWorkerId } from "./ops/workers.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
@@ -481,15 +481,17 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   );
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));
-  // and claims its scratch against the volume's live leases first, so two jobs cannot both pass on the same free bytes (disk-leases.ts)
-  await step("disk leases", async () => {
+  // and every job claims its scratch, cores and memory against the host's live leases first, so two jobs cannot
+  // both pass on the same free capacity (resource-leases.ts)
+  await step("resource leases", async () => {
     const volume = await volumeId(paths.root);
+    const machine = await machineId();
     // a pinned WORKER_ID that a live replica already beats under gets a suffix first, or we would release that replica's leases
     const selfId = await claimWorkerId(config, database.db, log.child({ module: "ops" }));
     // a previous incarnation under this id (a restarted container keeps hostname:pid; WORKER_ID is pinned) can no longer be writing
     await releaseWorkerLeases(svc, selfId);
-    resources.setLeaser(createDiskLeaser(svc, { volume, selfId, staleMs: LEASE_STALE_MS }), volume);
-    return volume;
+    resources.setLeaser(createLeaser(svc, { volume, machine, selfId, staleMs: LEASE_STALE_MS }), { volume, machine });
+    return `${volume} on ${machine}`;
   });
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads

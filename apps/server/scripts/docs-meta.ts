@@ -265,6 +265,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "Scan the whole video for on-screen text (burned-in captions, watermarks, slides) during refine, so captions avoid it and slides are shown whole. On by default. Instance ceiling: off skips it for every project; when on, a project may opt out via `refineScenes`. Shot cuts do not depend on it: every project detects them before clip selection.",
   ],
   RENDER_CONCURRENCY: ["pipeline", "Parallel renders per worker. `auto` follows CPUs and free memory (see the resource governor); a number pins it."],
+  SCENE_SCAN_THREADS: [
+    "pipeline",
+    "Decoder threads for the shot-cut scan, a full decode of every source before clips are picked. 0 = auto: 1 to 4, from the cores no other job of this process has leased (docs/specs/resource-leases.md). A number pins it; 1 is the old behaviour.",
+  ],
   FACE_DETECTION: ["pipeline", "Face detection for automatic layout (follow crop, stacked webcam). false = fit only."],
   LAYOUT_MIN_FACE_RATIO: ["pipeline", "Share of sampled frames that must contain a face before a clip gets a face-following layout."],
   LAYOUT_MIN_FACE_SIZE: ["pipeline", "Median face height / frame height needed for a face-following layout."],

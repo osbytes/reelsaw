@@ -108,6 +108,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `RENDER_CONCURRENCY` | `auto` | Parallel renders per worker. `auto` follows CPUs and free memory (see the resource governor); a number pins it. |
+| `SCENE_SCAN_THREADS` | `0` | Decoder threads for the shot-cut scan, a full decode of every source before clips are picked. 0 = auto: 1 to 4, from the cores no other job of this process has leased (docs/specs/resource-leases.md). A number pins it; 1 is the old behaviour. |
 | `TRANSCRIBE_CHUNK_SECONDS` | `600` | Audio is split into chunks of this length for transcription APIs with upload limits. |
 | `TRANSCRIBE_CONCURRENCY` | `0` | Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors. |
 | `ANALYZE_CONCURRENCY` | `0` | Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud. |

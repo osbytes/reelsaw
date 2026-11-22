@@ -55,7 +55,7 @@ export async function measureLoudness(
 ): Promise<Loudness | null> {
   const { stderr } = await media.ffmpeg(
     ["-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-af", "loudnorm=print_format=json", "-f", "null", "-"],
-    { signal },
+    { signal, threads: "light" },
   );
   return parseLoudnorm(stderr);
 }

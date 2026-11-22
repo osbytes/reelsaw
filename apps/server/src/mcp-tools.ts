@@ -870,7 +870,7 @@ export const TOOLS = {
   list_workers: {
     title: "List workers",
     description:
-      "Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = claimed by jobs in flight), GPU, render slots, queues it listens on, and its jobs. A worker out of disk drops the media queues from `queues` until it recovers. `paused` = what it was short of (memory, CPU, disk), null when it has room. Returns { items, live, stale }; stale = no check-in for 45 seconds. Hosted non-admins are refused.",
+      "Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable); *Leased* = claimed by jobs in flight on its host, GPU, render slots, queues it listens on, and its jobs. A worker out of disk drops the media queues from `queues` until it recovers. `paused` = what it was short of (memory, CPU, disk), null when it has room. Returns { items, live, stale }; stale = no check-in for 45 seconds. Hosted non-admins are refused.",
     annotations: { readOnlyHint: true },
   },
   get_failure: {

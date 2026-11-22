@@ -31,7 +31,7 @@ for (const dir of process.argv.slice(2).filter((a) => !a.startsWith("--"))) {
   const media = await materialize(ctx, c.source);
   if (withText && !samples.some((s) => s.text?.length)) {
     const det = await loadTextDetector(config.TEXT_MODEL_PATH);
-    const frames = await sampleClipText({ detector: det, ffmpegPath: config.FFMPEG_PATH }, media, c.start, c.end - c.start, 2);
+    const frames = await sampleClipText({ detector: det, ffmpegPath: config.FFMPEG_PATH, threads: 2 }, media, c.start, c.end - c.start, 2);
     await det.release();
     const r3 = (v: number) => Number(v.toFixed(3));
     samples = attachText(

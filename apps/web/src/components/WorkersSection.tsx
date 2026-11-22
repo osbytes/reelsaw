@@ -32,6 +32,14 @@ function diskPaused(w: { role: string; live: boolean; queues: string[] }) {
   return w.live && w.role !== "api" && w.queues.length > 0 && !w.queues.includes("project.ingest");
 }
 
+/** cores and memory jobs in flight on this host have leased (ffmpeg threads, render memory), when there are any */
+function cpuLine(w: { cpus: number; coresLeased: number }) {
+  return `${w.cpus} CPU${w.coresLeased > 0 ? ` (${w.coresLeased} leased)` : ""}`;
+}
+function memLine(w: { memTotalMB: number; memLeasedMB: number }) {
+  return `${formatMb(w.memTotalMB)}${w.memLeasedMB > 0 ? ` (${formatMb(w.memLeasedMB)} leased)` : ""}`;
+}
+
 function gpuLine(w: { gpu: { vendor: string; devices: string[]; note: string } | null }) {
   if (!w.gpu) return "no GPU";
   return w.gpu.devices[0] || w.gpu.vendor;
@@ -102,7 +110,7 @@ export function WorkersSection() {
                 : w.live
                   ? "idle"
                   : "—";
-            const specs = `${w.cpus} CPU · ${formatMb(w.memTotalMB)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${w.renders.running}/${w.renders.max} renders`}`;
+            const specs = `${cpuLine(w)} · ${memLine(w)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${w.renders.running}/${w.renders.max} renders`}`;
             const otherVersion = w.live && version && w.version !== version;
             return (
               <li

@@ -100,6 +100,8 @@ export const envSchema = z.object({
   PRIVACY_URL: z.string().url().optional(),
   // "auto" (default): renders start while CPU and memory allow (see resources.ts); a number pins it
   RENDER_CONCURRENCY: z.union([z.literal("auto"), z.coerce.number().int().min(1)]).default("auto"),
+  // decoder threads for the shot-cut scan; 0 = auto: 1-4 from the CPU pool (resources.ts sceneScanCpu, docs/specs/resource-leases.md)
+  SCENE_SCAN_THREADS: z.coerce.number().int().min(0).max(64).default(0),
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
   MAX_SOURCE_FILE_MB: z.coerce.number().int().min(1).default(8192), // yt-dlp --max-filesize for URL sources
   ALLOW_PRIVATE_SOURCE_URLS: boolFalse, // true: URL sources may point at LAN/loopback addresses (e.g. a NAS)

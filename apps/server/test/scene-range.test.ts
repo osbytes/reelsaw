@@ -53,18 +53,18 @@ describe("detectScenes with a range", { skip: haveFfmpeg ? false : "ffmpeg not o
   const near = (xs: number[], want: number) => xs.some((x) => Math.abs(x - want) <= 0.15);
 
   it("finds the cut on the whole file", async () => {
-    const cuts = await media.detectScenes(file);
+    const cuts = await media.detectScenes(file, { threads: 2 });
     assert.equal(cuts.length, 1, `cuts ${cuts.join(",")}`);
     assert.ok(near(cuts, 3), `cut at ${cuts[0]}, expected 3.0`);
   });
 
   it("reports a range's cuts relative to the range start", async () => {
-    const cuts = await media.detectScenes(file, undefined, undefined, { start: 2, duration: 3 });
+    const cuts = await media.detectScenes(file, { range: { start: 2, duration: 3 }, threads: 2 });
     assert.equal(cuts.length, 1, `cuts ${cuts.join(",")}`);
     assert.ok(near(cuts, 1), `cut at ${cuts[0]}, expected 1.0 (3.0 on the file's clock)`);
   });
 
   it("finds nothing in a range without a cut", async () => {
-    assert.deepEqual(await media.detectScenes(file, undefined, undefined, { start: 3.5, duration: 2 }), []);
+    assert.deepEqual(await media.detectScenes(file, { range: { start: 3.5, duration: 2 }, threads: 2 }), []);
   });
 });

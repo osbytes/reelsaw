@@ -190,6 +190,7 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   try {
     let samples = await sampleFaces(det, {
       ffmpegPath: ctx.config().FFMPEG_PATH,
+      threads: 2,
       source: media,
       startSec: c.start,
       durationSec: c.end - c.start,
@@ -200,7 +201,7 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
       // content cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
       const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
       try {
-        const frames = await sampleClipText({ detector: text, ffmpegPath: ctx.config().FFMPEG_PATH }, media, c.start, c.end - c.start, 2);
+        const frames = await sampleClipText({ detector: text, ffmpegPath: ctx.config().FFMPEG_PATH, threads: 2 }, media, c.start, c.end - c.start, 2);
         const r3 = (v: number) => Number(v.toFixed(3));
         samples = attachText(
           samples,
