@@ -237,11 +237,15 @@ function SearchButton() {
       onPointerEnter={prefetchPalette}
       onFocus={prefetchPalette}
       className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]"
-      aria-label="Search"
+      // the name contains the visible text (WCAG 2.5.3); the shortcut is announced through aria-keyshortcuts
+      aria-label="Search or paste a link"
+      aria-keyshortcuts={mod === "⌘" ? "Meta+K" : "Control+K"}
     >
       <Search className="h-4 w-4 shrink-0" />
       <span className="hidden min-w-0 flex-1 truncate text-left text-ink2 sm:inline">Search or paste a link…</span>
-      <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
+      <span className="kbd hidden shrink-0 text-ink2 opacity-100 sm:inline-grid" aria-hidden>
+        {mod}K
+      </span>
     </button>
   );
 }
