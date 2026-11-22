@@ -17,6 +17,16 @@ How a clip's start and end are chosen, and where to add a fixture when one is wr
    `test/thought.test.ts`) moves the edges onto sentence boundaries. The editor's manual edits never
    go through it (user decisions are durable).
 
+## Scoring candidates
+
+After snapping and pooling, candidates are scored on the rubric in batches of 4 (`scoreSample`, `select.ts`; the one
+path for analyze, "Re-pick moments" and the eval). Small self-hosted judges copy what the prompt shows them, so the
+prompt's example has one entry per candidate id and placeholders, never numbers (an example scored 7/6/8/5 once put a
+third of a pool on the same total, 68). A candidate the answer leaves out is scored again on its own: an unscored
+candidate ranks below every scored one. With several samples (`ANALYZE_SCORE_SAMPLES`), sample k reads the batch
+rotated by k places, because a judge scores the last place of a batch about 2 points lower. Measured in the
+selection eval's creator picks (docs/EVALS.md): `creatorTiedShare` and `creatorMatchPercentile`.
+
 ## Checkpointed windows
 
 Finding moments is made of *steps* saved in `job_steps` as they finish: one per map window (`map:<i>`), per second look

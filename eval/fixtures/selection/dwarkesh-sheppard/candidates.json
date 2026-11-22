@@ -1,5 +1,5 @@
 {
- "recordedAt": "2026-10-18T16:45:57.734Z",
+ "recordedAt": "2026-11-22T04:31:21.236Z",
  "model": "compat:qwen2.5:14b",
  "judge": "compat:qwen2.5:14b",
  "samples": 1,
@@ -10,212 +10,364 @@
  },
  "candidates": [
   {
-   "startSec": 462.15,
-   "endSec": 500.11,
-   "title": "The Power of Horses",
-   "hook": "Horse Advantage",
-   "total": 68,
-   "scored": true
+   "startSec": 4456.47,
+   "endSec": 4494.35,
+   "title": "Conquistadors' Bold Move",
+   "hook": "100 men vs 10 million",
+   "total": 83,
+   "scored": true,
+   "mapScore": 90
   },
   {
-   "startSec": 756.39,
-   "endSec": 800.91,
+   "startSec": 733.35,
+   "endSec": 770.35,
    "title": "Cortés' Bold Move",
-   "hook": "Taking the emperor hostage",
-   "total": 68,
-   "scored": true
+   "hook": "Cortés takes Moctezuma hostage",
+   "total": 80,
+   "scored": true,
+   "mapScore": 90
   },
   {
-   "startSec": 4093.99,
-   "endSec": 4118.99,
-   "title": "Aztecs' Strategic Mistake",
-   "hook": "Cortés Escapes Again!",
-   "total": 68,
-   "scored": true
+   "startSec": 766.23,
+   "endSec": 790.91,
+   "title": "Cortés' Brutal Punishment",
+   "hook": "Burned Alive in Front of the Court",
+   "total": 80,
+   "scored": true,
+   "mapScore": 80
   },
   {
-   "startSec": 655.43,
-   "endSec": 713.87,
-   "title": "Moctezuma's Fateful Decision",
-   "hook": "Empire's tipping point",
-   "total": 68,
-   "scored": true
+   "startSec": 592.23,
+   "endSec": 618.27,
+   "title": "Cortés and Moctezuma",
+   "hook": "Two Worlds Collide",
+   "total": 78,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 4047.11,
-   "endSec": 4097.71,
-   "title": "Aztecs' Strategic Mistakes",
-   "hook": "Why did they lose?",
-   "total": 68,
-   "scored": true
+   "startSec": 5630.31,
+   "endSec": 5671.55,
+   "title": "How 200 Spanish Soldiers Defeated Empires",
+   "hook": "200 Men, 2 Empires",
+   "total": 78,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 5820.87,
-   "endSec": 5843,
-   "title": "The True Key to Conquest",
-   "hook": "Just Horses & Steel?",
-   "total": 68,
-   "scored": true
-  },
-  {
-   "startSec": 1083.19,
-   "endSec": 1138.91,
-   "title": "Tlaxcalans' Perspective on Cortés",
-   "hook": "Equal Partners?",
-   "total": 68,
-   "scored": true
-  },
-  {
-   "startSec": 5431.43,
-   "endSec": 5455.39,
-   "title": "The Aztecs & Incas Fall",
-   "hook": "Local Allies Betrayed",
-   "total": 62,
-   "scored": true
+   "startSec": 1011.03,
+   "endSec": 1039.31,
+   "title": "Cortés' Victory at the Battle of Otumba",
+   "hook": "Horses and Steel Win the Day",
+   "total": 75,
+   "scored": true,
+   "mapScore": 85
   },
   {
    "startSec": 3371.67,
-   "endSec": 3418.03,
-   "title": "Spanish Conquistadors' Impact",
-   "hook": "No new wealth created",
-   "total": 50,
-   "scored": true
+   "endSec": 3407.55,
+   "title": "Spanish Conquest: Just Gold and Silver?",
+   "hook": "Obsessed with bullion",
+   "total": 71,
+   "scored": true,
+   "mapScore": 80
   },
   {
-   "startSec": 3854.31,
-   "endSec": 3913.15,
-   "title": "Spanish vs British Colonies",
-   "hook": "Quick Fix or Long Game?",
-   "total": 39,
-   "scored": true
+   "startSec": 4073.51,
+   "endSec": 4094.59,
+   "title": "Aztecs' Strategic Blunder",
+   "hook": "Cortés Escapes Again",
+   "total": 70,
+   "scored": true,
+   "mapScore": 90
   },
   {
-   "startSec": 4852.95,
-   "endSec": 4888.35,
-   "title": "Spanish Brutality",
-   "hook": "Innocent Victims",
-   "total": 94,
-   "scored": false
+   "startSec": 5780.07,
+   "endSec": 5809.23,
+   "title": "How Aztec Allies Betrayed Moctezuma",
+   "hook": "Sides with the Spanish",
+   "total": 70,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 4609.83,
-   "endSec": 4660.91,
-   "title": "Spanish Shock at Aztec Sacrifice",
-   "hook": "Culture Clash",
-   "total": 92,
-   "scored": false
+   "startSec": 3617.27,
+   "endSec": 3652.03,
+   "title": "How Silver Ruined Spain",
+   "hook": "Silver = Inflation",
+   "total": 70,
+   "scored": true,
+   "mapScore": 80
   },
   {
-   "startSec": 362.31,
-   "endSec": 409.87,
-   "title": "The Critical Edge of Steel",
-   "hook": "Steel vs Stone Weapons",
-   "total": 90,
-   "scored": false
+   "startSec": 462.15,
+   "endSec": 486.19,
+   "title": "Horses as Ultimate Weapon",
+   "hook": "Horses changed the game",
+   "total": 68,
+   "scored": true,
+   "mapScore": 88
   },
   {
-   "startSec": 874.79,
-   "endSec": 918.35,
-   "title": "Cortés Wins Over Spanish Forces",
-   "hook": "Diplomacy over Steel?",
-   "total": 90,
-   "scored": false
+   "startSec": 4339.27,
+   "endSec": 4366.91,
+   "title": "The Inca's Demoralizing Defeats",
+   "hook": "Inca army crumbles under pressure",
+   "total": 68,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 1020.39,
-   "endSec": 1073.31,
-   "title": "Battle of Otumba: Cortés' Victory",
-   "hook": "Horses vs. Aztecs",
-   "total": 90,
-   "scored": false
+   "startSec": 5533.91,
+   "endSec": 5576.83,
+   "title": "How 200 Spanish Soldiers Conquered Empires",
+   "hook": "Unbelievable Conquest",
+   "total": 68,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 3521.43,
-   "endSec": 3576.27,
-   "title": "Silver's Role in Globalization",
-   "hook": "Global trade shift",
-   "total": 90,
-   "scored": false
-  },
-  {
-   "startSec": 4503.75,
-   "endSec": 4558.19,
-   "title": "Spanish Conquistadors' Motivation",
-   "hook": "Risk & Reward",
-   "total": 90,
-   "scored": false
-  },
-  {
-   "startSec": 4785.35,
-   "endSec": 4821.63,
-   "title": "Cortés' Greed for Gold",
-   "hook": "Gold Fever",
-   "total": 88,
-   "scored": false
-  },
-  {
-   "startSec": 527.75,
-   "endSec": 580.27,
-   "title": "Cortés' Standstill Against Tlaxcalans",
-   "hook": "Few Hundred vs Thousands",
-   "total": 85,
-   "scored": false
-  },
-  {
-   "startSec": 968.95,
-   "endSec": 1020.99,
-   "title": "Cortés' Escape During La Noche Triste",
-   "hook": "Night of Sadness",
-   "total": 85,
-   "scored": false
-  },
-  {
-   "startSec": 3635.03,
-   "endSec": 3690.91,
-   "title": "Spanish Silver Boom Backfires",
-   "hook": "Silver = Instant Riches?",
-   "total": 85,
-   "scored": false
+   "startSec": 4140.15,
+   "endSec": 4167.55,
+   "title": "Aztecs Missed a Key Strategy",
+   "hook": "Why didn't they attack at night?",
+   "total": 66,
+   "scored": true,
+   "mapScore": 85
   },
   {
    "startSec": 3760.79,
-   "endSec": 3787.63,
-   "title": "Ming Dynasty's Silver Crisis",
-   "hook": "Silver = Empire's Downfall?",
-   "total": 85,
-   "scored": false
+   "endSec": 3794.51,
+   "title": "Spanish Silver Trade's Impact on China",
+   "hook": "Silver Crisis Fuels Ming's Downfall",
+   "total": 65,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 4348.71,
-   "endSec": 4381.71,
-   "title": "Why did Inca soldiers defect?",
-   "hook": "Defections & loyalty",
-   "total": 85,
-   "scored": false
+   "startSec": 4591.03,
+   "endSec": 4613.47,
+   "title": "Spanish Conquistadors' Spiritual Journey",
+   "hook": "God's Will or Greed?",
+   "total": 65,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 5344.31,
-   "endSec": 5391.07,
-   "title": "Why the British Won in India",
-   "hook": "Bad Kings & Competent CEOs",
-   "total": 85,
-   "scored": false
+   "startSec": 515.67,
+   "endSec": 537.15,
+   "title": "War Mastiffs in Armor",
+   "hook": "Scary dogs of war",
+   "total": 63,
+   "scored": true,
+   "mapScore": 85
   },
   {
-   "startSec": 5576.23,
-   "endSec": 5606.59,
-   "title": "The Power of Adaptability",
-   "hook": "Adapting to Local Circumstances",
-   "total": 85,
-   "scored": false
+   "startSec": 4754.79,
+   "endSec": 4776.91,
+   "title": "Atlantis on Lake Texcoco",
+   "hook": "Floating City Marvel",
+   "total": 60,
+   "scored": true,
+   "mapScore": 90
   },
   {
-   "startSec": 3290.55,
-   "endSec": 3339.39,
-   "title": "Atahualpa's Mistake",
-   "hook": "King betrayed by pirate",
-   "total": 75,
-   "scored": false
+   "startSec": 3339.35,
+   "endSec": 3359.39,
+   "title": "How Atahualpa Misjudged Pizarro",
+   "hook": "Kings don't kill kings?",
+   "total": 60,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 968.95,
+   "endSec": 994.03,
+   "title": "Cortés Trapped and Forced to Flee",
+   "hook": "Cortés' Desperate Escape",
+   "total": 60,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 947.91,
+   "endSec": 969.55,
+   "title": "Alvarado's Bloody Preemptive Strike",
+   "hook": "Massacre in Tenochtitlan",
+   "total": 58,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 5419.27,
+   "endSec": 5467.47,
+   "title": "Why the British Won the Hundred Years' War",
+   "hook": "Crazy Kings & British Victory",
+   "total": 57,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 5244.07,
+   "endSec": 5270.11,
+   "title": "Empires' Fatal Flaw",
+   "hook": "Foreign Rulers",
+   "total": 56,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 562.31,
+   "endSec": 592.83,
+   "title": "Tlaxcalans' Decision",
+   "hook": "Hail Mary for Tlaxcalans",
+   "total": 55,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 3485.67,
+   "endSec": 3514.19,
+   "title": "Spanish Silver to China",
+   "hook": "China's Silk Exchange",
+   "total": 55,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 4681.03,
+   "endSec": 4712.51,
+   "title": "The Shock of Aztec Sacrifice",
+   "hook": "Black Blood and Clay",
+   "total": 55,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 5287.03,
+   "endSec": 5321.95,
+   "title": "The British Naval Advantage",
+   "hook": "Royal Navy Rules",
+   "total": 55,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 1083.19,
+   "endSec": 1106.51,
+   "title": "Equal Partners?",
+   "hook": "Not between subordinates",
+   "total": 55,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 4852.95,
+   "endSec": 4879.47,
+   "title": "Spanish Brutality in New World",
+   "hook": "Massacres & Genocide",
+   "total": 54,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 3435.03,
+   "endSec": 3469.23,
+   "title": "Spanish Use of New World Wealth",
+   "hook": "No New Wealth",
+   "total": 51,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 1159.11,
+   "endSec": 1184.67,
+   "title": "Conquistadors' Small Numbers",
+   "hook": "0.5% of the force",
+   "total": 49,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 4194.15,
+   "endSec": 4245.15,
+   "title": "Aztec Warfare Culture Explained",
+   "hook": "Warriors for sacrifice",
+   "total": 49,
+   "scored": true,
+   "mapScore": 80
+  },
+  {
+   "startSec": 366.31,
+   "endSec": 409.87,
+   "title": "Steel vs Obsidian",
+   "hook": "Steel armor supremacy",
+   "total": 48,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 5131.11,
+   "endSec": 5156.91,
+   "title": "Tlaxcalans reject alliance with Aztecs",
+   "hook": "Enemies forever",
+   "total": 47,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 3513.59,
+   "endSec": 3546.83,
+   "title": "Spanish Empire's Global Impact",
+   "hook": "Globalization Begins",
+   "total": 44,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 4282.23,
+   "endSec": 4305.71,
+   "title": "Cultural Shift vs. Aliens?",
+   "hook": "Impossible reorientation",
+   "total": 44,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 856.55,
+   "endSec": 889.63,
+   "title": "Cortés' Diplomatic Victory",
+   "hook": "Diplomacy over Force",
+   "total": 40,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 3919.99,
+   "endSec": 3954.51,
+   "title": "The North-South Divide in the US",
+   "hook": "North vs South: Industrial vs Agrarian",
+   "total": 39,
+   "scored": true,
+   "mapScore": 90
+  },
+  {
+   "startSec": 4261.83,
+   "endSec": 4282.83,
+   "title": "Aztecs' Capture Culture",
+   "hook": "Aztecs preferred capture over kill",
+   "total": 35,
+   "scored": true,
+   "mapScore": 85
+  },
+  {
+   "startSec": 5067.43,
+   "endSec": 5091.39,
+   "title": "Why didn't the Inca and Aztecs unite against the Spanish?",
+   "hook": "Divided they fell",
+   "total": 35,
+   "scored": true,
+   "mapScore": 85
   }
  ]
 }
