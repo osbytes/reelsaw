@@ -199,3 +199,26 @@ on an instance is an admin, and admins always get full-quality sources, so seed 
 Scenarios are finished or failed states only: a working state has no job behind it, so the
 reconciler resumes it and it moves on. Add a scenario next to the others when a feature has a state worth seeing. That keeps it one command away for the
 next screenshot.
+
+## Motion
+
+Short (150 to 200 ms), easing out, and only to explain a change. `prefers-reduced-motion: reduce` is
+honoured globally by one rule in `index.css` (`@layer base`): transitions and decorative animations end
+at once, and `animate-spin` keeps turning because a spinner is status, not decoration. JS-driven motion
+(none today) reads the same media query through one hook, never per component.
+
+## Accessibility debt
+
+WCAG 2.2 AA is the bar. The a11y rules old screens still break (`useButtonType`,
+`noLabelWithoutControl`, `noStaticElementInteractions`, `useKeyWithClickEvents`, …) stay at `warn`
+in `biome.json`, and their counts are in `scripts/lint-baseline.json`: CI fails if one rises, so a
+new screen cannot add to them. There are no automated axe checks yet (no browser end-to-end
+suite); a keyboard and screen-reader pass of the changed screens is part of UI review.
+
+## Changing the system
+
+1. Change the token or the primitive (`index.css`, `components/ui.tsx`) and this file in the same
+   pull request, with what was hit.
+2. Run `pnpm guards`; when you remove violations, lower the baseline
+   (`node scripts/lint-ratchet.mjs --update`), never raise it.
+3. Check both themes, desktop and a real phone, keyboard only, and reduced motion.
