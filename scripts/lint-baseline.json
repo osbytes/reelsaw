@@ -9,6 +9,8 @@
   "a11y/useSemanticElements": 16,
   "complexity/noBannedTypes": 1,
   "correctness/useExhaustiveDependencies": 126,
+  "i18n/jsx-text": 861,
+  "i18n/string-props": 403,
   "performance/noImgElement": 3,
   "style/noNonNullAssertion": 2034,
   "suspicious/noArrayIndexKey": 58,

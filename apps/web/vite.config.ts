@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { lingui } from "@lingui/vite-plugin";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  // lingui: compiles .po catalogues on import and expands the Trans / t macros natively (no Babel)
+  plugins: [react(), lingui({ macroTransform: true }), tailwindcss()],
   server: {
     port: 5173,
     proxy: {

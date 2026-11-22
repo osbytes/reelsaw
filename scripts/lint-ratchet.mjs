@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Lint ratchet: per-rule counts of the Biome diagnostics that are not errors yet may only go down.
+// Lint ratchet: per-rule counts of the Biome diagnostics that are not errors yet, and of user-facing literals in
+// the web app (i18n/*, scripts/i18n-literals.mjs), may only go down. i18n/physical-css is at 0: any new one fails.
 // biome.json keeps a rule at "warn" while old code still breaks it (or "off" with the rule listed in
 // TRACKED below); this script fails CI when any count rises above scripts/lint-baseline.json, and
 // when one falls below it, so the baseline is lowered in the same change that removed the
@@ -10,6 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { i18nFindings } from "./i18n-literals.mjs";
 
 const BASELINE = "scripts/lint-baseline.json";
 // rules off in biome.json because old code breaks them too often to show as warnings, counted here
@@ -39,6 +41,9 @@ const add = (d) => {
 };
 for (const d of diagnostics([])) add(d);
 for (const rule of TRACKED) for (const d of diagnostics([`--only=${rule}`])) if (d.category === `lint/${rule}`) add(d);
+
+// strings and layout that bypass internationalisation in the web app (scripts/i18n-literals.mjs, docs/I18N.md)
+for (const f of i18nFindings()) counts[f.kind] = (counts[f.kind] ?? 0) + 1;
 
 const sorted = Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
 if (process.argv.includes("--update")) {

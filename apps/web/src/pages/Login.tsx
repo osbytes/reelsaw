@@ -27,6 +27,7 @@ import { attributionHeaders, identifySignup, track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
 import { useDocumentTitle } from "../lib/title";
 import { Pending } from "../components/ui";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 /** Where to go after the next sign-in (a plan picked on the website, or a link pasted into its hero box); kept a day, in localStorage so an email verification link in a new tab still finds it. */
 export const AFTER_SIGN_IN_KEY = "reelsaw.afterSignIn";
@@ -51,6 +52,7 @@ function rememberAfterSignIn(to: string) {
 
 export function LoginPage({ signup = false }: { signup?: boolean }) {
   const { data } = useSession();
+  const { t } = useLingui();
   const nav = useNavigate();
   const [mode, setMode] = useState<"login" | "signup">(signup ? "signup" : "login");
   // /signup?plan=pro&interval=year from the pricing page, or /signup?url=… from the website's hero box: remembered
@@ -92,20 +94,20 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const oauthQuery =
     /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
   const canResend = status.data?.emailEnabled !== false && shouldOfferResendVerification({ errorCode, expiredLink, afterSignUp });
-  useDocumentTitle(expiredLink ? "This link expired · Reelsaw" : mode === "signup" ? "Create account · Reelsaw" : "Sign in · Reelsaw");
+  useDocumentTitle(expiredLink ? t`This link expired · Reelsaw` : mode === "signup" ? t`Create account · Reelsaw` : t`Sign in · Reelsaw`);
 
   if (data && !oauthQuery) return <Navigate to="/" replace />;
 
   async function resend(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!email.trim()) return setError("Enter the email you signed up with.");
+    if (!email.trim()) return setError(t`Enter the email you signed up with.`);
     setBusy(true);
     setError(null);
     setErrorCode(null);
     const r = await sendVerificationEmail({ email: email.trim(), callbackURL: VERIFY_EMAIL_CALLBACK_PATH });
     setBusy(false);
     if (r.error) {
-      setError(r.error.message ?? "Could not send a new link");
+      setError(r.error.message ?? t`Could not send a new link`);
       return;
     }
     setExpiredLink(false);
@@ -132,7 +134,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       setCaptchaToken(null);
       setCaptchaAttempt((n) => n + 1);
       setErrorCode(res.error.code ?? null);
-      return setError(res.error.message ?? "Something went wrong");
+      return setError(res.error.message ?? t`Something went wrong`);
     }
     // Verification is required, so the account exists and there is no session. Stay here and switch
     // to sign-in with the password they just chose. Leaving for a fresh form is where a password
@@ -157,7 +159,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       const r = await authClient.$fetch<{ redirect_uri: string }>("/oauth2/continue", { method: "POST", body: { oauth_query: oauthQuery } });
       if (r.data?.redirect_uri) return window.location.assign(r.data.redirect_uri);
       setBusy(false);
-      return setError(r.error?.message ?? "Could not continue the authorization");
+      return setError(r.error?.message ?? t`Could not continue the authorization`);
     }
     setBusy(false);
     track(mode === "signup" ? "signup_completed" : "signin_completed", { plan: plan ?? undefined, source_url: !!source });
@@ -167,22 +169,28 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   return (
     <ScrollArea className="h-dvh">
       <div className="relative flex min-h-dvh items-center justify-center p-6">
-        <ThemeToggle className="absolute right-4 top-4" />
+        <ThemeToggle className="absolute end-4 top-4" />
         <form onSubmit={submit} className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-          <AuthCardHeader title={expiredLink ? "This link expired" : mode === "login" ? "Sign in" : "Create account"} />
+          <AuthCardHeader title={expiredLink ? t`This link expired` : mode === "login" ? t`Sign in` : t`Create account`} />
           {mode === "signup" && (
             <div>
-              <label className="label">Name</label>
+              <label className="label">
+                <Trans>Name</Trans>
+              </label>
               <input className="input" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
           )}
           <div>
-            <label className="label">Email</label>
+            <label className="label">
+              <Trans>Email</Trans>
+            </label>
             <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           {!expiredLink && (
             <div>
-              <label className="label">Password</label>
+              <label className="label">
+                <Trans>Password</Trans>
+              </label>
               <input
                 key={mode}
                 className="input"
@@ -195,45 +203,67 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
                 onChange={(e) => setPassword(e.target.value)}
               />
               {mode === "login" && (
-                <p className="mt-1.5 text-right">
+                <p className="mt-1.5 text-end">
                   <Link to={resetPasswordPath(email)} className="text-xs text-ink3 no-underline hover:text-ink">
-                    Forgot password?
+                    <Trans>Forgot password?</Trans>
                   </Link>
                 </p>
               )}
             </div>
           )}
           {mode === "signup" && plan && (
-            <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>
+            <p className="text-xs leading-relaxed text-ink2">
+              <Trans>After you sign in, you pick up where you left off: the {plan} plan.</Trans>
+            </p>
           )}
           {mode === "signup" && !(plan && plan !== FREE_PLAN) && source && (
             <p className="text-xs leading-relaxed text-ink2">
-              After you sign in, your link is waiting on the New project page: <span className="break-all font-mono text-ink">{source}</span>
+              <Trans>
+                After you sign in, your link is waiting on the New project page: <span className="break-all font-mono text-ink">{source}</span>
+              </Trans>
             </p>
           )}
           {mode === "signup" && signupMode === "approval" && (
-            <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>
+            <p className="text-xs leading-relaxed text-ink2">
+              <Trans>New accounts wait for an admin to approve them before they can start projects.</Trans>
+            </p>
           )}
           {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
             <p className="text-xs leading-relaxed text-ink3">
-              By creating an account you accept the{" "}
-              {status.data.termsUrl && (
-                <a href={status.data.termsUrl} target="_blank" rel="noreferrer">
-                  terms
-                </a>
+              {status.data.termsUrl && status.data.privacyUrl ? (
+                <Trans>
+                  By creating an account you accept the{" "}
+                  <a href={status.data.termsUrl} target="_blank" rel="noreferrer">
+                    terms
+                  </a>{" "}
+                  and{" "}
+                  <a href={status.data.privacyUrl} target="_blank" rel="noreferrer">
+                    privacy policy
+                  </a>
+                  .
+                </Trans>
+              ) : status.data.termsUrl ? (
+                <Trans>
+                  By creating an account you accept the{" "}
+                  <a href={status.data.termsUrl} target="_blank" rel="noreferrer">
+                    terms
+                  </a>
+                  .
+                </Trans>
+              ) : (
+                <Trans>
+                  By creating an account you accept the{" "}
+                  <a href={status.data.privacyUrl ?? undefined} target="_blank" rel="noreferrer">
+                    privacy policy
+                  </a>
+                  .
+                </Trans>
               )}
-              {status.data.termsUrl && status.data.privacyUrl && " and "}
-              {status.data.privacyUrl && (
-                <a href={status.data.privacyUrl} target="_blank" rel="noreferrer">
-                  privacy policy
-                </a>
-              )}
-              .
             </p>
           )}
           {oauthQuery && (
             <p className="text-xs leading-relaxed text-ink2">
-              An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.
+              <Trans>An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</Trans>
             </p>
           )}
           {!expiredLink && captcha && <Captcha key={captchaAttempt} provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
@@ -241,7 +271,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
             <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
           )}
           <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
-            <Pending busy={busy}>{expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}</Pending>
+            <Pending busy={busy}>{expiredLink ? t`Send me a new link` : mode === "login" ? t`Sign in` : t`Create account`}</Pending>
           </button>
           {canResend && !expiredLink && (
             <button
@@ -250,7 +280,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
               onClick={() => void resend()}
               disabled={busy || !email.trim()}
             >
-              Send a new confirmation
+              <Trans>Send a new confirmation</Trans>
             </button>
           )}
           {signupMode !== "closed" ? (
@@ -262,13 +292,15 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
                 setExpiredLink(false);
               }}
             >
-              {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+              {mode === "login" ? t`Need an account? Sign up` : t`Have an account? Sign in`}
             </button>
           ) : (
-            <p className="min-h-4 text-center text-xs text-ink3">Sign-ups are closed on this instance.</p>
+            <p className="min-h-4 text-center text-xs text-ink3">
+              <Trans>Sign-ups are closed on this instance.</Trans>
+            </p>
           )}
         </form>
-        <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
+        <p className="absolute inset-x-0 bottom-4 text-center text-xs text-ink3">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
             github.com/osbytes/reelsaw
           </a>
