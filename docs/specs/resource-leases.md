@@ -78,6 +78,10 @@ service.
    (a retryable "waiting for capacity" outcome) instead of looping in `acquire`, so pg-boss's
    fair-share priority picks the next job and a paying account's job is not stuck behind a Free one.
    Host-capacity waits (everyone is short) keep today's bounded wait (`RESOURCE_WAIT_MAX_SECONDS`).
+   A requeue never spends an attempt and ages the job (a capped priority point, as Slurm's age factor),
+   and the paid reserve is soft: after a few requeues it lets the job through, so Free work under
+   sustained paid load is delayed, never starved. A ceiling cannot starve a job: it frees as the
+   account's own work ends.
 5. **Plan ceilings are a `Grants` field, EE only.** `resources: { maxCores, maxMemMB }` beside
    `queuePriority` and `sourceHeight`: the most one account may hold at once across all its leases,
    checked against that account's ledger rows in the same step. An admin's per-user override

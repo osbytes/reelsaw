@@ -151,7 +151,18 @@ import { emailPreferences, setEmailPreferences } from "../notify/preferences.js"
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
-import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, queuePriorityOf, resourceCeilingOf, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
+import {
+  capacityOfferFor,
+  limitsDetail,
+  LIMIT_KEYS,
+  limitUsage,
+  periodFor,
+  queuePriorityOf,
+  resourceCeilingOf,
+  usageByUser,
+  sourceQualityFor,
+  watermarkFor,
+} from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { CATALOG_PAGE_MAX } from "../ai/catalog.js";
@@ -505,6 +516,8 @@ const headRouter = router({
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
         /** how tall this account's links are downloaded (null = full quality) and the plan that lifts the cap */
         sourceQuality: ctx.who.blocked ? null : await sourceQualityFor(ctx.svc.database.db, ctx.user, ctx.svc.entitlements),
+        /** the plan that renders sooner when this account's render waits for capacity (hosted Free and lower plans) */
+        capacity: ctx.who.blocked ? null : await capacityOfferFor(ctx.svc.database.db, ctx.user, ctx.svc.entitlements),
         /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
         emailEnabled: ctx.svc.email.enabled,
         emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),

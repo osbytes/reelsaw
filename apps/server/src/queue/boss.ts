@@ -44,6 +44,8 @@ export interface RenderJob extends ProjectJob {
   clipId: string;
   /** clips.render_gen this job renders; a stale job (gen moved on) exits without writing */
   gen?: number;
+  /** times it went back to the queue for its account's capacity (queue/workers.ts `deferForCapacity`) */
+  deferrals?: number;
 }
 export interface PrepareJob extends RenderJob {
   mode: "exact" | "ai";

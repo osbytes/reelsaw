@@ -110,6 +110,14 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       return { text: `A clip failed to render: ${errText(p["error"])}`, tone: "err" };
     case "clip.retrying":
       return { text: `Retrying ${p["step"]} (attempt ${p["attempt"]} of ${p["max"]}) after: ${p["reason"]}`, tone: "warn" };
+    case "clip.capacity_wait":
+      return {
+        text:
+          p["bound"] === "reserve"
+            ? `${clip} is waiting for render capacity: the servers are busy with paid plans, it starts within a few minutes`
+            : `${clip} is waiting for render capacity: it starts when your other renders finish`,
+        tone: "run",
+      };
     case "clip.bumper_skipped":
       return { text: `${p["slot"] === "both" ? "Intro and outro" : p["slot"] === "outro" ? "Outro" : "Intro"} skipped: ${p["reason"]}`, tone: "warn" };
     case "clip.overlay_skipped":

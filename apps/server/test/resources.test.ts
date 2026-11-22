@@ -17,6 +17,7 @@ import {
   MAX_SCENE_SCAN_THREADS,
   claimOnLive,
   AccountCeilingError,
+  RESERVE_BYPASS_DEFERRALS,
   type AccountLimits,
   renderRefusal,
   NO_LEASES,
@@ -76,7 +77,7 @@ describe("claimOnLive with an account's limits (hosted plans)", () => {
   });
   it("a render slot past the memory ceiling is refused as the account's, not the host's", () => {
     const r = claimOnLive(slot, NO_LEASES, free({ cores: 0, memMB: 2400 }));
-    assert.ok(!r.ok && r.account, "refused with account: the worker requeues it");
+    assert.ok(!r.ok && r.account === "ceiling", "refused as the account's ceiling: the worker requeues it");
     assert.match(!r.ok ? r.reason : "", /2400 MB of its 2400 MB memory/);
     assert.ok(claimOnLive(slot, NO_LEASES, free({ cores: 0, memMB: 1200 })).ok, "a second render fits 2400 MB");
   });
@@ -86,9 +87,16 @@ describe("claimOnLive with an account's limits (hosted plans)", () => {
   });
   it("a reserved account's render waits in the queue while the machine's leases reach into the reserve", () => {
     const r = claimOnLive(slot, { ...NO_LEASES, cores: 5 }, free({ cores: 0, memMB: 0 }, 2));
-    assert.ok(!r.ok && r.account);
+    assert.ok(!r.ok && r.account === "reserve");
     assert.match(!r.ok ? r.reason : "", /kept for paid plans/);
     assert.ok(claimOnLive(slot, { ...NO_LEASES, cores: 4 }, free({ cores: 0, memMB: 0 }, 2)).ok);
+  });
+  it("after RESERVE_BYPASS_DEFERRALS trips back to the queue the reserve lets the render through, its ceiling still holds", () => {
+    const busy = { ...NO_LEASES, cores: 7 };
+    assert.ok(!claimOnLive({ ...slot, deferrals: RESERVE_BYPASS_DEFERRALS - 1 }, busy, free({ cores: 0, memMB: 0 }, 2)).ok);
+    assert.ok(claimOnLive({ ...slot, deferrals: RESERVE_BYPASS_DEFERRALS }, busy, free({ cores: 0, memMB: 0 }, 2)).ok, "aged past the reserve");
+    const full = claimOnLive({ ...slot, deferrals: 99 }, busy, free({ cores: 0, memMB: 2400 }, 2));
+    assert.ok(!full.ok && full.account === "ceiling", "never past its own ceiling: that frees as its own work ends");
   });
   it("a reserve as large as the machine still lets an idle one start the work", () => {
     const small = { ...slot, capacity: 2 };
@@ -295,10 +303,13 @@ describe("leases on the governor", () => {
     let calls = 0;
     g.setLeaser(async (req) => {
       calls++;
-      return { ok: false, reason: `the account's jobs hold 2400 MB of its 2400 MB memory (${req.kind})`, live: NO_LEASES, account: true };
+      return { ok: false, reason: `the account's jobs hold 2400 MB of its 2400 MB memory (${req.kind})`, live: NO_LEASES, account: "ceiling" };
     }, SCOPE);
     const started = Date.now();
-    await assert.rejects(g.renderSlot({}), (err) => err instanceof AccountCeilingError && /^Waiting for capacity: /.test(err.message));
+    await assert.rejects(
+      g.renderSlot({}),
+      (err) => err instanceof AccountCeilingError && err.bound === "ceiling" && /^Waiting for capacity: /.test(err.message),
+    );
     assert.equal(calls, 1, "one claim, no retry loop");
     assert.ok(Date.now() - started < 1500, "no wait in the worker slot");
     assert.equal(g.renders().running, 0);

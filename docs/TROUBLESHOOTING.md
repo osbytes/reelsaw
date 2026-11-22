@@ -571,9 +571,14 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   `reelsaw limits <email> --cores N --mem-mb M|--resources follow`, MCP `set_user_resources`) or the plan (Free 2
   cores / 2400 MB up to Pro 8 / 9600). A CPU pass past it gets fewer threads, down to one, and never waits. A render
   past its memory, or a Free render while the machine's leased cores reach into the last `FREE_RESERVE_CORES`, is
-  refused as the account's (`AccountCeilingError`, "Waiting for capacity: …"): the worker returns the job to the
-  queue with a backoff capped at a minute, without spending an attempt, so its slot takes the next job in fair-share
-  order. An account holding nothing may always start one render. Self-hosted there is no account ceiling.
+  refused as the account's (`AccountCeilingError`, "Waiting for capacity: …"): the worker reschedules the job as if it
+  had never started (`deferForCapacity`: no attempt spent, back in 15, 30, then 60 s with jitter), counts the
+  deferral in its data and raises its priority by one point, at most `DEFERRAL_AGING_MAX` (1, below Starter's +2), so
+  the longest-waiting Free render goes first among Free work and never past a paying account's. After
+  `RESERVE_BYPASS_DEFERRALS` (3) the reserve lets it through: busy paid work delays a Free render by a few minutes,
+  never indefinitely (its own ceiling still holds, and that frees as its own renders end). The project shows
+  "waiting for render capacity" (event `clip.capacity_wait`, once per job) with the next plan's offer when there is
+  one. An account holding nothing may always start one render. Self-hosted there is no account ceiling.
 - **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
   owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
   nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The

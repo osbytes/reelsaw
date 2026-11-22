@@ -103,6 +103,7 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
             monthlyPrice: next.price?.month,
             watermark: next.watermark,
             sourceHeight: next.sourceHeight,
+            resources: next.resources,
           },
         }
       : {}),

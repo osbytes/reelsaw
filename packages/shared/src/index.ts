@@ -1270,6 +1270,8 @@ export const PROJECT_EVENT_TYPES = [
   "clip.failed",
   /** a clip job attempt ended without finishing (error, crash, restart) and will be retried */
   "clip.retrying",
+  /** a render went back to the queue: its account's plan ceiling, or the cores a busy machine keeps for paid plans (hosted) */
+  "clip.capacity_wait",
   /** an intro/outro could not be used; the clip rendered without it */
   "clip.bumper_skipped",
   /** an overlay (logo, sticker, b-roll) could not be used; the clip rendered without it */
@@ -1376,6 +1378,7 @@ export const projectEventSchemas = {
   "clip.done": event({ clipId: z.string(), index: z.number().int(), renderSec: z.number().optional() }),
   "clip.failed": event({ clipId: z.string(), error: z.string(), errorKind: z.string().optional() }),
   "clip.retrying": event({ clipId: z.string(), step: z.string(), attempt: z.number().int(), max: z.number().int(), reason: z.string() }),
+  "clip.capacity_wait": event({ clipId: z.string(), bound: z.enum(["ceiling", "reserve"]) }),
   /** `both`: joining the intro and outro failed, so the clip went out without either */
   "clip.bumper_skipped": event({ ...skipped, slot: z.enum(["intro", "outro", "both"]), assetIds: z.array(z.string()) }),
   /** the clip's overlay or music layers (`layerIds`) and their library assets that were left out */

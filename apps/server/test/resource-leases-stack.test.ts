@@ -12,7 +12,7 @@ import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema } from "../src/db/index.js";
 import { createLeaser, hostLeases, LEASE_STALE_MS } from "../src/resource-leases.js";
-import { leaseFits, RENDER_MEM_MB, RENDER_SLOT_KIND, type LeaseResult } from "../src/resources.js";
+import { leaseFits, RENDER_MEM_MB, RENDER_SLOT_KIND, RESERVE_BYPASS_DEFERRALS, type LeaseResult } from "../src/resources.js";
 import type { Entitlements, Grants } from "../src/quota.js";
 import { db } from "./helpers.js";
 
@@ -211,6 +211,20 @@ describe("resource leases (Postgres)", () => {
       const again = await hosted(workerA)(slot({ userId: freeUser, jobId: "f3" }));
       assert.ok(again.ok, "once its own work ends, the Free render fits");
       await releaseAll([again]);
+    });
+
+    it("a Free render held back by the reserve gets through after a few trips back to the queue", async () => {
+      // paid work keeps the machine inside the reserve: 6 of 7 cores leased
+      const paidLoad = await hosted(workerB)({ kind: "render-encode", cpu: { min: 6, max: 6 }, capacity, ids: { userId: paidUser } });
+      assert.ok(paidLoad.ok);
+      const tries: boolean[] = [];
+      for (let deferrals = 0; deferrals <= RESERVE_BYPASS_DEFERRALS; deferrals++) {
+        const r = await hosted(workerA)({ ...slot({ userId: freeUser }), deferrals });
+        tries.push(r.ok);
+        if (r.ok) await r.release();
+      }
+      assert.deepEqual(tries, [false, false, false, true], "refused while young, admitted once aged");
+      await releaseAll([paidLoad]);
     });
 
     it("without plans (self-hosted) nothing bounds an account: the host's capacity only", async () => {

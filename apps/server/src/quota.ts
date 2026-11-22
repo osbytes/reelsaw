@@ -67,6 +67,8 @@ export interface Grants {
     watermark?: boolean | null | undefined;
     /** that plan's source cap; null = it downloads links at full quality (the "full-quality video" offer) */
     sourceHeight?: number | null | undefined;
+    /** that plan's resource ceiling (the "faster renders" offer when a render waits for capacity) */
+    resources?: ResourceCeiling | null | undefined;
   };
 }
 export interface Entitlements {
@@ -169,6 +171,28 @@ export function resourceCeilingOf(override: ResourceCeiling | null, grants: Gran
   const reserveCores = Math.max(0, grants?.reserveCores ?? 0);
   if (override) return { value: override, source: "override", plan, override, reserveCores };
   return { value: plan, source: plan ? "plan" : "instance", plan, override: null, reserveCores };
+}
+
+/**
+ * The plan to offer when this account's render waits for capacity (`clip.capacity_wait`): the next plan, when it holds
+ * more cores or skips the paid reserve. None for admins, instances without plans, or the top plan.
+ */
+export async function capacityOfferFor(
+  db: Db,
+  user: { id: string; role: UserRole },
+  ent?: Entitlements | null,
+): Promise<{ upgrade?: { label: string; href: string } }> {
+  if (!ent || user.role === "admin") return {};
+  const grants = await ent.grantsFor(db, user.id);
+  const u = grants?.upgrade;
+  const mine = grants?.resources;
+  if (!u?.resources) return {};
+  const more = !mine || u.resources.maxCores > mine.maxCores || (grants?.reserveCores ?? 0) > 0;
+  if (!more) return {};
+  const cores = plural(u.resources.maxCores, "core");
+  const what = (grants?.reserveCores ?? 0) > 0 ? `${cores} for renders, no busy-hours wait` : `${cores} for renders`;
+  const label = u.monthlyPrice ? `${u.planLabel}: ${what}, $${u.monthlyPrice.toLocaleString("en-US")} a month` : `${u.planLabel}: ${what}`;
+  return { upgrade: { label, href: u.url } };
 }
 
 /**
