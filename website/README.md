@@ -1,8 +1,8 @@
 # reelsaw.com
 
 The website for the Reelsaw open-source project: Next.js (App Router, Tailwind v4) that reuses
-the app's design tokens (`apps/web/src/index.css`), fonts and logo. Home, alternatives, guides,
-pricing, legal, releases and the pipeline film.
+the app's design tokens (`apps/web/src/index.css`), fonts and logo. Home, alternatives, guides, use cases
+(`content/use-cases.ts`, served at `/<slug>` beside the guides), pricing, legal, releases and the pipeline film.
 
 It is a standalone package with its own lockfile, outside the pnpm workspace, so the app's Docker
 image, CI and `pnpm dev` are unaffected.

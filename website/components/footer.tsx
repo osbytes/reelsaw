@@ -1,5 +1,5 @@
 import { GitHubMark, Logo } from "./logo";
-import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
+import { ALTERNATIVE_LINKS, GUIDE_NAV, USE_CASE_NAV } from "@/content/links";
 import { SITE } from "@/lib/site";
 
 const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
@@ -24,6 +24,10 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
     ],
   },
   {
+    title: "Use cases",
+    links: [{ href: "/use-cases", label: "All use cases" }, ...USE_CASE_NAV],
+  },
+  {
     title: "Compare",
     links: [{ href: "/alternatives", label: "All comparisons" }, ...ALTERNATIVE_LINKS.slice(0, 4), ...GUIDE_NAV],
   },
@@ -42,7 +46,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
 export function Footer() {
   return (
     <footer className="border-t border-line bg-panel/40">
-      <div className="container-page grid grid-cols-1 gap-10 py-14 sm:grid-cols-2 md:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
+      <div className="container-page grid grid-cols-1 gap-10 py-14 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_repeat(5,minmax(0,1fr))]">
         <div className="flex flex-col gap-3">
           <Logo />
           <p className="max-w-[34ch] text-sm leading-relaxed text-ink2">

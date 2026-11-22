@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { COMPETITORS } from "@/content/competitors";
 import { GUIDES } from "@/content/guides";
+import { USE_CASES } from "@/content/use-cases";
 import { CHECKED } from "@/content/reelsaw";
 import { githubReleases } from "@/lib/github";
 import { releasePath } from "@/lib/release-pages";
@@ -31,6 +32,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "yearly" as const,
       priority: 0.4,
     })),
+    { url: `${SITE.url}/use-cases`, lastModified: checked, changeFrequency: "monthly", priority: 0.8 },
+    ...USE_CASES.map((u) => ({ url: `${SITE.url}/${u.slug}`, lastModified: new Date(u.updated), changeFrequency: "monthly" as const, priority: 0.7 })),
     ...GUIDES.map((g) => ({ url: `${SITE.url}/${g.slug}`, lastModified: checked, changeFrequency: "monthly" as const, priority: 0.7 })),
   ];
 }

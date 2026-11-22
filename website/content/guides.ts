@@ -413,5 +413,3 @@ export const GUIDES: Guide[] = [
     ],
   },
 ];
-
-export const guideBySlug = (slug: string) => GUIDES.find((g) => g.slug === slug);
