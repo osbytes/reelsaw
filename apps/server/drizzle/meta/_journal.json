@@ -484,6 +484,13 @@
       "when": 1795382751576,
       "tag": "0068_resource_ceilings",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795385108530,
+      "tag": "0069_lease_reserved",
+      "breakpoints": true
     }
   ]
 }

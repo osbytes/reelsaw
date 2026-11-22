@@ -105,6 +105,7 @@ export async function hostLeases(db: Pick<Db, "select">, p: LeaseScope & { selfI
       jobs: sql<number>`count(*)::int`,
       diskJobs: sql<number>`(count(*) filter (where ${t.volume} = ${p.volume} and ${t.mb} > 0))::int`,
       onMachine: sql<number>`(count(*) filter (where ${t.machine} = ${p.machine}))::int`,
+      reservedCores: sql<number>`(coalesce(sum(${t.cores}) filter (where ${t.machine} = ${p.machine} and ${t.reserved}), 0))::int`,
     })
     .from(t)
     .leftJoin(schema.workerInstances, eq(schema.workerInstances.id, t.workerId))
@@ -116,7 +117,7 @@ export async function hostLeases(db: Pick<Db, "select">, p: LeaseScope & { selfI
       ),
     )
     .groupBy(t.kind);
-  const live: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
+  const live: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {}, reservedCores: 0 };
   for (const r of rows) {
     live.mb += r.mb;
     live.cores += r.cores;
@@ -124,6 +125,7 @@ export async function hostLeases(db: Pick<Db, "select">, p: LeaseScope & { selfI
     live.jobs += r.jobs;
     live.diskJobs += r.diskJobs;
     if (r.onMachine) live.kinds[r.kind] = r.onMachine;
+    live.reservedCores = (live.reservedCores ?? 0) + r.reservedCores;
   }
   return live;
 }
@@ -194,11 +196,13 @@ export function createLeaser(svc: Pick<Services, "database" | "log" | "entitleme
   const log = svc.log.child({ module: "resources" });
   return async (req) =>
     svc.database.db.transaction(async (tx) => {
+      // who the claim is for and what bounds it need no lock: read them first, so the host's locks are held only for
+      // the sums and the record
+      const ent = svc.entitlements;
+      const acct = ent ? await leaseAccount(tx as unknown as Db, ent, req.ids) : null;
       // both scopes, always in this order: disk is checked per volume, cores and memory per machine, then the account
       await takeTxLock(tx, txLock.leaseVolume(p.volume));
       await takeTxLock(tx, txLock.leaseMachine(p.machine));
-      const ent = svc.entitlements;
-      const acct = ent ? await leaseAccount(tx as unknown as Db, ent, req.ids) : null;
       if (acct?.limits) {
         await takeTxLock(tx, txLock.leaseAccount(acct.userId));
         acct.limits.live = await accountLeases(tx, { userId: acct.userId, selfId: p.selfId, staleMs: p.staleMs });
@@ -215,6 +219,7 @@ export function createLeaser(svc: Pick<Services, "database" | "log" | "entitleme
           jobId: req.ids?.jobId ?? null,
           projectId: req.ids?.projectId ?? null,
           userId: acct?.userId ?? req.ids?.userId ?? null,
+          reserved: (acct?.limits?.reserveCores ?? 0) > 0,
           kind: req.kind,
           mb: claim.mb,
           cores: claim.cores,

@@ -1033,6 +1033,8 @@ export const resourceLeases = pgTable(
     mb: integer("mb").notNull().default(0),
     cores: integer("cores").notNull().default(0),
     memMB: integer("mem_mb").notNull().default(0),
+    /** the paid reserve applies to the account (hosted Free): its cores do not count as the reserve's (resources.ts `accountRefusal`) */
+    reserved: boolean("reserved").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },

@@ -88,8 +88,17 @@ describe("claimOnLive with an account's limits (hosted plans)", () => {
   it("a reserved account's render waits in the queue while the machine's leases reach into the reserve", () => {
     const r = claimOnLive(slot, { ...NO_LEASES, cores: 5 }, free({ cores: 0, memMB: 0 }, 2));
     assert.ok(!r.ok && r.account === "reserve");
-    assert.match(!r.ok ? r.reason : "", /kept for paid plans/);
+    assert.match(!r.ok ? r.reason : "", /paid plans hold 5 of this host.s 7 cores; the last 2 cores are kept for them/);
     assert.ok(claimOnLive(slot, { ...NO_LEASES, cores: 4 }, free({ cores: 0, memMB: 0 }, 2)).ok);
+  });
+  it("Free leases' burst grants never count as the reserve: a second Free render starts beside a Free encode", () => {
+    // 4-core pool, reserve 2: one Free render's encode took the whole pool as a burst grant
+    const freeEncode = { ...NO_LEASES, cores: 4, reservedCores: 4, kinds: { [RENDER_SLOT_KIND]: 1 } };
+    const other: AccountLimits = { ceiling: { maxCores: 2, maxMemMB: 2400 }, reserveCores: 2, live: { cores: 0, memMB: 0 } };
+    assert.ok(claimOnLive({ ...slot, capacity: 4 }, freeEncode, other).ok, "no paid work holds the reserve");
+    const paidEncode = { ...freeEncode, reservedCores: 0 };
+    const r = claimOnLive({ ...slot, capacity: 4 }, paidEncode, other);
+    assert.ok(!r.ok && r.account === "reserve", "paid work reaching into the reserve still holds it back");
   });
   it("after RESERVE_BYPASS_DEFERRALS trips back to the queue the reserve lets the render through, its ceiling still holds", () => {
     const busy = { ...NO_LEASES, cores: 7 };
@@ -312,6 +321,9 @@ describe("leases on the governor", () => {
     );
     assert.equal(calls, 1, "one claim, no retry loop");
     assert.ok(Date.now() - started < 1500, "no wait in the worker slot");
+    const said: string[] = [];
+    await assert.rejects(g.renderSlot({ onWait: (r) => said.push(r) }), AccountCeilingError);
+    assert.match(said[0] ?? "", /^Waiting for capacity: the account's jobs hold/, "the clip shows why before it goes back");
     assert.equal(g.renders().running, 0);
   });
   it("a pinned RENDER_CONCURRENCY is this process's own count", async () => {

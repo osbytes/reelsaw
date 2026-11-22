@@ -42,6 +42,7 @@ describe("resource leases (Postgres)", () => {
   const freeUser = `test-free-${run}`;
   const paidUser = `test-pro-${run}`;
   const freeProject = `test-project-${run}`;
+  const freeUser2 = `test-free2-${run}`;
   const grants = (plan: string, resources: Grants["resources"], reserveCores: number): Grants => ({
     plan,
     planLabel: plan,
@@ -53,7 +54,7 @@ describe("resource leases (Postgres)", () => {
   });
   const plans: Entitlements = {
     grantsFor: async (_db, userId) =>
-      userId === freeUser ? grants("free", { maxCores: 2, maxMemMB: 2400 }, 2) : grants("pro", { maxCores: 8, maxMemMB: 9600 }, 0),
+      userId === freeUser || userId === freeUser2 ? grants("free", { maxCores: 2, maxMemMB: 2400 }, 2) : grants("pro", { maxCores: 8, maxMemMB: 9600 }, 0),
   };
   const live = (scope: { volume: string; machine: string } = { volume, machine }) => hostLeases(orm, { ...scope, selfId: workerA, staleMs: LEASE_STALE_MS });
 
@@ -179,9 +180,13 @@ describe("resource leases (Postgres)", () => {
       assert.equal(freeCores, 2 + 5, "two cores of ceiling, then one thread each: each pass shrinks to its min");
       const rows = await orm.select().from(schema.resourceLeases).where(eq(schema.resourceLeases.projectId, freeProject));
       assert.ok(rows.length === 6 && rows.every((r) => r.userId === freeUser), "the owner is recorded on every row");
-      // the Free account may not start a render while the machine's leases reach into the reserve
+      assert.ok(
+        rows.every((r) => r.reserved),
+        "Free leases are marked: their burst grants are not the reserve's",
+      );
+      // the account already holds its cores: its render goes back to the queue, the slot stays free
       const freeRender = await hosted(workerA)(slot({ userId: freeUser }));
-      assert.ok(!freeRender.ok && freeRender.account, "refused as the account's: the worker requeues it, the slot stays free");
+      assert.ok(!freeRender.ok && freeRender.account === "ceiling", "refused as the account's: the worker requeues it");
       const paid = await hosted(workerB)(slot({ userId: paidUser }));
       assert.ok(paid.ok, "a paid render starts beside the Free burst");
       await releaseAll([...burst, paid]);
@@ -211,6 +216,15 @@ describe("resource leases (Postgres)", () => {
       const again = await hosted(workerA)(slot({ userId: freeUser, jobId: "f3" }));
       assert.ok(again.ok, "once its own work ends, the Free render fits");
       await releaseAll([again]);
+    });
+
+    it("a Free encode's burst grant does not shut another Free render out of an idle machine", async () => {
+      const small = 4; // pool of 4, reserve 2
+      const freeEncode = await hosted(workerA)({ kind: "render-encode", cpu: { min: 4, max: 4 }, capacity: small, ids: { userId: freeUser } });
+      assert.ok(freeEncode.ok);
+      const second = await hosted(workerB)({ ...slot({ userId: freeUser2 }), capacity: small });
+      assert.ok(second.ok, "no paid work holds the reserve");
+      await releaseAll([freeEncode, second]);
     });
 
     it("a Free render held back by the reserve gets through after a few trips back to the queue", async () => {

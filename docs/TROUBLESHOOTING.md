@@ -570,7 +570,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   cores and memory its jobs hold at once across every machine, from an admin's per-user value (Users → Limits,
   `reelsaw limits <email> --cores N --mem-mb M|--resources follow`, MCP `set_user_resources`) or the plan (Free 2
   cores / 2400 MB up to Pro 8 / 9600). A CPU pass past it gets fewer threads, down to one, and never waits. A render
-  past its memory, or a Free render while the machine's leased cores reach into the last `FREE_RESERVE_CORES`, is
+  past its memory, or a Free render while paid work's leased cores reach into the last `FREE_RESERVE_CORES`, is
   refused as the account's (`AccountCeilingError`, "Waiting for capacity: …"): the worker reschedules the job as if it
   had never started (`deferForCapacity`: no attempt spent, back in 15, 30, then 60 s with jitter), counts the
   deferral in its data and raises its priority by one point, at most `DEFERRAL_AGING_MAX` (1, below Starter's +2), so

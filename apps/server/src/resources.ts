@@ -240,6 +240,8 @@ export interface HostLeases {
   /** leases that hold disk */
   diskJobs: number;
   kinds: Record<string, number>;
+  /** cores on the machine held by leases the paid reserve applies to (hosted Free accounts'); absent = 0 */
+  reservedCores?: number;
 }
 export const NO_LEASES: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
 
@@ -301,7 +303,7 @@ export interface AccountLimits {
  * - cores: the grant is kept within the account's ceiling and above the machine's reserve, down to 1 thread. Every
  *   CPU pass is elastic here: thread count never changes the output, and a pass never waits for cores.
  * - memory (a render's slot): fixed work. One that would take the account past its memory ceiling, or a reserved
- *   account's that would start while the machine's leased cores already reach into the reserve, is refused with
+ *   account's that would start while paid leases' cores already reach into the reserve, is refused with
  *   `account`, and the caller sends the job back to the queue (`AccountCeilingError`). An account holding nothing may
  *   always take one, so a ceiling below one render's size never locks it out. The reserve is a soft bound: a job sent
  *   back RESERVE_BYPASS_DEFERRALS times passes it (still within its ceiling), so busy paid work delays Free work but
@@ -313,7 +315,7 @@ export function claimOnLive(req: LeaseRequest, live: HostLeases, account?: Accou
   const memMB = Math.max(0, Math.round(req.memMB ?? 0));
   const capacity = req.capacity ?? 1;
   if (account && memMB > 0) {
-    const refusal = accountRefusal({ memMB, capacity, hostCores: live.cores, account, deferrals: req.deferrals ?? 0 });
+    const refusal = accountRefusal({ memMB, capacity, hostCores: live.cores, reservedCores: live.reservedCores ?? 0, account, deferrals: req.deferrals ?? 0 });
     if (refusal) return { ok: false, reason: refusal.reason, live, account: refusal.bound };
   }
   const want = typeof req.cpu === "function" ? req.cpu(live) : req.cpu;
@@ -343,14 +345,20 @@ function accountRefusal(p: {
   memMB: number;
   capacity: number;
   hostCores: number;
+  /** of `hostCores`, what reserved (Free) accounts' leases hold: elastic grants that shrink, so they never fill the reserve */
+  reservedCores: number;
   account: AccountLimits;
   deferrals: number;
 }): { reason: string; bound: AccountBound } | null {
   const a = p.account;
   const reserve = p.deferrals >= RESERVE_BYPASS_DEFERRALS ? 0 : reserveOf(a, p.capacity);
-  if (reserve > 0 && p.hostCores >= p.capacity - reserve)
+  // the reserve is room for paid work: only what paid (unreserved) leases hold reaches into it. Free leases are
+  // burst grants (a lone encode takes the pool) that shrink for the next pass, so counting them would let one Free
+  // render shut every other Free render out of an otherwise idle machine
+  const paidCores = Math.max(0, p.hostCores - p.reservedCores);
+  if (reserve > 0 && paidCores >= p.capacity - reserve)
     return {
-      reason: `${p.hostCores} of this host's ${plural(p.capacity, "core")} are leased; the last ${plural(reserve, "core")} are kept for paid plans`,
+      reason: `paid plans hold ${paidCores} of this host's ${plural(p.capacity, "core")}; the last ${plural(reserve, "core")} are kept for them`,
       bound: "reserve",
     };
   // an account holding nothing may always start one: a ceiling below one render's size must not lock it out
@@ -795,7 +803,10 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
           };
         }
         // the account's own ceiling: never wait for it in this slot (a paying account's render may be queued behind)
-        if (r.account) throw new AccountCeilingError(r.reason, r.account);
+        if (r.account) {
+          onWait?.(`Waiting for capacity: ${r.reason}`);
+          throw new AccountCeilingError(r.reason, r.account);
+        }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000)
           throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot: ${r.reason}`);
         if (r.reason !== lastReason) {

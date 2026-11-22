@@ -1,0 +1,1 @@
+ALTER TABLE "resource_leases" ADD COLUMN "reserved" boolean DEFAULT false NOT NULL;

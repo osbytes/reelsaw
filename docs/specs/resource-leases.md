@@ -92,7 +92,7 @@ service.
 6. **A paid reserve on hosted.** Free accounts' leases may not take the last `FREE_RESERVE_CORES`
    cores (and, later, a matching memory reserve) of a host, so a burst of Free work leaves room for paid
    jobs. An EE setting; absent, 0. Shipped: a Free pass is granted only what is above the reserve (one
-   thread at least), a Free render goes back to the queue while the machine's leased cores reach into it.
+   thread at least), a Free render goes back to the queue while paid work's leased cores reach into it (Free leases are burst grants that shrink, so they never count as the reserve's).
 7. **Every heavy ffmpeg pass is leased.** Slice 2 makes the ffmpeg helper take the lease's grant and
    turn it into `-threads`, so a pass cannot skip the budget (the type is the guard). Light probes
    (`ffprobe`, single-frame grabs) stay unleased.
