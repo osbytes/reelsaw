@@ -555,11 +555,11 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   (`biome-ignore`, `@ts-expect-error`) always says why. A review comment made twice becomes a rule
   (`biome.json`, a GritQL plugin, or a test that scans the source) before it becomes a line in
   `AGENTS.md`.
-- **Languages.** The UI, emails and MCP text are English only today, written as literals. Moving
-  them to a message catalogue (and dates and numbers through one `Intl` module, which
-  `packages/shared/src/format.ts` already is for counts, sizes and days) is an open decision;
-  until it is made, new copy keeps whole sentences in one string, never sentences built from
-  joined fragments, so it can be extracted later.
+- **Every string a person reads goes through the catalogue.** Reelsaw ships in English and is
+  built for more: web copy uses Lingui's `<Trans>` and `t`, whole sentences as one message, plurals
+  as ICU messages; layout uses logical CSS classes only; check UI work in the `?locale=en-XA`
+  pseudo-locale. Log lines, config keys, MCP tool names and CLI flags stay English. How, and what
+  is left to wrap: [I18N.md](I18N.md).
 - **Fix the class, not the instance.** A bug is evidence that the codebase made a mistake easy.
   Patching the one place it showed up leaves every sibling in place and the next person free to
   write it again. Every fix answers four questions, in the same change:

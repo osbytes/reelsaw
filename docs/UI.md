@@ -212,8 +212,8 @@ at once, and `animate-spin` keeps turning because a spinner is status, not decor
 WCAG 2.2 AA is the bar. The a11y rules old screens still break (`useButtonType`,
 `noLabelWithoutControl`, `noStaticElementInteractions`, `useKeyWithClickEvents`, …) stay at `warn`
 in `biome.json`, and their counts are in `scripts/lint-baseline.json`: CI fails if one rises, so a
-new screen cannot add to them. There are no automated axe checks yet (no browser end-to-end
-suite); a keyboard and screen-reader pass of the changed screens is part of UI review.
+new screen cannot add to them. Axe runs over the main screens in CI's stack job (`apps/web/e2e`, with its own baseline, once that
+suite lands); a keyboard and screen-reader pass of the changed screens is still part of UI review.
 
 ## Changing the system
 
