@@ -88,6 +88,7 @@
     "semver": "^7.8.5",
     "standardwebhooks": "^1.1.1",
     "stripe": "23.0.0",
+    "ts-extras": "3.0.0",
     "undici": "7.30.1",
     "wordlist-english": "^1.2.1",
     "yauzl": "3.4.0",

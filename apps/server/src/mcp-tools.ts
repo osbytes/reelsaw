@@ -4,6 +4,7 @@
  * catalogue over stdio and forwards calls to a running instance. One list, so the two surfaces
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
+import { objectKeys } from "ts-extras";
 import { z } from "zod";
 import {
   DECISION_KINDS,
@@ -1202,4 +1203,4 @@ export const TOOLS = {
 export type ToolName = keyof typeof TOOLS;
 /** Tools that only do something on a hosted instance with billing (ee); elsewhere they answer with a sentence. */
 export const EE_TOOLS: ToolName[] = ["get_billing", "billing_checkout_url", "billing_portal_url"];
-export const TOOL_NAMES = Object.keys(TOOLS) as ToolName[];
+export const TOOL_NAMES = objectKeys(TOOLS);

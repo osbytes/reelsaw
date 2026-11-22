@@ -1312,7 +1312,7 @@ ${usage}`);
       ) {
         return c.words
           .slice(c.target.index, c.target.index + c.target.span)
-          .map((w: { text?: string }) => w.text ?? "")
+          .map((w) => (w && typeof w === "object" && "text" in w && typeof w.text === "string" ? w.text : ""))
           .join(" ")
           .slice(0, 40);
       }

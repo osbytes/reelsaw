@@ -23,6 +23,9 @@ importers:
       '@changesets/cli':
         specifier: ^3.0.3
         version: 3.0.3
+      '@total-typescript/ts-reset':
+        specifier: 0.6.1
+        version: 0.6.1
       lefthook:
         specifier: 2.2.2
         version: 2.2.2
@@ -209,6 +212,9 @@ importers:
       stripe:
         specifier: 23.0.0
         version: 23.0.0(@types/node@24.19.2)
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       undici:
         specifier: 7.30.1
         version: 7.30.1
@@ -357,6 +363,9 @@ importers:
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -391,6 +400,9 @@ importers:
       fuse.js:
         specifier: 7.1.0
         version: 7.1.0
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -2461,7 +2473,9 @@ packages:
   '@smithy/core@3.36.2':
     resolution: {integrity: sha512-oRw0rB9QSUiCZfEs23G5F4Af+b2rQt1lItIICWu5IejFNd+uPM8SWqiKLMpQ6bX1Q7slsLbjuoE2niErFtkVPQ==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -2594,6 +2608,9 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@total-typescript/ts-reset@0.6.1':
+    resolution: {integrity: sha512-cka47fVSo6lfQDIATYqb/vO1nvFfbPw7uWLayIXIhGETj0wcOOlrlkobOMDNQOFr9QOafegUPq13V2+6vtD7yg==}
 
   '@trpc/client@11.19.0':
     resolution: {integrity: sha512-0MKkPq6MejsKB5Opca1Rl22KVIaqo2+A1EiXyZ8EGUsl9TLrPdpGn+Usux20TZKFwnSC2+wI/WilqNJaP4ODfw==}
@@ -4070,6 +4087,10 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
+  ts-extras@3.0.0:
+    resolution: {integrity: sha512-n3A9eyRX5Ka84sLdAT/pQl7crCg2E9oMZkx3mrunqh1zDXuK5LXHFUG5VTaljbb0jAdOQVikP3WEU+W0vaJm/Q==}
+    engines: {node: '>=22'}
+
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
@@ -4085,6 +4106,10 @@ packages:
   type-fest@5.10.0:
     resolution: {integrity: sha512-NoSdpq/WEiAg5sjmBkmV/hfxv6HJH4NqPNrqjtSO5CwRmpsDfaf4begxW34KdJykH/l1yHtwBWQkCRdoXO8mPA==}
     engines: {node: '>=20'}
+
+  type-fest@6.0.3:
+    resolution: {integrity: sha512-MOJXegkac3h+sWdVb6VY/ACclsa71z3BprNpedGV8ljIzYCo+LRWgyIkWhidKNoiNJOb6kUds1pNCyzQ2p6hJQ==}
+    engines: {node: '>=22'}
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -6488,6 +6513,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
+  '@total-typescript/ts-reset@0.6.1': {}
+
   '@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@trpc/server': 11.19.0(typescript@5.9.3)
@@ -7782,6 +7809,10 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
 
+  ts-extras@3.0.0:
+    dependencies:
+      type-fest: 6.0.3
+
   tslib@2.8.1: {}
 
   tsx@4.23.15:
@@ -7793,6 +7824,10 @@ snapshots:
   type-fest@0.20.2: {}
 
   type-fest@5.10.0:
+    dependencies:
+      tagged-tag: 1.0.0
+
+  type-fest@6.0.3:
     dependencies:
       tagged-tag: 1.0.0
 
