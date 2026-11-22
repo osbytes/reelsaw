@@ -35,8 +35,8 @@ export async function loadVad(modelPath: string): Promise<Vad> {
         else buf.fill(0, 0, CONTEXT);
         buf.set(pcm.subarray(f * FRAME, (f + 1) * FRAME), CONTEXT);
         const res = await session.run({ input: new ort.Tensor("float32", buf.slice(), [1, CONTEXT + FRAME]), state, sr });
-        out[f] = (res.output!.data as Float32Array)[0]!;
-        state = res.stateN as typeof state;
+        out[f] = (res["output"]!.data as Float32Array)[0]!;
+        state = res["stateN"] as typeof state;
       }
       return out;
     },

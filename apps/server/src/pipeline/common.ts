@@ -207,7 +207,7 @@ export class StageContext {
       needDiskMB,
       signal: this.signal,
       onWait: (r) => void this.progress(0, `Waiting for resources: ${r}`, extra).catch(() => {}),
-      ids: { jobId: this.ids.jobId === undefined ? undefined : String(this.ids.jobId), projectId: this.projectId },
+      ids: { jobId: this.ids["jobId"] === undefined ? undefined : String(this.ids["jobId"]), projectId: this.projectId },
     });
   }
 
@@ -276,7 +276,7 @@ export class StageContext {
       progress: pct,
       message,
       ...(detail ? { detail } : {}),
-      ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}),
+      ...(typeof extra["clipId"] === "string" ? { clipId: extra["clipId"] } : {}),
     });
   }
 
@@ -492,7 +492,7 @@ export function modelsUsed(svc: Services, ...which: Array<"language" | "transcri
     if (w === "language") add("language", m.language);
     if (w === "transcription") add("transcription", m.transcription);
     if (w === "align") add("align", m.align);
-    if (w === "aligner" && svc.aligner) out.aligner = path.basename(c.ALIGN_MODEL_DIR ?? "wav2vec2");
+    if (w === "aligner" && svc.aligner) out["aligner"] = path.basename(c.ALIGN_MODEL_DIR ?? "wav2vec2");
   }
   return out;
 }

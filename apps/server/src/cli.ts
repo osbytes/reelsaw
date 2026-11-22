@@ -1302,21 +1302,21 @@ ${usage}`);
     const what = (d: (typeof page.items)[number]) => {
       const c = d.context;
       if (
-        Array.isArray(c.words) &&
-        c.target &&
-        typeof c.target === "object" &&
-        "index" in c.target &&
-        "span" in c.target &&
-        typeof c.target.index === "number" &&
-        typeof c.target.span === "number"
+        Array.isArray(c["words"]) &&
+        c["target"] &&
+        typeof c["target"] === "object" &&
+        "index" in c["target"] &&
+        "span" in c["target"] &&
+        typeof c["target"].index === "number" &&
+        typeof c["target"].span === "number"
       ) {
-        return c.words
-          .slice(c.target.index, c.target.index + c.target.span)
+        return c["words"]
+          .slice(c["target"].index, c["target"].index + c["target"].span)
           .map((w: { text?: string }) => w.text ?? "")
           .join(" ")
           .slice(0, 40);
       }
-      return Array.isArray(c.fields) ? c.fields.join(",") : String(d.before?.title ?? d.after?.title ?? "").slice(0, 40);
+      return Array.isArray(c["fields"]) ? c["fields"].join(",") : String(d.before?.["title"] ?? d.after?.["title"] ?? "").slice(0, 40);
     };
     table(
       page.items.map((d) => ({
@@ -2431,7 +2431,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
 
   async "log-level"(svc) {
     const { parseLogLevels, formatLogLevels } = await import("./log.js");
-    const env = parseLogLevels(process.env.LOG_LEVEL || "info");
+    const env = parseLogLevels(process.env["LOG_LEVEL"] || "info");
     const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number | undefined }) => {
       if (st.acks !== undefined)
         console.log(
@@ -3122,7 +3122,7 @@ async function run() {
     RUN_WORKERS: "false",
     OTEL_ENABLED: "false",
     REELSAW_CLI: "1",
-    LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn",
+    LOG_LEVEL: process.env["CLI_LOG_LEVEL"] ?? "warn",
   });
   try {
     await fn(svc);

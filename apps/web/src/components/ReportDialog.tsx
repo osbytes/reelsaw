@@ -59,10 +59,10 @@ export function ReportDialog() {
     mutationFn: async () => {
       if (feedbackOnly) {
         const client = clientContext();
-        const tags: Record<string, string> = { source: target?.tags?.source ?? "report-dialog", ...target?.tags };
-        if (projectId) tags.projectId = projectId;
-        if (clipIds.length) tags.clipIds = clipIds.join(",");
-        if (client.route) tags.route = client.route;
+        const tags: Record<string, string> = { source: target?.tags?.["source"] ?? "report-dialog", ...target?.tags };
+        if (projectId) tags["projectId"] = projectId;
+        if (clipIds.length) tags["clipIds"] = clipIds.join(",");
+        if (client.route) tags["route"] = client.route;
         const sent = await sendIssueFeedback({
           message: text.trim(),
           name: me.data?.name,
@@ -109,7 +109,7 @@ export function ReportDialog() {
           name: me.data?.name,
           email: me.data?.email,
           tags: {
-            source: target?.tags?.source ?? "report-dialog",
+            source: target?.tags?.["source"] ?? "report-dialog",
             ...target?.tags,
             ...(projectId ? { projectId } : {}),
             ...(client.route ? { route: client.route } : {}),

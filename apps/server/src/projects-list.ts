@@ -90,7 +90,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
   return {
     rows: rows.map((p) => {
       const f = facts.get(p.id);
-      const sourceThumb = (p.sourceMeta?.thumbnail as string | undefined) ?? null;
+      const sourceThumb = (p.sourceMeta?.["thumbnail"] as string | undefined) ?? null;
       return {
         p,
         clipCount: f?.clipCount ?? 0,

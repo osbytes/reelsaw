@@ -68,11 +68,11 @@ if (!inContainer) {
       process.env[k] = v.replace(/:\/\/(speaches|ollama|host\.docker\.internal|db|minio)(?=[:/])/, "://localhost");
   }
 }
-process.env.DATABASE_URL ||= "postgres://eval@localhost/eval"; // never connected to
-process.env.BETTER_AUTH_SECRET ||= "eval-only-secret-not-used-anywhere";
-process.env.REELSAW_CLI = "1";
+process.env["DATABASE_URL"] ||= "postgres://eval@localhost/eval"; // never connected to
+process.env["BETTER_AUTH_SECRET"] ||= "eval-only-secret-not-used-anywhere";
+process.env["REELSAW_CLI"] = "1";
 
-const log = createLogger({ LOG_LEVEL: has("verbose") ? "debug" : process.env.EVAL_LOG_LEVEL || "warn", LOG_FORMAT: "auto" }, { role: "eval" });
+const log = createLogger({ LOG_LEVEL: has("verbose") ? "debug" : process.env["EVAL_LOG_LEVEL"] || "warn", LOG_FORMAT: "auto" }, { role: "eval" });
 
 interface SuiteReport {
   profile: string;

@@ -43,20 +43,20 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 /** The scores one decision gives, or none (implicit, backfilled, or a kind that judges no model output). */
 export function decisionScores(d: ScoredDecision): DecisionScore[] {
   if (!d.explicit || d.backfilled) return [];
-  const origin = typeof d.context.origin === "string" ? d.context.origin : null;
+  const origin = typeof d.context["origin"] === "string" ? d.context["origin"] : null;
   const base = {
     kind: d.kind,
     clipId: d.clipId,
     origin,
-    ...(typeof d.before?.score === "number" ? { aiScore: d.before.score } : {}),
-    ...(typeof d.context.flagKind === "string" ? { flagKind: d.context.flagKind } : {}),
-    ...(typeof d.context.subkind === "string" ? { subkind: d.context.subkind } : {}),
+    ...(typeof d.before?.["score"] === "number" ? { aiScore: d.before["score"] } : {}),
+    ...(typeof d.context["flagKind"] === "string" ? { flagKind: d.context["flagKind"] } : {}),
+    ...(typeof d.context["subkind"] === "string" ? { subkind: d.context["subkind"] } : {}),
     models: Object.entries(d.models).map(([k, v]) => `${k}=${v}`),
   };
   if (d.kind === "clip.edit") {
     // a person's own clip is not the model's output; edits to an AI clip say which part missed
     if (origin === "manual") return [];
-    const fields = strings(d.context.fields);
+    const fields = strings(d.context["fields"]);
     const out: DecisionScore[] = [{ id: `decision-${d.id}`, name: "clip.untouched", value: 0, metadata: { ...base, fields } }];
     if (fields.includes("bounds")) out.push({ id: `decision-${d.id}-bounds`, name: "clip.bounds_kept", value: 0, metadata: base });
     if (fields.some((f) => f === "title" || f === "hook" || f === "caption" || f === "hashtags"))
@@ -66,7 +66,7 @@ export function decisionScores(d: ScoredDecision): DecisionScore[] {
   const s = SCORE[d.kind];
   if (!s) return [];
   // accepting or rejecting a fix the person typed judges nothing the model proposed
-  if ((d.kind === "fix.accept" || d.kind === "fix.reject") && d.context.subkind === "manual") return [];
+  if ((d.kind === "fix.accept" || d.kind === "fix.reject") && d.context["subkind"] === "manual") return [];
   // deleting or restoring a clip the person made is about their clip, not the model's pick
   if ((d.kind === "clip.delete" || d.kind === "clip.restore") && origin === "manual") return [];
   return [{ id: `decision-${d.id}`, name: s.name, value: s.value, metadata: base }];

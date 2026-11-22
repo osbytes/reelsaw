@@ -301,7 +301,7 @@ async function fetchCaptions(id: string, cache: string, pauseSec: number, manual
       await sleep(pauseSec * 1000);
     }
     process.stderr.write(`  fetching captions for ${id}\n`);
-    const ytdlp = process.env.YTDLP_PATH || "yt-dlp";
+    const ytdlp = process.env["YTDLP_PATH"] || "yt-dlp";
     await fs.mkdir(cache, { recursive: true });
     await exec(ytdlp, [
       "--js-runtimes",
@@ -324,7 +324,7 @@ async function fetchCaptions(id: string, cache: string, pauseSec: number, manual
   const meta = JSON.parse(await fs.readFile(info, "utf8")) as Info & { subtitles?: Record<string, unknown> };
   return {
     info: { id: meta.id, title: meta.title, duration: meta.duration, upload_date: meta.upload_date } as Info,
-    hasManual: !!meta.subtitles?.en,
+    hasManual: !!meta.subtitles?.["en"],
     auto: JSON.parse(await fs.readFile(auto, "utf8")) as Json3,
     manual: existsSync(man) ? (JSON.parse(await fs.readFile(man, "utf8")) as Json3) : undefined,
   };

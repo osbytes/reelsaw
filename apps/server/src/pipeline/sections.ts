@@ -58,7 +58,7 @@ export interface RenderSource {
 
 /** Whether this project's stored source is a preview copy whose clips render from fetched windows. */
 export function rendersFromSections(project: Pick<Project, "sourceType" | "sourceMeta" | "sourceUrl">): number | null {
-  const h = project.sourceMeta?.previewHeight;
+  const h = project.sourceMeta?.["previewHeight"];
   return project.sourceType === "url" && project.sourceUrl && typeof h === "number" && h > 0 ? h : null;
 }
 

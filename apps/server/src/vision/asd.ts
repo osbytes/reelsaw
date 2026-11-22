@@ -64,8 +64,8 @@ export async function loadAsdModel(dir: string, opts: OnnxOptions = {}): Promise
       const vo = await visual.session.run({
         visual_feature: new ort.Tensor("float32", crops.slice(v0 * px, (v0 + n) * px), [1, n, ASD_CROP, ASD_CROP]),
       });
-      ae.set(ao.audio_embed!.data as Float32Array, v0 * EMBED);
-      ve.set(vo.visual_embed!.data as Float32Array, v0 * EMBED);
+      ae.set(ao["audio_embed"]!.data as Float32Array, v0 * EMBED);
+      ve.set(vo["visual_embed"]!.data as Float32Array, v0 * EMBED);
     }
     return { ae, ve };
   }
@@ -82,7 +82,7 @@ export async function loadAsdModel(dir: string, opts: OnnxOptions = {}): Promise
             audio_embed: new ort.Tensor("float32", ae.slice(v0 * EMBED, (v0 + n) * EMBED), [1, n, EMBED]),
             visual_embed: new ort.Tensor("float32", ve.slice(v0 * EMBED, (v0 + n) * EMBED), [1, n, EMBED]),
           });
-          const s = out.score!.data as Float32Array;
+          const s = out["score"]!.data as Float32Array;
           for (let i = 0; i < n; i++) sum[v0 + i]! += s[i]! / DURATIONS.length;
         }
       }

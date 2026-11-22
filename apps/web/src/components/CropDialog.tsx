@@ -161,10 +161,10 @@ export function CropDialog({
     if (e.button !== 0 || !frameRef.current || !region) return;
     e.preventDefault();
     const target = e.target as HTMLElement;
-    const handle = target.dataset.handle as Handle | undefined;
+    const handle = target.dataset["handle"] as Handle | undefined;
     const p = at(e);
     if (handle) drag.current = { kind: "size", handle, orig: region };
-    else if (target.dataset.box) drag.current = { kind: "move", grab: { x: p.x - region.x1, y: p.y - region.y1 }, orig: region };
+    else if (target.dataset["box"]) drag.current = { kind: "move", grab: { x: p.x - region.x1, y: p.y - region.y1 }, orig: region };
     else drag.current = { kind: "draw", from: p };
     frameRef.current.setPointerCapture(e.pointerId);
   };

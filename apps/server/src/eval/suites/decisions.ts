@@ -17,7 +17,7 @@ export const decisionsSuite: Suite = {
   offlineBaseline: true,
   noBaseline: true,
   async run(ctx): Promise<CaseResult[]> {
-    const file = ctx.opt("decisions") ?? process.env.EVAL_DECISIONS;
+    const file = ctx.opt("decisions") ?? process.env["EVAL_DECISIONS"];
     if (!file) return [{ id: "(suite)", pass: false, skipped: "no decisions export: set EVAL_DECISIONS=<file.jsonl> or pass --decisions <file>" }];
     const { rows, bad } = parseExport(await fs.readFile(file, "utf8"));
     if (bad) ctx.log.warn({ bad }, "export lines that are not decisions were skipped");

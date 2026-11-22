@@ -74,9 +74,9 @@ async function clipsPayload(svc: Services, userId: string, clips: Clip[]) {
 }
 
 const runOf = (payload: Record<string, unknown>) => ({
-  seq: typeof payload.runSeq === "number" ? payload.runSeq : null,
-  reason: typeof payload.runReason === "string" ? payload.runReason : null,
-  runSec: typeof payload.runSec === "number" ? payload.runSec : null,
+  seq: typeof payload["runSeq"] === "number" ? payload["runSeq"] : null,
+  reason: typeof payload["runReason"] === "string" ? payload["runReason"] : null,
+  runSec: typeof payload["runSec"] === "number" ? payload["runSec"] : null,
 });
 
 /** The JSON body for a delivery, as the string that is signed and sent. */
@@ -129,16 +129,16 @@ export async function buildBody(svc: Services, d: WebhookDeliveryRow): Promise<s
       break;
     }
     case "project.failed":
-      data = { project: summary, run: runOf(payload), stage: payload.stage ?? null, error: payload.error ?? null };
+      data = { project: summary, run: runOf(payload), stage: payload["stage"] ?? null, error: payload["error"] ?? null };
       break;
     case "clip.done":
     case "clip.failed": {
-      const clipId = typeof payload.clipId === "string" ? payload.clipId : null;
+      const clipId = typeof payload["clipId"] === "string" ? payload["clipId"] : null;
       const clip = clipId ? await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId) }) : undefined;
       data = {
         project: summary,
         clip: clip && !clip.deletedAt ? await clipPayload(svc, project.userId, clip) : { id: clipId, deleted: true },
-        ...(d.type === "clip.failed" ? { error: payload.error ?? null } : {}),
+        ...(d.type === "clip.failed" ? { error: payload["error"] ?? null } : {}),
       };
       break;
     }

@@ -30,7 +30,7 @@
       "complexity": {
         "noCommaOperator": "off",
         "useOptionalChain": "error",
-        "useLiteralKeys": "error",
+        "useLiteralKeys": "off",
         "noUselessFragments": "error",
         "noUselessEscapeInRegex": "error"
       },

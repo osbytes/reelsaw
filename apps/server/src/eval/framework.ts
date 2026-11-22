@@ -162,7 +162,7 @@ export function makeCache(dir: string, readThrough = true) {
 
 /** Locate eval/: EVAL_DIR, or walk up from cwd and from this file looking for eval/fixtures. */
 export function findEvalRoot(): string {
-  if (process.env.EVAL_DIR) return path.resolve(process.env.EVAL_DIR);
+  if (process.env["EVAL_DIR"]) return path.resolve(process.env["EVAL_DIR"]);
   const starts = [process.cwd(), path.dirname(new URL(import.meta.url).pathname)];
   for (const start of starts) {
     let d = start;
@@ -270,7 +270,7 @@ export async function materialize(ctx: EvalContext, source: MediaSource): Promis
     .update(await fs.readFile(out))
     .digest("hex");
   if (source.sha256 && source.sha256 !== sha) {
-    if (source.strictSha && process.env.EVAL_STRICT_MEDIA === "1") {
+    if (source.strictSha && process.env["EVAL_STRICT_MEDIA"] === "1") {
       await fs.rm(out, { force: true });
       throw new MediaDriftError(
         `media ${source.id} differs from the fixture's recorded sha256 (${sha.slice(0, 12)} vs ${source.sha256.slice(0, 12)}); sub-second labels are only valid for the original encode. Re-materialise where the fixture was made, or re-label and update the sha256`,

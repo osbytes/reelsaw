@@ -51,7 +51,7 @@ export async function loadAligner(dir: string, opts: OnnxOptions = {}): Promise<
       const x = new Float32Array(pcm.length);
       for (let i = 0; i < pcm.length; i++) x[i] = (pcm[i]! - mean) / std;
       const res = await session.run({ input_values: new ort.Tensor("float32", x, [1, x.length]) });
-      const logits = res.logits!;
+      const logits = res["logits"]!;
       const T = logits.dims[1]!;
       const C = logits.dims[2] ?? V;
       const data = logits.data as Float32Array;

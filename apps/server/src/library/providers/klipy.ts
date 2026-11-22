@@ -21,26 +21,26 @@ function formats(g: Record<string, unknown>): {
   width?: number | undefined;
   height?: number | undefined;
 } {
-  const mf = obj(g.media_formats);
+  const mf = obj(g["media_formats"]);
   if (Object.keys(mf).length) {
-    const dims = arr(obj(mf.gif).dims);
+    const dims = arr(obj(mf["gif"])["dims"]);
     return {
-      mp4: httpsUrl(obj(mf.mp4).url),
-      gif: httpsUrl(obj(mf.gif).url),
-      thumb: httpsUrl(obj(mf.tinygif).url) ?? httpsUrl(obj(mf.gif).url),
+      mp4: httpsUrl(obj(mf["mp4"])["url"]),
+      gif: httpsUrl(obj(mf["gif"])["url"]),
+      thumb: httpsUrl(obj(mf["tinygif"])["url"]) ?? httpsUrl(obj(mf["gif"])["url"]),
       width: num(dims[0]),
       height: num(dims[1]),
     };
   }
-  const f = obj(g.file);
-  const size = obj(f.md ?? f.hd ?? f.sm);
-  const sm = obj(f.sm ?? f.md);
+  const f = obj(g["file"]);
+  const size = obj(f["md"] ?? f["hd"] ?? f["sm"]);
+  const sm = obj(f["sm"] ?? f["md"]);
   return {
-    mp4: httpsUrl(obj(size.mp4).url),
-    gif: httpsUrl(obj(size.gif).url),
-    thumb: httpsUrl(obj(sm.gif).url) ?? httpsUrl(obj(sm.webp).url),
-    width: num(obj(size.gif).width),
-    height: num(obj(size.gif).height),
+    mp4: httpsUrl(obj(size["mp4"])["url"]),
+    gif: httpsUrl(obj(size["gif"])["url"]),
+    thumb: httpsUrl(obj(sm["gif"])["url"]) ?? httpsUrl(obj(sm["webp"])["url"]),
+    width: num(obj(size["gif"])["width"]),
+    height: num(obj(size["gif"])["height"]),
   };
 }
 
@@ -52,11 +52,11 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
   };
   const rows = (r: unknown) => {
     const o = obj(r);
-    const data = obj(o.data);
-    return arr(o.results).length ? arr(o.results) : arr(data.data).length ? arr(data.data) : arr(o.data);
+    const data = obj(o["data"]);
+    return arr(o["results"]).length ? arr(o["results"]) : arr(data["data"]).length ? arr(data["data"]) : arr(o["data"]);
   };
   const item = (g: Record<string, unknown>): ProviderItem | null => {
-    const id = str(g.id) ?? str(g.slug);
+    const id = str(g["id"]) ?? str(g["slug"]);
     const f = formats(g);
     if (!id || !f.thumb || !(f.mp4 || f.gif)) return null;
     return {
@@ -64,14 +64,14 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       externalId: id,
       kind: "video",
       mime: f.mp4 ? "video/mp4" : "image/gif",
-      name: clip(str(g.title) ?? str(g.content_description) ?? `GIF ${id}`, 120),
+      name: clip(str(g["title"]) ?? str(g["content_description"]) ?? `GIF ${id}`, 120),
       previewUrl: f.mp4 ?? f.gif ?? f.thumb,
       thumbUrl: f.thumb,
       width: f.width,
       height: f.height,
       license: LICENSE,
       attribution: "GIFs via Klipy",
-      url: httpsUrl(g.itemurl) ?? httpsUrl(g.url),
+      url: httpsUrl(g["itemurl"]) ?? httpsUrl(g["url"]),
     };
   };
   return {
@@ -87,7 +87,7 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       const r = await http.json("klipy", url("/gifs/search", { q, per_page: String(Math.min(50, limit)), page: String(page), customer_id: "reelsaw" }));
       const items = rows(r).flatMap((g) => item(obj(g)) ?? []);
       const o = obj(r);
-      const hasNext = o.has_next ?? obj(o.data).has_next ?? (str(o.next) ? true : undefined);
+      const hasNext = o["has_next"] ?? obj(o["data"])["has_next"] ?? (str(o["next"]) ? true : undefined);
       return { items, ...(hasNext && items.length ? { nextCursor: String(page + 1) } : {}) };
     },
     async resolve(externalId): Promise<Resolved> {
@@ -96,17 +96,17 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       const r = await http.json("klipy", url("/gifs/search", { q: externalId, per_page: "20", customer_id: "reelsaw" }));
       const g = rows(r)
         .map(obj)
-        .find((x) => (str(x.id) ?? str(x.slug)) === externalId);
+        .find((x) => (str(x["id"]) ?? str(x["slug"])) === externalId);
       const f = g ? formats(g) : undefined;
       const file = f?.mp4 ?? f?.gif;
       if (!g || !f || !file) throw new ProviderError("Klipy no longer returns that item; search for it again.");
       return {
         url: file,
         ext: f.mp4 ? "mp4" : "gif",
-        name: clip(str(g.title) ?? `Klipy ${externalId}`, 120),
+        name: clip(str(g["title"]) ?? `Klipy ${externalId}`, 120),
         kind: "video",
         tags: [],
-        provenance: { provider: "klipy", externalId, url: httpsUrl(g.itemurl) ?? httpsUrl(g.url), license: LICENSE, attribution: "GIF via Klipy" },
+        provenance: { provider: "klipy", externalId, url: httpsUrl(g["itemurl"]) ?? httpsUrl(g["url"]), license: LICENSE, attribution: "GIF via Klipy" },
       };
     },
   };

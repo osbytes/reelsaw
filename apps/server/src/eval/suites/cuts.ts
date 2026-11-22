@@ -133,12 +133,12 @@ export const cutsSuite: Suite = {
     return out;
   },
   summarize(results) {
-    const v = (k: string) => results.filter((r) => r.metrics?.verdict === k).length;
+    const v = (k: string) => results.filter((r) => r.metrics?.["verdict"] === k).length;
     return {
       clean: { value: v("clean"), better: "higher" },
       broken: { value: v("broken"), better: "lower" },
       asrCallsPerCase: {
-        value: Number((results.reduce((a, r) => a + Number(r.metrics?.asrCalls ?? 0), 0) / (results.length || 1)).toFixed(1)),
+        value: Number((results.reduce((a, r) => a + Number(r.metrics?.["asrCalls"] ?? 0), 0) / (results.length || 1)).toFixed(1)),
         better: "lower",
         tolerance: 2,
       },

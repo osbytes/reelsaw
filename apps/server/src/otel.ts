@@ -34,9 +34,9 @@ export interface Otel {
 }
 
 function start(): Otel {
-  if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
+  if (!truthy(process.env["OTEL_ENABLED"])) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
   const cfg = resolveOtlp(process.env);
-  const operatorSampler = !!process.env.OTEL_TRACES_SAMPLER?.trim();
+  const operatorSampler = !!process.env["OTEL_TRACES_SAMPLER"]?.trim();
   // Before the SDK loads: it reads OTEL_TRACES_SAMPLER when it starts. The browser uses cfg.sampleRate.
   applyServerSampler(process.env, cfg.sampleRate);
   const require = createRequire(import.meta.url);
@@ -49,13 +49,13 @@ function start(): Otel {
   const { resourceFromAttributes } = require("@opentelemetry/resources");
   const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = require("@opentelemetry/semantic-conventions");
 
-  const runWorkers = process.env.RUN_WORKERS === undefined || truthy(process.env.RUN_WORKERS);
-  const runHttp = process.env.RUN_HTTP === undefined || truthy(process.env.RUN_HTTP);
+  const runWorkers = process.env["RUN_WORKERS"] === undefined || truthy(process.env["RUN_WORKERS"]);
+  const runHttp = process.env["RUN_HTTP"] === undefined || truthy(process.env["RUN_HTTP"]);
 
   const sdk = new NodeSDK({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: cfg.serviceName,
-      [ATTR_SERVICE_VERSION]: process.env.REELSAW_VERSION ?? process.env.npm_package_version ?? "0.1.0",
+      [ATTR_SERVICE_VERSION]: process.env["REELSAW_VERSION"] ?? process.env["npm_package_version"] ?? "0.1.0",
       "reelsaw.role": runHttp && runWorkers ? "app" : runHttp ? "api" : "worker",
     }),
     traceExporter: new OTLPTraceExporter({ url: cfg.tracesUrl, headers: cfg.headers }),
@@ -65,7 +65,7 @@ function start(): Otel {
     metricReader: cfg.metrics
       ? new metrics.PeriodicExportingMetricReader({
           exporter: new OTLPMetricExporter({ url: cfg.metricsUrl, headers: cfg.headers }),
-          exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 30_000),
+          exportIntervalMillis: Number(process.env["OTEL_METRIC_EXPORT_INTERVAL"] ?? 30_000),
         })
       : undefined,
     // unless the operator chose a sampler: parent-based at OTEL_TRACES_SAMPLE_RATE, minus orphan client spans

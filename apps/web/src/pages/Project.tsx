@@ -757,7 +757,7 @@ export function ProjectPage() {
           <video
             ref={sourceRef}
             src={p.sourceVideoUrl}
-            poster={(p.sourceMeta?.thumbnail as string | undefined) ?? undefined}
+            poster={(p.sourceMeta?.["thumbnail"] as string | undefined) ?? undefined}
             preload="metadata"
             playsInline
             className="absolute inset-0 h-full w-full bg-black object-contain"

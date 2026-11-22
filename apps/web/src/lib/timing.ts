@@ -26,7 +26,7 @@ export function stageTimes(log: ProjectEvent[]): Record<string, StageTime> {
     } else if (e.type === "stage.started" && typeof stage === "string" && stage !== "review") out[stage] = { startedAt: t };
     else if (e.type === "stage.completed" && stage === "analyze") analyzed = t;
   }
-  if (!out.render && (analyzed ?? runStart) !== undefined) out.render = { startedAt: (analyzed ?? runStart)! };
+  if (!out["render"] && (analyzed ?? runStart) !== undefined) out["render"] = { startedAt: (analyzed ?? runStart)! };
   return out;
 }
 

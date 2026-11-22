@@ -177,14 +177,14 @@ async function readAll(db: Db): Promise<Record<string, unknown>> {
 function parseVerdict(v: unknown): WordTimestampVerdict | undefined {
   if (!v || typeof v !== "object") return undefined;
   const o = v as Record<string, unknown>;
-  if (typeof o.wordLevel !== "boolean" || typeof o.checkedAt !== "string") return undefined;
+  if (typeof o["wordLevel"] !== "boolean" || typeof o["checkedAt"] !== "string") return undefined;
   return {
-    wordLevel: o.wordLevel,
-    segments: Number(o.segments) || 0,
-    text: String(o.text ?? ""),
-    checkedAt: o.checkedAt,
-    ...(typeof o.reader === "number" ? { reader: o.reader } : {}),
-    ...(typeof o.asked === "string" ? { asked: o.asked } : {}),
+    wordLevel: o["wordLevel"],
+    segments: Number(o["segments"]) || 0,
+    text: String(o["text"] ?? ""),
+    checkedAt: o["checkedAt"],
+    ...(typeof o["reader"] === "number" ? { reader: o["reader"] } : {}),
+    ...(typeof o["asked"] === "string" ? { asked: o["asked"] } : {}),
   };
 }
 

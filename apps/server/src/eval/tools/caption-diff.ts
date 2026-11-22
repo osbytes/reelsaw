@@ -283,7 +283,7 @@ export async function fetchTracks(
   dir: string,
   opts: { requireAuto?: boolean; ytdlp?: string } = {},
 ): Promise<{ manual: string; auto: string | null }> {
-  const ytdlp = opts.ytdlp ?? (process.env.YTDLP_PATH || "yt-dlp");
+  const ytdlp = opts.ytdlp ?? (process.env["YTDLP_PATH"] || "yt-dlp");
   await fs.mkdir(dir, { recursive: true });
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const manual = path.join(dir, `${videoId}.en.json3`);

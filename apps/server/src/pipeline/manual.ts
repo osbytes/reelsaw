@@ -84,10 +84,10 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
     const r = (extractJson(err.text ?? "") ?? {}) as Record<string, unknown>;
     return {
-      title: String(r.title ?? text.slice(0, 60)),
-      hook: String(r.hook ?? ""),
-      caption: String(r.caption ?? ""),
-      hashtags: Array.isArray(r.hashtags) ? r.hashtags.map(String).slice(0, 8) : [],
+      title: String(r["title"] ?? text.slice(0, 60)),
+      hook: String(r["hook"] ?? ""),
+      caption: String(r["caption"] ?? ""),
+      hashtags: Array.isArray(r["hashtags"]) ? r["hashtags"].map(String).slice(0, 8) : [],
     };
   }
 }

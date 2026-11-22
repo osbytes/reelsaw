@@ -244,11 +244,11 @@ export function TranscriptPanel({
     if (!content.contains(r.commonAncestorContainer)) return setPick(null);
     const els = [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => r.intersectsNode(el));
     if (!els.length) return setPick(null);
-    const start = Math.min(...els.map((e) => Number(e.dataset.s)));
-    const end = Math.max(...els.map((e) => Number(e.dataset.e)));
+    const start = Math.min(...els.map((e) => Number(e.dataset["s"])));
+    const end = Math.max(...els.map((e) => Number(e.dataset["e"])));
     // snap the visible highlight to whole words: what's highlighted is exactly what Make clip / Cut / Correct use
-    const first = els.reduce((a, e) => (Number(e.dataset.s) < Number(a.dataset.s) ? e : a));
-    const last = els.reduce((a, e) => (Number(e.dataset.e) > Number(a.dataset.e) ? e : a));
+    const first = els.reduce((a, e) => (Number(e.dataset["s"]) < Number(a.dataset["s"]) ? e : a));
+    const last = els.reduce((a, e) => (Number(e.dataset["e"]) > Number(a.dataset["e"]) ? e : a));
     const snapped = document.createRange();
     snapped.setStartBefore(first);
     snapped.setEndAfter(last);
@@ -502,7 +502,7 @@ export function TranscriptPanel({
     const v = viewportRef.current;
     const content = contentRef.current;
     const spans = content
-      ? [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => Number(el.dataset.s) >= a - 0.02 && Number(el.dataset.e) <= b + 0.02)
+      ? [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => Number(el.dataset["s"]) >= a - 0.02 && Number(el.dataset["e"]) <= b + 0.02)
       : [];
     if (!v || !spans.length) {
       if (tries < 20) requestAnimationFrame(() => selectRange(a, b, tries + 1));

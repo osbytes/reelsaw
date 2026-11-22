@@ -396,7 +396,7 @@ export async function loadReleasesFeed(opts: LoadReleasesOpts): Promise<Releases
     "user-agent": opts.userAgent,
     "x-github-api-version": "2022-11-28",
   };
-  if (opts.token) headers.authorization = `Bearer ${opts.token}`;
+  if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
   const signal = opts.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS);
   const doFetch = opts.fetch;
 

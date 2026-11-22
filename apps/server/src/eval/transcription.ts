@@ -31,7 +31,7 @@ const argv = (name: string, def: string) => {
   return i >= 0 ? args[i + 1]! : def;
 };
 const casesPath = path.resolve(argv("cases", "../../eval/fixtures/transcription/cases.json"));
-const models = argv("models", process.env.TRANSCRIPTION_MODEL ?? "openai:whisper-1").split(",");
+const models = argv("models", process.env["TRANSCRIPTION_MODEL"] ?? "openai:whisper-1").split(",");
 const only = argv("only", "");
 
 const config = loadConfig();
@@ -131,12 +131,15 @@ for (const modelId of models) {
         ms += tms;
         if (correct) {
           const t0 = Date.now();
-          const r = await correctTranscript(lm, words, extractEntities(c.meta), { title: String(c.meta.title ?? ""), uploader: String(c.meta.uploader ?? "") });
+          const r = await correctTranscript(lm, words, extractEntities(c.meta), {
+            title: String(c.meta["title"] ?? ""),
+            uploader: String(c.meta["uploader"] ?? ""),
+          });
           ms += Date.now() - t0;
           w = r.words;
           corrections += r.applied.length;
           pending += r.flags.length - r.applied.length;
-          if (process.env.EVAL_VERBOSE && r.flags.length)
+          if (process.env["EVAL_VERBOSE"] && r.flags.length)
             console.error(`    flags: ${r.flags.map((f) => `${f.heard}→${f.suggested} ${f.confidence} ${f.status}`).join("; ")}`);
         }
         const hyp = normTokens(w.map((x) => x.text).join(" "));
@@ -146,7 +149,7 @@ for (const modelId of models) {
         hit += es.hit;
         refN += es.refN;
         extra += es.extra;
-        if (process.env.EVAL_VERBOSE)
+        if (process.env["EVAL_VERBOSE"])
           console.error(
             `  ${modelId} bias=${bias} correct=${correct} ${c.id}: wer=${wer(ref, hyp).toFixed(3)} entities=${es.hit}/${es.refN} extra=${es.extra}\n    ${w.map((x) => x.text).join(" ")}`,
           );

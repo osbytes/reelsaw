@@ -85,19 +85,19 @@ export function compatTranscriptionModel(settings: CompatTranscriptionSettings, 
     provider: `${settings.provider}.transcription`,
     modelId,
     async doGenerate(options: TranscriptionModelV4CallOptions) {
-      const o = (options.providerOptions?.openai ?? {}) as Record<string, unknown>;
+      const o = (options.providerOptions?.["openai"] ?? {}) as Record<string, unknown>;
       const bytes = typeof options.audio === "string" ? Buffer.from(options.audio, "base64") : options.audio;
       const ext = options.mediaType.split("/")[1]?.replace("mpeg", "mp3") || "bin";
       const form = new FormData();
       form.append("model", modelId);
       form.append("file", new Blob([new Uint8Array(bytes)], { type: options.mediaType }), `audio.${ext}`);
-      form.append("response_format", typeof o.responseFormat === "string" ? o.responseFormat : "verbose_json");
-      for (const g of Array.isArray(o.timestampGranularities) ? o.timestampGranularities : []) form.append("timestamp_granularities[]", String(g));
+      form.append("response_format", typeof o["responseFormat"] === "string" ? o["responseFormat"] : "verbose_json");
+      for (const g of Array.isArray(o["timestampGranularities"]) ? o["timestampGranularities"] : []) form.append("timestamp_granularities[]", String(g));
       for (const k of ["language", "prompt", "temperature"] as const) if (o[k] != null) form.append(k, String(o[k]));
 
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(options.headers ?? {})) if (v != null) headers[k] = v;
-      if (settings.apiKey) headers.authorization = `Bearer ${settings.apiKey}`;
+      if (settings.apiKey) headers["authorization"] = `Bearer ${settings.apiKey}`;
       const res = await doFetch(url, { method: "POST", headers, body: form, ...(options.abortSignal ? { signal: options.abortSignal } : {}) });
       const raw = await res.text();
       const responseHeaders = Object.fromEntries(res.headers.entries());
