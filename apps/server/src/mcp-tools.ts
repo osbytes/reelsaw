@@ -851,10 +851,15 @@ export const TOOLS = {
   list_models: {
     title: "List models",
     description:
-      "Admins only: the models each provider offers for language or transcription (the Settings → Models picker), a page per provider, the models in use first. installed: false = a self-hosted server can download it. Next page: provider plus its nextCursor. q searches (typos too) and keeps matching providers, best first. Returns { providers: [{ provider, title, available, reason, error, selfHosted, models: [{ id, label, note, installed }], total, nextCursor, installedCount }], limit, q }. Cached 5 minutes.",
+      "Admins only: the models each provider offers for language or transcription (the Settings → Models picker), a page per provider, the models in use first. installed: false = a self-hosted server can download it. Next page: provider plus its nextCursor. q searches (typos too) and keeps matching providers, best first. Returns { providers: [{ provider, title, available, reason, error, selfHosted, groups, models: [{ id, label, note, installed, group }], total, nextCursor, installedCount }], limit, q }. Cached 5 minutes.",
     inputSchema: {
       kind: z.enum(["language", "transcription"]).describe("language = AI_MODEL / the judge; transcription = TRANSCRIPTION_MODEL or the align model"),
-      provider: z.string().min(1).max(60).optional().describe("Only this provider (e.g. openai, anthropic, gateway, openrouter), to page through its models"),
+      provider: z
+        .string()
+        .min(1)
+        .max(60)
+        .optional()
+        .describe("Only this provider (e.g. openai, anthropic, gateway, opencode, openrouter), to page through its models"),
       q: z.string().max(200).optional().describe("Fuzzy search, e.g. whisper large or haiku gateway"),
       cursor: z.string().max(20).optional().describe("nextCursor from the previous page of the same provider and q"),
       limit: z.number().int().min(1).max(100).optional().describe("Models per provider, default 50"),

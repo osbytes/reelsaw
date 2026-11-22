@@ -106,7 +106,9 @@ export function stageTimeoutMessage(i: StageTimeoutInfo): string {
     i.total > 0
       ? `${i.done} of ${i.total} parts done in ${humanDuration(i.elapsedMs)} on ${i.model}${i.unitMs ? ` (~${humanDuration(i.unitMs)} per part)` : ""}`
       : `no part finished in ${humanDuration(i.elapsedMs)} on ${i.model}`;
-  return `${label} timed out: ${progress}. Retry continues where it stopped; a smaller or GPU-backed model is faster.`;
+  // the stage does not know where the model runs, so the hint names both remedies: a local model is slow
+  // on CPU, a cloud model is slow when it reasons at length before answering (MiniMax M3: ~45 s a call)
+  return `${label} timed out: ${progress}. Retry continues where it stopped; a faster model helps: smaller or GPU-backed when self-hosted, one that does not reason at length in the cloud.`;
 }
 
 /** One attempt's verdict from the worker's point of view; see queue/workers.ts. */

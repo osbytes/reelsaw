@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -95,9 +95,14 @@ export function ModelPicker({
   const current = known.get(value) ?? (chosen?.id === value ? chosen : undefined);
   const byProvider = useMemo(() => new Map(providers.map((p) => [p.provider, p])), [providers]);
   const stateOf = (provider: string) => states.find((s) => s.provider === provider);
+  /** the provider listing a model id: its prefix, or the provider that owns that prefix (opencode-go → opencode) */
+  const cardOf = (id: string) => {
+    const prefix = id.split(":")[0]!;
+    return providers.find((p) => p.provider === prefix || p.prefixes?.includes(prefix))?.provider ?? prefix;
+  };
   // open on the current value's provider
   useEffect(() => {
-    if (open) setPicked(value ? value.split(":")[0]! : (providers.find((p) => p.available)?.provider ?? null));
+    if (open) setPicked(value ? cardOf(value) : (providers.find((p) => p.available)?.provider ?? null));
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typed = query.trim();
@@ -143,8 +148,10 @@ export function ModelPicker({
         <span className="grid h-4 w-4 shrink-0 place-items-center text-acc">{on && <Check className="h-4 w-4" />}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-mono text-xs">
-            {/* the short name the provider column shows ("OpenAI"), not the listing's "OpenAI-compatible server (url)" */}
-            {showProvider && <span className="text-ink3">{stateOf(p.provider)?.title ?? p.title} · </span>}
+            {/* the short name the provider column shows ("OpenAI"), not the listing's "OpenAI-compatible server (url)";
+                a provider with sections names the section instead ("OpenCode Zen" / "OpenCode Go"), the only thing
+                that tells two rows with the same model apart once search drops the section headings */}
+            {showProvider && <span className="text-ink3">{m.group ?? stateOf(p.provider)?.title ?? p.title} · </span>}
             {m.label}
           </span>
           {m.note && <span className="block truncate text-[11px] text-ink3">{m.note}</span>}
@@ -341,9 +348,27 @@ function ModelList({
   const hasMore = more ? rest.isPending || rest.hasNextPage : !!first.nextCursor;
   const loadMore = () => (more ? void rest.fetchNextPage() : setMore(true));
   const sentinel = useLoadMoreSentinel(loadMore, loadOnScroll && hasMore && !rest.isFetching);
+  // sections (OpenCode Zen / Go): a heading where the section changes, and, once everything is loaded,
+  // the sections that came back empty with the reason ("This key cannot use OpenCode Go")
+  const groups = first.groups ?? [];
+  const noticeOf = (name: string) => groups.find((g) => g.name === name)?.notice;
+  const heading = (name: string, notice: string | undefined) => (
+    <div key={`group:${name}`} className="px-2 pb-1 pt-2 first:pt-1">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink3">{name}</div>
+      {notice && <div className="text-[11px] text-ink3">{notice}</div>}
+    </div>
+  );
+  const shownGroups = new Set(models.map((m) => m.group));
+  const emptyGroups = hasMore || q ? [] : groups.filter((g) => !shownGroups.has(g.name));
   return (
     <>
-      {models.map((m) => row(m))}
+      {models.map((m, i) => (
+        <Fragment key={m.id}>
+          {!q && m.group && m.group !== models[i - 1]?.group && heading(m.group, noticeOf(m.group))}
+          {row(m)}
+        </Fragment>
+      ))}
+      {emptyGroups.map((g) => heading(g.name, g.notice))}
       {models.length < first.total && (
         <div ref={sentinel} className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-ink3">
           <span>

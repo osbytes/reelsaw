@@ -10,6 +10,8 @@
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./registry.js";
+import { OPENCODE_PLANS, opencodeUserAgent, type OpenCodePlan } from "./opencode.js";
+import { aliasesOf, credentialOwner, OPENCODE_DEFAULT_BASE_URL } from "./provider-ids.js";
 import type { WordTimestampVerdict } from "./word-timestamps.js";
 import { createFuzzy, formatBytes } from "@reelsaw/shared";
 
@@ -24,6 +26,8 @@ export interface CatalogModel {
   /** self-hosted servers: present on disk (false = listed by the registry, can be pulled) */
   installed?: boolean;
   sizeBytes?: number;
+  /** section within its provider (one of the provider's `groups`); models of a section stay together */
+  group?: string;
 }
 
 export interface CatalogProvider {
@@ -38,6 +42,10 @@ export interface CatalogProvider {
   source: "live" | "installed" | "static";
   selfHosted?: { baseUrl: string; server: "ollama" | "speaches" | "openai-compatible"; canPull: boolean };
   models: CatalogModel[];
+  /** model-id prefixes this provider owns when there are several (OpenCode: `opencode`, `opencode-go`); absent = `provider` alone */
+  prefixes?: string[];
+  /** sections of `models`, in order, each with an optional line shown under its heading */
+  groups?: Array<{ name: string; notice?: string }>;
   /** the listing failed; models may be a static fallback */
   error?: string;
 }
@@ -154,6 +162,7 @@ const TITLES: Record<string, string> = {
   deepgram: "Deepgram",
   assemblyai: "AssemblyAI",
   gateway: "Vercel AI Gateway",
+  opencode: "OpenCode (Zen + Go)",
 };
 
 /**
@@ -171,6 +180,31 @@ export function looksLikeSpeechModel(id: string): boolean {
 function outputModalities(m: { architecture?: { output_modalities?: unknown } }): string[] | undefined {
   const o = m.architecture?.output_modalities;
   return Array.isArray(o) ? o.map(String) : undefined;
+}
+
+/** What an OpenCode /models entry says about a model; only the fields the picker reads. */
+export interface OpenCodeModelEntry {
+  id: string;
+  name?: string;
+  /** chat, decision, image, embedding, video, realtime */
+  type?: string;
+  /** the APIs OpenCode serves the model on natively, e.g. { "chat-completions": { base_url } } */
+  api?: Record<string, unknown>;
+  cost?: { text?: { input?: { price?: number }; output?: { price?: number } } };
+}
+
+/**
+ * Whether Reelsaw can run an OpenCode model, decided by OpenCode's own listing, never by its name.
+ * Reelsaw speaks Chat Completions to OpenCode, like to any OpenAI-compatible server. A model served
+ * natively on another API (Anthropic messages, OpenAI responses, Google) reaches Chat Completions only
+ * through OpenCode's translation, which loses structured output (MiniMax M3 on Go answered with its
+ * reasoning in front of the JSON and ignored the schema), so it is left out. Free models (priced 0)
+ * only run inside the OpenCode app ("Free-tier chat models require OpenCode").
+ */
+export function isUsableOpenCodeModel(m: OpenCodeModelEntry): boolean {
+  if (m.type !== "chat" || !m.api || !("chat-completions" in m.api)) return false;
+  const price = m.cost?.text;
+  return !(price?.input?.price === 0 && price?.output?.price === 0);
 }
 
 /** Keep the chat-capable OpenAI models out of a /v1/models dump that also lists TTS, embeddings, images. */
@@ -280,6 +314,8 @@ export function createModelCatalog(
     const title = TITLES[provider] ?? provider;
     const apiKey = override?.apiKey ?? keyFor(provider);
     const out: CatalogProvider = { provider, title, kind, available: !!apiKey, source: "live", models: [] };
+    const aliases = aliasesOf(provider);
+    if (aliases.length) out.prefixes = [provider, ...aliases];
     if (!out.available) {
       out.reason = missing(provider);
       out.source = "static";
@@ -349,12 +385,60 @@ export function createModelCatalog(
               : undefined;
           out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
         }
+      } else if (provider === "opencode") {
+        await listOpenCode(out, key, kind);
       }
     } catch (err) {
       out.error = `cannot list ${title}: ${(err as Error).message}`;
       log.warn({ provider, err }, "model listing failed");
     }
     return out;
+  }
+
+  /**
+   * One key, two plans: Zen and Go are listed side by side as sections of one provider. A plan the key
+   * cannot use (no Go subscription, no Zen credits) leaves its section empty with a note; only both
+   * failing is an error, so Save and connect accepts a key that works on either.
+   */
+  async function listOpenCode(out: CatalogProvider, key: string, kind: CatalogKind) {
+    const plans = Object.keys(OPENCODE_PLANS) as OpenCodePlan[];
+    out.groups = plans.map((p) => ({ name: OPENCODE_PLANS[p].group, ...(OPENCODE_PLANS[p].notice ? { notice: OPENCODE_PLANS[p].notice } : {}) }));
+    if (kind !== "language") return;
+    const root = (config.OPENCODE_BASE_URL || OPENCODE_DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const headers = { authorization: `Bearer ${key}`, "user-agent": opencodeUserAgent(config.REELSAW_VERSION) };
+    const results = await Promise.all(
+      plans.map(async (plan) => {
+        const res = await fetch(root + OPENCODE_PLANS[plan].models, { headers, signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) return { plan, status: res.status, models: [] as OpenCodeModelEntry[] };
+        const body = (await res.json()) as { data?: OpenCodeModelEntry[] };
+        return { plan, status: res.status, models: (body.data ?? []).filter(isUsableOpenCodeModel).sort((a, b) => a.id.localeCompare(b.id)) };
+      }),
+    );
+    if (results.every((r) => r.status >= 400)) {
+      const s = results[0]!.status;
+      throw new Error(s === 401 || s === 403 ? `the key was rejected (HTTP ${s})` : `OpenCode returned HTTP ${s}`);
+    }
+    for (const r of results) {
+      const plan = OPENCODE_PLANS[r.plan];
+      if (r.status >= 400) {
+        const group = out.groups.find((g) => g.name === plan.group)!;
+        group.notice =
+          r.status === 401 || r.status === 403 ? `This key cannot use ${plan.group} (HTTP ${r.status}).` : `${plan.group} returned HTTP ${r.status}.`;
+        continue;
+      }
+      for (const m of r.models) {
+        const input = m.cost?.text?.input?.price;
+        const output = m.cost?.text?.output?.price;
+        // Go draws list prices from the subscription's allowance; Zen bills them
+        const price = input !== undefined && output !== undefined ? `$${input.toFixed(2)} / $${output.toFixed(2)} per 1M tokens` : "";
+        out.models.push({
+          id: `${r.plan}:${m.id}`,
+          label: m.id,
+          group: plan.group,
+          note: [m.name && m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined,
+        });
+      }
+    }
   }
 
   async function providerFor(
@@ -420,7 +504,8 @@ export function createModelCatalog(
   }
 
   async function list(kind: CatalogKind, opts: { refresh?: boolean | undefined } = {}): Promise<CatalogProvider[]> {
-    const providers = [...new Set([compat, ...Object.keys(providerKeyEnv)])];
+    // aliases (opencode-go) are listed inside their owner, not as providers of their own
+    const providers = [...new Set([compat, ...Object.keys(providerKeyEnv)])].filter((p) => credentialOwner(p) === p);
     const out = await Promise.all(
       providers.map(async (p) => {
         const k = `${kind}:${p}:${credentials.version()}`;
@@ -451,11 +536,12 @@ export function createModelCatalog(
       if (!Number.isSafeInteger(offset) || offset < 0) throw new Error(`cursor "${opts.cursor}" is not one this listing gave out`);
       const q = opts.q?.trim() ?? "";
       const all = await list(kind, { refresh: opts.refresh });
-      if (opts.provider && !all.some((p) => p.provider === opts.provider))
-        throw new Error(`no provider "${opts.provider}"; one of ${all.map((p) => p.provider).join(", ")}`);
+      // an alias (opencode-go) pages through its owner's listing
+      const only = opts.provider ? credentialOwner(opts.provider) : undefined;
+      if (only && !all.some((p) => p.provider === only)) throw new Error(`no provider "${opts.provider}"; one of ${all.map((p) => p.provider).join(", ")}`);
       const pinned = new Set(opts.pin ?? []);
       const ranked = all
-        .filter((p) => !opts.provider || p.provider === opts.provider)
+        .filter((p) => !only || p.provider === only)
         .map((p) => {
           let models = p.models;
           let best = 1;
@@ -468,6 +554,11 @@ export function createModelCatalog(
             best = hits[0]?.score ?? 1;
           } else if (pinned.size) {
             models = [...models.filter((m) => pinned.has(m.id)), ...models.filter((m) => !pinned.has(m.id))];
+            // pinned models lead their own section, so sections stay together across pages
+            if (p.groups) {
+              const order = new Map(p.groups.map((g, i) => [g.name, i]));
+              models = [...models].sort((a, b) => (order.get(a.group ?? "") ?? 0) - (order.get(b.group ?? "") ?? 0));
+            }
           }
           const end = offset + limit;
           const page: CatalogProviderPage = {
