@@ -364,7 +364,7 @@ export const COMPETITORS: Competitor[] = [
       },
       {
         q: "Can Reelsaw do Submagic-style captions?",
-        a: "Reelsaw burns in word-level karaoke captions with AI-picked key words enlarged and coloured, boxed or outlined styles, size and uppercase options, and drag-to-place positions with platform safe zones. You can overlay library or stock B-roll and music. It does not add emojis, punch-in zooms or auto-inserted matched B-roll.",
+        a: "Reelsaw burns in word-level karaoke captions with AI-picked key words enlarged and coloured, boxed or outlined styles, size and uppercase options, and drag-to-place positions with platform safe zones. Punch-in zooms on the key words are a style toggle, previewed in the editor. You can overlay library or stock B-roll and music. It does not add emojis or auto-inserted matched B-roll.",
       },
       {
         q: "Does either tool watermark the output?",

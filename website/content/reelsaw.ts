@@ -35,13 +35,13 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
     key: "reframe",
     label: "Face-tracked 9:16 reframing",
     reelsaw:
-      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; shots without a face follow their moving subject; hand-set crops; one clip's framing for the whole project. YuNet face detector with landmarks and face tracking, on the CPU",
+      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; shots without a face follow their moving subject; hand-set crops; one clip's framing for the whole project; renders 9:16, 4:5, 1:1 or 16:9. YuNet face detector with landmarks and face tracking, on the CPU",
   },
   {
     key: "captions",
     label: "Word-level captions",
     reelsaw:
-      "Yes: karaoke highlight, AI-picked key words, boxed or outlined, fonts your instance admin uploads, drag positions on a live preview; every script the transcriber takes, from Hindi and Thai to Japanese and Arabic",
+      "Yes: karaoke highlight, AI-picked key words, boxed or outlined, fonts your instance admin uploads, drag positions on a live preview, optional punch-in zooms on the key words; every script the transcriber takes, from Hindi and Thai to Japanese and Arabic",
   },
   { key: "fillers", label: "Filler and false-start removal", reelsaw: "Yes, for English: jump cuts located by forced alignment, each one reviewable" },
   { key: "dubbing", label: "AI dubbing / translation", reelsaw: "No" },

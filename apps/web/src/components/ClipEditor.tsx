@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { SourceQualityOffer } from "./SourceQualityOffer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -139,6 +139,13 @@ import {
   bodyEdgeFades,
   fadeLevel,
   plural,
+  planPunchIns,
+  punchInAnchor,
+  layoutForShape,
+  outputSize,
+  OUTPUT_SHAPES,
+  SHAPE_LABEL,
+  punchInLevel,
 } from "@reelsaw/shared";
 import { FadePresets, fadeText } from "./FadeField";
 
@@ -672,15 +679,18 @@ function LiveTimeline({ clock, ...props }: Omit<ComponentProps<typeof Timeline>,
 function LivePreview({
   clock,
   framingAt,
+  zoomAt,
   assetOverlaysAt,
   rangeStart,
   rangeEnd,
   edgeFades,
   playing,
   ...props
-}: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays" | "veil"> & {
+}: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays" | "veil" | "zoom"> & {
   clock: Clock;
   framingAt: (t: number) => Framing;
+  /** the punch-in at a moment (absolute seconds), null when the picture is not zoomed */
+  zoomAt: (t: number) => { scale: number; ax: number; ay: number } | null;
   assetOverlaysAt: (t: number) => PreviewAssetOverlay[];
   rangeStart: number;
   rangeEnd: number;
@@ -698,7 +708,9 @@ function LivePreview({
   useEffect(() => {
     if (source instanceof HTMLVideoElement) source.volume = level;
   }, [source, level]);
-  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} playing={playing} veil={1 - level} />;
+  return (
+    <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} zoom={zoomAt(t)} time={t - rangeStart} playing={playing} veil={1 - level} />
+  );
 }
 
 /**
@@ -1038,7 +1050,8 @@ export function ClipEditor(props: Props) {
           ] ?? sections[0]!;
         const det = clip.layoutSegments.find((d) => t >= d.start && t < d.end) ?? clip.layoutSegments.find((d) => !d.manual);
         const fallback: PreviewLayout = clip.layout && clip.layout !== "mixed" ? (clip.layout as PreviewLayout) : "fit";
-        const lay: PreviewLayout = sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode;
+        // a shape too wide for two stacked panes (16:9) shows a split or stack whole, as the renderer does (`layoutForShape`)
+        const lay: PreviewLayout = layoutForShape(sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode, style.shape);
         const clamp = (v: number) => Math.max(0, Math.min(1, v));
         const subjectCrop = lay === "center" && sec.mode === "auto" && det?.focus === "subject" && !det.manual;
         const at = (tr: Array<[number, number]> | undefined): number | undefined => {
@@ -1080,6 +1093,7 @@ export function ClipEditor(props: Props) {
         const c2 = lay === "split" ? centre(1) : undefined;
         return {
           layout: lay,
+          out: outputSize(style.shape),
           cx: c1.x,
           cy: c1.y,
           ...(c2 ? { cx2: c2.x, cy2: c2.y } : {}),
@@ -1103,7 +1117,7 @@ export function ClipEditor(props: Props) {
           ...(lay === "split" && sec.crop2 ? { crop2: sec.crop2 } : {}),
         };
       },
-    [sections, clip.layoutSegments, clip.layout],
+    [sections, clip.layoutSegments, clip.layout, style.shape],
   );
   const framing = useMemo(() => framingAt(current), [framingAt, current]);
   // where each stretch's panes meet, on the clip's clock (the captions' clock): the preview puts caption lines there like the renderer
@@ -1112,7 +1126,7 @@ export function ClipEditor(props: Props) {
     const step = 0.1;
     for (let t = range[0]; t < range[1]; t += step) {
       const f = framingAt(t);
-      runs.push({ start: t - range[0], end: Math.min(range[1], t + step) - range[0], y: layoutSeamY(f.layout, f.content, srcW, srcH) });
+      runs.push({ start: t - range[0], end: Math.min(range[1], t + step) - range[0], y: layoutSeamY(f.layout, f.content, srcW, srcH, f.out) });
     }
     return mergeSeamRuns(runs);
   }, [framingAt, range, srcW, srcH]);
@@ -1550,6 +1564,47 @@ export function ClipEditor(props: Props) {
     () => flags.filter((f) => f.kind === "disfluency" && (f.status === "auto" || f.status === "accepted")).map((f) => ({ start: f.start, end: f.end })),
     [flags],
   );
+  /**
+   * The punch-in zooms the render will burn in (`planPunchIns`, the renderer's own plan) on the clip's clock: the same
+   * key words, kept inside one framed piece, never over a shot change, a section or layout change, an accepted cut or a
+   * pause the last render shortened.
+   */
+  const punchIns = useMemo(() => {
+    if (!style.punchIn) return [];
+    const [a, b] = range;
+    const rel = (t: number) => t - a;
+    const cut = (w: { start: number; end: number }) => cutSpans.some((c) => w.start >= c.start - 0.001 && w.end <= c.end + 0.001);
+    const pauses = clip.diagnostics?.pauses?.ranges ?? [];
+    const breaks = [
+      ...sceneCuts,
+      ...sections.map((s) => s.start),
+      ...clip.layoutSegments.flatMap((d) => [d.start, d.end]),
+      ...[...cutSpans, ...pauses].flatMap((c) => [c.start, c.end]),
+    ]
+      .filter((t) => t > a && t < b)
+      .map(rel);
+    return planPunchIns(
+      words.filter((w) => w.end > a && w.start < b && !cut(w)).map((w) => ({ text: w.text, start: rel(w.start), end: rel(w.end) })),
+      emphasis,
+      {
+        start: 0,
+        end: b - a,
+        breaks,
+        anchorAt: (t) => {
+          const f = framingAt(t + a);
+          const o = f.out ?? outputSize(style.shape);
+          return punchInAnchor({ layout: f.layout, crop: f.crop, inset: f.inset, cy: f.cy }, srcW, srcH, o.w / o.h);
+        },
+      },
+    );
+  }, [style.punchIn, range, cutSpans, clip.diagnostics, sceneCuts, sections, clip.layoutSegments, words, emphasis, framingAt, srcW, srcH]);
+  const zoomAt = useCallback(
+    (t: number) => {
+      const { level, zoom } = punchInLevel(punchIns, t - range[0]);
+      return zoom ? { scale: 1 + (style.punchInScale - 1) * level, ax: zoom.ax, ay: zoom.ay } : null;
+    },
+    [punchIns, range, style.punchInScale],
+  );
 
   // ----- dirty tracking + save -----
   /**
@@ -1841,7 +1896,8 @@ export function ClipEditor(props: Props) {
   // ----- inspector tabs -----
   const cropLayout = framing.layout !== "fit" && framing.layout !== "none";
   const curSec = sections[secIdx];
-  const capWarn = safe && style.captions !== "none" ? safeZoneWarning(platform, style.captionX, style.captionY) : "";
+  // the platform safe zones are the 9:16 apps' (TikTok, Shorts, Reels); other shapes have no buttons over the picture
+  const capWarn = safe && style.shape === "9:16" && style.captions !== "none" ? safeZoneWarning(platform, style.captionX, style.captionY) : "";
 
   // ----- fades: the video's own start and end, and how an intro / outro joins it (part of the style, so "Apply style to" covers it) -----
   const hasBumper = !!bumperBlocks.intro || !!bumperBlocks.outro;
@@ -1940,6 +1996,24 @@ export function ClipEditor(props: Props) {
           ]}
         />
       </Field>
+      <Field label="Shape" hint={<span>{SHAPE_LABEL[style.shape]}</span>}>
+        <Segmented
+          size="sm"
+          ariaLabel="Shape of the video"
+          value={style.shape}
+          onChange={(v) => setStyle({ shape: v })}
+          options={OUTPUT_SHAPES.map((s) => ({
+            value: s,
+            label: s,
+            title:
+              s === "9:16"
+                ? "TikTok, Shorts, Reels"
+                : s === "16:9"
+                  ? "YouTube, websites: split and stack sections show the whole frame"
+                  : "Instagram and LinkedIn feeds",
+          }))}
+        />
+      </Field>
       <Field label="Look">
         <div className="grid grid-cols-4 gap-2">
           {(
@@ -2027,9 +2101,9 @@ export function ClipEditor(props: Props) {
               />
             }
           >
-            {style.emphasis && (
+            {(style.emphasis || style.punchIn) && (
               <>
-                <Swatches label="Key word" colors={KW} value={style.emphasisColor} onChange={(c) => setStyle({ emphasisColor: c })} />
+                {style.emphasis && <Swatches label="Key word" colors={KW} value={style.emphasisColor} onChange={(c) => setStyle({ emphasisColor: c })} />}
                 <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] border border-line bg-panel p-1.5">
                   {emphasis.map((w, i) => (
                     <span key={w} className="inline-flex items-center gap-1 rounded-full bg-sunk py-0.5 pl-2.5 pr-1 text-xs font-semibold">
@@ -2061,6 +2135,35 @@ export function ClipEditor(props: Props) {
                     }}
                   />
                 </div>
+              </>
+            )}
+          </Field>
+          <Field
+            label={
+              <Switch
+                checked={style.punchIn}
+                onChange={(v) => setStyle({ punchIn: v })}
+                label={<span className="text-xs font-semibold text-ink2">Zoom in on key words</span>}
+              />
+            }
+            hint={style.punchIn ? <span className="font-mono">{style.punchInScale.toFixed(2)}x</span> : undefined}
+          >
+            {style.punchIn && (
+              <>
+                <input
+                  type="range"
+                  min={1.05}
+                  max={1.3}
+                  step={0.01}
+                  value={style.punchInScale}
+                  onChange={(e) => setStyle({ punchInScale: Number(e.target.value) }, "punchin")}
+                  className="accent-[var(--acc)]"
+                  aria-label="Zoom amount"
+                />
+                <p className="text-[11px] text-ink3">
+                  {punchIns.length ? `${plural(punchIns.length, "zoom")}: ${punchIns.map((z) => z.word).join(", ")}.` : "No key word fits a zoom in this clip."}{" "}
+                  Face and centre crops only, once per word, never across a cut or a change of framing.
+                </p>
               </>
             )}
           </Field>
@@ -2537,6 +2640,7 @@ export function ClipEditor(props: Props) {
           clock={clock}
           playing={playing}
           framingAt={framingAt}
+          zoomAt={zoomAt}
           rangeStart={range[0]}
           rangeEnd={range[1]}
           edgeFades={bodyEdgeFades(style, { intro: !!bumperBlocks.intro, outro: !!bumperBlocks.outro })}

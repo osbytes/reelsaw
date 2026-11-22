@@ -97,8 +97,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   create-clip <projectId> <startSec> <endSec> [--mode exact|ai]
  *                                           add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them
  *                                           (same as clips.create and create_clip)
- *   update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]
- *                                           edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip)
+ *   update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--style '<json>'|none] [--emphasis w1,w2] [--rerender|--no-rerender]
+ *                                           edit one clip; --style is the clip's own style (replaces it; none = the project's, e.g. '{"punchIn":true}'),
+ *                                           --emphasis its key words; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip)
  *   purge [--dry-run]                       remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
  *   purge-project <projectId> [--forget-decisions]   delete one already-deleted project forever (frees storage; minutes stay counted); its decisions stay in the decision log unless --forget-decisions
  *   decisions <email> [--kind k] [--project id]      the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions)
@@ -347,6 +348,7 @@ import {
   styleOverrideSchema,
   type ClearableSetting,
   type ProjectSettingsPatch,
+  type StyleOverride,
 } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
@@ -997,12 +999,23 @@ ${usage}`);
       `created clip ${r.clip.id} (${formatTime(r.clip.startSec)}-${formatTime(r.clip.endSec)}); it is ${r.queued === "prepare" ? "being prepared and renders afterwards" : "queued"}`,
     );
   },
-  /** Edit one clip: `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]`. Same function as clips.update and the update_clip tool. */
+  /** Edit one clip: `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--style json|none] [--emphasis a,b] [--rerender|--no-rerender]`. Same function as clips.update and the update_clip tool. */
   async "update-clip"(svc) {
-    const usage = "usage: reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]";
+    const usage =
+      "usage: reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--style '<json>'|none] [--emphasis w1,w2] [--rerender|--no-rerender]";
     if (!pos[0]) throw new Error(usage);
     const start = flag("start");
     const end = flag("end");
+    const styleArg = flag("style");
+    let style: StyleOverride | null | undefined;
+    if (styleArg !== undefined) {
+      const parsed = styleArg === "none" ? { success: true as const, data: null } : styleOverrideSchema.safeParse(JSON.parse(styleArg));
+      if (!parsed.success)
+        throw new Error(`${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}
+${usage}`);
+      style = parsed.data;
+    }
+    const emphasisArg = flag("emphasis");
     const r = await updateClip(svc, null, {
       id: pos[0],
       title: flag("title"),
@@ -1010,6 +1023,14 @@ ${usage}`);
       caption: flag("caption"),
       startSec: start === undefined ? undefined : seconds(start, "--start"),
       endSec: end === undefined ? undefined : seconds(end, "--end"),
+      style,
+      emphasis:
+        emphasisArg === undefined
+          ? undefined
+          : emphasisArg
+              .split(",")
+              .map((w) => w.trim())
+              .filter(Boolean),
       rerender: args.includes("--no-rerender") ? false : args.includes("--rerender") ? true : undefined,
     });
     if (!r.changed.length) return void console.log("nothing changed");
@@ -1944,6 +1965,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     if (!diagnostics) return console.log("(no diagnostics; rendered before diagnostics existed)");
     console.log(`  at ${diagnostics.renderedAt} in ${diagnostics.renderMs} ms, ${diagnostics.outDurationSec}s out, layout ${diagnostics.layout}`);
     for (const a of diagnostics.cuts.applied) console.log(`  cut     ${a.start.toFixed(3)}-${a.end.toFixed(3)}`);
+    for (const z of diagnostics.punchIns ?? []) console.log(`  zoom    ${z.start.toFixed(3)}-${z.end.toFixed(3)} on "${z.word}"`);
     for (const s of diagnostics.cuts.skipped) console.log(`  SKIPPED ${s.start.toFixed(3)}-${s.end.toFixed(3)}: ${s.reason}`);
   },
 
