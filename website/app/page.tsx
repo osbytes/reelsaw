@@ -63,7 +63,7 @@ const FEATURES = [
   {
     icon: Captions,
     title: "Captions that read",
-    body: "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined. Drag caption and hook positions on a live preview with platform safe zones.",
+    body: "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones.",
   },
   {
     icon: Film,
