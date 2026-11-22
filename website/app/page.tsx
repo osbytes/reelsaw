@@ -35,7 +35,7 @@ const STEPS = [
   {
     icon: ScanFace,
     title: "Reframe and render",
-    body: "A 1.2 MB face detector on the CPU picks a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
+    body: "A tiny face detector and tracker on the CPU pick a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
   },
 ];
 
