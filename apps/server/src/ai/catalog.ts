@@ -398,32 +398,41 @@ export function createModelCatalog(
   /**
    * One key, two plans: Zen and Go are listed side by side as sections of one provider. A plan the key
    * cannot use (no Go subscription, no Zen credits) leaves its section empty with a note; only both
-   * failing is an error, so Save and connect accepts a key that works on either.
+   * failing is an error, so Save and connect accepts a key that works on either. A plan that cannot be
+   * reached or answers garbage fails on its own, like one that answers an HTTP error.
+   * Language models only: the transcription listing gets no sections (OpenCode has no speech models).
    */
   async function listOpenCode(out: CatalogProvider, key: string, kind: CatalogKind) {
+    if (kind !== "language") return;
     const plans = Object.keys(OPENCODE_PLANS) as OpenCodePlan[];
     out.groups = plans.map((p) => ({ name: OPENCODE_PLANS[p].group, ...(OPENCODE_PLANS[p].notice ? { notice: OPENCODE_PLANS[p].notice } : {}) }));
-    if (kind !== "language") return;
     const root = (config.OPENCODE_BASE_URL || OPENCODE_DEFAULT_BASE_URL).replace(/\/+$/, "");
     const headers = { authorization: `Bearer ${key}`, "user-agent": opencodeUserAgent(config.REELSAW_VERSION) };
+    const rejected = (status: number | undefined) => status === 401 || status === 403;
     const results = await Promise.all(
-      plans.map(async (plan) => {
-        const res = await fetch(root + OPENCODE_PLANS[plan].models, { headers, signal: AbortSignal.timeout(10_000) });
-        if (!res.ok) return { plan, status: res.status, models: [] as OpenCodeModelEntry[] };
-        const body = (await res.json()) as { data?: OpenCodeModelEntry[] };
-        return { plan, status: res.status, models: (body.data ?? []).filter(isUsableOpenCodeModel).sort((a, b) => a.id.localeCompare(b.id)) };
+      plans.map(async (plan): Promise<{ plan: OpenCodePlan; status?: number; error?: string; models: OpenCodeModelEntry[] }> => {
+        try {
+          const res = await fetch(root + OPENCODE_PLANS[plan].models, { headers, signal: AbortSignal.timeout(10_000) });
+          if (!res.ok) return { plan, status: res.status, error: `HTTP ${res.status}`, models: [] };
+          const body = (await res.json()) as { data?: OpenCodeModelEntry[] };
+          if (!Array.isArray(body?.data)) return { plan, status: res.status, error: "an unexpected answer", models: [] };
+          return { plan, status: res.status, models: body.data.filter(isUsableOpenCodeModel).sort((a, b) => a.id.localeCompare(b.id)) };
+        } catch (err) {
+          return { plan, error: (err as Error).message, models: [] };
+        }
       }),
     );
-    if (results.every((r) => r.status >= 400)) {
-      const s = results[0]!.status;
-      throw new Error(s === 401 || s === 403 ? `the key was rejected (HTTP ${s})` : `OpenCode returned HTTP ${s}`);
+    if (results.every((r) => r.error)) {
+      // a rejected key is the actionable reason, whichever plan said it
+      const r = results.find((x) => rejected(x.status));
+      if (r) throw new Error(`the key was rejected (HTTP ${r.status})`);
+      throw new Error(results.map((x) => `${OPENCODE_PLANS[x.plan].group}: ${x.error}`).join("; "));
     }
     for (const r of results) {
       const plan = OPENCODE_PLANS[r.plan];
-      if (r.status >= 400) {
+      if (r.error) {
         const group = out.groups.find((g) => g.name === plan.group)!;
-        group.notice =
-          r.status === 401 || r.status === 403 ? `This key cannot use ${plan.group} (HTTP ${r.status}).` : `${plan.group} returned HTTP ${r.status}.`;
+        group.notice = rejected(r.status) ? `This key cannot use ${plan.group} (HTTP ${r.status}).` : `${plan.group} could not be listed: ${r.error}.`;
         continue;
       }
       for (const m of r.models) {

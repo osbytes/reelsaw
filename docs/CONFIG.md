@@ -90,7 +90,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports. |
 | `VERCEL_OIDC_TOKEN` | unset | Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform). |
 | `OPENCODE_API_KEY` | unset | OpenCode Console key (language models only). One key lists both plans: pay-per-token Zen models as `opencode:<model>` and, with a Go subscription, Go models as `opencode-go:<model>`. Go is meant for coding agents and has 5-hour, weekly and monthly caps. |
-| `OPENCODE_BASE_URL` | `https://opencode.ai/inference` | OpenCode inference root: Zen is `<root>/openai/v1`, Go is `<root>/go/v1`. Change it only for a proxy or a test server. |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/inference` | OpenCode inference root: Zen chats at `<root>/openai/v1` and lists models at `<root>/v1/models`; Go chats at `<root>/go/openai/v1` and lists models at `<root>/go/v1/models`. Change it only for a proxy or a test server. |
 | `OPENAI_COMPATIBLE_BASE_URL` | unset | Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`). |
 | `OPENAI_COMPATIBLE_API_KEY` | unset | Key for the compat server (`ollama` for Ollama). |
 | `OPENAI_COMPATIBLE_NAME` | `compat` | Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>` (`openrouter` gives `openrouter:anthropic/claude-sonnet-4.5`). |

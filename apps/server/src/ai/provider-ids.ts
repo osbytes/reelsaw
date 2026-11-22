@@ -18,5 +18,5 @@ export function aliasesOf(owner: string): string[] {
   return Object.keys(CREDENTIAL_ALIASES).filter((a) => CREDENTIAL_ALIASES[a] === owner);
 }
 
-/** OpenCode's inference root (OPENCODE_BASE_URL's default): Zen at `<root>/openai/v1`, Go at `<root>/go/v1`. */
+/** OpenCode's inference root (OPENCODE_BASE_URL's default): chat and model-list paths per plan are OPENCODE_PLANS (ai/opencode.ts). */
 export const OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/inference";

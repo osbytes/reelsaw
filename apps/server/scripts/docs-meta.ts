@@ -194,7 +194,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "providers",
     "OpenCode Console key (language models only). One key lists both plans: pay-per-token Zen models as `opencode:<model>` and, with a Go subscription, Go models as `opencode-go:<model>`. Go is meant for coding agents and has 5-hour, weekly and monthly caps.",
   ],
-  OPENCODE_BASE_URL: ["providers", "OpenCode inference root: Zen is `<root>/openai/v1`, Go is `<root>/go/v1`. Change it only for a proxy or a test server."],
+  OPENCODE_BASE_URL: [
+    "providers",
+    "OpenCode inference root: Zen chats at `<root>/openai/v1` and lists models at `<root>/v1/models`; Go chats at `<root>/go/openai/v1` and lists models at `<root>/go/v1/models`. Change it only for a proxy or a test server.",
+  ],
   OPENAI_COMPATIBLE_BASE_URL: [
     "providers",
     "Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`).",

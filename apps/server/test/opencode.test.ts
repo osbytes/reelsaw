@@ -50,6 +50,9 @@ const GO = [
 let server: http.Server;
 let base = "";
 let goStatus = 200;
+/** "html": Go answers 200 with a page, not JSON; "drop": Go hangs up without answering */
+let goFault: "" | "html" | "drop" = "";
+let zenStatus = 200;
 type ChatBody = { model: string; response_format?: { type: string; json_schema: { strict: boolean } } };
 const calls: Array<{ url: string; headers: http.IncomingHttpHeaders; body: ChatBody }> = [];
 
@@ -63,7 +66,9 @@ before(async () => {
         res.end(JSON.stringify(v));
       };
       if (req.headers.authorization !== `Bearer ${KEY}`) return json(401, { error: "no key" });
-      if (req.url === "/v1/models") return json(200, { object: "list", data: ZEN });
+      if (req.url === "/v1/models") return zenStatus === 200 ? json(200, { object: "list", data: ZEN }) : json(zenStatus, { error: "down" });
+      if (req.url === "/go/v1/models" && goFault === "drop") return req.socket.destroy();
+      if (req.url === "/go/v1/models" && goFault === "html") return res.writeHead(200, { "content-type": "text/html" }).end("<html>maintenance</html>");
       if (req.url === "/go/v1/models") return goStatus === 200 ? json(200, { object: "list", data: GO }) : json(goStatus, { type: "EntitlementError" });
       if (req.url === "/openai/v1/chat/completions" || req.url === "/go/openai/v1/chat/completions") {
         const body = JSON.parse(raw) as ChatBody;
@@ -87,6 +92,8 @@ before(async () => {
 after(() => new Promise<void>((r) => server.close(() => r())));
 beforeEach(() => {
   goStatus = 200;
+  goFault = "";
+  zenStatus = 200;
   calls.length = 0;
 });
 
@@ -161,6 +168,34 @@ describe("OpenCode listing", () => {
     assert.ok(oc.models.every((m) => m.id.startsWith("opencode:")));
     assert.match(oc.groups![1]!.notice!, /cannot use OpenCode Go \(HTTP 403\)/);
     assert.equal((await c.probe("opencode", { apiKey: KEY })).ok, true);
+  });
+
+  it("a Go listing that cannot be reached or read leaves Zen listed", async () => {
+    for (const fault of ["drop", "html"] as const) {
+      goFault = fault;
+      const oc = (await createModelCatalog(config(), log, credentials).page("language", { provider: "opencode" })).providers[0]!;
+      assert.equal(oc.error, undefined, fault);
+      assert.deepEqual(
+        oc.models.map((m) => m.id),
+        ["opencode:glm-5.3", "opencode:minimax-m3"],
+        fault,
+      );
+      assert.match(oc.groups![1]!.notice!, /OpenCode Go could not be listed/, fault);
+    }
+  });
+
+  it("both plans failing names the rejected key, whichever plan rejected it", async () => {
+    zenStatus = 503;
+    goStatus = 403;
+    const r = await createModelCatalog(config(), log, credentials).probe("opencode", { apiKey: KEY });
+    assert.equal(r.ok, false);
+    assert.match(r.error!, /rejected \(HTTP 403\)/);
+  });
+
+  it("the transcription listing has no OpenCode sections", async () => {
+    const oc = (await createModelCatalog(config(), log, credentials).page("transcription", { provider: "opencode" })).providers[0]!;
+    assert.equal(oc.groups, undefined);
+    assert.deepEqual(oc.models, []);
   });
 
   it("a key neither plan takes is refused", async () => {
