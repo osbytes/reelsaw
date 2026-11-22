@@ -80,7 +80,7 @@ export function withoutPrompt<T extends Record<string, Record<string, unknown>>>
   const cur = opts[vendor];
   if (!cur || !("prompt" in cur)) return opts;
   const next = { ...cur };
-  delete next.prompt;
+  delete next["prompt"];
   return { ...opts, [vendor]: next };
 }
 

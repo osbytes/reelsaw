@@ -75,7 +75,7 @@ export type ResolvedOtlp = {
  * Out of range clamps into 0–1.
  */
 export function traceSampleRate(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.OTEL_TRACES_SAMPLE_RATE;
+  const raw = env["OTEL_TRACES_SAMPLE_RATE"];
   if (raw === undefined || raw.trim() === "") return 1;
   const n = Number(raw);
   if (!Number.isFinite(n)) return 1;
@@ -88,9 +88,9 @@ export function traceSampleRate(env: NodeJS.ProcessEnv = process.env): number {
  * standard variable wins on the server.
  */
 export function applyServerSampler(env: NodeJS.ProcessEnv, sampleRate: number): void {
-  if (env.OTEL_TRACES_SAMPLER?.trim()) return;
-  env.OTEL_TRACES_SAMPLER = "parentbased_traceidratio";
-  env.OTEL_TRACES_SAMPLER_ARG = String(sampleRate);
+  if (env["OTEL_TRACES_SAMPLER"]?.trim()) return;
+  env["OTEL_TRACES_SAMPLER"] = "parentbased_traceidratio";
+  env["OTEL_TRACES_SAMPLER_ARG"] = String(sampleRate);
 }
 
 /** JSON island the SPA reads before its first request. `<` is escaped so the payload cannot close the script. */
@@ -107,11 +107,11 @@ export function injectOtelBoot(html: string, cfg: OtelPublic): string {
 
 /** Resolve OTLP endpoint/headers from OTEL_* env only. */
 export function resolveOtlp(env: NodeJS.ProcessEnv = process.env): ResolvedOtlp {
-  const serviceName = env.OTEL_SERVICE_NAME || "reelsaw";
-  const endpoint = otlpBase(env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || "http://localhost:4318");
-  const headers = parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS);
+  const serviceName = env["OTEL_SERVICE_NAME"] || "reelsaw";
+  const endpoint = otlpBase(env["OTEL_EXPORTER_OTLP_ENDPOINT"]?.trim() || "http://localhost:4318");
+  const headers = parseOtlpHeaders(env["OTEL_EXPORTER_OTLP_HEADERS"]);
   const toSentry = isSentryOtlpUrl(endpoint);
-  const metricsWanted = !["0", "false", "no", "off"].includes((env.OTEL_METRICS_ENABLED ?? "true").toLowerCase());
+  const metricsWanted = !["0", "false", "no", "off"].includes((env["OTEL_METRICS_ENABLED"] ?? "true").toLowerCase());
   return {
     endpoint,
     tracesUrl: `${endpoint}/v1/traces`,
@@ -162,8 +162,8 @@ export function otelLogFromLine(line: string, scrub: (value: string) => string =
   } catch {
     return null;
   }
-  if (!isPlain(row) || typeof row.msg !== "string" || !row.msg) return null;
-  const level = typeof row.level === "number" ? row.level : 30;
+  if (!isPlain(row) || typeof row["msg"] !== "string" || !row["msg"]) return null;
+  const level = typeof row["level"] === "number" ? row["level"] : 30;
   const attributes: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(row)) {
     if (SKIP_LINE_KEYS.has(k)) continue;
@@ -181,7 +181,7 @@ export function otelLogFromLine(line: string, scrub: (value: string) => string =
             : level >= 20
               ? { severityNumber: 5, severityText: "DEBUG" }
               : { severityNumber: 1, severityText: "TRACE" };
-  return { ...severity, body: scrub(row.msg), attributes };
+  return { ...severity, body: scrub(row["msg"]), attributes };
 }
 
 function addLogAttribute(out: Record<string, string | number | boolean>, key: string, value: unknown, scrub: (value: string) => string, depth: number): void {

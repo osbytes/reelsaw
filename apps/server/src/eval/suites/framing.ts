@@ -136,7 +136,7 @@ function judgeTile(id: string, c: FramingCase, raw: FaceSample[], config: Parame
   const checks: Record<string, number | string> = { segments: segs.map((sg) => `${sg.decision.layout}@${sg.start.toFixed(1)}`).join(",") };
   const stackSec = segs.filter((sg) => sg.decision.layout === "stack").reduce((n, sg) => n + sg.end - sg.start, 0);
   const share = stackSec / (c.end - c.start);
-  checks.stackShare = Number(share.toFixed(3));
+  checks["stackShare"] = Number(share.toFixed(3));
   const minAgree = c.expect.minAgreement ?? 0.9;
   if (share < minAgree) fails.push(`stack for ${(share * 100).toFixed(0)}% of the range, expected at least ${(minAgree * 100).toFixed(0)}%`);
   const auto = segs.filter((sg) => sg.decision.layout === "stack").sort((a, b) => b.end - b.start - (a.end - a.start))[0]?.decision;
@@ -177,8 +177,8 @@ function judgeTile(id: string, c: FramingCase, raw: FaceSample[], config: Parame
     checks[`${label}.facesInTile`] = Number(inTile.toFixed(2));
     if (inTile < 0.9) fails.push(`${label}: only ${(inTile * 100).toFixed(0)}% of the detected faces lie inside the tile`);
   }
-  checks.tileErr = Number(worst.toFixed(3));
-  checks.faceFrames = Number((samples.filter((s) => s.box).length / Math.max(1, samples.length)).toFixed(3));
+  checks["tileErr"] = Number(worst.toFixed(3));
+  checks["faceFrames"] = Number((samples.filter((s) => s.box).length / Math.max(1, samples.length)).toFixed(3));
   return { id, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" };
 }
 
@@ -277,10 +277,10 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
     agreed += ok;
   }
   const agreement = scored > 0 ? agreed / scored : 1;
-  checks.agreement = Number(agreement.toFixed(3));
-  checks.faceErr = Number(worstFace.toFixed(3));
-  checks.insetErr = Number(worstInset.toFixed(3));
-  checks.subjectErr = Number(worstSubject.toFixed(3));
+  checks["agreement"] = Number(agreement.toFixed(3));
+  checks["faceErr"] = Number(worstFace.toFixed(3));
+  checks["insetErr"] = Number(worstInset.toFixed(3));
+  checks["subjectErr"] = Number(worstSubject.toFixed(3));
   const minAgree = c.expect.minAgreement ?? 0.8;
   if (agreement < minAgree)
     fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);
@@ -291,14 +291,14 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
     const stacks = segs.filter((sg) => sg.decision.layout === "stack");
     const tiles = stacks.flatMap((sg) => (sg.decision.tile ? [sg.decision.tile] : []));
     const worst = tiles.length ? Math.max(...tiles.map((t) => boxErr(t, c.expect.tile!.box))) : NaN;
-    checks.tile = tiles.length ? fmtBox(tiles[0]!) : "none";
-    checks.tileErr = Number.isFinite(worst) ? Number(worst.toFixed(3)) : "n/a";
+    checks["tile"] = tiles.length ? fmtBox(tiles[0]!) : "none";
+    checks["tileErr"] = Number.isFinite(worst) ? Number(worst.toFixed(3)) : "n/a";
     if (tiles.length < stacks.length) fails.push(`${stacks.length - tiles.length} of ${stacks.length} stack pieces found no webcam tile`);
     if (worst > tol) fails.push(`tile ${worst.toFixed(2)} off the labelled bounds ${c.expect.tile.box.join(",")} (tolerance ${tol})`);
   }
   if (c.expect.minCropWidth !== undefined) {
     const share = verticalCrop(c.srcW, c.srcH).w / c.srcW;
-    checks.cropWidth = Number(share.toFixed(3));
+    checks["cropWidth"] = Number(share.toFixed(3));
     if (segs.some((sg) => sg.decision.layout === "face") && share < c.expect.minCropWidth)
       fails.push(`face crop keeps ${(share * 100).toFixed(0)}% of the width`);
     const wide = segs.filter((sg) => sg.decision.layout === "split" || sg.decision.layout === "stack");
@@ -376,9 +376,9 @@ export const framingSuite: Suite = {
           if (!r || isFullFrame(r)) fails.push("no content region found");
           else {
             const side = contentSide(r);
-            checks.side = side ?? "inset";
-            checks.contentX = `${r.x1}-${r.x2}`;
-            checks.reason = d.reason;
+            checks["side"] = side ?? "inset";
+            checks["contentX"] = `${r.x1}-${r.x2}`;
+            checks["reason"] = d.reason;
             if (want.side && side !== want.side) fails.push(`content on the ${side}, expected ${want.side}`);
             if (want.box && [r.x1, r.y1, r.x2, r.y2].some((v, i) => Math.abs(v - want.box![i]!) > 0.03))
               fails.push(`content ${r.x1},${r.y1},${r.x2},${r.y2}, expected ${want.box.join(",")}`);
@@ -387,12 +387,12 @@ export const framingSuite: Suite = {
         }
         if (c.expect.segments) {
           const got = segs.map((sg) => sg.decision.layout);
-          checks.segments = got.join(",");
+          checks["segments"] = got.join(",");
           if (got.join(",") !== c.expect.segments.join(",")) fails.push(`segments ${got.join(",")}, expected ${c.expect.segments.join(",")}`);
         }
         if (c.expect.edges) {
           const got = segs.slice(0, -1).map((sg) => Number(sg.end.toFixed(1)));
-          checks.edges = got.join(",");
+          checks["edges"] = got.join(",");
           const off = c.expect.edges.some((e, i) => got[i] === undefined || Math.abs(got[i]! - e) > 0.3);
           if (off || got.length !== c.expect.edges.length) fails.push(`boundaries at ${got.join(",")} s, expected ${c.expect.edges.join(",")} (+-0.3)`);
         }
@@ -452,14 +452,14 @@ export const framingSuite: Suite = {
   },
   summarize(results) {
     const offs = results.flatMap((r) => ["A.offset", "B.offset"].map((k) => r.metrics?.[k]).filter((v): v is number => typeof v === "number"));
-    const errs = results.map((r) => r.metrics?.medianErrPx).filter((v): v is number => typeof v === "number");
+    const errs = results.map((r) => r.metrics?.["medianErrPx"]).filter((v): v is number => typeof v === "number");
     const agree = results
       .filter((r) => !r.skipped)
-      .map((r) => r.metrics?.agreement)
+      .map((r) => r.metrics?.["agreement"])
       .filter((v): v is number => typeof v === "number");
     const tileErrs = results
       .filter((r) => !r.skipped)
-      .map((r) => r.metrics?.tileErr)
+      .map((r) => r.metrics?.["tileErr"])
       .filter((v): v is number => typeof v === "number");
     return {
       worstShotAgreement: { value: agree.length ? Math.min(...agree) : 1, better: "higher", tolerance: 0.05 },

@@ -202,7 +202,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   async function ensureCustomer(user: { id: string; email: string; name: string }): Promise<string> {
     const have = await db().query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) });
     if (have) return have.stripeCustomerId;
-    const existing = (await stripe.customers.list({ email: user.email, limit: 10 })).data.find((c) => c.metadata?.userId === user.id);
+    const existing = (await stripe.customers.list({ email: user.email, limit: 10 })).data.find((c) => c.metadata?.["userId"] === user.id);
     const customer =
       existing ??
       (await stripe.customers.create({ email: user.email, name: user.name, metadata: { userId: user.id } }, { idempotencyKey: `customer:${user.id}` }));
@@ -346,7 +346,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
 
   /** Which account a Stripe subscription belongs to: its metadata, else its customer, else the row that already points at it. */
   async function userIdFor(d: Db, sub: Stripe.Subscription | null, subscriptionId: string): Promise<string | null> {
-    const meta = sub?.metadata?.userId;
+    const meta = sub?.metadata?.["userId"];
     if (meta) return meta;
     const customerId = sub ? idOf(sub.customer) : null;
     if (customerId) {

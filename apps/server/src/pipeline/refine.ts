@@ -268,7 +268,7 @@ export async function refineEntities(ctx: StageContext) {
     await svc.ai.languageModel(),
     raw,
     t.entities,
-    { title: project.title, uploader: project.sourceMeta?.uploader as string | undefined },
+    { title: project.title, uploader: project.sourceMeta?.["uploader"] as string | undefined },
     {
       signal: ctx.signal,
       timeoutMs: ctx.unitTimeoutMs(svc.models.get().language),

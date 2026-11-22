@@ -543,7 +543,7 @@ const headRouter = router({
       const clean = withSpokenLanguage(Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== "")));
       return ctx.svc.tx(async (u) => {
         // the default layer template must be one of the user's live templates
-        if (typeof clean.layerTemplateId === "string") await getLayerTemplate(u.db, ctx.user.id, clean.layerTemplateId);
+        if (typeof clean["layerTemplateId"] === "string") await getLayerTemplate(u.db, ctx.user.id, clean["layerTemplateId"]);
         const [cur] = await u.db
           .select({ d: schema.userSettings.projectDefaults })
           .from(schema.userSettings)
@@ -1126,7 +1126,7 @@ const restRouter = router({
       });
       return rows.map(({ projectId: _p, ...e }) => ({
         ...e,
-        email: typeof e.payload.email === "string" ? e.payload.email : null,
+        email: typeof e.payload["email"] === "string" ? e.payload["email"] : null,
         createdAt: e.createdAt.toISOString(),
       }));
     }),

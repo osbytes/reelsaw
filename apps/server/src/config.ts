@@ -375,7 +375,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET))
     throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
   // the operator CLI (src/cli.ts) runs with both off on purpose
-  if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
+  if (!c.RUN_HTTP && !c.RUN_WORKERS && env["REELSAW_CLI"] !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
   if (c.NODE_ENV === "production" && c.BETTER_AUTH_SECRET.length < 32) throw new ConfigError("BETTER_AUTH_SECRET must be at least 32 characters in production");
   try {
     if (c.YTDLP_PROXY) parseYtdlpProxies(c.YTDLP_PROXY);

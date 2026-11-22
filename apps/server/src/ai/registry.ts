@@ -138,8 +138,8 @@ const lenientJsonSchema: LanguageModelMiddleware = {
     ...params,
     providerOptions: {
       ...params.providerOptions,
-      openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) },
-      openaiCompatible: { strictJsonSchema: false, ...(params.providerOptions?.openaiCompatible ?? {}) },
+      openai: { strictJsonSchema: false, ...(params.providerOptions?.["openai"] ?? {}) },
+      openaiCompatible: { strictJsonSchema: false, ...(params.providerOptions?.["openaiCompatible"] ?? {}) },
     },
   }),
 };

@@ -87,6 +87,6 @@ export function largestReportedFile(info: Record<string, unknown>): number | nul
     }
   };
   take(info);
-  if (Array.isArray(info.requested_formats)) info.requested_formats.forEach(take);
+  if (Array.isArray(info["requested_formats"])) info["requested_formats"].forEach(take);
   return sizes.length ? Math.max(...sizes) : null;
 }

@@ -19,7 +19,7 @@ type Key = {
 
 /** What a key may do beyond a normal account. A key with no record (never an administrator) shows nothing; older keys were granted admin by migration. */
 function adminLabel(k: Key): string | null {
-  return k.permissions?.admin?.includes("write") ? "can administer" : null;
+  return k.permissions?.["admin"]?.includes("write") ? "can administer" : null;
 }
 
 const when = (d: Date | string | null | undefined) => (d ? formatDay(d, { month: "short" }) : "never");

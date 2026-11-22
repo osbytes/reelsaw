@@ -47,7 +47,7 @@ export interface Telemetry {
 
 /** Sentry's own collector interval, unless OTEL_METRIC_EXPORT_INTERVAL is a sane number. Below 1s the SDK clamps and warns. */
 function metricIntervalMs(): number {
-  const n = Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 30_000);
+  const n = Number(process.env["OTEL_METRIC_EXPORT_INTERVAL"] ?? 30_000);
   return Number.isFinite(n) && n >= 1000 ? n : 30_000;
 }
 

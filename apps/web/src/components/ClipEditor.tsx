@@ -1822,7 +1822,7 @@ export function ClipEditor(props: Props) {
     snapped.setEndAfter(spans.at(-1)!);
     sel.removeAllRanges();
     sel.addRange(snapped);
-    setTxSel({ start: Math.min(...spans.map((n) => Number(n.dataset.s))), end: Math.max(...spans.map((n) => Number(n.dataset.e))) });
+    setTxSel({ start: Math.min(...spans.map((n) => Number(n.dataset["s"]))), end: Math.max(...spans.map((n) => Number(n.dataset["e"]))) });
   };
   const transcript = (
     <div className="relative flex min-h-0 flex-1 flex-col">

@@ -306,7 +306,7 @@ class S3Storage implements Storage {
     const headers: Record<string, string> = { "Accept-Ranges": "bytes" };
     if (res.ContentLength !== undefined) headers["Content-Length"] = String(res.ContentLength);
     if (res.ContentRange) headers["Content-Range"] = res.ContentRange;
-    if (res.ETag) headers.ETag = res.ETag;
+    if (res.ETag) headers["ETag"] = res.ETag;
     if (res.LastModified) headers["Last-Modified"] = res.LastModified.toUTCString();
     // the SDK's Node body is a Readable (sdkStreamMixin over IncomingMessage)
     return { body: res.Body as Readable, status: res.ContentRange ? (206 as const) : (200 as const), headers };

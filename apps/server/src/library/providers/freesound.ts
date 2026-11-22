@@ -29,21 +29,21 @@ export function freesound({ settings, http }: ProviderDeps): Provider {
   };
   const credit = (name: string, user: string | undefined) => clip(`${name} by ${user ?? "unknown"} (Freesound)`, 300);
   const item = (s: Record<string, unknown>): ProviderItem | null => {
-    const license = freesoundLicense(str(s.license));
-    const preview = httpsUrl(obj(s.previews)["preview-hq-mp3"]);
-    const name = str(s.name);
-    if (!license || !preview || !name || s.id === undefined) return null;
+    const license = freesoundLicense(str(s["license"]));
+    const preview = httpsUrl(obj(s["previews"])["preview-hq-mp3"]);
+    const name = str(s["name"]);
+    if (!license || !preview || !name || s["id"] === undefined) return null;
     return {
       provider: "freesound",
-      externalId: String(s.id),
+      externalId: String(s["id"]),
       kind: "audio",
       mime: "audio/mpeg",
       name: clip(name.replace(/\.(wav|mp3|flac|ogg|aif+)$/i, ""), 120),
       previewUrl: preview,
-      durationSec: num(s.duration),
+      durationSec: num(s["duration"]),
       license,
-      attribution: license.id === "cc0" ? undefined : credit(name, str(s.username)),
-      url: httpsUrl(s.url),
+      attribution: license.id === "cc0" ? undefined : credit(name, str(s["username"])),
+      url: httpsUrl(s["url"]),
     };
   };
   return {
@@ -61,17 +61,17 @@ export function freesound({ settings, http }: ProviderDeps): Provider {
           url("/search/text/", { query: q, filter: FILTER[license ?? "cc0"], fields: FIELDS, page: String(page), page_size: String(Math.min(150, limit)) }),
         ),
       );
-      return { items: arr(r.results).flatMap((s) => item(obj(s)) ?? []), ...(r.next ? { nextCursor: String(page + 1) } : {}) };
+      return { items: arr(r["results"]).flatMap((s) => item(obj(s)) ?? []), ...(r["next"] ? { nextCursor: String(page + 1) } : {}) };
     },
     async resolve(externalId): Promise<Resolved> {
       if (!/^\d+$/.test(externalId)) throw new ProviderError("That is not a Freesound id (a number).");
       const s = obj(await http.json("freesound", url(`/sounds/${externalId}/`, { fields: FIELDS })));
-      const license = freesoundLicense(str(s.license));
+      const license = freesoundLicense(str(s["license"]));
       if (!license) throw new ProviderError("That sound's license (not CC0 or CC-BY) cannot be imported.");
-      const file = httpsUrl(obj(s.previews)["preview-hq-mp3"]);
-      const name = str(s.name);
+      const file = httpsUrl(obj(s["previews"])["preview-hq-mp3"]);
+      const name = str(s["name"]);
       if (!file || !name) throw new ProviderError("Freesound returned no preview for that sound.");
-      const tags = arr(s.tags)
+      const tags = arr(s["tags"])
         .flatMap((t) => (typeof t === "string" ? [t.toLowerCase()] : []))
         .slice(0, 12);
       return {
@@ -80,7 +80,7 @@ export function freesound({ settings, http }: ProviderDeps): Provider {
         name: clip(name.replace(/\.(wav|mp3|flac|ogg|aif+)$/i, ""), 120),
         kind: "audio",
         tags,
-        provenance: { provider: "freesound", externalId, url: httpsUrl(s.url), license, attribution: credit(name, str(s.username)) },
+        provenance: { provider: "freesound", externalId, url: httpsUrl(s["url"]), license, attribution: credit(name, str(s["username"])) },
       };
     },
   };

@@ -131,25 +131,29 @@ export function parseClipsLeniently(text: string): ClipCandidate[] {
   for (const raw of firstArray(parsed)) {
     if (!raw || typeof raw !== "object") continue;
     const r = raw as Record<string, unknown>;
-    const startSec = toSeconds(r.startSec ?? r.start ?? r.start_time ?? r.startTime ?? r.from);
-    const endSec = toSeconds(r.endSec ?? r.end ?? r.end_time ?? r.endTime ?? r.to);
+    const startSec = toSeconds(r["startSec"] ?? r["start"] ?? r["start_time"] ?? r["startTime"] ?? r["from"]);
+    const endSec = toSeconds(r["endSec"] ?? r["end"] ?? r["end_time"] ?? r["endTime"] ?? r["to"]);
     if (startSec === undefined || endSec === undefined || endSec <= startSec) continue;
-    const text = typeof r.text === "string" ? r.text : typeof r.quote === "string" ? r.quote : "";
-    const title = String(r.title ?? r.headline ?? text.slice(0, 60) ?? "Clip").trim() || "Clip";
-    const hook = String(r.hook ?? r.caption ?? r.overlay ?? title)
+    const text = typeof r["text"] === "string" ? r["text"] : typeof r["quote"] === "string" ? r["quote"] : "";
+    const title = String(r["title"] ?? r["headline"] ?? text.slice(0, 60) ?? "Clip").trim() || "Clip";
+    const hook = String(r["hook"] ?? r["caption"] ?? r["overlay"] ?? title)
       .trim()
       .slice(0, 80);
-    const scoreRaw = Number(r.score ?? r.virality ?? r.rating ?? 50);
+    const scoreRaw = Number(r["score"] ?? r["virality"] ?? r["rating"] ?? 50);
     const score = Number.isFinite(scoreRaw) ? (scoreRaw <= 1 ? scoreRaw * 100 : scoreRaw <= 10 ? scoreRaw * 10 : scoreRaw) : 50;
-    const hashtags = Array.isArray(r.hashtags) ? r.hashtags.map(String) : typeof r.hashtags === "string" ? r.hashtags.split(/[\s,]+/).filter(Boolean) : [];
+    const hashtags = Array.isArray(r["hashtags"])
+      ? r["hashtags"].map(String)
+      : typeof r["hashtags"] === "string"
+        ? r["hashtags"].split(/[\s,]+/).filter(Boolean)
+        : [];
     out.push({
       title,
       hook,
       startSec,
       endSec,
       score: Math.max(0, Math.min(100, score)),
-      reasoning: String(r.reasoning ?? r.reason ?? r.why ?? text).slice(0, 1000),
-      caption: String(r.caption ?? r.description ?? "").slice(0, 300),
+      reasoning: String(r["reasoning"] ?? r["reason"] ?? r["why"] ?? text).slice(0, 1000),
+      caption: String(r["caption"] ?? r["description"] ?? "").slice(0, 300),
       hashtags: hashtags.slice(0, 8),
     });
   }
@@ -408,13 +412,13 @@ function salvageScores(text: string): { scores: ScoreItem[] } | null {
   const scores = arr
     .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
     .map((r) => ({
-      id: Number(r.id ?? r.candidate ?? -1),
-      hook: to10(r.hook),
-      flow: to10(r.flow ?? r.standalone),
-      value: to10(r.value),
-      shareability: to10(r.shareability ?? r.share),
-      relevance: r.relevance === undefined ? undefined : to10(r.relevance),
-      emphasis: Array.isArray(r.emphasis) ? r.emphasis.map(String) : [],
+      id: Number(r["id"] ?? r["candidate"] ?? -1),
+      hook: to10(r["hook"]),
+      flow: to10(r["flow"] ?? r["standalone"]),
+      value: to10(r["value"]),
+      shareability: to10(r["shareability"] ?? r["share"]),
+      relevance: r["relevance"] === undefined ? undefined : to10(r["relevance"]),
+      emphasis: Array.isArray(r["emphasis"]) ? r["emphasis"].map(String) : [],
     }))
     .filter((r) => r.id >= 0);
   return scores.length ? { scores } : null;

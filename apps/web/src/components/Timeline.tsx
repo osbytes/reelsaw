@@ -427,8 +427,8 @@ export function Timeline({
   const canSplitAt = (t: number) => sections.some((s) => t > s.start + MIN_SECTION && t < s.end - MIN_SECTION);
   function onContext(e: React.MouseEvent) {
     const el = e.target as HTMLElement;
-    const lane = el.closest<HTMLElement>("[data-lane]")?.dataset.lane ?? "ruler";
-    const layer = el.closest<HTMLElement>("[data-ly]")?.dataset.ly ?? null;
+    const lane = el.closest<HTMLElement>("[data-lane]")?.dataset["lane"] ?? "ruler";
+    const layer = el.closest<HTMLElement>("[data-ly]")?.dataset["ly"] ?? null;
     const t = Number(tAt(e.clientX).toFixed(2));
     const section = sectionAt(Math.max(range[0], Math.min(range[1] - 0.01, t)));
     setMenuAt({ t, lane, section, layer });

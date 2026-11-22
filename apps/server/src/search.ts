@@ -98,7 +98,7 @@ async function projectRows(db: Db, rows: Array<ProjectRow & { score?: number }>)
     durationSec: p.durationSec,
     sourceUrl: p.sourceUrl,
     updatedAt: p.updatedAt.toISOString(),
-    thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
+    thumbnailUrl: (p.sourceMeta?.["thumbnail"] as string | undefined) ?? null,
     /** relevance (higher is better); 0 where the list is not ranked by relevance */
     score: p.score ?? 0,
     ...(facts.get(p.id) ?? { clipCount: 0, clipsDone: 0, failedClipIds: [] as string[] }),

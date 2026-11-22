@@ -407,7 +407,7 @@ export const ADMIN_REFUSED_MESSAGE = "This key cannot change instance settings. 
  * Settings, where it can be revoked.
  */
 export function apiKeyCanAdminister(permissions: Record<string, string[]> | null | undefined): boolean {
-  return permissions?.admin?.includes("write") ?? false;
+  return permissions?.["admin"]?.includes("write") ?? false;
 }
 
 /** `requester`, but only for accounts allowed to use the app. Pending, suspended, and must-change sessions get null. */

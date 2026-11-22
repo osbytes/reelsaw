@@ -226,7 +226,7 @@ export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosit
     const v = override?.[k] ?? settings[k as keyof typeof settings];
     if (v !== undefined) base[k] = v;
   }
-  if (legacyY !== undefined && override?.captionY === undefined) base.captionY = legacyY;
+  if (legacyY !== undefined && override?.captionY === undefined) base["captionY"] = legacyY;
   const parsed = styleSchema.safeParse(base);
   return parsed.success ? parsed.data : { ...defaultStyle, ...(base as Partial<Style>) };
 }

@@ -793,7 +793,7 @@ export async function purgeProject(
     .delete(schema.projects)
     .where(eq(schema.projects.id, projectId))
     .returning({ sourceMeta: schema.projects.sourceMeta, userId: schema.projects.userId, forget: schema.projects.forgetDecisionsOnPurge });
-  await releaseUpload(svc, u, projectId, gone?.sourceMeta?.uploadId);
+  await releaseUpload(svc, u, projectId, gone?.sourceMeta?.["uploadId"]);
   // decisions outlive the project (docs/specs/decision-log.md) unless the owner asked to forget them, now or when deleting it
   const forgotten = gone && (gone.forget || opts.forgetDecisions) ? await forgetDecisions(u.db, gone.userId, { projectId }) : 0;
   u.afterCommit(async () => {

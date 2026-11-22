@@ -119,11 +119,11 @@ export async function runDisfluencyCases(ctx: EvalContext, cases: Case[]): Promi
 /** Precision / recall overall and per split (a split-only run reports that split only). */
 export function summarizeDisfluency(results: CaseResult[]): Record<string, SummaryMetric> {
   const score = (rs: CaseResult[], prefix: string): Record<string, SummaryMetric> => {
-    const n = (o: string) => rs.filter((r) => r.metrics?.outcome === o).length;
+    const n = (o: string) => rs.filter((r) => r.metrics?.["outcome"] === o).length;
     const tp = n("TP");
     const fp = n("FP");
     const fn = n("FN");
-    const autoFp = rs.filter((r) => r.metrics?.outcome === "FP" && String(r.metrics?.got).endsWith("auto")).length;
+    const autoFp = rs.filter((r) => r.metrics?.["outcome"] === "FP" && String(r.metrics?.["got"]).endsWith("auto")).length;
     return {
       [`${prefix}precision`]: { value: Number((tp / Math.max(1, tp + fp)).toFixed(2)), better: "higher", tolerance: 0.03, ratio: { k: tp, n: tp + fp } },
       [`${prefix}recall`]: { value: Number((tp / Math.max(1, tp + fn)).toFixed(2)), better: "higher", tolerance: 0.03, ratio: { k: tp, n: tp + fn } },
@@ -132,7 +132,7 @@ export function summarizeDisfluency(results: CaseResult[]): Record<string, Summa
       [`${prefix}autoFalsePositives`]: { value: autoFp, better: "lower" },
     };
   };
-  const bySplit = (s: Split) => results.filter((r) => r.metrics?.split === s);
+  const bySplit = (s: Split) => results.filter((r) => r.metrics?.["split"] === s);
   const dev = bySplit("dev");
   const held = bySplit("heldout");
   // a `--split` run scores one split only; a full run reports the whole set and both splits

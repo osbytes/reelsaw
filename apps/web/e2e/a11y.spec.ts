@@ -33,7 +33,7 @@ for (const screen of SCREENS) {
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
     const key = `${screen.name}@${info.project.name}`;
     const now = [...new Set(results.violations.map((v) => v.id))].sort();
-    if (process.env.AXE_UPDATE) {
+    if (process.env["AXE_UPDATE"]) {
       const current = readBaseline();
       current[key] = now;
       fs.writeFileSync(BASELINE, `${JSON.stringify(Object.fromEntries(Object.entries(current).sort()), null, 2)}\n`);

@@ -75,7 +75,7 @@ export function clientContext() {
     route: location.pathname + location.hash,
     userAgent: navigator.userAgent,
     viewport: `${window.innerWidth}x${window.innerHeight}`,
-    theme: document.documentElement.dataset.theme ?? "system",
+    theme: document.documentElement.dataset["theme"] ?? "system",
     errors: buf.slice(),
   };
 }

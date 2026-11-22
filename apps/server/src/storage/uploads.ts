@@ -73,7 +73,7 @@ export async function sweepAbandonedUploads(svc: Services, opts: { now?: number 
         await svc.tx(async (u) => {
           // re-checked in the deleting statement: a project created from it a moment ago keeps it
           const gone = await u.db.execute(sql`delete from uploads where id = ${id} and id not in (${named}) returning storage_key as "storageKey"`);
-          const storageKey = gone.rows[0]?.storageKey;
+          const storageKey = gone.rows[0]?.["storageKey"];
           if (typeof storageKey !== "string") return;
           rows++;
           u.afterCommit(async () => {

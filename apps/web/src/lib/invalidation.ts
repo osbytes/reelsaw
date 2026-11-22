@@ -21,10 +21,10 @@ export const INVALIDATION: Record<ProjectEventType, Rule> = {
   "project.created": ["project", "list"],
   "run.started": ["project", "list"],
   // "review" is a saved transcript edit (its re-renders show up as clips)
-  "stage.started": (p) => (p.stage === "review" ? (p.rerendered ? ["transcript", "project", "list"] : ["transcript"]) : ["project", "list"]),
+  "stage.started": (p) => (p["stage"] === "review" ? (p["rerendered"] ? ["transcript", "project", "list"] : ["transcript"]) : ["project", "list"]),
   // progress is live state only
   "stage.progress": [],
-  "stage.completed": (p) => (TRANSCRIPT_STAGES.has(String(p.stage)) ? ["project", "list", "transcript"] : ["project", "list"]),
+  "stage.completed": (p) => (TRANSCRIPT_STAGES.has(String(p["stage"])) ? ["project", "list", "transcript"] : ["project", "list"]),
   "stage.failed": ["project", "list"],
   "clip.created": ["project", "list"],
   "clip.rendering": ["project"],
