@@ -32,6 +32,7 @@ import {
   formatDay,
   plural,
   processedEndSec,
+  spansCover,
 } from "@reelsaw/shared";
 import {
   checkAnnouncedMinutes,
@@ -62,7 +63,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { transcriptCovers } from "../pipeline/transcribe.js";
+import { projectNeededSpans } from "../pipeline/transcribe.js";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -142,12 +143,13 @@ export async function retryProject(
       status: schema.projects.status,
       sourceLimitSec: schema.projects.sourceLimitSec,
       extendFromSec: schema.projects.extendFromSec,
+      durationSec: schema.projects.durationSec,
     })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p || (opts.onlyIfFailed && p.status !== "failed")) return null;
   const [transcript] = await u.db
-    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine, coveredSec: schema.transcripts.coveredSec })
+    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine, covered: schema.transcripts.covered })
     .from(schema.transcripts)
     .where(eq(schema.transcripts.projectId, p.id))
     .for("update");
@@ -160,6 +162,7 @@ export async function retryProject(
     .for("no key update");
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
+  const covers = !transcript || spansCover(transcript.covered, await projectNeededSpans(u.db, p));
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
   const queue = retryQueueFor({
     clips,
@@ -168,7 +171,7 @@ export async function retryProject(
     stage: p.stage,
     sourceKey: p.sourceKey,
     sourceExpired: !!p.sourceExpiredAt,
-    transcriptCovers: !transcript || transcriptCovers(transcript.coveredSec, p.sourceLimitSec),
+    transcriptCovers: covers,
     extending: p.extendFromSec !== null,
   });
 
@@ -508,12 +511,12 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const transcript = await u.db.query.transcripts.findFirst({
       where: eq(schema.transcripts.projectId, p.id),
-      columns: { projectId: true, coveredSec: true },
+      columns: { projectId: true, covered: true },
     });
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
     // picking again before the rest of the video's words are in would pick from the old part only, and its picks
     // would be replaced again by the extension's
-    if (!transcriptCovers(transcript.coveredSec, p.sourceLimitSec))
+    if (!spansCover(transcript.covered, await projectNeededSpans(u.db, p)))
       throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
@@ -1116,10 +1119,10 @@ export async function partialSourceOf(
   const s = svc.settings.get();
   // from the state, not the run's reason (a retry or re-pick of an extension has another): the rest's words are not in
   // yet, or its picks are not made yet, while the project works
-  const [t] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  const [t] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   const extending =
     (WORKING as readonly string[]).includes(p.status) &&
-    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !transcriptCovers(t.coveredSec, p.sourceLimitSec)));
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !spansCover(t.covered, await projectNeededSpans(db, p))));
   const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
   const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
   const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;

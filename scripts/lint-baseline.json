@@ -14,7 +14,7 @@
   "knip/exports": 313,
   "knip/types": 218,
   "performance/noImgElement": 3,
-  "style/noNonNullAssertion": 2029,
+  "style/noNonNullAssertion": 2024,
   "suspicious/noArrayIndexKey": 58,
   "suspicious/noConfusingVoidType": 1,
   "suspicious/noExplicitAny": 10

@@ -5,9 +5,9 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { processedEndSec, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { processedEndSec, spansCover, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { partialUntil } from "../src/quota.js";
-import { appendTranscript, chunksFrom, transcriptCovers } from "../src/pipeline/transcribe.js";
+import { audioChunks, legacyCoveredSec, mergeTranscript, neededSpans } from "../src/pipeline/transcribe.js";
 import { partialPrecheckSentence } from "../src/projects/service.js";
 
 const CHUNK = 600;
@@ -45,52 +45,108 @@ describe("processedEndSec", () => {
   });
 });
 
-describe("transcriptCovers", () => {
+describe("what a transcript must cover", () => {
+  it("is the processed start of a project from before ranges, else its ranges", () => {
+    assert.deepEqual(neededSpans({ durationSec: 8040, sourceLimitSec: 3600 }, []), [[0, 3600]]);
+    assert.deepEqual(neededSpans({ durationSec: 8040, sourceLimitSec: null }, []), [[0, 8040]]);
+    // a whole range has no padding; chosen ranges get 15 s on each side, clamped to the video
+    assert.deepEqual(
+      neededSpans({ durationSec: 8040 }, [
+        { startSec: 0, endSec: 3600, origin: "whole" },
+        { startSec: 3600, endSec: 4200, origin: "whole" },
+      ]),
+      [[0, 4200]],
+    );
+    assert.deepEqual(
+      neededSpans({ durationSec: 8040 }, [
+        { startSec: 5, endSec: 60, origin: "user" },
+        { startSec: 8000, endSec: 8040, origin: "api" },
+      ]),
+      [
+        [0, 75],
+        [7985, 8040],
+      ],
+    );
+  });
   it("knows a partial transcript from a whole one", () => {
-    assert.equal(transcriptCovers(null, null), true);
-    assert.equal(transcriptCovers(null, 3600), true);
-    assert.equal(transcriptCovers(3600, 3600), true);
-    assert.equal(transcriptCovers(3600, 7200), false);
-    assert.equal(transcriptCovers(3600, null), false);
+    assert.equal(spansCover([[0, 3600]], [[0, 3600]]), true);
+    assert.equal(spansCover([[0, 3600]], [[0, 7200]]), false);
+    assert.equal(spansCover([[0, 3600.2]], [[0, 3600.5]]), true);
+    assert.equal(spansCover([], [[0, 60]]), false);
+  });
+  it("writes the old covered end only for a transcript of the video's start", () => {
+    assert.equal(legacyCoveredSec([[0, 3600]], 8040), 3600);
+    assert.equal(legacyCoveredSec([[0, 8040]], 8040), null);
+    assert.equal(legacyCoveredSec([[100, 200]], 8040), null);
+    assert.equal(
+      legacyCoveredSec(
+        [
+          [0, 60],
+          [100, 200],
+        ],
+        8040,
+      ),
+      null,
+    );
   });
 });
 
-describe("chunksFrom", () => {
-  const offsets = [0, 600, 1200, 1800, 2400, 3000, 3600.02, 4200.04];
-  it("is every chunk for a new transcript", () => {
-    assert.deepEqual(chunksFrom(offsets, 4500, 0), [0, 1, 2, 3, 4, 5, 6, 7]);
+describe("audioChunks", () => {
+  it("places each chunk of a stretch on the source clock, keyed by its offset", () => {
+    assert.deepEqual(audioChunks(4500, [600, 300.5]), [
+      { index: 45000, offsetSec: 4500, endSec: 5100, file: 0 },
+      { index: 51000, offsetSec: 5100, endSec: 5400.5, file: 1 },
+    ]);
   });
-  it("skips the chunks a partial transcript already covers (a frame of slack at the boundary)", () => {
-    assert.deepEqual(chunksFrom(offsets, 4500, 3600), [6, 7]);
-  });
-  it("leaves out the muxer's sliver past the last whole chunk of a partial run", () => {
-    // audio cut at 240 s, chunked at 60 s: the cuts land a few ms late, so a 4th-to-5th chunk of milliseconds is left over
-    assert.deepEqual(chunksFrom([0, 60.012, 120.024, 180, 239.996], 240, 0), [0, 1, 2, 3]);
-  });
-  it("keeps a chunk that straddles the covered end (another chunk length)", () => {
-    assert.deepEqual(chunksFrom([0, 700, 1400, 2100], 2400, 1200), [1, 2, 3]);
+  it("leaves out the muxer's sliver past the last cut", () => {
+    assert.deepEqual(
+      audioChunks(0, [60.012, 60.012, 59.976, 0.004]).map((c) => c.file),
+      [0, 1, 2],
+    );
   });
 });
 
-describe("appendTranscript", () => {
+describe("mergeTranscript", () => {
   const w = (text: string, start: number): Word => ({ text, start, end: start + 0.4 });
-  it("keeps the old words and their fixes where they were and shifts the new part's flags past them", () => {
+  const fix: TranscriptFlag = { kind: "disfluency", wordIndex: 0, span: 1, suggested: "", status: "accepted", start: 0, end: 0.4 } as TranscriptFlag;
+  it("adds a later part after the words there, shifting its own flags past them", () => {
     const raw = [w("uh", 0), w("hello", 1), w("world", 2)];
-    const fix: TranscriptFlag = { kind: "disfluency", wordIndex: 0, span: 1, suggested: "", status: "accepted", start: 0, end: 0.4 } as TranscriptFlag;
     const loop: TranscriptFlag = { kind: "loop", wordIndex: 1, span: 2, suggested: "go", status: "auto", start: 3601, end: 3603 } as TranscriptFlag;
     const added = [w("and", 3600), w("go", 3601), w("go", 3602), w("now", 3603)];
-    const out = appendTranscript({ words: raw.slice(1), rawWords: raw, flags: [fix] }, { rawWords: added, flags: [loop] });
+    const out = mergeTranscript({ words: raw.slice(1), rawWords: raw, flags: [fix] }, { rawWords: added, flags: [loop] });
     assert.equal(out.rawWords.length, 7);
     assert.deepEqual(
-      out.flags.map((f) => [f.kind, f.wordIndex]),
+      out.flags.map((f) => [f.kind, f.wordIndex, f.span]),
       [
-        ["disfluency", 0],
-        ["loop", 4],
+        ["disfluency", 0, 1],
+        ["loop", 4, 2],
       ],
     );
     assert.deepEqual(
       out.words.map((x) => x.text),
       ["hello", "world", "and", "go", "now"],
+    );
+  });
+  it("puts an earlier range's words before the words there and moves every fix, deleted ones too, with its words", () => {
+    const raw = [w("uh", 5000), w("later", 5001), w("on", 5002)];
+    const deleted = { ...fix, wordIndex: 2, deletedAt: "2026-11-22T00:00:00Z" };
+    const added = [w("first", 1500), w("words", 1501)];
+    const out = mergeTranscript({ words: raw.slice(1), rawWords: raw, flags: [fix], deletedFlags: [deleted] }, { rawWords: added, flags: [] });
+    assert.deepEqual(
+      out.rawWords.map((x) => x.text),
+      ["first", "words", "uh", "later", "on"],
+    );
+    assert.deepEqual(
+      out.flags.map((f) => [f.wordIndex, f.span]),
+      [[2, 1]],
+    );
+    assert.deepEqual(
+      out.deletedFlags.map((f) => f.wordIndex),
+      [4],
+    );
+    assert.deepEqual(
+      out.words.map((x) => x.text),
+      ["first", "words", "later", "on"],
     );
   });
 });

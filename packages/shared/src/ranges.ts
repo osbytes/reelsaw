@@ -71,6 +71,34 @@ export function spansSec(spans: readonly Span[]): number {
   return mergeSpans(spans).reduce((a, [s, e]) => a + (e - s), 0);
 }
 
+/** Whether `covered` holds all of `needed` (to half a second: chunk cuts land on frame boundaries). */
+export function spansCover(covered: readonly Span[], needed: readonly Span[]): boolean {
+  return spansSec(subtractSpans(needed, covered)) <= 0.5;
+}
+
+/** Whether one span lies inside the union of `spans` (to half a second). */
+export function spanWithin(span: Span, spans: readonly Span[]): boolean {
+  return spansCover(spans, [span]);
+}
+
+/**
+ * The source time a project's transcript must cover: every range, the ones a person or a caller chose widened by the
+ * context padding (a `whole` range is the video or its processed start, so it needs none), clamped to the length.
+ */
+export function transcriptSpans(
+  ranges: readonly { startSec: number; endSec: number; origin: RangeOrigin }[],
+  durationSec: number | null,
+  padSec = RANGE_PAD_SEC,
+): [number, number][] {
+  return mergeSpans(
+    ranges.map((r): [number, number] => {
+      const pad = r.origin === "whole" ? 0 : padSec;
+      const end = r.endSec + pad;
+      return [Math.max(0, r.startSec - pad), durationSec === null ? end : Math.min(durationSec, end)];
+    }),
+  );
+}
+
 export interface PlannedRange {
   startSec: number;
   endSec: number;

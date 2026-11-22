@@ -688,7 +688,17 @@ export const transcripts = pgTable("transcripts", {
   words: jsonb("words").$type<Word[]>().notNull(),
   /** words exactly as the transcriber returned them; `words` is this with accepted flags applied */
   rawWords: jsonb("raw_words").$type<Word[]>(),
-  /** the transcript covers [0, covered_sec) of the source (a partly processed video); null = all of it. Transcribe appends the rest when the project's limit moves past it */
+  /**
+   * The source time the words cover, as sorted, disjoint `[start, end]` spans: the whole video, the start a partly
+   * processed one covers, or its ranges with their padding (docs/specs/range-clipping.md). Transcribe adds the words
+   * of whatever a project's ranges need past it (`transcriptSpans`), merged in time order.
+   */
+  covered: jsonb("covered").$type<[number, number][]>().notNull().default([]),
+  /**
+   * Deprecated: the covered end before spans (null = all of it). Still written for one release (`legacyCoveredSec`) so
+   * a process of the previous version mid-rollout reads what it expects; dropped with source_limit_sec (range-clipping
+   * plan 2.4).
+   */
   coveredSec: real("covered_sec"),
   flags: jsonb("flags").$type<TranscriptFlag[]>().notNull().default([]),
   /** soft-deleted fixes, newest last; kept out of `flags` so nothing downstream applies them. Restorable. */

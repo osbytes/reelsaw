@@ -21,13 +21,14 @@ import {
   reframeModeSchema,
   styleOverrideSchema,
   type ClipLayer,
-  processedEndSec,
+  spanWithin,
 } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { RenderManyMissing, requestPrepare, requestRender, requestRenders } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
+import { projectNeededSpans } from "../pipeline/transcribe.js";
 import { cleanLayers } from "../library/layers.js";
 import { syncClipRefs, syncClipsRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
@@ -35,28 +36,32 @@ import { byOwner, findProject, NO_CLIP, type Actor } from "../projects/service.j
 import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/service.js";
 
 /**
- * A clip's end must be inside what was processed: the video, or the start of a partly processed one (past it there is no
- * transcript, so no captions or cuts). While an extension is still transcribing, the limit has moved but the words have
- * not: the transcript's covered end (`transcripts.covered_sec`) bounds it too. The one bound check for every clip edit
- * and new clip.
+ * A clip must lie inside what was processed: the video, the start of a partly processed one, or the project's ranges
+ * (past them there is no transcript, so no captions or cuts). While a part is still being transcribed, its range is
+ * there but its words are not: the transcript's covered spans (`transcripts.covered`) bound it too. The one bound check
+ * for every clip edit and new clip.
  */
-async function assertWithinProcessed(db: Db, p: { id: string; durationSec: number | null; sourceLimitSec: number | null }, endSec: number, pastVideo: string) {
-  const limit = processedEndSec(p);
-  const [t] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
-  const covered = t?.coveredSec ?? null;
-  const end = covered !== null && (limit === null || covered < limit) ? covered : limit;
-  if (end === null || endSec <= end + 0.5) return;
-  if (covered !== null && limit !== null && covered < limit && endSec <= limit + 0.5)
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: `Reelsaw is still transcribing minutes ${Math.round(covered / 60)}–${Math.round(limit / 60)} of this video. Use that part once it is done.`,
-    });
-  if (p.durationSec !== null && end < p.durationSec - 0.5)
+async function assertWithinProcessed(
+  db: Db,
+  p: { id: string; durationSec: number | null; sourceLimitSec: number | null },
+  span: [startSec: number, endSec: number],
+  pastVideo: string,
+) {
+  if (p.durationSec !== null && span[1] > p.durationSec + 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: pastVideo });
+  const needed = await projectNeededSpans(db, p);
+  const [t] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  if (spanWithin(span, needed)) {
+    // no transcript at all is the caller's to refuse (it says the video must be transcribed first)
+    if (!t || spanWithin(span, t.covered)) return;
+    throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing this part of the video. Use it once it is done." });
+  }
+  const [first, ...more] = needed;
+  if (first && !more.length && first[0] <= 0.5)
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Reelsaw has processed the first ${Math.round(end / 60)} minutes of this video so far. Clip the rest of the video to use this part.`,
+      message: `Reelsaw has processed the first ${Math.round(first[1] / 60)} minutes of this video so far. Clip the rest of the video to use this part.`,
     });
-  throw new TRPCError({ code: "BAD_REQUEST", message: pastVideo });
+  throw new TRPCError({ code: "BAD_REQUEST", message: "That part of the video is outside this project's ranges. Add a range that covers it to use it." });
 }
 
 /** Every asset id is one of the owner's library (an id the clip already uses stays valid even if it was removed since). */
@@ -156,7 +161,7 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     if (boundsChanged) {
       if (endSec - startSec < MIN_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip must be at least ${MIN_CLIP_SECONDS} seconds` });
       if (endSec - startSec > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
-      await assertWithinProcessed(u.db, p, endSec, "Clip ends after the video");
+      await assertWithinProcessed(u.db, p, [startSec, endSec], "Clip ends after the video");
     }
     const titleChanged = input.title !== undefined && input.title !== c.title;
     const captionChanged = input.caption !== undefined && input.caption !== c.caption;
@@ -266,7 +271,7 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
     // the owner's allowance of clips of their own (Free: one), under their quota lock; an admin acting on it counts too
     await checkManualClipQuota(u.db, svc.settings.get(), p.userId, svc.entitlements);
-    await assertWithinProcessed(u.db, p, input.endSec, "Selection ends after the video");
+    await assertWithinProcessed(u.db, p, [input.startSec, input.endSec], "Selection ends after the video");
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
     if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });
     const existing = await u.db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id), columns: { index: true } });

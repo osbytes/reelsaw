@@ -7,7 +7,7 @@ Where the code is today:
 - Ingest downloads the **whole** link (at `sourceHeightFor`'s preview height on Free) or keeps the whole upload;
   `admitSource` decides minutes on the full length and may set `projects.source_limit_sec` (partial: the start).
 - Transcribe stops at `source_limit_sec` (`extractAudio(untilSec)`, `chunksFrom`), and the transcript records one
-  contiguous `coveredSec`.
+  contiguous `coveredSec` (now spans: 1.4).
 - Analyze picks up to `processedEndSec` (packages/shared/src/partial.ts), or from `extend_from_sec` after an extend.
 - Render already reads from a file plus offset (`renderSource` in pipeline/ranges.ts: full-quality windows,
   table `source_sections`). Transcribe, analyze, refine and the scans read one file via `ctx.ensureSource`.
@@ -49,9 +49,13 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       unit that records the seconds, under the quota lock, and the ledger records the billed seconds. Tests:
       test/ranges-stack.test.ts (admit, refuse, other projects counted). Left: two ranges ingests of one account
       racing past the cap (a stack test with two concurrent ingests).
-- [ ] 1.4 Transcript coverage becomes spans: `transcripts.covered` (jsonb `[start, end][]`) replacing `coveredSec`
-      (migration copies `[0, coveredSec]`). Transcribe extracts audio per padded range (`extractAudio` gains
-      `fromSec`), keeps chunk offsets on the source clock, and appends words only inside spans not yet covered.
+- [x] 1.4 Transcript coverage is spans: `transcripts.covered` (jsonb `[start, end][]`, migration 0069 copies
+      `[0, coalesce(covered_sec, duration_sec)]`). Transcribe cuts each stretch the ranges need and the transcript lacks
+      (`neededSpans` less `covered`) through `ctx.sourceAt`, chunks it on the source clock (rows keyed by offset in
+      tenths of a second), and merges the words in time order (`mergeTranscript` moves every flag and soft-deleted
+      fix with its words). Retry, re-pick, "Clip the rest" and clip bounds read `spansCover` / `spanWithin` over the
+      ranges. `covered_sec` stays one release, written as before (`legacyCoveredSec`), so a previous-version process
+      mid-rollout reads what it expects; dropped with 2.4. Report imports from before spans get `covered` derived.
 - [ ] 1.5 Analyze picks inside **find** ranges only (generalise `extend_from_sec` to "ranges of this run": the
       ranges whose `run_id` is the current run). **Clip** ranges become clips directly: bounds snapped to the
       nearest sentence ends within the padding, `origin: "ai"`, `range_id` set, hook and title from the
@@ -84,8 +88,8 @@ Goal: a finished project grows by ranges; today's "Clip the rest" is one of them
       time; drag across hatched time → "New range" popover (mode, cost from `checkSource`, Clip this range);
       clips grouped by range; `#range=<id>` deep link scrolls to and highlights it; "Find more in this range"
       runs analyze for that range only (`reanalyze_project { rangeId }`).
-- [ ] 2.4 `partial.ts` keeps its exports for one release, reading the ranges; then the `source_limit_sec` and
-      `extend_from_sec` columns are dropped in a follow-up migration once nothing reads them.
+- [ ] 2.4 `partial.ts` keeps its exports for one release, reading the ranges; then the `source_limit_sec`,
+      `extend_from_sec` and `transcripts.covered_sec` columns are dropped in a follow-up migration once nothing reads them.
 
 ## Slice 3 — Fetch only the ranges
 
