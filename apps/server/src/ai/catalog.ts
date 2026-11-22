@@ -3,14 +3,15 @@
  * downloads onto self-hosted servers (Ollama `/api/pull`, Speaches `POST /v1/models/{id}`) with progress.
  *
  * Only providers whose key or base URL is in the environment answer with a live list; the rest are
- * shown as unavailable with the variable to set. Listings are cached for a few minutes per provider.
+ * shown as unavailable with the variable to set. Listings are cached for a few minutes per provider
+ * and leave this module a page at a time (`page`): a Speaches registry alone lists hundreds of models.
  * Keys never leave this module: listings carry model ids, names, sizes and prices.
  */
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./registry.js";
 import type { WordTimestampVerdict } from "./word-timestamps.js";
-import { formatBytes } from "@reelsaw/shared";
+import { createFuzzy, formatBytes } from "@reelsaw/shared";
 
 export type CatalogKind = "language" | "transcription";
 
@@ -41,6 +42,39 @@ export interface CatalogProvider {
   error?: string;
 }
 
+/** One provider with one page of its models: the listing (or the matches for `q`) from `cursor`, at most `limit` long. */
+export interface CatalogProviderPage extends CatalogProvider {
+  /** models in the whole listing, or matches when searching */
+  total: number;
+  /** pass back as `cursor` (with the same provider and q) for the models after this page; null at the end */
+  nextCursor: string | null;
+  /** self-hosted servers: how many models are on the server, out of the whole listing */
+  installedCount?: number;
+}
+
+export interface CatalogPage {
+  providers: CatalogProviderPage[];
+  /** the page size used, per provider */
+  limit: number;
+  /** the search, trimmed; null when browsing */
+  q: string | null;
+}
+
+export interface CatalogPageOptions {
+  /** only this provider (to page through it); unknown names are refused */
+  provider?: string | undefined;
+  /** fuzzy search over id, label, provider title and note; providers without a match are left out, the rest ranked by their best match */
+  q?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
+  /** ids shown first in their provider when browsing (the models in use), so the first page always has them */
+  pin?: readonly string[] | undefined;
+  refresh?: boolean | undefined;
+}
+
+export const CATALOG_PAGE_DEFAULT = 50;
+export const CATALOG_PAGE_MAX = 100;
+
 export interface PullJob {
   id: string;
   provider: string;
@@ -55,7 +89,14 @@ export interface PullJob {
 }
 
 export interface ModelCatalog {
+  /** Every provider with its whole listing. Internal: screens, MCP and the CLI read `page`, which bounds it. */
   list(kind: CatalogKind, opts?: { refresh?: boolean | undefined }): Promise<CatalogProvider[]>;
+  /**
+   * Every provider (or one) with a page of its models: the picker's provider column and model list, list_models and
+   * `reelsaw models`. A self-hosted Speaches server lists hundreds of downloadable models, so the listing is never
+   * sent whole. Pages are offsets into the cached listing, which holds still for CACHE_MS.
+   */
+  page(kind: CatalogKind, opts?: CatalogPageOptions): Promise<CatalogPage>;
   /**
    * Try credentials before they are saved: list the provider's models with them. Returns how many
    * models answered per kind, or the error the provider gave (bad key, unreachable server).
@@ -71,6 +112,14 @@ export interface ModelCatalog {
 }
 
 const CACHE_MS = 5 * 60_000;
+
+/** what a model search matches on, the model's own name counting most */
+const SEARCH_KEYS = [
+  { name: "label", weight: 3 },
+  { name: "id", weight: 2 },
+  { name: "title", weight: 1 },
+  { name: "note", weight: 0.5 },
+];
 
 /** self-hosted and available providers first, then the ones that need a key */
 const byShown = (a: CatalogProvider, b: CatalogProvider) =>
@@ -370,29 +419,69 @@ export function createModelCatalog(
     if (!res.ok && res.status !== 409) throw new Error(`HTTP ${res.status} ${await res.text().catch(() => "")}`);
   }
 
+  async function list(kind: CatalogKind, opts: { refresh?: boolean | undefined } = {}): Promise<CatalogProvider[]> {
+    const providers = [...new Set([compat, ...Object.keys(providerKeyEnv)])];
+    const out = await Promise.all(
+      providers.map(async (p) => {
+        const k = `${kind}:${p}:${credentials.version()}`;
+        const hit = cache.get(k);
+        if (hit && !opts.refresh && Date.now() - hit.at < CACHE_MS) return hit.value;
+        const v = await providerFor(p, kind);
+        if (!v.error) cache.set(k, { at: Date.now(), value: v });
+        return v;
+      }),
+    );
+    // what the word-timestamp test said, for models that took it (not cached: a Test press changes it)
+    if (kind === "transcription") {
+      const verdicts = await verdictsOf(out.flatMap((p) => p.models.map((m) => m.id))).catch(() => new Map<string, WordTimestampVerdict>());
+      const note = (m: CatalogModel) => {
+        const v = verdicts.get(m.id);
+        return v ? { ...m, note: [m.note, v.wordLevel ? "word timestamps: passed" : "no word timestamps"].filter(Boolean).join(" · ") } : m;
+      };
+      return out.map((p) => ({ ...p, models: p.models.map(note) })).sort(byShown);
+    }
+    return out.sort(byShown);
+  }
+
   return {
-    async list(kind, opts = {}) {
-      const providers = [...new Set([compat, ...Object.keys(providerKeyEnv)])];
-      const out = await Promise.all(
-        providers.map(async (p) => {
-          const k = `${kind}:${p}:${credentials.version()}`;
-          const hit = cache.get(k);
-          if (hit && !opts.refresh && Date.now() - hit.at < CACHE_MS) return hit.value;
-          const v = await providerFor(p, kind);
-          if (!v.error) cache.set(k, { at: Date.now(), value: v });
-          return v;
-        }),
-      );
-      // what the word-timestamp test said, for models that took it (not cached: a Test press changes it)
-      if (kind === "transcription") {
-        const verdicts = await verdictsOf(out.flatMap((p) => p.models.map((m) => m.id))).catch(() => new Map<string, WordTimestampVerdict>());
-        const note = (m: CatalogModel) => {
-          const v = verdicts.get(m.id);
-          return v ? { ...m, note: [m.note, v.wordLevel ? "word timestamps: passed" : "no word timestamps"].filter(Boolean).join(" · ") } : m;
-        };
-        return out.map((p) => ({ ...p, models: p.models.map(note) })).sort(byShown);
-      }
-      return out.sort(byShown);
+    list,
+    async page(kind, opts = {}) {
+      const limit = Math.min(CATALOG_PAGE_MAX, Math.max(1, Math.floor(opts.limit ?? CATALOG_PAGE_DEFAULT)));
+      const offset = opts.cursor ? Number(opts.cursor) : 0;
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new Error(`cursor "${opts.cursor}" is not one this listing gave out`);
+      const q = opts.q?.trim() ?? "";
+      const all = await list(kind, { refresh: opts.refresh });
+      if (opts.provider && !all.some((p) => p.provider === opts.provider))
+        throw new Error(`no provider "${opts.provider}"; one of ${all.map((p) => p.provider).join(", ")}`);
+      const pinned = new Set(opts.pin ?? []);
+      const ranked = all
+        .filter((p) => !opts.provider || p.provider === opts.provider)
+        .map((p) => {
+          let models = p.models;
+          let best = 1;
+          if (q) {
+            const hits = createFuzzy(
+              p.models.map((m) => ({ m, id: m.id, label: m.label, title: p.title, note: m.note ?? "" })),
+              SEARCH_KEYS,
+            ).search(q);
+            models = hits.map((h) => h.item.m);
+            best = hits[0]?.score ?? 1;
+          } else if (pinned.size) {
+            models = [...models.filter((m) => pinned.has(m.id)), ...models.filter((m) => !pinned.has(m.id))];
+          }
+          const end = offset + limit;
+          const page: CatalogProviderPage = {
+            ...p,
+            models: models.slice(offset, end),
+            total: models.length,
+            nextCursor: end < models.length ? String(end) : null,
+            ...(p.selfHosted ? { installedCount: p.models.filter((m) => m.installed).length } : {}),
+          };
+          return { page, best };
+        });
+      // a search keeps the providers that matched, best match first (stable, so ties keep the usual order)
+      const providers = q ? ranked.filter((r) => r.page.total > 0).sort((a, b) => a.best - b.best) : ranked;
+      return { providers: providers.map((r) => r.page), limit, q: q || null };
     },
     async probe(provider, creds) {
       const [l, t] = await Promise.all([providerFor(provider, "language", creds), providerFor(provider, "transcription", creds)]);

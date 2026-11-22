@@ -51,6 +51,7 @@ import { SelectionBar } from "../components/SelectionBar";
 import { RuleFromUserDialog } from "../components/SignupRules";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 import { pageTitle, useDocumentTitle } from "../lib/title";
+import { useDebounced } from "../lib/useDebounced";
 
 type Usage = {
   projects: number;
@@ -172,15 +173,6 @@ const BULK_DONE: Record<BulkAction, string> = {
 
 const PAGE = 50;
 
-/** `value`, but only after it has stopped changing for `ms`. */
-function useDebounced<T>(value: T, ms: number) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 const num = new Intl.NumberFormat();
 const asStatus = (v: string | null): Status | "" => (v === "pending" || v === "active" || v === "suspended" ? v : "");
 const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "no" ? v : "");

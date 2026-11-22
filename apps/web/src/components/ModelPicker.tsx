@@ -1,26 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@reelsaw/server";
 import { Check, ChevronRight, ChevronsUpDown, Download, ExternalLink, KeyRound, Server } from "lucide-react";
 import { ScrollArea } from "./scroll-area";
-import { createFuzzy } from "../lib/fuzzy";
 import { Skeleton } from "./ui";
+import { useTRPC } from "../lib/trpc";
+import { useDebounced } from "../lib/useDebounced";
+import { useLoadMoreSentinel } from "../lib/useLoadMore";
 
-export interface PickerModel {
-  id: string;
-  label: string;
-  note?: string;
-  installed?: boolean;
-}
-export interface PickerProvider {
-  provider: string;
-  title: string;
-  available: boolean;
-  reason?: string;
-  source: "live" | "installed" | "static";
-  selfHosted?: { baseUrl: string; server: "ollama" | "speaches" | "openai-compatible"; canPull: boolean };
-  models: PickerModel[];
-  error?: string;
-}
+type CatalogPage = inferRouterOutputs<AppRouter>["admin"]["models"]["catalog"];
+export type PickerProvider = CatalogPage["providers"][number];
+export type PickerModel = PickerProvider["models"][number];
 export interface PickerProviderState {
   provider: string;
   title: string;
@@ -35,6 +27,12 @@ export interface PickerProviderState {
   baseUrlSource: "env" | "db" | null;
   unreadable: boolean;
 }
+
+/** models per provider when the picker opens, and per page after that: a Speaches registry alone lists hundreds */
+const PAGE = 50;
+/** matches per provider while searching */
+const SEARCH_PAGE = 20;
+const num = new Intl.NumberFormat();
 
 function PickerSkeleton() {
   return (
@@ -51,16 +49,17 @@ function PickerSkeleton() {
  * Provider-first model picker, cascader style: the left column lists providers with their state
  * (configured from .env, entered here, needs a key, unreachable); the right column shows that
  * provider's models, or the inline form to enter its key / base URL when it has none. Typing in the
- * search box flattens every available provider's models into one filtered list. A self-hosted
- * model that is not installed shows a download action. A typed id that matches nothing can still
- * be chosen ("Use <id>"), since registries lag behind new releases.
+ * search box searches every provider on the server (fuzzy, ranked) and lists the matches. Listings
+ * come a page at a time (admin.models.catalog, the same as list_models): the first page of each
+ * provider on load, the rest as the list scrolls, with "Showing 50 of 729" so the cut is never
+ * silent. A self-hosted model that is not installed shows a download action. A typed id that
+ * matches nothing can still be chosen ("Use <id>"), since registries lag behind new releases.
  */
 export function ModelPicker({
+  kind,
   value,
   onChange,
-  providers,
   states,
-  loading,
   onPull,
   pulling,
   onSaveCredentials,
@@ -69,11 +68,10 @@ export function ModelPicker({
   label,
   placeholder = "Pick a model",
 }: {
+  kind: "language" | "transcription";
   value: string;
   onChange: (id: string) => void;
-  providers: PickerProvider[];
   states: PickerProviderState[];
-  loading?: boolean;
   onPull?: (id: string) => void;
   pulling?: Set<string>;
   /** resolves when saved and verified; rejects with the provider's error */
@@ -83,11 +81,18 @@ export function ModelPicker({
   label: string;
   placeholder?: string;
 }) {
+  const trpc = useTRPC();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
+  /** the model last chosen here, so the trigger keeps its note when it came from a later page or a search */
+  const [chosen, setChosen] = useState<PickerModel | null>(null);
+  const browse = useQuery(trpc.admin.models.catalog.queryOptions({ kind, limit: PAGE }));
+  const providers = useMemo(() => browse.data?.providers ?? [], [browse.data]);
+  const loading = browse.isPending;
+  // the models in use come first in their provider's first page, so the trigger finds them here
   const known = useMemo(() => new Map(providers.flatMap((p) => p.models.map((m) => [m.id, m] as const))), [providers]);
-  const current = known.get(value);
+  const current = known.get(value) ?? (chosen?.id === value ? chosen : undefined);
   const byProvider = useMemo(() => new Map(providers.map((p) => [p.provider, p])), [providers]);
   const stateOf = (provider: string) => states.find((s) => s.provider === provider);
   // open on the current value's provider
@@ -96,29 +101,23 @@ export function ModelPicker({
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typed = query.trim();
-  const q = typed.toLowerCase();
-  const canUseTyped = /^[a-z0-9_-]+:\S+$/i.test(typed) && !known.has(typed);
-  // fuzzy across every provider's models (Fuse, shared with the command palette): typos, scattered
+  // fuzzy across every provider's models on the server (the shared Fuse search): typos, scattered
   // characters and multi-word queries ("haiku gateway") all rank by closeness
-  const index = useMemo(
-    () =>
-      createFuzzy(
-        providers.flatMap((p) => p.models.map((m) => ({ m, p, id: m.id, label: m.label, title: p.title, note: m.note ?? "" }))),
-        [
-          { name: "label", weight: 3 },
-          { name: "id", weight: 2 },
-          { name: "title", weight: 1 },
-          { name: "note", weight: 0.5 },
-        ],
-      ),
-    [providers],
-  );
-  const hits = useMemo(() => (q ? index.filter(q, 60) : []), [q, index]);
+  const q = useDebounced(typed, 200);
+  const search = useQuery({
+    ...trpc.admin.models.catalog.queryOptions({ kind, q, limit: SEARCH_PAGE }),
+    enabled: open && !!q,
+    placeholderData: keepPreviousData,
+  });
+  const hits = typed && search.data?.q ? search.data.providers : [];
+  const searching = !!typed && (typed !== q || search.isFetching);
+  const canUseTyped = /^[a-z0-9_-]+:\S+$/i.test(typed) && !known.has(typed) && !hits.some((p) => p.models.some((m) => m.id === typed));
   const selected = picked ? byProvider.get(picked) : undefined;
   const selectedState = picked ? stateOf(picked) : undefined;
 
-  const choose = (id: string) => {
+  const choose = (id: string, m: PickerModel | null) => {
     onChange(id);
+    setChosen(m);
     setOpen(false);
     setQuery("");
   };
@@ -137,14 +136,15 @@ export function ModelPicker({
             if (!busy) onPull?.(m.id);
             return;
           }
-          choose(m.id);
+          choose(m.id, m);
         }}
         className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="grid h-4 w-4 shrink-0 place-items-center text-acc">{on && <Check className="h-4 w-4" />}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-mono text-xs">
-            {showProvider && <span className="text-ink3">{p.title} · </span>}
+            {/* the short name the provider column shows ("OpenAI"), not the listing's "OpenAI-compatible server (url)" */}
+            {showProvider && <span className="text-ink3">{stateOf(p.provider)?.title ?? p.title} · </span>}
             {m.label}
           </span>
           {m.note && <span className="block truncate text-[11px] text-ink3">{m.note}</span>}
@@ -166,7 +166,7 @@ export function ModelPicker({
     if (p.error) return { text: "unreachable", tone: "text-warn" };
     if (!p.available) return { text: s?.baseUrlEnv && !s.keyEnv.length ? "needs a URL" : "needs a key", tone: "text-ink3" };
     if (s?.keySource === "db" || s?.baseUrlSource === "db") return { text: "entered here", tone: "text-ok" };
-    return { text: p.selfHosted ? `${p.models.filter((m) => m.installed).length} installed` : "from .env", tone: "text-ink3" };
+    return { text: p.selfHosted ? `${num.format(p.installedCount ?? 0)} installed` : "from .env", tone: "text-ink3" };
   };
 
   // the confirm is a dialog below this z-[80] popover: close it first
@@ -200,24 +200,35 @@ export function ModelPicker({
             autoFocus
             className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
           />
-          {q ? (
+          {typed ? (
             <ScrollArea className="max-h-[min(360px,calc(var(--radix-popover-content-available-height)-60px))]">
               <div className="p-1">
                 {canUseTyped && (
                   <button
                     type="button"
-                    onClick={() => choose(typed)}
+                    onClick={() => choose(typed, null)}
                     className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk"
                   >
                     <span className="w-4" />
                     <span className="min-w-0 flex-1 truncate">
                       Use <span className="font-mono text-xs">{typed}</span>
                     </span>
-                    <span className="shrink-0 text-xs text-ink3">not in any listing; checked on save</span>
+                    <span className="shrink-0 text-xs text-ink3">not among the matches; checked on save</span>
                   </button>
                 )}
-                {hits.map(({ m, p }) => modelRow(m, p, true))}
-                {!canUseTyped && !hits.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No matches"}</div>}
+                {hits.map((p) => (
+                  <ModelList
+                    key={`${p.provider}\n${search.data?.q}`}
+                    kind={kind}
+                    first={p}
+                    q={search.data?.q ?? undefined}
+                    limit={SEARCH_PAGE}
+                    row={(m) => modelRow(m, p, true)}
+                  />
+                ))}
+                {!canUseTyped && !hits.length && (
+                  <div className="px-3 py-6 text-center text-sm text-ink3">{searching || loading ? <PickerSkeleton /> : "No matches"}</div>
+                )}
               </div>
             </ScrollArea>
           ) : (
@@ -265,7 +276,7 @@ export function ModelPicker({
                         <ProviderSummary state={selectedState} catalog={selected} onClear={askClear} saving={saving} onSave={onSaveCredentials} />
                       )}
                       {selected.models.length ? (
-                        selected.models.map((m) => modelRow(m, selected, false))
+                        <ModelList key={selected.provider} kind={kind} first={selected} limit={PAGE} row={(m) => modelRow(m, selected, false)} loadOnScroll />
                       ) : (
                         <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No models of this kind here"}</div>
                       )}
@@ -280,6 +291,73 @@ export function ModelPicker({
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+/**
+ * One provider's models: the page already loaded (`first`), then the next pages of the same provider (and search)
+ * when the list is scrolled to its end (`loadOnScroll`) or "Show more" is pressed. Says how many of how many it shows.
+ * Remounted per provider and search, so switching back starts from the first page again and stays cheap.
+ */
+function ModelList({
+  kind,
+  first,
+  q,
+  limit,
+  row,
+  loadOnScroll = false,
+}: {
+  kind: "language" | "transcription";
+  first: PickerProvider;
+  q?: string | undefined;
+  limit: number;
+  row: (m: PickerModel) => ReactNode;
+  loadOnScroll?: boolean;
+}) {
+  const trpc = useTRPC();
+  const [more, setMore] = useState(false);
+  const rest = useInfiniteQuery(
+    trpc.admin.models.catalog.infiniteQueryOptions(
+      { kind, provider: first.provider, limit, ...(q ? { q } : {}) },
+      {
+        initialCursor: first.nextCursor,
+        getNextPageParam: (last) => last.providers[0]?.nextCursor ?? undefined,
+        enabled: more && !!first.nextCursor,
+      },
+    ),
+  );
+  const models = useMemo(() => {
+    if (!more || !rest.data) return first.models;
+    const seen = new Set(first.models.map((m) => m.id));
+    const out = [...first.models];
+    for (const page of rest.data.pages)
+      for (const m of page.providers[0]?.models ?? [])
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          out.push(m);
+        }
+    return out;
+  }, [first.models, more, rest.data]);
+  const hasMore = more ? rest.isPending || rest.hasNextPage : !!first.nextCursor;
+  const loadMore = () => (more ? void rest.fetchNextPage() : setMore(true));
+  const sentinel = useLoadMoreSentinel(loadMore, loadOnScroll && hasMore && !rest.isFetching);
+  return (
+    <>
+      {models.map((m) => row(m))}
+      {models.length < first.total && (
+        <div ref={sentinel} className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-ink3">
+          <span>
+            Showing {num.format(models.length)} of {num.format(first.total)}
+            {q ? " matches" : ""}
+          </span>
+          {hasMore && (
+            <button type="button" className="rounded-[6px] px-1.5 py-0.5 hover:bg-sunk disabled:opacity-60" disabled={rest.isFetching} onClick={loadMore}>
+              {rest.isFetching ? "Loading…" : "Show more"}
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

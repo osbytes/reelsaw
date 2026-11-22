@@ -23,6 +23,7 @@ import { AssetLightbox, DeleteAssetDialog, UploadJobs, useBumperActions, useBump
 import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
 import { Modal, Notice } from "./ui";
 import { useRestoreWindow } from "../lib/retention";
+import { useDebounced } from "../lib/useDebounced";
 
 type Out = inferRouterOutputs<AppRouter>;
 type RemoteItem = Out["library"]["search"]["items"][number];
@@ -42,15 +43,6 @@ export interface PickedAsset {
 }
 
 const PAGE = 24;
-
-function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 /** true once the element has been on screen (stays true), so a source's query runs lazily */
 function useSeen(ref: React.RefObject<Element | null>) {
