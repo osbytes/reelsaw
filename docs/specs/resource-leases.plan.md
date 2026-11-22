@@ -53,8 +53,9 @@ so for the minutes both run they do not see each other's disk claims. A single-h
 - [x] 3.3 `FREE_RESERVE_CORES` EE setting (`Grants.reserveCores` on Free): a Free pass gets only the cores above the
       reserve (floor one thread), a Free render is requeued while paid leases' cores reach into it (rows carry `reserved`). Never the
       whole machine (at most capacity − 1). The matching memory reserve is left for later.
-- [x] 3.5 No starvation: a deferral reschedules the job without spending an attempt (`started_on` cleared, so pg-boss
-      does not count it), raises its priority one point per deferral up to `DEFERRAL_AGING_MAX` (1, below the lowest
+- [x] 3.5 No starvation: a deferral puts the job back through pg-boss's API (fenced `deleteJob` + `send` under the same id, one
+      transaction) with the attempts it had left, so a wait spends none; it
+      raises its priority one point per deferral up to `DEFERRAL_AGING_MAX` (1, below the lowest
       paid plan's +2: Slurm's capped age factor), and after `RESERVE_BYPASS_DEFERRALS` (3) the reserve lets it through.
       The owner sees "waiting for render capacity" (`clip.capacity_wait`) with the next plan's offer in the project's
       upgrade line (`me.capacity`).

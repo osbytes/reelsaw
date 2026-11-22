@@ -572,7 +572,8 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   cores / 2400 MB up to Pro 8 / 9600). A CPU pass past it gets fewer threads, down to one, and never waits. A render
   past its memory, or a Free render while paid work's leased cores reach into the last `FREE_RESERVE_CORES`, is
   refused as the account's (`AccountCeilingError`, "Waiting for capacity: …"): the worker reschedules the job as if it
-  had never started (`deferForCapacity`: no attempt spent, back in 15, 30, then 60 s with jitter), counts the
+  had never started (`deferForCapacity`, pg-boss API only: the attempt is deleted, fenced to it, and the job sent again under
+  the same id in one transaction; no attempt spent, back in 15, 30, then 60 s with jitter), counts the
   deferral in its data and raises its priority by one point, at most `DEFERRAL_AGING_MAX` (1, below Starter's +2), so
   the longest-waiting Free render goes first among Free work and never past a paying account's. After
   `RESERVE_BYPASS_DEFERRALS` (3) the reserve lets it through: busy paid work delays a Free render by a few minutes,

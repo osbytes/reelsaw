@@ -78,21 +78,52 @@ export function deferralDelaySeconds(deferrals: number, random = Math.random): n
 
 /**
  * A render refused by its account's ceiling or the paid reserve (resources.ts `AccountCeilingError`) goes back to the
- * queue as if it had never started: state `retry` with `started_on` cleared (so pg-boss's next fetch does not count an
- * attempt), `start_after` the backoff, one more deferral in its data (past RESERVE_BYPASS_DEFERRALS the reserve lets it
- * through) and up to DEFERRAL_AGING_MAX points of priority. pg-boss's own completion of the handler then finds the row
- * no longer active and leaves it (the worker is not transactional). Its slot takes the next job in fair-share order.
+ * queue through pg-boss's own API, as one transaction: the running attempt is deleted (fenced to this attempt, so a
+ * worker that lost its claim changes nothing) and the job is sent again under the same id and singleton key, with one
+ * more deferral in its data (past RESERVE_BYPASS_DEFERRALS the reserve lets it through), up to DEFERRAL_AGING_MAX
+ * points of priority, `startAfter` the backoff, and the attempts it has left (a wait spends none). pg-boss's own
+ * completion of the handler then finds no active row and leaves it. Its slot takes the next job in fair-share order.
+ * False when the attempt was no longer this worker's to put back.
  */
-export async function deferForCapacity(svc: Services, jobId: string, deferrals: number): Promise<void> {
-  await svc.database.pool.query(
-    `update pgboss.job
-        set state = 'retry', started_on = null, heartbeat_on = null,
-            start_after = now() + make_interval(secs => $2),
-            priority = priority + $3,
-            data = jsonb_set(data, '{deferrals}', to_jsonb($4::int))
-      where id = $1 and state = 'active'`,
-    [jobId, deferralDelaySeconds(deferrals), deferrals <= DEFERRAL_AGING_MAX ? 1 : 0, deferrals],
-  );
+export async function deferForCapacity(
+  svc: Pick<Services, "database" | "queue">,
+  queue: string,
+  job: { id: string; retryCount: number },
+  deferrals: number,
+): Promise<boolean> {
+  const { boss } = svc.queue;
+  const client = await svc.database.pool.connect();
+  const db = { executeSql: (text: string, values?: unknown[]) => client.query(text, values) };
+  try {
+    await client.query("begin");
+    const row = await boss.getJobById<Record<string, unknown>>(queue, job.id, { db });
+    const gone = row?.state === "active" ? await boss.deleteJob(queue, { id: job.id, retryCount: job.retryCount }, { db }) : null;
+    if (!row || !(gone as { affected?: number } | null)?.affected) {
+      await client.query("rollback");
+      return false;
+    }
+    // null: another job for this clip was queued meanwhile (a re-render); it renders the clip instead
+    await boss.send(
+      queue,
+      { ...row.data, deferrals },
+      {
+        id: job.id,
+        ...(row.singletonKey ? { singletonKey: row.singletonKey } : {}),
+        priority: row.priority + (deferrals <= DEFERRAL_AGING_MAX ? 1 : 0),
+        startAfter: deferralDelaySeconds(deferrals),
+        expireInSeconds: row.expireInSeconds,
+        retryLimit: Math.max(0, row.retryLimit - row.retryCount),
+        db,
+      },
+    );
+    await client.query("commit");
+    return true;
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Seconds of media a job worked on: the source's length, or the clip's for prepare and render. Null before ingest knows it. */
@@ -412,7 +443,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           // never wait in this slot for the account's own work to end: back to the queue, the slot takes the next job
           const deferrals = (job.data.deferrals ?? 0) + 1;
           log.info({ reason: err.message, bound: err.bound, deferrals }, "render back to the queue until the account has capacity");
-          await deferForCapacity(svc, job.id, deferrals);
+          await deferForCapacity(svc, QUEUES.render, job, deferrals);
           // once per job: the owner sees why the clip waits (and, on a plan with a next one, the upgrade offer)
           if (deferrals === 1) await svc.events.emit("clip.capacity_wait", { projectId, clipId, bound: err.bound }).catch(() => {});
           return;

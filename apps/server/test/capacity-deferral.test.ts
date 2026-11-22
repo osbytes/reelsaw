@@ -1,5 +1,5 @@
 /**
- * A render refused by its account's capacity goes back to pg-boss as if it had never started (queue/workers.ts
+ * A render refused by its account's capacity goes back to pg-boss through its own API (queue/workers.ts
  * `deferForCapacity`): no attempt spent, one more deferral in its data, a capped priority bump, and a backoff. Runs
  * against the local stack's Postgres (TEST_DATABASE_URL) on a throwaway pg-boss queue no worker listens on.
  */
@@ -32,14 +32,6 @@ describe("deferForCapacity (pg-boss)", () => {
   let pool: pg.Pool;
   let boss: PgBoss;
   const name = `test.capacity-${randomUUID().slice(0, 8)}`;
-  const row = async (id: string) =>
-    (
-      await pool.query<{ state: string; retry_count: number; started_on: Date | null; priority: number; data: { deferrals?: number }; wait: number }>(
-        "select state, retry_count, started_on, priority, data, extract(epoch from start_after - now())::int as wait from pgboss.job where id = $1",
-        [id],
-      )
-    ).rows[0];
-
   before(async () => {
     pool = db();
     boss = new PgBoss({ db: { executeSql: (text, values) => pool.query(text, values) }, schema: "pgboss", useListenNotify: false });
@@ -53,26 +45,54 @@ describe("deferForCapacity (pg-boss)", () => {
     await pool.end();
   });
 
-  it("puts the job back without spending an attempt, aged and counted, and pg-boss's completion leaves it", async () => {
-    const svc = { database: { pool } } as never;
-    const id = await boss.send(name, { clipId: "c1" });
+  it("puts the job back through pg-boss without spending an attempt, aged and counted, under the same id", async () => {
+    const svc = { database: { pool }, queue: { boss } } as never;
+    const id = await boss.send(name, { clipId: "c1" }, { singletonKey: "clip:c1", priority: -2 });
     assert.ok(id);
     for (let deferrals = 1; deferrals <= DEFERRAL_AGING_MAX + 2; deferrals++) {
-      await pool.query("update pgboss.job set start_after = now() where id = $1", [id]);
+      await boss.update(name, undefined, { id, startAfter: new Date() }); // skip the backoff
       const [job] = await boss.fetch(name);
       assert.equal(job?.id, id);
-      await deferForCapacity(svc, id, deferrals);
-      const r = await row(id);
+      assert.ok(job);
+      assert.equal(await deferForCapacity(svc, name, job, deferrals), true);
+      const r = await boss.getJobById<{ clipId: string; deferrals?: number }>(name, id);
       assert.ok(r);
-      assert.equal(r.state, "retry");
-      assert.equal(r.started_on, null, "the next fetch does not count an attempt");
-      assert.equal(r.retry_count, 0, "no attempt spent");
-      assert.equal(r.data.deferrals, deferrals);
-      assert.equal(r.priority, Math.min(deferrals, DEFERRAL_AGING_MAX), "one point per deferral, capped");
-      assert.ok(r.wait >= 10 && r.wait <= 75, `back within a minute or so (${r.wait} s)`);
+      assert.equal(r.state, "created");
+      assert.equal(r.retryCount, 0, "no attempt spent");
+      assert.equal(r.retryLimit, 2, "the attempts it had left");
+      assert.equal(r.singletonKey, "clip:c1");
+      assert.deepEqual(r.data, { clipId: "c1", deferrals });
+      assert.equal(r.priority, -2 + Math.min(deferrals, DEFERRAL_AGING_MAX), "one point per deferral, capped");
+      const wait = (r.startAfter.getTime() - Date.now()) / 1000;
+      assert.ok(wait >= 10 && wait <= 75, `back within a minute or so (${wait} s)`);
       // the handler returns after deferring: pg-boss completes what is still active, which this row no longer is
       await boss.complete(name, id);
-      assert.equal((await row(id))?.state, "retry");
+      assert.equal((await boss.getJobById(name, id))?.state, "created");
     }
+  });
+
+  it("a real failure before the wait keeps counting: the attempts left carry over", async () => {
+    const svc = { database: { pool }, queue: { boss } } as never;
+    const id = await boss.send(name, { clipId: "c2" }, { singletonKey: "clip:c2" });
+    assert.ok(id);
+    await boss.fetch(name);
+    await boss.fail(name, id, { message: "ffmpeg crashed" });
+    await boss.update(name, undefined, { id, startAfter: new Date() }); // skip the backoff
+    const [job] = await boss.fetch(name);
+    assert.equal(job?.retryCount, 1);
+    assert.ok(job);
+    await deferForCapacity(svc, name, job, 1);
+    const r = await boss.getJobById(name, id);
+    assert.equal(r?.retryLimit, 1, "two attempts, one spent: one left");
+  });
+
+  it("an attempt this worker no longer holds is left alone", async () => {
+    const svc = { database: { pool }, queue: { boss } } as never;
+    const id = await boss.send(name, { clipId: "c3" });
+    assert.ok(id);
+    const [job] = await boss.fetch(name);
+    assert.ok(job);
+    assert.equal(await deferForCapacity(svc, name, { id, retryCount: job.retryCount + 1 }, 1), false, "another attempt's claim");
+    assert.equal((await boss.getJobById(name, id))?.state, "active");
   });
 });
