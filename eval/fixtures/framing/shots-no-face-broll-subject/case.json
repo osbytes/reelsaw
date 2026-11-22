@@ -1,0 +1,96 @@
+{
+  "kind": "shots",
+  "note": "VOA news package on US shipbuilding (standard licence: url and time only, no frames committed), 0:00-2:30: b-roll between interviews. Labelled by eye from a 1 fps contact sheet of 0-150 s and frames with a 0.1-width grid. Subject shots: a submarine's wake crossing a fleet at sea (0-4.9 s, moving right from x 0.33 to 0.50), a worker on an orange lift against a hull (41.8-44.2 s, x 0.45), a worker at a machine on the right of a factory floor (126-129.2 s, x 0.80, profile face in 58% of frames). Must stay whole: the bar-chart animation (64.3-70.9 s, text and growing bars), a sailor waving a flag at the bow's tip of a docked ship (59.5-61.4 s: the ship is the subject, the moving flag is at the frame's edge) and a wide dockside carrier (44.2-46.7 s, motion spread). The other shots (interviews, factory b-roll with diffuse motion) are not labelled.",
+  "source": {
+    "id": "voa-ships-0-150",
+    "url": "https://www.youtube.com/watch?v=AK0A6L6-agU",
+    "start": 0,
+    "end": 150,
+    "sha256": "c4af9c901a0a7f9e28c1a96613f01410a641131596ea449785c10e912f8597fb"
+  },
+  "start": 0,
+  "end": 150,
+  "srcW": 1920,
+  "srcH": 1080,
+  "sceneCuts": [
+    4.92,
+    7.84,
+    9.56,
+    11.44,
+    14.8,
+    19.8,
+    24.56,
+    26.8,
+    29.2,
+    32.76,
+    35.84,
+    38.88,
+    41.76,
+    44.16,
+    46.68,
+    53.04,
+    59.52,
+    61.4,
+    64.28,
+    70.88,
+    77.52,
+    80,
+    84.4,
+    86.56,
+    91.44,
+    94.92,
+    100.28,
+    102.56,
+    104,
+    104.92,
+    107.4,
+    110.44,
+    124.36,
+    125.04,
+    126.04,
+    129.24,
+    135.52,
+    139.16,
+    143.36,
+    148.36
+  ],
+  "expect": {
+    "minAgreement": 0.9,
+    "faceTol": 0.08,
+    "windows": [
+      {
+        "from": 0.3,
+        "to": 4.9,
+        "layout": "subject",
+        "subject": 0.4
+      },
+      {
+        "from": 41.8,
+        "to": 44.1,
+        "layout": "subject",
+        "subject": 0.45
+      },
+      {
+        "from": 44.2,
+        "to": 46.6,
+        "layout": "fit"
+      },
+      {
+        "from": 59.6,
+        "to": 61.4,
+        "layout": "fit"
+      },
+      {
+        "from": 64.3,
+        "to": 70.8,
+        "layout": "fit"
+      },
+      {
+        "from": 126.1,
+        "to": 129.2,
+        "layout": "subject",
+        "subject": 0.8
+      }
+    ]
+  }
+}

@@ -49,6 +49,7 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
 
 /**
  * auto   – detect faces per clip: big face → "face", webcam-in-corner/small face → "stack", no face → "fit";
+ *          no face but one clearly moving subject (b-roll, a product in the hand) → "center" following it (`DetectedSegment.focus`);
  *          a picture inset between bars (a phone video in a 16:9 edit) → "fit" showing just the inset (`DetectedSegment.inset`)
  * face   – 9:16 crop that follows the detected face (falls back to center crop when none is found)
  * split  – two speakers, one crop stacked above the other
@@ -60,7 +61,7 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
 export const reframeModeSchema = z
   .enum(["auto", "face", "split", "stack", "fit", "center", "none"])
   .describe(
-    "Framing: auto (detect per section; a video inset between bars, like a phone clip in a 16:9 edit, is cropped to the inset), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)",
+    "Framing: auto (detect per section; a shot without a face follows its moving subject when one clearly stands out, else shows whole; a video inset between bars, like a phone clip in a 16:9 edit, is cropped to the inset), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)",
   );
 export type ReframeMode = z.infer<typeof reframeModeSchema>;
 
@@ -812,6 +813,11 @@ export interface DetectedSegment {
    * output shows just this part of the source: filling the frame when it is 9:16, else at its own shape over a blurred copy
    */
   inset?: ContentRegion;
+  /**
+   * "center" only (automatic): a shot without a usable face whose crop follows its moving subject (a ship, a car, a product
+   * in the hand) along `track`, instead of the frame's centre
+   */
+  focus?: "subject";
 }
 
 /**

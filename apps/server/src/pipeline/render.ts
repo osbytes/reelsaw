@@ -543,7 +543,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
   const first = segments[0]!;
   const summary = segments
-    .map((sg) => `${sg.decision.inset ? "inset" : sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`)
+    .map(
+      (sg) =>
+        `${sg.decision.inset ? "inset" : sg.decision.focus ? "subject" : sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`,
+    )
     .join(", ");
   log.info(
     { layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount, sceneCuts: { n: sceneCuts.length, from: cutsFrom } },
@@ -561,6 +564,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}),
         ...(sg.decision.tile ? { tile: sg.decision.tile } : {}),
         ...(sg.decision.inset ? { inset: sg.decision.inset } : {}),
+        ...(sg.decision.focus ? { focus: sg.decision.focus } : {}),
       })),
       faceSamples: samples.length,
       sceneCuts: sceneCuts.length,
@@ -594,6 +598,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       ...(sg.decision.layout === "stack" && sg.decision.content ? { content: sg.decision.content } : {}),
       ...(sg.decision.layout === "stack" && sg.decision.tile ? { tile: sg.decision.tile } : {}),
       ...(sg.decision.layout === "fit" && sg.decision.inset ? { inset: sg.decision.inset } : {}),
+      ...(sg.decision.layout === "center" && sg.decision.focus ? { focus: sg.decision.focus } : {}),
     };
   });
   await db

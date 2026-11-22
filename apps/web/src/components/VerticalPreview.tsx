@@ -49,6 +49,8 @@ export interface Framing {
   crop2?: ContentRegion | undefined;
   /** "fit": the picture is an inset between bars (detected); shown on its own like a fixed crop, but with nothing to drag */
   inset?: ContentRegion | undefined;
+  /** "center": the crop follows the moving subject of a shot without a face (detected), not the frame's centre */
+  focus?: "subject" | undefined;
 }
 /** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
 export type PaneHit = 0 | 1 | "top";

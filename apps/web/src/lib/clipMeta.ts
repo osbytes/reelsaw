@@ -8,7 +8,7 @@ export interface MetaClip {
   layout: string | null;
   layoutOverride: string | null;
   layoutSections?: Array<{ mode: string }>;
-  layoutSegments?: Array<{ layout: string; inset?: unknown }>;
+  layoutSegments?: Array<{ layout: string; inset?: unknown; focus?: string | undefined }>;
   bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null;
   diagnostics?: {
     pauses?: { cuts: number; removedSec: number };
@@ -33,6 +33,17 @@ export interface Meta {
   warn: boolean;
 }
 
+/**
+ * The label key of a rendered piece: its layout, or what an automatic choice did inside it ("inset": a Whole frame
+ * that showed a picture inset between bars; "subject": a crop that followed the moving subject of a shot without a face).
+ * The one reading for the clip card and the editor (`layoutLabel`).
+ */
+export function pieceKind(s: { layout: string; inset?: unknown; focus?: string | undefined }): string {
+  if (s.layout === "fit" && s.inset) return "inset";
+  if (s.layout === "center" && s.focus === "subject") return "subject";
+  return s.layout;
+}
+
 function framing(c: MetaClip, labels: Record<string, string>): string | null {
   const segs = c.layoutSegments ?? [];
   const forced = (c.layoutSections?.length ?? 0) > 0 || (!!c.layoutOverride && c.layoutOverride !== "auto");
@@ -40,7 +51,8 @@ function framing(c: MetaClip, labels: Record<string, string>): string | null {
   if (!segs.length) return c.layout ? `${auto}${labels[c.layout] ?? c.layout}` : null;
   const names: string[] = [];
   for (const s of segs) {
-    const n = s.layout === "fit" && s.inset ? (labels.inset ?? "inset") : (labels[s.layout] ?? s.layout);
+    const k = pieceKind(s);
+    const n = labels[k] ?? k;
     if (names.at(-1) !== n) names.push(n);
   }
   return `${auto}${names.join(" → ")}${forced ? " (set)" : ""}`;

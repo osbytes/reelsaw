@@ -1,0 +1,50 @@
+{
+  "kind": "shots",
+  "note": "Cooking demo, corn cob chowder (standard licence: referenced by url and time only, no frames committed), 0:00-2:00: the cook's torso and hands at a kitchen counter, the face above the frame, cut with a full-screen recipe card. Labelled by eye from frames at 99.5-107.5 s (2 s apart, 0.1-width grid) and at 15/24/34/48/56/60 s. Subject: 98.9-108.5 s, two hands husking an ear of corn at x 0.45-0.65 over a still kitchen (the crop should sit on the hands, ~0.57; a face is seen in 3% of frames). Must stay whole: the recipe card (12.7-27.2 s: ingredients, directions and nutrition facts across the frame, nothing moving). Not labelled: the presenter shots with the face in frame (0-12.7, 27-33, 36-46, 62-99 s) and the husking shots where an arm sweeps across the counter (33-36, 46-62 s, motion spread wider than a 9:16 crop: fit or a subject crop are both defensible).",
+  "source": {
+    "id": "chia-demo",
+    "url": "https://www.youtube.com/watch?v=0BRsls4bqUI",
+    "start": 0,
+    "end": 761.894,
+    "sha256": "3ec2130254638e73ea068d715f5425eeb3263a00f5ff266efb17d9160f5fb168"
+  },
+  "start": 0,
+  "end": 120,
+  "srcW": 1920,
+  "srcH": 1080,
+  "sceneCuts": [
+    12.667,
+    27.233,
+    32.867,
+    36.267,
+    45.633,
+    46.7,
+    48.767,
+    51.6,
+    52.333,
+    53.4,
+    59.967,
+    60.9,
+    62,
+    98.867,
+    108.533,
+    109.733
+  ],
+  "expect": {
+    "minAgreement": 0.9,
+    "faceTol": 0.08,
+    "windows": [
+      {
+        "from": 12.8,
+        "to": 27.1,
+        "layout": "fit"
+      },
+      {
+        "from": 99.2,
+        "to": 108.4,
+        "layout": "subject",
+        "subject": 0.57
+      }
+    ]
+  }
+}

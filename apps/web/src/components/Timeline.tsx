@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
+import { pieceKind } from "../lib/clipMeta";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, LayoutTemplate } from "lucide-react";
@@ -81,10 +82,17 @@ export const MODE_LABEL: Record<string, string> = {
   none: "Original",
   /** not a mode: what an automatic Whole frame showed when it found a picture inset between bars */
   inset: "Inset video",
+  /** not a mode: an automatic crop that follows the moving subject of a shot without a face */
+  subject: "Follow subject",
 };
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"), a fit whether it showed an inset picture. */
-export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion; inset?: ContentRegion | undefined }) =>
-  d.layout === "stack" ? contentLabel(d.content, d.tile) : d.layout === "fit" && d.inset ? MODE_LABEL.inset : MODE_LABEL[d.layout];
+export const layoutLabel = (d: {
+  layout: string;
+  content?: ContentRegion;
+  tile?: ContentRegion;
+  inset?: ContentRegion | undefined;
+  focus?: string | undefined;
+}) => (d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[pieceKind(d)]);
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;
