@@ -19,7 +19,7 @@
  */
 import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from "ai";
 import { z } from "zod";
-import { clipCandidateSchema, rubricTotal, type ClipCandidate, type ClipScores, type TranscriptSegment } from "@reelsaw/shared";
+import { clipCandidateSchema, plural, rubricTotal, type ClipCandidate, type ClipScores, type TranscriptSegment } from "@reelsaw/shared";
 import { fmtTs } from "./transcript.js";
 import { abortOpt, callSignal } from "./steps.js";
 import { withLlmContext } from "../ai/trace.js";
@@ -170,7 +170,7 @@ export interface LlmOpts {
 
 /** Bump a prompt's version whenever its text changes: saved steps (job_steps) are keyed on it, so they stop applying. */
 export const MAP_PROMPT_VERSION = "map-1";
-export const SCORE_PROMPT_VERSION = "score-1";
+export const SCORE_PROMPT_VERSION = "score-2";
 
 /**
  * Structured output with two fallbacks for weak/local models: salvage the raw text of a schema
@@ -441,8 +441,8 @@ ${c.focus ? `- relevance: how directly it is about "${c.focus}".\n` : ""}Also re
 
 ${items.map((it) => `### Candidate ${it.id} (${Math.round(it.durationSec)}s)\n${it.text}`).join("\n\n")}
 
-Respond with JSON only:
-{"scores":[{"id":${items[0]?.id ?? 0},"hook":7,"flow":6,"value":8,"shareability":5,${c.focus ? `"relevance":9,` : ""}"emphasis":["word","word"]}]}`;
+Score every candidate: exactly ${plural(items.length, "entry", "entries")} in "scores", one per candidate id (${items.map((it) => it.id).join(", ")}). Respond with JSON only, in this shape (each <0-10> is your own integer for that candidate):
+{"scores":[${items.map((it) => `{"id":${it.id},"hook":<0-10>,"flow":<0-10>,"value":<0-10>,"shareability":<0-10>,${c.focus ? `"relevance":<0-10>,` : ""}"emphasis":["word","word"]}`).join(",")}]}`;
 }
 
 /** Candidates per scoring prompt. */
@@ -459,7 +459,11 @@ export function scoreBatches(items: ScoreInput[]): ScoreInput[][] {
  * One batch scored once (one sample): the raw items, ids mapped back to the candidates'. A sample the model could not
  * answer comes back empty; a cancelled or timed-out call is never swallowed.
  */
-export async function scoreSample(o: LlmOpts, batch: ScoreInput[], c: SelectContext, samples: number): Promise<ScoreItem[]> {
+export async function scoreSample(o: LlmOpts, given: ScoreInput[], c: SelectContext, samples: number, sample = 0): Promise<ScoreItem[]> {
+  // A judge scores a candidate up to 2 points lower in the last place of a batch than in the first: sample k reads the
+  // batch rotated by k places, so k samples see every candidate from k different places.
+  const shift = given.length ? sample % given.length : 0;
+  const batch = [...given.slice(shift), ...given.slice(0, shift)];
   // models number things from 1 and renumber per prompt: use local 1..k ids, map back afterwards
   const local = batch.map((it, i) => ({ ...it, id: i + 1 }));
   const r = await llmJson(o, buildScorePrompt(local, c), scoreSchema, "score", samples > 1 ? 0.7 : 0.2, salvageScores).catch((err) => {
@@ -471,7 +475,15 @@ export async function scoreSample(o: LlmOpts, batch: ScoreInput[], c: SelectCont
   const idsOk = got.every((s) => s.id >= 1 && s.id <= batch.length) && new Set(got.map((s) => s.id)).size === got.length;
   if (!idsOk && got.length === batch.length) return got.map((s, i) => ({ ...s, id: batch[i]!.id })); // trust order instead
   if (!idsOk) o.log?.warn({ ids: got.map((s) => s.id), batch: batch.length }, "scoring batch returned unusable ids");
-  return got.filter((s) => s.id >= 1 && s.id <= batch.length).map((s) => ({ ...s, id: batch[s.id - 1]!.id }));
+  const seen = new Set<number>();
+  const answered = got.filter((s) => s.id >= 1 && s.id <= batch.length && !seen.has(s.id) && seen.add(s.id)).map((s) => ({ ...s, id: batch[s.id - 1]!.id }));
+  // Small judges often answer only the first candidate of a batch. An unscored candidate ranks below every scored one
+  // whatever its quality, so each one the answer left out is asked again on its own (at most batch - 1 more calls).
+  const missing = batch.filter((it) => !answered.some((s) => s.id === it.id));
+  if (!missing.length || batch.length === 1) return answered;
+  o.log?.debug({ batch: batch.length, missing: missing.length }, "scoring batch left candidates out; scoring them one by one");
+  for (const it of missing) answered.push(...(await scoreSample(o, [it], c, samples, sample)));
+  return answered;
 }
 
 /** Median per criterion over every sample of every batch; the emphasis words most samples agree on. */
@@ -510,26 +522,6 @@ export function aggregateScores(items: ScoreInput[], c: SelectContext, results: 
     out.set(it.id, { scores, total: rubricTotal(scores), emphasis });
   }
   return out;
-}
-
-/** Score candidates in small batches, `samples` times each, median per criterion. */
-export async function scoreCandidates(
-  o: LlmOpts,
-  items: ScoreInput[],
-  c: SelectContext,
-  samples: number,
-  concurrency: number,
-  onProgress?: (done: number, total: number) => void,
-): Promise<Map<number, ScoreResult>> {
-  const batches = scoreBatches(items);
-  const jobs = batches.flatMap((b) => Array.from({ length: samples }, () => b));
-  let done = 0;
-  const results = await mapLimit(jobs, concurrency, async (batch) => {
-    const r = await scoreSample(o, batch, c, samples);
-    onProgress?.(++done, jobs.length);
-    return r;
-  });
-  return aggregateScores(items, c, results);
 }
 
 // ---------- 5. rank ----------

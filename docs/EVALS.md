@@ -294,6 +294,12 @@ Traps:
 - `matching` / `matchingKept`: candidates that match a creator span, and how many of them the
   relative score gate (`scoreGate`, analyze.ts, with the `.env` `ANALYZE_*` settings) keeps.
 - `picksFound`: shorts with at least one span recalled.
+- `inPool` (summary `creatorPoolRecall`): creator spans matched by any pooled candidate, whatever its rank. The
+  ceiling ranking can reach: a span missing from the pool is the map pass's miss, not the judge's.
+- `matchPercentile` (summary `creatorMatchPercentile`): mean rank percentile of the candidates that match a span
+  (1 = ranked first, 0.5 = what a random order gives). Finer than recall@N, which moves in whole spans.
+- `tied` (summary `creatorTiedShare`): the largest group of scored candidates sharing one rubric total, as a share
+  of the scored ones. A judge copying the prompt's example numbers shows up here.
 - Summary: `creatorRecallAtN`, `creatorPicksFound`, `creatorGateKeepsMatches` as k/n ratios with
   Wilson intervals (n is tiny: read them as a smoke test).
 
@@ -316,24 +322,39 @@ by loosening the IoU. `passRate` covers only the invariant cases.
 (cd apps/server && npx tsx src/eval/run.ts selection --offline)              # replays / uses candidates.json
 ```
 
-Recorded run (2026-10-18, `compat:qwen2.5:14b` on local Ollama, 1 score sample, no pairwise, as the
-pipeline runs a self-hosted judge; 44 LLM calls, 51 min; `candidates.json` in each fixture):
+Recorded runs (`compat:qwen2.5:14b` on local Ollama, all on the same map answers, so only scoring and
+ranking differ; `candidates.json` in each fixture is the last row's):
 
-| fixture | recall@N | N | best rank | gate keeps matches | our top N from the negative stretch |
+| run | recall@N | pool recall | match percentile | tied share | unscored |
 |---|---|---|---|---|---|
-| `dwarkesh-sheppard` | 1/6 (`_hH7vnTWnq8` 4076-4096 at rank 5) | 8 | 5 | 1/2 (fails) | 4 |
-| `huberman-kanoski` | 0/1 | 3 | none | n/a | 1 |
-| `lex-dhh` | 1/6 (13835-13877 at rank 5) | 8 | 5 | 1/1 | 2 |
+| 2026-10-18 recorded (score-1 prompt, 1 sample) | 2/13 = 0.15 | 3/13 | 0.75 (3 matches) | 17/38 = 0.45 | 25/63 |
+| 2026-11-21 live, score-1, 1 sample | 3/13 = 0.23 | 5/13 | | | 35/96 |
+| live, score-1, 3 samples | 3/13 = 0.23 | 5/13 | | | |
+| live, score-2, 3 samples (rotated) | 2/13 = 0.15 | 5/13 | 0.47 | | 0 |
+| live, score-2, 1 sample, pairwise 1 pass | 3/13 = 0.23 | 5/13 | 0.56 | 0.16 | 0 |
+| **live, score-2, 1 sample (the default)** | **3/13 = 0.23** | **5/13** | **0.56** | **15/96 = 0.16** | **0** |
 
-Summary: recall@N 2/13 = 0.15 (95% CI 0.04-0.42), shorts with a span found 2/5. What it says:
-- **The right moment, the wrong bounds.** Huberman: our rank-1 candidate (6397-6449, "Rewiring
-  Cravings") is the creator's moment, but starts 21 s late and runs 35 s past it (IoU 0.23).
-- **The judge cannot separate candidates.** One sample from a 14B model gives most candidates the same
-  total (68); ties keep pool order, so rank among them is noise, and moments from the negative stretch
-  (which the creator did not cut) fill a quarter to a half of the top N.
-- **The relative gate collapses on ties.** With most totals equal, MAD = 0 and the threshold is the
-  median: on Dwarkesh it drops a candidate matching the creator's "How Spain Got Rich" span (total
-  39 against a threshold of 68).
+What it says:
+- **The ties and the unscored third were a prompt defect, not the judge.** The score prompt's JSON example listed
+  one candidate with hook 7, flow 6, value 8, shareability 5, which is a rubric total of exactly 68. qwen2.5:14b
+  answered only the first candidate of a batch of 4 (a third of the pool was unscored and ranked last, whatever its
+  quality) and gave the example's numbers to many of the rest. `score-2` shows one entry per candidate with no
+  numbers to copy, and `scoreSample` asks again, one by one, for any candidate an answer leaves out. The tie share
+  fell from 0.45 to 0.16 and every candidate is scored.
+- **The judge itself is near chance on these moments.** With every candidate scored, the candidates matching a
+  creator span sit at a mean rank percentile of 0.47-0.56; random order gives 0.5. Two of the creator's Dwarkesh
+  moments (the Aztec capture culture, 4258-4300) are scored at the bottom of 40 in every run. More samples (3,
+  rotated so each candidate is read from 3 places of its batch) and a pairwise pass do not move recall@N, so a
+  self-hosted judge keeps 1 sample and no pairwise. Recall@N 2-3/13 is the noise band at n = 13.
+- **Position bias inside a batch.** The same candidate scores about 2 points lower in the last place of a batch than
+  in the first (probe: reversed batches). Samples beyond the first read the batch rotated.
+- **The pool is the ceiling.** 5/13 spans have a candidate at IoU >= 0.3 anywhere in the pool; 4 more have one at
+  0.18-0.28. The map pass proposes short clips (median 29 s, creators' spans median 42 s, and creators stitch
+  several spans into one short of 87-255 s), so better ranking alone cannot pass 5/13 here.
+- **Bounds have no one-sided bias to snap away.** Against the nearest creator span our clips start from 8 s early
+  to 74 s late and end from 71 s early to 28 s late; Huberman's rank-1 "starts late, runs past" (2026-10-18) is one
+  side of that spread. Snapping keeps the model's proposal (it only grows a clip to the minimum), so the bounds are
+  the map model's, not `snapCandidate`'s.
 - Long creator spans (the 124 s Spain short, the 100 s Lex piece) can only be matched loosely by a
   60 s clip; that is the length setting, not the picker.
 
