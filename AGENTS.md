@@ -18,6 +18,11 @@ Radix), `packages/shared` (zod schemas, shared geometry/caption helpers; rebuild
 `pnpm --filter @reelsaw/shared build` after changing it).
 `website/` is reelsaw.com (Next.js, own lockfile, outside the pnpm workspace; see `website/README.md`).
 
+Before writing a helper or a module, search for an existing one. If you copy or mirror existing code on
+purpose, mark the copy `// dup-of: <path>#<symbol>`; `pnpm guards` (the dup-of ledger, the lint ratchet in
+`scripts/lint-baseline.json`, no vendor agent files) fails CI when a third use is due or a lint count rises.
+The recurring audit is `.agents/skills/project-audit/`.
+
 Every `git commit` uses `-s` so the DCO trailer is on the commit (`CONTRIBUTING.md`); the
 lefthook commit-msg hook (`lefthook.yml`, installed by `pnpm install`) adds it too. Forgot on a
 pushed branch: `git rebase --signoff origin/main &&
@@ -28,7 +33,7 @@ Everyday commands:
 ```bash
 pnpm --filter @reelsaw/web build                      # web bundle (served by the app)
 (cd apps/server && npx tsc --noEmit -p .)             # typecheck server
-pnpm format && pnpm lint                              # Biome format + lint (biome.json); CI fails on either
+pnpm format && pnpm lint && pnpm guards               # Biome format + lint (biome.json), repo guards; CI fails on any
 (cd apps/web && npx tsc --noEmit -p .)                # typecheck web
 docker compose --profile local-ai up -d --build app   # deploy locally (http://localhost:3100)
 docker builder prune -f --keep-storage 3GB; docker image prune -f   # keep Docker's disk in check
