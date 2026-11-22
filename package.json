@@ -11,6 +11,7 @@
     "lint": "biome lint",
     "lint:fix": "biome lint --write",
     "lint:ratchet": "node scripts/lint-ratchet.mjs",
+    "clones": "node scripts/clones.mjs",
     "guards": "node scripts/check-agent-files.mjs && node scripts/dup-ledger.mjs --check && node scripts/lint-ratchet.mjs",
     "format": "biome format --write",
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
@@ -29,6 +30,8 @@
     "@biomejs/biome": "2.5.15",
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
+    "jscpd": "5.4.3",
+    "knip": "5.88.1",
     "lefthook": "2.2.2",
     "typescript": "5.9.3"
   }
