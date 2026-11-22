@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/osbytes/reelsaw/security/advisories/new
+    about: Report privately. Never in a public issue (SECURITY.md).
+  - name: Question, help installing, or an idea to discuss
+    url: https://github.com/osbytes/reelsaw/discussions
+    about: Ask and discuss here.
