@@ -18,11 +18,11 @@ import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
 import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, tightenOverlays, dropFaceOverlaps, mergeRegions } from "./overlays.js";
-import { speechSegments, planPauseTrim } from "../audio/vad.js";
+import { speechSegments, planPauseTrim, VAD_SR } from "../audio/vad.js";
 import { measureLoudness, speechGainDb, PEAK_LIMITER, type Loudness } from "../audio/loudness.js";
 import { clipPcm } from "../audio/pcm.js";
 import { alignWordTimes } from "../audio/align.js";
-import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
+import { activeSpeakers, speechAt } from "./speaker.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken, upperCase } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
@@ -493,16 +493,21 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         const a = trackCenter(sg.decision.track).x;
         const b = trackCenter(sg.decision.track2).x;
         const tl = await activeSpeakers(
-          { faces: svc.faces, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal },
+          { faces: svc.faces, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal, asd: svc.asd },
           sourcePath,
           at + sg.start,
           sg.end - sg.start,
           [a, b],
           speechAt(speechProbs, sg.start),
-          envelopeAt(clipAudio!, sg.start),
+          clipAudio!.subarray(Math.round(sg.start * VAD_SR), Math.round(sg.end * VAD_SR)),
+          { srcAspect: srcW / srcH },
         );
         const confident = tl.confidence >= 0.5;
-        log.info({ segment: [sg.start, sg.end], confidence: tl.confidence, runs: tl.runs, used: confident && tl.runs.length > 0 }, "active speaker detection");
+        if (tl.fallback) log.warn({ segment: [sg.start, sg.end], err: tl.fallback }, "active speaker model failed; used the synchrony heuristic");
+        log.info(
+          { segment: [sg.start, sg.end], method: tl.method, confidence: tl.confidence, runs: tl.runs, used: confident && tl.runs.length > 0 },
+          "active speaker detection",
+        );
         if (!confident || !tl.runs.length) {
           expanded.push(sg);
           continue;
@@ -521,7 +526,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
               track: tr,
               track2: undefined,
               faceSize: sg.decision.speakerSizes?.[r.who] ?? sg.decision.faceSize,
-              reason: `active speaker ${r.who === 0 ? "left" : "right"} (confidence ${tl.confidence})`,
+              reason: `active speaker ${r.who === 0 ? "left" : "right"} (${tl.method}, confidence ${tl.confidence})`,
             },
           });
         }

@@ -284,6 +284,10 @@ export const envSchema = z.object({
   // face detection for automatic layout (vision/faces.ts)
   FACE_DETECTION: boolTrue,
   FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ultraface-rfb-320.onnx")),
+  // learned active speaker detection (LR-ASD, vision/asd.ts) for two-person splits; false or a missing model = the
+  // mouth-motion synchrony heuristic (pipeline/speaker.ts)
+  ASD_MODEL: boolTrue,
+  ASD_MODEL_DIR: z.string().default(path.resolve(process.cwd(), "models/lr-asd")),
   // burned-in caption / watermark detection (PP-OCRv4 text detector); false = never hide source text
   TEXT_DETECTION: boolTrue,
   // voice activity detection (Silero VAD) for tightening long pauses; false = never trim silence

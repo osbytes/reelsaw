@@ -135,10 +135,12 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep. |
 | `FACE_MODEL_PATH` | `./models/ultraface-rfb-320.onnx` | UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
+| `ASD_MODEL` | `true` | LR-ASD audio-visual active speaker detection: who is talking in a two-person split, so the clip cuts to them. false, or model files missing (a warning at boot), = the older mouth-motion synchrony heuristic. Costs about a second of CPU per second of split footage. |
+| `ASD_MODEL_DIR` | `./models/lr-asd` | LR-ASD model directory (`audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx`). |
 | `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |
 | `VAD` | `true` | Silero voice activity detection for tightening long pauses. false = never trim silence. |
 | `ALIGNER` | `true` | wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search. |
-| `ONNX_EXECUTION_PROVIDER` | `cpu` | Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu \| cuda \| coreml \| dml`. Values: `cpu | cuda | coreml | dml`. |
+| `ONNX_EXECUTION_PROVIDER` | `cpu` | Where the face, text, alignment and active speaker models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu \| cuda \| coreml \| dml`. Values: `cpu | cuda | coreml | dml`. |
 | `ALIGN_MODEL_DIR` | `./models/wav2vec2-base-960h` | wav2vec2 model directory. |
 | `VAD_MODEL_PATH` | `./models/silero-vad.onnx` | Silero VAD ONNX model. |
 | `TEXT_MODEL_PATH` | `./models/ppocrv4-det.onnx` | PP-OCRv4 text detector ONNX model. |

@@ -270,7 +270,7 @@ export const GUIDES: Guide[] = [
         heading: "Two people in frame",
         bullets: [
           "Split: two speakers stacked top and bottom, when the shot has two faces and detection is confident.",
-          "Face: the crop follows whoever is talking, chosen by mouth motion correlated with the audio envelope, with a minimum of 2.5 seconds per shot so it never flickers.",
+          "Face: the crop follows whoever is talking, chosen by an audio-visual model that checks each mouth against the speech (a listener who laughs or drinks is not the talker), with a minimum of 2.5 seconds per shot so it never flickers.",
           "Stack: slides or a screen on top, the webcam tile below (the picture-in-picture box of a Zoom, Teams, Meet or OBS recording), for video podcasts that share a screen.",
           "Fit: the whole frame over a blurred background when there is no face, such as a title card or b-roll.",
           "Phone footage edited into the frame between blurred or black bars is cropped to the picture itself, so a vertical clip fills the vertical frame.",

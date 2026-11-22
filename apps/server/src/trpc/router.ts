@@ -988,6 +988,8 @@ const restRouter = router({
         text: ctx.svc.text?.provider ?? null,
         vad: ctx.svc.vad ? ("cpu" as const) : null,
         aligner: ctx.svc.aligner?.provider ?? null,
+        /** LR-ASD; null = speakers are followed by the synchrony heuristic */
+        asd: ctx.svc.asd?.provider ?? null,
       },
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,

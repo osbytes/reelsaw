@@ -94,9 +94,19 @@ threshold) are detected once per project before clip selection (`ensureSceneCuts
 kept on the transcript (a saved `scene-cuts` step the scenes refine step shares; a failed decode throws and retries rather than storing "no cuts"); a project from before that, or an imported report, has none, and the render
 detects them on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the
 layout always has the edits. The `layout resolved` log line says how many and from
-where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
-correlated with the audio envelope) runs only on `split` segments of 3 s or more. Static "faces"
-(posters, photos) are dropped first (`dropStaticFaces`).
+where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`) runs only on `split` segments of 3 s or more. It uses
+LR-ASD (`vision/asd.ts`, `ASD_MODEL`): faces detected at 12.5 fps and matched to the two seats, each
+seat's box median-smoothed over ±0.25 s, 112×112 grayscale crops at 25 fps scored against the segment's
+MFCCs (`audio/mfcc.ts`), a speaking logit per frame. During speech the face that clearly speaks leads
+(logit above 0 and 1 above the other); when only one face is visible, its logit decides between it and
+the other seat, which is how an off-camera interviewer is attributed. A leader takes the turn after
+0.6 s and runs under 2.5 s fold into their neighbours. Without the model (`ASD_MODEL=false`, files
+missing, or a failure on the segment, logged) the older heuristic runs: 10 fps mouth motion correlated
+with the audio envelope, with the same turn rules. The `active speaker detection` log line names the
+`method`. A third face about as large as the speakers' makes the result "unsure" (keep the split);
+printed faces do not count: `dropStaticFaces` finds boxes that never move, and of those the ones whose
+thumbnail still changes over a second (a still person blinks and breathes; a poster does not) are kept.
+Cost: about one second of CPU per second of split footage.
 
 **Order of rules in `decideLayout`** (first match wins):
 

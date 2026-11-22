@@ -32,6 +32,7 @@ import { loadFaceDetector, type FaceDetector } from "./vision/faces.js";
 import { loadTextDetector, type TextDetector } from "./vision/text.js";
 import { loadVad, type Vad } from "./audio/vad.js";
 import { loadAligner, type Aligner } from "./audio/align.js";
+import { loadAsdModel, type AsdModel } from "./vision/asd.js";
 import { createLogger, type Logger } from "./log.js";
 import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
 import { createUpdateChecker, type UpdateChecker } from "./updates.js";
@@ -82,6 +83,8 @@ export interface Services {
   releases: ReleaseFeed;
   /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
   aligner: Aligner | null;
+  /** LR-ASD active speaker model; null = the synchrony heuristic follows speakers (ASD_MODEL=false, or its files are missing) */
+  asd: AsdModel | null;
   /** null when VAD=false; then pauses are never trimmed. */
   vad: Vad | null;
   /** null when TEXT_DETECTION=false; then burned-in source text is never hidden. */
@@ -214,6 +217,28 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
         return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
       } catch (err) {
         throw new Error(`cannot load ${config.FACE_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set FACE_DETECTION=false.`);
+      }
+    },
+  );
+
+  // unlike the other detectors a missing speaker model does not stop boot: speaker following falls back to the
+  // synchrony heuristic it replaced, and Settings → System / `reelsaw machine` show which one runs
+  const asd = await step(
+    !config.ASD_MODEL
+      ? "active speaker model (disabled, heuristic)"
+      : detectors
+        ? "active speaker model (LR-ASD ONNX)"
+        : "active speaker model (skipped, no workers in this process)",
+    async () => {
+      if (!config.ASD_MODEL || !detectors) return null;
+      try {
+        return await loadAsdModel(config.ASD_MODEL_DIR, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "asd" }) });
+      } catch (err) {
+        log.warn(
+          { err, dir: config.ASD_MODEL_DIR },
+          'active speaker model unavailable; following speakers with the synchrony heuristic. Run "pnpm models:download" or set ASD_MODEL=false.',
+        );
+        return null;
       }
     },
   );
@@ -439,6 +464,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     text,
     vad,
     aligner,
+    asd,
     ee: null,
     eventHandlers,
     entitlements: null,
@@ -486,6 +512,7 @@ export async function shutdownServices(s: Services, opts: { afterQueueStop?: () 
   await s.text?.release().catch(() => {});
   await s.vad?.release().catch(() => {});
   await s.aligner?.release().catch(() => {});
+  await s.asd?.release().catch(() => {});
   await s.llmTrace.shutdown();
   await s.telemetry.shutdown();
   await s.events.stop().catch(() => {});

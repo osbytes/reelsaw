@@ -81,6 +81,7 @@ export async function systemInfo(svc: Services, instance: boolean, full: boolean
       text: svc.text?.provider ?? null,
       vad: svc.vad ? "cpu" : null,
       aligner: svc.aligner?.provider ?? null,
+      asd: svc.asd?.provider ?? null,
     },
     storage: svc.storage.driver,
     roles: { http: c.RUN_HTTP, workers: c.RUN_WORKERS },

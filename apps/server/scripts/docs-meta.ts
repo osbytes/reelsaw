@@ -268,9 +268,14 @@ export const DOCS: Record<string, [GroupId, string]> = {
   VAD_MODEL_PATH: ["local", "Silero VAD ONNX model."],
   ALIGNER: ["local", "wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search."],
   ALIGN_MODEL_DIR: ["local", "wav2vec2 model directory."],
+  ASD_MODEL: [
+    "local",
+    "LR-ASD audio-visual active speaker detection: who is talking in a two-person split, so the clip cuts to them. false, or model files missing (a warning at boot), = the older mouth-motion synchrony heuristic. Costs about a second of CPU per second of split footage.",
+  ],
+  ASD_MODEL_DIR: ["local", "LR-ASD model directory (`audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx`)."],
   ONNX_EXECUTION_PROVIDER: [
     "local",
-    "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`.",
+    "Where the face, text, alignment and active speaker models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`.",
   ],
   ASR_CACHE_DAYS: [
     "local",
@@ -565,6 +570,7 @@ export const ENV_VALUE: Record<"root" | "deploy", Record<string, string>> = {
     TEXT_MODEL_PATH: "apps/server/models/ppocrv4-det.onnx",
     VAD_MODEL_PATH: "apps/server/models/silero-vad.onnx",
     ALIGN_MODEL_DIR: "apps/server/models/wav2vec2-base-960h",
+    ASD_MODEL_DIR: "apps/server/models/lr-asd",
     WATERMARK_LOGO_PATH: "apps/server/assets/watermark.png",
     LOG_FILE: "/data/logs/reelsaw.log",
   },
