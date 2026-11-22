@@ -273,6 +273,7 @@ export const GUIDES: Guide[] = [
           "Face: the crop follows whoever is talking, chosen by mouth motion correlated with the audio envelope, with a minimum of 2.5 seconds per shot so it never flickers.",
           "Stack: slides or a screen on top, the webcam tile below (the picture-in-picture box of a Zoom, Teams, Meet or OBS recording), for video podcasts that share a screen.",
           "Fit: the whole frame over a blurred background when there is no face, such as a title card or b-roll.",
+          "Phone footage edited into the frame between blurred or black bars is cropped to the picture itself, so a vertical clip fills the vertical frame.",
           "Clips are split at scene cuts and face-presence changes, so one clip can open on a wide shot and switch to a talking head. Override any section in the editor.",
         ],
       },

@@ -47,6 +47,8 @@ export interface Framing {
   crop?: ContentRegion | undefined;
   /** a crop the user fixed on the bottom pane of a split */
   crop2?: ContentRegion | undefined;
+  /** "fit": the picture is an inset between bars (detected); shown on its own like a fixed crop, but with nothing to drag */
+  inset?: ContentRegion | undefined;
 }
 /** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
 export type PaneHit = 0 | 1 | "top";
@@ -137,6 +139,7 @@ export function paneRect(f: Framing, srcW: number, srcH: number, pane: 0 | 1): {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const fixed = pane === 0 ? f.crop : f.crop2;
   if (fixed) return tileCrop(srcW, srcH, fixed);
+  if (pane === 0 && f.layout === "fit" && f.inset) return tileCrop(srcW, srcH, f.inset);
   if (f.layout === "stack" && f.tile) return tileCrop(srcW, srcH, f.tile);
   if (f.layout === "split") {
     const c = speakerCrop(srcW, srcH, halfAspect, pane === 0 ? { cy: f.cy, size: f.size ?? 0.3 } : { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 });
@@ -986,9 +989,10 @@ function paint(
     draw(c.x, c.y, c.w, c.h, (W - c.w * fit) / 2, py + (ph - c.h * fit) / 2, c.w * fit, c.h * fit);
     ctx.restore();
   };
-  // a crop the user fixed on a whole-frame pane: that part of the source, at its own shape over a blurred copy
-  if (f.crop && f.layout !== "split" && f.layout !== "stack" && f.layout !== "none") {
-    fitted(tileCrop(srcW, srcH, f.crop), 0, H);
+  // a crop the user fixed on a whole-frame pane, or the inset picture of a fit: that part of the source, at its own shape over a blurred copy
+  const shown = f.crop ?? (f.layout === "fit" ? f.inset : undefined);
+  if (shown && f.layout !== "split" && f.layout !== "stack" && f.layout !== "none") {
+    fitted(tileCrop(srcW, srcH, shown), 0, H);
     return;
   }
 

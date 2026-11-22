@@ -79,10 +79,12 @@ export const MODE_LABEL: Record<string, string> = {
   fit: "Whole frame",
   center: "Centre crop",
   none: "Original",
+  /** not a mode: what an automatic Whole frame showed when it found a picture inset between bars */
+  inset: "Inset video",
 };
-/** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"). */
-export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion }) =>
-  d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[d.layout];
+/** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"), a fit whether it showed an inset picture. */
+export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion; inset?: ContentRegion | undefined }) =>
+  d.layout === "stack" ? contentLabel(d.content, d.tile) : d.layout === "fit" && d.inset ? MODE_LABEL.inset : MODE_LABEL[d.layout];
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;

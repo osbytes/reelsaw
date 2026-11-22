@@ -20,6 +20,7 @@ writing; search for the function name if they drifted.
 | `stack` with a webcam tile | the speaker is a picture-in-picture box (Zoom, Teams, Meet, OBS) over the screen or in a flat band beside it | the tile alone below, at its own aspect over a blurred copy of itself; on top the whole frame, or the frame without the tile's flat band | the small / corner rule above, or a face seen too rarely for `face` whose tile stands steady; `probeTiles` + `aggregateTile` (`webcam-tile.ts`): see thresholds below | the tile applies to a forced "Screen + speaker" too (it is the speaker's own bounds, not a content region); a drag on the pane moves the tile's window |
 | `stack` with a content region | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectContentRegion` (`content-region.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
 | `fit` | no usable face: graphics, b-roll, screencasts, slides | whole frame over a blurred background | face in under `LAYOUT_MIN_FACE_RATIO` of frames; or a text-heavy run (`fitTextHeavy`, `layout.ts:605`) | section mode "Whole frame" |
+| `fit` with an inset | a narrower picture in the middle of the frame between flat or blurred bars (pillarboxing): a phone video in a 16:9 edit, a square or 4:3 clip | just the picture: trimmed to exactly 9:16 and filling the frame when its shape is within 12% of 9:16, else fitted at its own aspect over a blurred copy of itself (`fitPane`) | `probeInset` + `insetRuns` (`inset.ts`): see thresholds below; overrides whatever the faces decided inside the run (a face crop would drift onto the bars) | none of its own: "Whole frame" shows the whole frame with the bars; a fixed crop on the section wins; the clip's `layoutSegments` carry `inset`, the editor labels the piece "Inset video" |
 | `center` | anything | static centre crop | only when there is no face detector, or a manual mode found no face | section mode "Centre crop" |
 | `none` | anything | original aspect, no reframing | manual / legacy only; mixed with other pieces it becomes `fit` | project reframe setting or legacy per-clip override |
 
@@ -46,6 +47,17 @@ Webcam-tile thresholds (`TILE`, `webcam-tile.ts`), from the 320x240 frames the f
 | per clip | rectangles clustered by position (every edge within 0.04); the cluster seen in at least 60% of the frames with the most frames wins, and a cluster seen in at least 90% as many frames that lies outside it wins over it (a line inside the webcam picture is a rectangle in some frames, the border in all) |
 | band | the strip from the tile to the frame edge it is flush with is a flat band when at most 10% of its pixels differ from its median luma by more than 0.08 (a name plate is a few percent), and the rest of the frame is at least 0.4 wide / tall; the top pane is then the frame without the band |
 | decision | `stack` with `tile { x1, y1, x2, y2 }` (and `content` = the frame minus the band); reason "… ; webcam tile top-right (x 0.87-1.00, y 0.08-0.22), in a flat band on the right" |
+
+Inset thresholds (`INSET`, `inset.ts`), from the same 320x240 frames:
+
+| signal | threshold |
+|---|---|
+| edges | a pair of columns mirrored about the centre (within 2 px), the left one between 6% and 42% of the width |
+| step | in at least 5 of 6 horizontal bands, at both edges: the vertical detail just inside (mean \|Δluma\| down the columns 2-7 px in) is at least 2x the detail just outside plus 0.4, or the luma jumps by 8+ across an edge whose outside is flat (under 1.5): a person in front of a plain wall has flat sides but no edge from top to bottom |
+| sides | the bars' mean detail at most 0.35x the picture's and at most 2.5 (blur measures 0.05-0.4 on 0-255 luma) |
+| shape | at most 1.37 wide:high in source pixels (4:3 and narrower); a wider "inset" is a frame with margins |
+| per clip | frames grouped by bounds (within 0.015, around the bounds most frames share); members up to 1 s apart, or 3 s with other insets between, form a stretch; kept when at least 2 s long with the inset in 70% of its frames; overlapping stretches: the longer wins. The picture's own cuts do not break a stretch, edges snap to a scene cut within 0.6 s |
+| decision | `fit` with `inset { x1, y1, x2, y2 }` (pulled 0.003 in from the bars, trimmed to 9:16 when close); reason "vertical video inside the frame (34–66% of the width), cropped to it" |
 
 Where the user can override: project setting `reframe` (`reframeModeSchema`, `packages/shared/src/index.ts:50`),
 per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; `coverTimeline`,
@@ -105,7 +117,9 @@ change is a real edge, so a piece between cuts may be as short as `MIN_SHOT_SEC`
 cuts every 3-4 s on average with many 1-2 s shots, and a multi-camera talk show alternating a
 close-up with a wide shot every 2 s must change layout at every edit (AutoFlip likewise decides per
 scene and resets at each shot boundary). Each piece runs `decideLayout` on its own samples, and
-neighbours with the same layout (and panel side) merge.
+neighbours with the same layout (and panel side) merge. Last, `insetRuns` stretches replace whatever
+was decided inside them with `fit` showing the inset (`overrideRuns`, the same folding rule as
+`fitTextHeavy` below).
 Content regions are segmented separately (`contentRuns`, `content-runs.ts`): runs of frames that voted for a
 panel (holes up to 0.75 s closed; gaps up to 4 s bridged when the divider stays at the same x),
 trimmed to the last voting frame plus one sample and snapped to a scene cut within 0.25 s. A run under
@@ -176,9 +190,10 @@ decision is stored per clip (`layoutSegments`, with `content`) and shown in the 
 - The reason text "app panel" vs "title card" is a guess from the number of text lines (5+ is an app).
 - 4:3 and vertical sources: the full-height crop is narrower than the source, so `face` barely moves;
   nothing special is done for vertical input, and content-region detection assumes a landscape composite.
-- Letterboxed or pillarboxed sources: the black bars are part of the frame; a pillar can look like a
-  divider (a bar is a strong straight edge) and the face-size thresholds are measured against the full
-  frame, not the picture. No fixture yet.
+- Pillarboxed pictures (black or blurred bars either side) are cropped to the picture (`fit` with an
+  inset). Not handled: letterboxing (bars above and below), a picture placed off centre, and a picture so
+  dark the bars cannot be told from it (a phone in a pocket shows whole). The face-size thresholds of a
+  shot the inset does not cover are still measured against the full frame.
 - Screen recordings with only a cursor have no face: `fit`.
 - Captions default to 72% of the height, over the speaker half of a panel stack; moved to the top they
   would sit on the panel.
@@ -201,13 +216,14 @@ committed samples (faces, plus text boxes and divider for `panel` cases), so it 
 | panel ends 1-3 s before the clip: the tail stays `face` | `panel-left-card-ends-before-clip`, `panel-left-card-ends-before-clip-2` |
 | `stack` with a webcam tile in a flat band (Zoom webinar, face seen in 3% of frames) | `tile-webinar-black-band` |
 | `stack` with a corner webcam tile over a screencast, no band | `tile-screencast-corner-webcam`, `shots-screencast-corner-webcam` (the tile check; the case still fails on the split, see below) |
+| `fit` with an inset: a 9:16 and a square phone clip between blurred bars, cut with a full-frame presenter | `shots-phone-inset-blur-bars` (negatives: every other shots / tile case's source shows no inset; `apps/server/test/inset.test.ts`) |
 | `fit`: no face (b-roll, graphics) | no fixture yet |
 | `fit`: text-heavy run over a speaker | no fixture yet |
 | negatives: lower-third text, text on both sides, room edges, narrow panel | unit tests only (`apps/server/test/side-panel.test.ts`); no real-footage fixture yet |
 | two faces close together, profile faces, glare, tiny webcam | no fixture yet |
 | presenter switching sides mid-clip, more than two speakers, fast swaps | no fixture yet |
 | dark title card without text detection, panel under the width threshold | no fixture yet |
-| letterboxed or pillarboxed source, 4:3 / vertical source | no fixture yet |
+| letterboxed source, 4:3 / vertical source | no fixture yet |
 | active-speaker following (needs audio) | covered by `speakers` suite, not framing |
 
 Adding a case from a bad clip: read what was decided with `docker compose exec app reelsaw clip <clipId>`

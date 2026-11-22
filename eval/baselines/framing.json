@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-24T20:25:51.105Z",
+  "updatedAt": "2026-11-22T00:36:15.003Z",
   "acceptedRegressions": [
     {
       "metric": "passRate",
@@ -26,7 +26,8 @@
     "track-4x3-interview": true,
     "tile-screencast-corner-webcam": true,
     "tile-webinar-black-band": true,
-    "shots-couch-multicam-guest-story": true
+    "shots-couch-multicam-guest-story": true,
+    "shots-phone-inset-blur-bars": true
   },
   "metrics": {
     "worstSpeakerOffset": {

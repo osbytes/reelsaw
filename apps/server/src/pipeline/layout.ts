@@ -6,6 +6,7 @@ import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
 import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
 import { probeTiles, aggregateTile, tileContent, tileReason, TILE, type TileProbe } from "./webcam-tile.js";
+import { probeInset, insetRuns, insetReason, type InsetProbe } from "./inset.js";
 
 /**
  * Layout thresholds config. Face sizes are normalized to the frame height, so their meaning shifts
@@ -70,6 +71,8 @@ export interface FaceSample {
   divider?: DividerProbe;
   /** rectangles that could be the webcam tile (picture-in-picture box) around the largest face, smallest first; `aggregateTile` picks one across frames */
   tiles?: TileProbe[];
+  /** a narrower picture in the middle of the frame, between flat or blurred bars (pillarboxing); `insetRuns` keeps the steady ones */
+  inset?: InsetProbe;
 }
 
 export interface LayoutDecision {
@@ -92,6 +95,8 @@ export interface LayoutDecision {
   contentSignals?: ContentSignals | undefined;
   /** "stack" only: the speaker is a webcam tile at these bounds; the speaker pane shows just the tile */
   tile?: ContentRegion | undefined;
+  /** "fit" only: the picture is an inset at these bounds (a phone video between blurred bars); the output shows just it */
+  inset?: ContentRegion | undefined;
 }
 
 export interface LayoutOptions {
@@ -149,7 +154,14 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       const boxes = await det.detect(px);
       const sorted = boxes.sort((a, b) => (b.x2 - b.x1) * (b.y2 - b.y1) - (a.x2 - a.x1) * (a.y2 - a.y1));
       const t = i / fps;
-      const sample: FaceSample = { t, box: sorted[0] ?? null, boxes: sorted, divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H) };
+      const inset = probeInset(px, FACE_INPUT_W, FACE_INPUT_H);
+      const sample: FaceSample = {
+        t,
+        box: sorted[0] ?? null,
+        boxes: sorted,
+        divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H),
+        ...(inset ? { inset } : {}),
+      };
       // the webcam tile around the face; a frame where the detector blinked (a tiny webcam face is missed
       // more often than not) is probed around the last face seen, or the next one, since a tile does not move
       if (sorted[0]) {
@@ -609,7 +621,53 @@ export function segmentLayouts(
     const { reasonSuffix, ...stack } = webcamStack(samples.filter((s) => s.t >= seg.start && s.t < seg.end));
     if (stack.tile) seg.decision = { ...seg.decision, ...stack, reason: `${seg.decision.reason}${reasonSuffix}` };
   }
-  return merged;
+  // a picture inset between bars (a phone video in a 16:9 edit) is shown on its own, whatever the
+  // faces inside it said: the bars are not part of the shot, and a face crop drifts onto them
+  const aspect = config.srcAspect ?? 16 / 9;
+  const insets = insetRuns(samples, duration, cuts, aspect);
+  if (!insets.length) return merged;
+  const out = overrideRuns(merged, insets, (r) => ({ ...staticDecision("fit", insetReason(r, aspect)), inset: r.region }));
+  return out.reduce<LayoutSegment[]>((acc, seg) => {
+    const last = acc[acc.length - 1];
+    if (last && sameFraming(last.decision, seg.decision)) last.end = seg.end;
+    else acc.push(seg);
+    return acc;
+  }, []);
+}
+
+/**
+ * Replace what `segments` decided inside each run with the run's own decision (`decide`). A sliver of
+ * a segment under `minPiece` before a run folds into it, one after a run folds into the run before
+ * it; a segment no run touches is kept whole, however short. `keep` leaves a segment alone.
+ */
+export function overrideRuns<S extends { start: number; end: number; decision: LayoutDecision }, R extends { start: number; end: number }>(
+  segments: S[],
+  runs: R[],
+  decide: (run: R) => LayoutDecision,
+  keep: (segment: S) => boolean = () => false,
+  minPiece = 1.5,
+): S[] {
+  if (!runs.length) return segments;
+  const out: S[] = [];
+  for (const sg of segments) {
+    if (keep(sg)) {
+      out.push(sg);
+      continue;
+    }
+    let t = sg.start;
+    for (const run of runs) {
+      const a = Math.max(run.start, sg.start);
+      const b = Math.min(run.end, sg.end);
+      if (b - a < minPiece) continue;
+      if (a - t >= minPiece) out.push({ ...sg, start: t, end: a });
+      const from = a - t < minPiece ? t : a;
+      out.push({ ...sg, start: from, end: b, decision: decide(run) });
+      t = b;
+    }
+    if (t === sg.start || sg.end - t >= minPiece) out.push({ ...sg, start: t, end: sg.end });
+    else out[out.length - 1]!.end = sg.end;
+  }
+  return out;
 }
 
 /** What the content-region logic saw and decided in one `segmentLayouts` call (debug log). */
@@ -623,11 +681,13 @@ export interface LayoutDiag {
 }
 export const newLayoutDiag = (): LayoutDiag => ({ frames: 0, voting: 0, candidates: [], decisions: [] });
 
-/** Same layout, and for a stack the same kind of region (content on the left and on the right are different framings). */
+/** Same layout, for a stack the same kind of region (content on the left and on the right are different framings), for a fit the same inset (or none). */
 export function sameFraming(a: LayoutDecision, b: LayoutDecision): boolean {
   if (a.layout !== b.layout) return false;
   const kind = (d: LayoutDecision) => (isFullFrame(d.content) ? "full" : (contentSide(d.content!) ?? "inset"));
-  return kind(a) === kind(b);
+  if (kind(a) !== kind(b) || !!a.inset !== !!b.inset) return false;
+  // two insets are one framing when their bounds agree (the same phone video across a cut)
+  return !a.inset || !b.inset || (["x1", "y1", "x2", "y2"] as const).every((k) => Math.abs(a.inset![k] - b.inset![k]) <= 0.02);
 }
 
 /** Re-base track points to a segment's own clock (t = 0 at segment start). */
@@ -1085,29 +1145,15 @@ export function textHeavyRuns(
 
 /** Auto segments show text-heavy spans whole (Whole frame) instead of cropping into the text. */
 export function fitTextHeavy(segments: ResolvedSegment[], runs: Array<[number, number]>, minPiece = 1.5): ResolvedSegment[] {
-  if (!runs.length) return segments;
-  const out: ResolvedSegment[] = [];
-  for (const sg of segments) {
-    // a content region is already shown whole on top (the text in it is why the frame looks text-heavy)
-    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none" || (sg.decision.content && !isFullFrame(sg.decision.content))) {
-      out.push(sg);
-      continue;
-    }
-    let t = sg.start;
-    for (const [a0, b0] of runs) {
-      const a = Math.max(a0, sg.start);
-      const b = Math.min(b0, sg.end);
-      if (b - a < minPiece) continue;
-      // a sliver before the run is folded into it rather than becoming its own flash of a crop
-      if (a - t >= minPiece) out.push({ ...sg, start: t, end: a });
-      const from = a - t < minPiece ? t : a;
-      out.push({ start: from, end: b, manual: false, decision: { ...staticDecision("fit", "text fills the frame (slide or document)") } });
-      t = b;
-    }
-    // a segment no run touched is kept whole, however short (a one-shot piece between two cuts);
-    // only the sliver left after a run inside the same segment folds into that run
-    if (t === sg.start || sg.end - t >= minPiece) out.push({ ...sg, start: t, end: sg.end });
-    else out[out.length - 1]!.end = sg.end;
-  }
-  return out;
+  const text = staticDecision("fit", "text fills the frame (slide or document)");
+  // a content region is already shown whole on top (the text in it is why the frame looks text-heavy)
+  const keep = (sg: ResolvedSegment) =>
+    sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none" || (!!sg.decision.content && !isFullFrame(sg.decision.content));
+  return overrideRuns(
+    segments,
+    runs.map(([start, end]) => ({ start, end })),
+    () => text,
+    keep,
+    minPiece,
+  ).map((sg) => (sg.decision === text ? { start: sg.start, end: sg.end, manual: false, decision: { ...text } } : sg));
 }
