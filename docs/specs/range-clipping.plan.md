@@ -17,13 +17,14 @@ Where the code is today:
 
 Goal: "section" means one thing, and no stage assumes one file covers the whole video.
 
-- [ ] 0.1 Rename the render-window module and its words to **windows**: `pipeline/sections.ts` → `pipeline/windows.ts`,
-      `SECTION_PAD_SEC` → `WINDOW_PAD_SEC`, `SectionUnavailableError` → `WindowUnavailableError`, metrics and log text.
-      The table `source_sections` keeps its name (a rename migration buys nothing); its schema comment says "render windows".
-- [ ] 0.2 `ctx.sourceAt(project, [startSec, endSec])` → `{ path, offsetSec }` in pipeline/common.ts; today it returns
-      `ensureSource` with offset 0. Move transcribe, analyze (scene and text scans), refine, faces and speaker
-      sampling to it; `renderSource` keeps its own lookup and falls back to `sourceAt`.
-- [ ] 0.3 Guard: a lint rule (or `pnpm guards` grep) fails a new `ensureSource(` outside common.ts and windows.ts.
+- [x] 0.1 Rename the render-window module and its words to **windows**: `pipeline/sections.ts` → `pipeline/windows.ts`,
+      `SECTION_PAD_SEC` → `WINDOW_PAD_SEC`, `SectionUnavailableError` → `WindowUnavailableError`, `rendersFromWindows`,
+      `dropWindows`, `removeScratchWindows`. Metric (`reelsaw.source.section_bytes`) and event names stay: dashboards
+      and webhooks read them. The table `source_sections` keeps its name (a rename migration buys nothing).
+- [x] 0.2 `ctx.sourceAt(project, [startSec, endSec])` → `{ path, offsetSec }` in pipeline/common.ts (today: the stored
+      source, offset 0) for every read by time: a render's fallback and a window's audio placement. The whole-video
+      scans (scene cuts, text scan, transcription) call `ctx.wholeSource(project)`, the one name slice 3 replaces.
+- [x] 0.3 Guard: `ensureSource` is `private` on the stage context, so the compiler refuses any other way in.
 
 ## Slice 1 — Sections in, sections billed (the whole file is still downloaded)
 

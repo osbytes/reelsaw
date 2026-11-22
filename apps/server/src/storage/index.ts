@@ -424,7 +424,7 @@ export const keys = {
   assetRaster: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/raster.${variant}.png`,
   /** a speech-to-text result (ai/asr.ts) shared across hosts when the store is S3; `sha` is the cache key */
   asrCache: (sha: string) => `${ASR_CACHE_PREFIX}${sha}.json`,
-  /** a full-quality window of a preview-sized link source (pipeline/sections.ts), named by its range in milliseconds */
+  /** a full-quality window of a preview-sized link source (pipeline/windows.ts), named by its range in milliseconds */
   sourceSection: (projectId: string, startMs: number, endMs: number) => `projects/${projectId}/sections/${startMs}-${endMs}.mp4`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };

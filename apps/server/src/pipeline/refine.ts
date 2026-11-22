@@ -492,7 +492,7 @@ export async function refineScenes(ctx: StageContext) {
         "text-scan",
         { input: { source: project.sourceKey, cuts: sceneCuts }, model: "text-detector", promptVersion: TEXT_SCAN_VERSION, params: { durationSec } },
         async (signal) => {
-          const sourcePath = await ctx.ensureSource(project);
+          const sourcePath = await ctx.wholeSource(project);
           const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
           return {
             overlays: r.overlays,

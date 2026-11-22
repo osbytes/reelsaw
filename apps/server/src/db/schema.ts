@@ -577,7 +577,7 @@ export const projects = pgTable(
 
 /**
  * Full-quality windows of a link whose stored source is a small preview (a plan's `sourceHeight`, see
- * pipeline/sections.ts): a clip renders from the window that covers it, fetched once and reused by every
+ * pipeline/windows.ts): a clip renders from the window that covers it, fetched once and reused by every
  * rerender. `offsetSec` is the source time at the file's first frame, measured against the preview's audio.
  */
 export const sourceSections = pgTable(

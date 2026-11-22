@@ -102,7 +102,7 @@ export async function transcribe(ctx: StageContext) {
   const fromSec = existing?.coveredSec ?? 0;
   await ctx.start("transcribing");
   await ctx.acquire("transcribe", 512);
-  const sourcePath = await ctx.ensureSource(project); // leases the pull itself when the copy is missing
+  const sourcePath = await ctx.wholeSource(project); // leases the pull itself when the copy is missing
 
   // Both outputs are built under a .part name and renamed, so a crash (OOM, SIGKILL, heartbeat
   // timeout) mid-write can never leave a truncated file a retry would trust. Named for the limit, so the audio of a

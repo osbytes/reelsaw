@@ -63,7 +63,7 @@ export async function takeTxLock(db: Pick<Db, "execute">, key: string): Promise<
 export const sessionLock = {
   /** one reconciler tick across all RUN_WORKERS processes (queue/reconcile.ts) */
   reconcile: () => "reconcile",
-  /** one full-quality window download (and stitch) per project at a time, across workers (pipeline/sections.ts) */
+  /** one full-quality window download (and stitch) per project at a time, across workers (pipeline/windows.ts) */
   sourceWindows: (projectId: string) => `source-windows:${projectId}`,
 } as const;
 

@@ -21,7 +21,7 @@ import type { Project } from "../db/schema.js";
 import type { Pool } from "pg";
 import type { Services } from "../services.js";
 import { keys } from "../storage/index.js";
-import { removeScratchSections } from "../storage/sweep.js";
+import { removeScratchWindows } from "../storage/sweep.js";
 import { clipPcm } from "../audio/pcm.js";
 import { VAD_SR } from "../audio/vad.js";
 import { isDownloadBlocked, isPermanentDownloadFailure } from "../ytdlp-errors.js";
@@ -33,9 +33,9 @@ import { describeDownloadFailure, sourceFormat } from "./ingest.js";
 import { ENCODE_PASS_CPU } from "../resources.js";
 
 /** Seconds fetched on each side of a clip: room for a keyframe before the start, and for small bound nudges. */
-export const SECTION_PAD_SEC = 3;
+export const WINDOW_PAD_SEC = 3;
 /** Full-quality height a window is fetched at. */
-export const SECTION_HEIGHT = 1080;
+export const WINDOW_HEIGHT = 1080;
 /** The match must be at least this good (normalised correlation of loudness envelopes) to move the window. */
 const MATCH_MIN_SCORE = 0.6;
 /** How far from the requested start the file may begin (keyframe distance), searched both ways. */
@@ -58,7 +58,7 @@ export interface RenderSource {
 }
 
 /** Whether this project's stored source is a preview copy whose clips render from fetched windows. */
-export function rendersFromSections(project: Pick<Project, "sourceType" | "sourceMeta" | "sourceUrl">): number | null {
+export function rendersFromWindows(project: Pick<Project, "sourceType" | "sourceMeta" | "sourceUrl">): number | null {
   const h = project.sourceMeta?.["previewHeight"];
   return project.sourceType === "url" && project.sourceUrl && typeof h === "number" && h > 0 ? h : null;
 }
@@ -74,11 +74,16 @@ export const MAX_WINDOW_SEC = 600;
 /** A missing stretch is fetched this far into what is already stored on each side, so the seam is inside both files. */
 export const SEAM_SEC = 2;
 
+/** Source seconds a clip's render may read: the clip and the room a window keeps on each side. */
+function clipSpan(clip: Clip): [number, number] {
+  return [Math.max(0, clip.startSec - WINDOW_PAD_SEC), clip.endSec + WINDOW_PAD_SEC];
+}
+
 /** The file a clip spanning [start, end] (source seconds) renders from. */
 export async function renderSource(ctx: StageContext, project: Project, clip: Clip): Promise<RenderSource> {
-  const previewHeight = rendersFromSections(project);
+  const previewHeight = rendersFromWindows(project);
   if (!previewHeight) {
-    return { path: await ctx.ensureSource(project), offsetSec: 0, width: project.width ?? 1920, height: project.height ?? 1080, preview: false };
+    return { ...(await ctx.sourceAt(project, clipSpan(clip))), width: project.width ?? 1920, height: project.height ?? 1080, preview: false };
   }
   const { svc } = ctx;
   const covering = await coveringWindow(ctx, project.id, clip);
@@ -93,24 +98,24 @@ export async function renderSource(ctx: StageContext, project: Project, clip: Cl
         if (covered) return covered;
         // a sibling clip just learned the windows cannot be had: do not walk every proxy into the same wall again
         const known = unavailable.get(project.id);
-        if (known) throw new SectionUnavailableError(known);
+        if (known) throw new WindowUnavailableError(known);
         return await fetchWindow(ctx, project, clip);
       },
       { signal: ctx.signal },
     );
   } catch (err) {
-    if (ctx.signal.aborted || !(err instanceof SectionUnavailableError)) throw err;
+    if (ctx.signal.aborted || !(err instanceof WindowUnavailableError)) throw err;
     unavailable.set(project.id, err.message);
     // the video is gone (deleted, private) or the site blocks us: the clip can still be made, softly, from the copy we have
     ctx.log.warn({ clipId: clip.id, err }, "full-quality window unavailable; rendering from the preview copy");
     await svc.events
       .emit("clip.preview_source", { projectId: project.id, clipId: clip.id, height: previewHeight, reason: err.message.slice(0, 500) })
       .catch(() => {});
-    return { path: await ctx.ensureSource(project), offsetSec: 0, width: project.width ?? 426, height: project.height ?? previewHeight, preview: true };
+    return { ...(await ctx.sourceAt(project, clipSpan(clip))), width: project.width ?? 426, height: project.height ?? previewHeight, preview: true };
   }
 }
 
-class SectionUnavailableError extends Error {}
+class WindowUnavailableError extends Error {}
 
 /**
  * Projects whose full-quality windows could not be had (gone, or blocked), with why, so the rest of their clips render
@@ -172,7 +177,7 @@ export function planWindow(o: { clip: Range; clips: Range[]; windows: Range[]; t
   fetch: Range[];
   stitch: boolean;
 } {
-  const pad = o.pad ?? SECTION_PAD_SEC;
+  const pad = o.pad ?? WINDOW_PAD_SEC;
   const padded = (r: Range): Range => [Math.max(0, r[0] - pad), Math.min(o.total, r[1] + pad)];
   const need = padded(o.clip);
   const touching = o.windows.some((w) => w[0] < need[1] && w[1] > need[0]);
@@ -361,7 +366,7 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
         "--no-warnings",
         "--quiet",
         "-f",
-        sourceFormat(SECTION_HEIGHT),
+        sourceFormat(WINDOW_HEIGHT),
         "--merge-output-format",
         "mp4",
         "--download-sections",
@@ -381,12 +386,12 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
     )
     .catch((err: Error) => {
       if (err instanceof NoEligibleProxyError)
-        throw new SectionUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP proxy or direct)");
+        throw new WindowUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP proxy or direct)");
       const message = describeDownloadFailure(err, stderrTail);
       const text = `${err.message}\n${stderrTail}`;
       // gone for good, or the site is turning us away (every exit already tried): render from the preview copy now
       // rather than retry into the same block and fail the clip
-      if (isPermanentDownloadFailure(text) || isDownloadBlocked(text)) throw new SectionUnavailableError(message);
+      if (isPermanentDownloadFailure(text) || isDownloadBlocked(text)) throw new WindowUnavailableError(message);
       throw new DownloadFailedError(message);
     });
   const name = (await fs.readdir(dir)).find((f) => f.startsWith(`${stem}.`) && f.endsWith(".mp4"));
@@ -394,7 +399,7 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
   const file = path.join(dir, name);
   const probe = await svc.media.ffprobe(file);
   if (!probe.width || !probe.height || probe.durationSec <= 0) throw new DownloadFailedError("The downloaded section has no video");
-  const placed = await placeSection(ctx, project, file, start).catch((err: unknown) => {
+  const placed = await placeWindow(ctx, project, file, start).catch((err: unknown) => {
     if (ctx.signal.aborted) throw err;
     ctx.log.warn({ err }, "could not match the section's audio to the source; using the requested start");
     return null;
@@ -479,11 +484,12 @@ export function stitchArgs(
 }
 
 /** Where the window starts on the source clock, from its sound against the preview's. */
-async function placeSection(ctx: StageContext, project: Project, file: string, requested: number): Promise<{ offsetSec: number; score: number } | null> {
-  const preview = await ctx.ensureSource(project);
+async function placeWindow(ctx: StageContext, project: Project, file: string, requested: number): Promise<{ offsetSec: number; score: number } | null> {
   const refStart = Math.max(0, requested - SEARCH_SEC + PROBE_FROM_SEC);
+  const refSec = 2 * SEARCH_SEC + PROBE_SEC;
+  const preview = await ctx.sourceAt(project, [refStart, refStart + refSec]);
   const [ref, probe] = await Promise.all([
-    clipPcm(ctx.svc.config.FFMPEG_PATH, preview, refStart, 2 * SEARCH_SEC + PROBE_SEC, ctx.signal),
+    clipPcm(ctx.svc.config.FFMPEG_PATH, preview.path, refStart - preview.offsetSec, refSec, ctx.signal),
     clipPcm(ctx.svc.config.FFMPEG_PATH, file, PROBE_FROM_SEC, PROBE_SEC, ctx.signal),
   ]);
   const m = measureOffset(ref, probe, VAD_SR);
@@ -553,11 +559,11 @@ function bestLag(a: Float32Array, b: Float32Array, lo: number, hi: number): { la
 }
 
 /** Drop a project's stored windows (its source changed or expired); the files go with the rows. */
-export async function dropSections(svc: Services, projectId: string): Promise<void> {
+export async function dropWindows(svc: Services, projectId: string): Promise<void> {
   const rows = await svc.database.db
     .delete(schema.sourceSections)
     .where(eq(schema.sourceSections.projectId, projectId))
     .returning({ key: schema.sourceSections.key });
   for (const r of rows) await svc.storage.delete(r.key).catch(() => {});
-  await removeScratchSections(svc, projectId);
+  await removeScratchWindows(svc, projectId);
 }

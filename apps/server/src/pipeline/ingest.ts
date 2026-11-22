@@ -169,7 +169,7 @@ export async function ingest(ctx: StageContext) {
         }
       }
       // a plan with a source cap (Free) downloads a small copy for the editor and analysis; each clip's render
-      // fetches its own window at full quality (sections.ts), so the proxy never carries the whole video in HD
+      // fetches its own window at full quality (windows.ts), so the proxy never carries the whole video in HD
       const cap = await sourceHeightFor(ctx.db, project.userId, svc.entitlements);
       const { previewHeight: _was, ...rest } = meta;
       meta = cap ? { ...rest, previewHeight: cap } : rest;
@@ -407,7 +407,7 @@ export async function ingest(ctx: StageContext) {
  * yt-dlp format selector for a link's source, at most `height` tall. H.264 first: it decodes everywhere (browser
  * preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU. A preview copy (`small`) keeps the same audio stream
  * as the full download (`ba[ext=m4a]`, ~1 MB a minute): transcription hears it at full quality, and a clip's
- * full-quality window lines up with it sample for sample (sections.ts). Without a small enough video, the smallest.
+ * full-quality window lines up with it sample for sample (windows.ts). Without a small enough video, the smallest.
  */
 export function sourceFormat(height: number, small = false): string {
   const h = `[height<=${height}]`;

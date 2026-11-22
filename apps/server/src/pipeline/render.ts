@@ -9,7 +9,7 @@ import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { errorKind, failedRow, type StageContext } from "./common.js";
-import { renderSource } from "./sections.js";
+import { renderSource } from "./windows.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";
@@ -349,7 +349,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     return;
   }
   await ctx.acquire("render", 512, { clipId });
-  // a preview-sized source (a plan's sourceHeight) renders from a full-quality window of the clip (sections.ts)
+  // a preview-sized source (a plan's sourceHeight) renders from a full-quality window of the clip (windows.ts)
   const src = await renderSource(ctx, project, clip);
   const sourcePath = src.path;
   /** the clip's start on the render file's clock: everything that reads pixels or sound from `sourcePath` uses it */
@@ -1815,7 +1815,7 @@ export async function planClipCuts(
   signal?: AbortSignal,
   log?: Logger,
   onProgress?: (cut: number, total: number, attempt: number) => void,
-  /** source seconds at `sourcePath`'s first frame (a full-quality window, sections.ts); 0 for the whole source */
+  /** source seconds at `sourcePath`'s first frame (a full-quality window, windows.ts); 0 for the whole source */
   sourceOffsetSec = 0,
 ): Promise<ClipCutPlan> {
   const duration = clip.endSec - clip.startSec;

@@ -1,5 +1,5 @@
 import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
-import { rendersFromSections } from "../pipeline/sections.js";
+import { rendersFromWindows } from "../pipeline/windows.js";
 import { z } from "zod";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -260,7 +260,7 @@ function publicProject(p: schema.Project) {
     metadata: p.metadata,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
     /** the stored source is a small preview this tall (the plan's cap): clips still render from full-quality windows of the link; null = full source */
-    sourcePreviewHeight: rendersFromSections(p),
+    sourcePreviewHeight: rendersFromWindows(p),
     /** retention removed the stored source; Retry downloads it again */
     sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),

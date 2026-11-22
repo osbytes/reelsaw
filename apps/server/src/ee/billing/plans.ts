@@ -31,7 +31,7 @@ export interface Plan {
   /**
    * Tallest video a link's source is downloaded at (null = the full download, up to 1080p). A capped source is
    * the editor's and analysis's copy; each clip's render fetches its own window at full quality
-   * (pipeline/sections.ts), so the proxy carries a few minutes of HD instead of the whole video.
+   * (pipeline/windows.ts), so the proxy carries a few minutes of HD instead of the whole video.
    */
   sourceHeight: number | null;
   /**

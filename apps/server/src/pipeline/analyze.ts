@@ -329,7 +329,7 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
   if (!project.width || !project.sourceKey) return [];
   if (ctx.stage === "analyze") await ctx.progress(0.01, "Detecting shot changes"); // the refine stage reports its own steps
   const detect = async (signal: AbortSignal): Promise<number> => {
-    const sourcePath = await ctx.ensureSource(project);
+    const sourcePath = await ctx.wholeSource(project);
     const cuts = await ctx.svc.resources.withCpu(
       {
         kind: "scene-scan",

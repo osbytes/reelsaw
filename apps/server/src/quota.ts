@@ -197,7 +197,7 @@ export async function capacityOfferFor(
 
 /**
  * How tall a link's source is downloaded for this account: the plan's cap (Free: 240p, the editor's and analysis's
- * copy; clips still render from full-quality windows, pipeline/sections.ts), or null for the full download.
+ * copy; clips still render from full-quality windows, pipeline/windows.ts), or null for the full download.
  * Admins and instances without plans always get the full download.
  */
 export async function sourceHeightFor(db: Db, userId: string, ent?: Entitlements | null): Promise<number | null> {

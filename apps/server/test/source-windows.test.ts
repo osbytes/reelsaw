@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_WINDOW_SEC, SEAM_SEC, measureOffset, planWindow, rendersFromSections, stitchArgs, stitchPlan, uncovered } from "../src/pipeline/sections.js";
+import { MAX_WINDOW_SEC, SEAM_SEC, measureOffset, planWindow, rendersFromWindows, stitchArgs, stitchPlan, uncovered } from "../src/pipeline/windows.js";
 import { sourceFormat } from "../src/pipeline/ingest.js";
 import { ffmpegCanUse } from "../src/ytdlp-proxy.js";
 import { SCENARIOS, assertLocal } from "../src/dev/scenarios.js";
@@ -57,9 +57,9 @@ describe("source sections", () => {
   });
 
   it("only link projects with a preview height render from windows", () => {
-    assert.equal(rendersFromSections({ sourceType: "url", sourceUrl: "https://example.com/v", sourceMeta: { previewHeight: 240 } }), 240);
-    assert.equal(rendersFromSections({ sourceType: "url", sourceUrl: "https://example.com/v", sourceMeta: {} }), null);
-    assert.equal(rendersFromSections({ sourceType: "upload", sourceUrl: null, sourceMeta: { previewHeight: 240 } }), null);
+    assert.equal(rendersFromWindows({ sourceType: "url", sourceUrl: "https://example.com/v", sourceMeta: { previewHeight: 240 } }), 240);
+    assert.equal(rendersFromWindows({ sourceType: "url", sourceUrl: "https://example.com/v", sourceMeta: {} }), null);
+    assert.equal(rendersFromWindows({ sourceType: "upload", sourceUrl: null, sourceMeta: { previewHeight: 240 } }), null);
   });
 
   it("caps the download at the plan's height; the full download is unchanged", () => {
