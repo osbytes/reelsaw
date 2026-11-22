@@ -467,8 +467,22 @@
     {
       "idx": 66,
       "version": "7",
-      "when": 1795382780448,
-      "tag": "0066_projects_list_sort",
+      "when": 1795379925212,
+      "tag": "0066_resource_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795379928315,
+      "tag": "0067_drop_disk_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795385726053,
+      "tag": "0068_projects_list_sort",
       "breakpoints": true
     }
   ]

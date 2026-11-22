@@ -154,6 +154,10 @@ project already hit the problem it prevents.
   re-analyze, refine and delete bump it, every stage job carries the value it was queued with,
   and a stage writes (start, complete, fail) only while that value is still current and the
   project is not deleted.
+- **Size work from a lease, never from a reading.** A job that takes CPU, memory or disk claims it from the
+  resource governor in the same step as the check (`resources.withCpu`, `acquire` for disk), and its
+  ffmpeg `-threads` is the grant. A sample of "what is free" that reserves nothing lets two jobs pass on
+  the same cores or bytes. Design and the slices still to come: [docs/specs/resource-leases.md](specs/resource-leases.md).
 - **Jobs are idempotent.** A job may run twice (retries, the reconciler, restarts). It checks
   for existing output and either skips or converges.
 - **The reconciler is a safety net, not the mechanism.** Correctness can't depend on it

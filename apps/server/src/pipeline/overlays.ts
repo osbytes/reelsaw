@@ -8,7 +8,7 @@
  * a coarse grid, and keep only cells that show text in several different shots.
  */
 import { spawn } from "node:child_process";
-import { rgbFramesToPipe, CommandError } from "../media.js";
+import { decodeThreadArgs, rgbFramesToPipe, CommandError } from "../media.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import type { TextDetector } from "../vision/text.js";
 import { TEXT_INPUT_W, TEXT_INPUT_H } from "../vision/text.js";
@@ -210,6 +210,7 @@ function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSi
         "-loglevel",
         "error",
         "-nostdin",
+        ...decodeThreadArgs(1), // one frame
         "-ss",
         t.toFixed(2),
         "-i",
@@ -468,7 +469,8 @@ export interface ClipTextFrame {
 
 /** Text boxes per frame in a clip's own time range (one ffmpeg pass at `fps`). */
 export async function sampleClipText(
-  deps: { detector: TextDetector; ffmpegPath: string; signal?: AbortSignal },
+  /** `threads`: the decoder's, from a CPU lease (SAMPLE_CPU) */
+  deps: { detector: TextDetector; ffmpegPath: string; threads: number; signal?: AbortSignal },
   source: string,
   startSec: number,
   durationSec: number,
@@ -482,6 +484,7 @@ export async function sampleClipText(
       "-loglevel",
       "error",
       "-nostdin",
+      ...decodeThreadArgs(deps.threads),
       "-ss",
       startSec.toFixed(3),
       "-t",

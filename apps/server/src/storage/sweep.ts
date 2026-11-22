@@ -24,7 +24,7 @@ import { chunk, deadlineIn, expired, keysetLoop, mapLimit } from "../lib/batch.j
 import { getState, setState } from "../lib/state.js";
 import { assetRefsReady } from "../library/refs.js";
 import { templateAssetUses } from "../library/template-assets.js";
-import { volumeId } from "../disk-leases.js";
+import { volumeId } from "../resource-leases.js";
 
 /** Files younger than this are never touched: a worker may be writing or about to commit them. */
 export const SWEEP_GRACE_MS = 60 * 60_000;

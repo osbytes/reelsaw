@@ -1,6 +1,7 @@
 import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
+import { sceneScanCpu } from "../resources.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
@@ -329,7 +330,14 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
   if (ctx.stage === "analyze") await ctx.progress(0.01, "Detecting shot changes"); // the refine stage reports its own steps
   const detect = async (signal: AbortSignal): Promise<number> => {
     const sourcePath = await ctx.ensureSource(project);
-    const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, signal);
+    const cuts = await ctx.svc.resources.withCpu(
+      {
+        kind: "scene-scan",
+        cpu: sceneScanCpu(ctx.svc.config.SCENE_SCAN_THREADS),
+        ids: ctx.leaseIds(),
+      },
+      (threads) => ctx.svc.media.detectScenes(sourcePath, { signal, threads }),
+    );
     signal.throwIfAborted(); // detectScenes answers [] when it was stopped: that is not "no cuts"
     // saved the moment they are found, in a unit of their own: a later step of this stage timing out loses nothing
     await ctx.svc.tx(async (u) => {

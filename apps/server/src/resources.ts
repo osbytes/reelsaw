@@ -14,8 +14,12 @@ import { plural } from "@reelsaw/shared";
  *   CPU    – utilisation measured from os.cpus() time deltas (load average is 0 on Windows);
  *            os.availableParallelism() for the CPU count (libuv honours affinity and container quotas)
  *   memory – process.availableMemory() / process.constrainedMemory() (libuv: cgroup-aware on Linux)
- *   disk   – fs.statfs() on the data directory, net of the disk leased to jobs in flight (disk-leases.ts):
- *            statfs sees only bytes already written, so a job claims its scratch before writing it
+ *   disk   – fs.statfs() on the data directory, net of the disk leased to jobs in flight
+ *
+ * and leases them (resource-leases.ts, docs/specs/resource-leases.md): a job claims the scratch, cores and
+ * memory it is about to use against what the host's other jobs hold, in one step, because a reading shows only
+ * what has already started. `acquire` (a stage's disk), `withCpu` (an ffmpeg pass's threads) and `renderSlot`
+ * (a render's memory and its place among the host's renders) are the three shapes of that one claim.
  */
 export interface ResourceSnapshot {
   at: string;
@@ -120,36 +124,47 @@ export interface ResourceGovernor {
    * because of the bytes on disk it throws `ResourceExhaustedError` (waiting does not free space),
    * short only because of other jobs' leases it waits for them like for CPU and memory.
    */
-  acquire(opts: {
-    kind: string;
-    needDiskMB?: number;
-    signal?: AbortSignal;
-    onWait?: (reason: string) => void;
-    ids?: { jobId?: string | undefined; projectId?: string };
-  }): Promise<DiskLease>;
+  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void; ids?: LeaseIds }): Promise<Lease>;
   /**
    * How a disk shortfall is answered: free at least `needBytes` of scratch (storage/sweep.ts
    * `reclaimScratch`). Set once the store and database are up; absent, a shortfall fails at once.
    */
   setReclaimer(fn: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null): void;
   /**
-   * The shared ledger of disk leases for `volume` (disk-leases.ts): every process on that filesystem checks
-   * and records its claims there. Until it is set (boot, tests, a process without a database) this process's
-   * own leases are the whole picture.
+   * The shared ledger of leases (resource-leases.ts): disk is checked against every process on `volume`, cores
+   * and memory against every process on `machine`. Until it is set (boot, tests, a process without a database)
+   * this process's own leases are the whole picture.
    */
-  setLeaser(fn: DiskLeaser | null, volume?: string): void;
-  /** the volume this process leases on (null until setLeaser) and the leases it holds right now */
-  leases(): { volume: string | null; ownMB: number; own: number };
+  setLeaser(fn: Leaser | null, scope?: { volume: string; machine: string }): void;
+  /** where this process leases (null until setLeaser) and what the leases it holds right now add up to */
+  leases(): { volume: string | null; machine: string | null; ownMB: number; own: number; ownCores: number; ownMemMB: number };
+  /**
+   * The ledger rows of the leases this process still holds. Any other row of this worker is one whose release
+   * failed (a database blip at the delete): the heartbeat drops those (resource-leases.ts `dropLeakedLeases`)
+   * instead of letting them count until they expire a day later.
+   */
+  ownLeaseIds(): number[];
   /** Evict scratch until `diskFreeMB` is at least `targetMB` (the floor plus headroom), or nothing is left to evict. Resolves to the free MB after. */
   reclaimTo(targetMB: number): Promise<number>;
-  /** ffmpeg encode `-threads` value: the CPUs shared by the renders running right now. Filtergraph threads are always 1 (see `ffmpegThreadArgs`). */
-  ffmpegThreads(): number;
+  /**
+   * Lease cores for one ffmpeg pass and run `fn` with the grant (`cpuGrant` against the host's live leases, so a
+   * pass starting beside others sees their claims), releasing them however it ends. Never waits: the grant is at
+   * least the request's `min`.
+   */
+  withCpu<T>(req: { kind: string; cpu: CpuAsk; ids?: LeaseIds }, fn: (cores: number) => Promise<T>): Promise<T>;
+  /** The cores of the pool `withCpu` grants from: every core of this host less one. */
+  cpuCapacity(): number;
+  /**
+   * A render encode's request: the pool (`cpuCapacity`) shared by the renders running on the host right now
+   * (x264/NVENC `-threads`; filtergraph threads are always 1, see `filterThreadArgs`).
+   */
+  renderEncodeCpu(): CpuAsk;
   /**
    * Wait for a render slot. With RENDER_CONCURRENCY=auto a render starts while fewer are running
    * than the CPUs allow (~CPUS_PER_RENDER cores each) and memory would stay above MIN_FREE_MEM_MB
    * with one more (~RENDER_MEM_MB); one render may always run. A number pins the limit instead.
    */
-  renderSlot(opts: { signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<() => void>;
+  renderSlot(opts: { signal?: AbortSignal; onWait?: (reason: string) => void; ids?: LeaseIds }): Promise<() => void>;
   /** upper bound on concurrent renders in this process (worker slots to register) */
   maxRenders(): number;
   renders(): { running: number; limit: number; mode: "auto" | "fixed" };
@@ -196,26 +211,96 @@ export function requiredDiskMB(minFreeMB: number, extraMB: number) {
   return minFreeMB + extraMB;
 }
 
-/** Disk a job holds for the scratch it is about to write; `release` gives it back (idempotent). */
-export interface DiskLease {
-  readonly mb: number;
-  release(): Promise<void>;
+/** Who a lease is for, recorded on the ledger row. */
+export interface LeaseIds {
+  jobId?: string | undefined;
+  projectId?: string | undefined;
+  /** the account, when the work is one account's (plan ceilings sum by it, docs/specs/resource-leases.md slice 3) */
+  userId?: string | undefined;
 }
 
-export interface DiskLeaseRequest {
-  /** scratch the job will write */
-  mb: number;
-  /** MIN_FREE_DISK_MB plus `mb`: what must be free, net of live leases, for the job to start */
-  requiredMB: number;
-  /** free MB on the volume as this process measured it (never -1: an unmeasurable disk is not leased) */
-  freeMB: number;
-  kind: string;
-  jobId?: string | undefined;
-  projectId?: string;
+/** What a job holds until `release` gives it back (idempotent): scratch disk, cores and memory. */
+export interface Lease {
+  readonly kind: string;
+  readonly mb: number;
+  readonly cores: number;
+  readonly memMB: number;
+  release(): Promise<void>;
 }
-export type DiskLeaseResult = { ok: true; release: () => Promise<void> } | { ok: false; leasedMB: number; jobs: number };
-/** Check the request against the volume's live leases and record it, as one atomic step (disk-leases.ts). */
-export type DiskLeaser = (req: DiskLeaseRequest) => Promise<DiskLeaseResult>;
+/** The disk half of a lease (a stage's scratch). */
+export type DiskLease = Lease;
+
+/** Everything leased on a host right now: totals and how many leases of each kind. */
+export interface HostLeases {
+  mb: number;
+  cores: number;
+  memMB: number;
+  /** every lease out */
+  jobs: number;
+  /** leases that hold disk */
+  diskJobs: number;
+  kinds: Record<string, number>;
+}
+export const NO_LEASES: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
+
+/**
+ * The kind of a render job's slot lease (`renderSlot`): what the host's render count is read from. Its own name,
+ * never "render": a render stage's disk lease is kind "render" too, and counting both made every render count twice
+ * (half the encode threads, half the render limit).
+ */
+export const RENDER_SLOT_KIND = "render-slot";
+
+/** A CPU request, or one that depends on what is out (a render encode's share of the host's renders). */
+export type CpuAsk = CpuRequest | ((live: HostLeases) => CpuRequest);
+
+/** One claim on a host. Every field is optional: a stage's disk, an ffmpeg pass's cores, a render's memory. */
+export interface LeaseRequest {
+  kind: string;
+  mb?: number;
+  memMB?: number;
+  cpu?: CpuAsk;
+  /** the pool `cpu` is granted from (`cpuCapacity` of this host) */
+  capacity?: number;
+  ids?: LeaseIds | undefined;
+  /** why the claim does not fit what is out, or null when it does; checked in the same step as the record */
+  admit?: ((live: HostLeases) => string | null) | undefined;
+}
+export type LeaseRefusal = { ok: false; reason: string; live: HostLeases };
+type LeaseClaim = { ok: true; mb: number; cores: number; memMB: number } | LeaseRefusal;
+/** `id` is the ledger row, so the heartbeat can drop a row whose release never reached the database (`ownLeaseIds`). */
+export type LeaseResult = { ok: true; id?: number; mb: number; cores: number; memMB: number; release: () => Promise<void> } | LeaseRefusal;
+/** Check a request against the host's live leases and record it, as one atomic step (resource-leases.ts). */
+export type Leaser = (req: LeaseRequest) => Promise<LeaseResult>;
+
+/** Pure: what a request is granted against `live`, or why it is refused. The ledger and the in-process pool both decide with this. */
+export function claimOnLive(req: LeaseRequest, live: HostLeases): LeaseClaim {
+  const reason = req.admit?.(live) ?? null;
+  if (reason) return { ok: false, reason, live };
+  const want = typeof req.cpu === "function" ? req.cpu(live) : req.cpu;
+  const cores = want ? cpuGrant({ capacity: req.capacity ?? 1, leased: live.cores, ...want }) : 0;
+  return { ok: true, mb: Math.max(0, Math.round(req.mb ?? 0)), cores, memMB: Math.max(0, Math.round(req.memMB ?? 0)) };
+}
+
+/**
+ * Pure: why one more render may not start on this host now, or null. One may always run; otherwise the host's
+ * renders stay within ~CPUS_PER_RENDER cores each and what measured memory allows (`renderLimit`), and the
+ * renders' leased memory (RENDER_MEM_MB each, every process on the host) fits above MIN_FREE_MEM_MB.
+ */
+export function renderRefusal(p: {
+  cpus: number;
+  hostRenders: number;
+  memAvailableMB: number;
+  memTotalMB: number;
+  memLeasedMB: number;
+  minFreeMemMB: number;
+}): string | null {
+  if (p.hostRenders === 0) return null;
+  const limit = renderLimit({ cpus: p.cpus, memAvailableMB: p.memAvailableMB, running: p.hostRenders, minFreeMemMB: p.minFreeMemMB });
+  if (p.hostRenders >= limit) return `${plural(p.hostRenders, "render")} running on this host, room for ${limit} (${p.cpus} CPUs, ${p.memAvailableMB} MB free)`;
+  if (p.memLeasedMB + RENDER_MEM_MB > p.memTotalMB - p.minFreeMemMB)
+    return `${p.memLeasedMB} MB of ${p.memTotalMB} MB memory leased to renders on this host, one more needs ${RENDER_MEM_MB} MB`;
+  return null;
+}
 
 /**
  * Pure: may a job that needs `requiredMB` free start when `freeMB` is free on disk and `leasedMB` of that is
@@ -237,6 +322,43 @@ export function diskShortReason(diskFreeMB: number, minFreeMB: number, extraMB: 
   return diskFreeMB < need ? `${diskFreeMB} MB disk free, need ${need}` : null;
 }
 
+/** A claim on cores: `min` is the guarantee, `max` how far it may burst into what is free (docs/specs/resource-leases.md). */
+interface CpuRequest {
+  min: number;
+  max: number;
+}
+
+/**
+ * The cores one request gets, pure for tests: what the pool has left after the leases already out, kept between the
+ * request's `min` and `max`. `min` always wins, so fixed-size work (`min = max`) never waits here and the pool can
+ * be over-committed by at most the guarantees of the work that arrived after it filled.
+ */
+export function cpuGrant(p: { capacity: number; leased: number } & CpuRequest): number {
+  const min = Math.max(1, Math.floor(p.min));
+  const max = Math.max(min, Math.floor(p.max));
+  return Math.min(max, Math.max(min, p.capacity - p.leased));
+}
+
+/** The pool's size: every core less one for everything that is not a leased job (Node, Postgres on a single box, the OS). */
+export const cpuCapacity = (cpus: number) => Math.max(1, cpus - 1);
+
+/** A frame sampler's decode (text, faces, speakers over a clip's window at a few fps): one or two threads from what is free. */
+export const SAMPLE_CPU: CpuRequest = { min: 1, max: 2 };
+
+/** A one-off encode (a stitched window, a bumper, a still-picture video): one thread up to four, from what is free. */
+export const ENCODE_PASS_CPU: CpuRequest = { min: 1, max: 4 };
+
+/** Most decoder threads a shot-cut scan takes: past this the single-threaded scene filter is the bottleneck. */
+export const MAX_SCENE_SCAN_THREADS = 4;
+
+/**
+ * What a shot-cut scan (`media.detectScenes`) asks the pool for: 1 to MAX_SCENE_SCAN_THREADS decoder threads, or
+ * exactly a pinned SCENE_SCAN_THREADS. Decoder threading is lossless, so the cuts are the same at any count.
+ */
+export function sceneScanCpu(pinned: number): CpuRequest {
+  return pinned > 0 ? { min: pinned, max: pinned } : { min: 1, max: MAX_SCENE_SCAN_THREADS };
+}
+
 /** How many renders may run now: pure, for tests. */
 export function renderLimit(p: { cpus: number; memAvailableMB: number; running: number; minFreeMemMB: number; fixed?: number | undefined }): number {
   if (p.fixed) return p.fixed;
@@ -250,6 +372,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
   const cpus = Math.max(1, os.availableParallelism());
   const fixed = config.RENDER_CONCURRENCY === "auto" ? undefined : config.RENDER_CONCURRENCY;
   let running = 0;
+  const cpuPool = cpuCapacity(cpus);
   let lastLimit = fixed ?? 1;
   let lastSnapshot: ResourceSnapshot | undefined;
   let lastAt = 0;
@@ -260,42 +383,74 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
   let reclaimer: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null = null;
   /** one eviction at a time: concurrent jobs short of disk share the run instead of walking the same directories */
   let reclaiming: Promise<number> | null = null;
-  let leaser: DiskLeaser | null = null;
+  let leaser: Leaser | null = null;
   let volume: string | null = null;
-  /** leases this process holds: lease id → MB (what the heartbeat reports; the whole ledger without a leaser) */
-  const own = new Map<number, number>();
+  let machine: string | null = null;
+  /** leases this process holds (what the heartbeat reports; the whole ledger without a leaser) */
+  const own = new Map<number, { kind: string; mb: number; cores: number; memMB: number; ledgerId?: number | undefined }>();
   let nextLease = 1;
-  const ownMB = () => [...own.values()].reduce((a, b) => a + b, 0);
+  function ownTotals(): HostLeases {
+    const t: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
+    for (const l of own.values()) {
+      t.mb += l.mb;
+      t.cores += l.cores;
+      t.memMB += l.memMB;
+      t.jobs++;
+      if (l.mb > 0) t.diskJobs++;
+      t.kinds[l.kind] = (t.kinds[l.kind] ?? 0) + 1;
+    }
+    return t;
+  }
 
   /**
-   * Claim `req.mb` against the volume's live leases, atomically with the check. Without a shared ledger the
-   * check and the reservation are one synchronous step on this process's own map, so two concurrent
-   * acquires cannot both pass on the same bytes either.
+   * Claim against the host's live leases, atomically with the check: the shared ledger, or without one this
+   * process's own map, checked and written in one synchronous step (no await before the write), so two concurrent
+   * claims cannot both pass on the same capacity either.
    */
-  async function takeLease(req: DiskLeaseRequest): Promise<DiskLeaseResult> {
-    if (leaser) return leaser(req);
-    const held = ownMB();
-    if (!leaseFits({ freeMB: req.freeMB, leasedMB: held, requiredMB: req.requiredMB })) return { ok: false, leasedMB: held, jobs: own.size };
-    return { ok: true, release: async () => {} };
+  async function claim(req: LeaseRequest): Promise<Lease | LeaseRefusal> {
+    const local = () => {
+      const c = claimOnLive(req, ownTotals());
+      return c.ok ? leaseHandle(req.kind, c, async () => {}) : c;
+    };
+    if (!leaser) return local();
+    let r: LeaseResult;
+    try {
+      r = await leaser(req);
+    } catch (err) {
+      // a claim with an admit rule (a stage's disk, a render slot) must see the whole host, so its failure is the
+      // job's to retry; a CPU-only claim never waits or refuses, so a database blip must not fail the ffmpeg pass:
+      // it is granted against this process's own leases and the pass goes on
+      if (req.admit) throw err;
+      log.warn({ err, kind: req.kind }, "lease ledger unreachable; granting cores from this process's own leases");
+      return local();
+    }
+    return r.ok ? leaseHandle(req.kind, r, r.release, r.id) : r;
   }
 
   /** The lease handed to the caller: drops the entry from `own` and the ledger once, whichever way it ends. */
-  function leaseHandle(mb: number, release: () => Promise<void>): DiskLease {
-    if (mb <= 0) return { mb: 0, release: async () => {} };
+  function leaseHandle(kind: string, c: { mb: number; cores: number; memMB: number }, release: () => Promise<void>, ledgerId?: number): Lease {
     const id = nextLease++;
-    own.set(id, mb);
+    own.set(id, { kind, mb: c.mb, cores: c.cores, memMB: c.memMB, ledgerId });
     let done = false;
     return {
-      mb,
+      kind,
+      mb: c.mb,
+      cores: c.cores,
+      memMB: c.memMB,
       async release() {
         if (done) return;
         done = true;
         own.delete(id);
-        lastAt = 0; // the next sample reads the disk again: the scratch is real (or gone) now
-        await release().catch((err) => log.warn({ err, mb }, "could not release a disk lease; it expires on its own"));
+        if (c.mb > 0) lastAt = 0; // the next sample reads the disk again: the scratch is real (or gone) now
+        await release().catch((err) =>
+          log.warn({ err, kind, mb: c.mb, cores: c.cores, memMB: c.memMB }, "could not release a lease; the next heartbeat drops it"),
+        );
       },
     };
   }
+
+  /** No claim at all (a stage with no scratch, or a disk it cannot measure): nothing to record or give back. */
+  const noLease = (kind: string): Lease => ({ kind, mb: 0, cores: 0, memMB: 0, release: async () => {} });
 
   /** Ask the reclaimer for `needMB` more, then resample. Resolves to the free MB afterwards (-1 when unmeasurable). */
   function reclaim(needMB: number): Promise<number> {
@@ -377,13 +532,19 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       reclaimer = fn;
     },
 
-    setLeaser(fn, vol) {
+    setLeaser(fn, scope) {
       leaser = fn;
-      volume = fn ? (vol ?? null) : null;
+      volume = fn ? (scope?.volume ?? null) : null;
+      machine = fn ? (scope?.machine ?? null) : null;
+    },
+
+    ownLeaseIds() {
+      return [...own.values()].flatMap((l) => (l.ledgerId === undefined ? [] : [l.ledgerId]));
     },
 
     leases() {
-      return { volume, ownMB: ownMB(), own: own.size };
+      const t = ownTotals();
+      return { volume, machine, ownMB: t.mb, own: t.jobs, ownCores: t.cores, ownMemMB: t.memMB };
     },
 
     async reclaimTo(targetMB) {
@@ -411,16 +572,23 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         if (!reasons.length) {
           // everything fits on paper: claim the scratch now, in the same step as the check against the
           // leases already out, so a second job cannot pass on the bytes this one is about to write
+          const freeMB = s.diskFreeMB;
           const r =
-            needDiskMB > 0 && s.diskFreeMB >= 0
-              ? await takeLease({ mb: needDiskMB, requiredMB: required, freeMB: s.diskFreeMB, kind, ...ids })
-              : ({ ok: true, release: async () => {} } as const);
-          if (r.ok) {
+            needDiskMB > 0 && freeMB >= 0
+              ? await claim({
+                  kind,
+                  mb: needDiskMB,
+                  ids,
+                  admit: (live) =>
+                    leaseFits({ freeMB, leasedMB: live.mb, requiredMB: required }) ? null : leaseShortReason(freeMB, live.mb, live.diskJobs, required),
+                })
+              : noLease(kind);
+          if (!("ok" in r)) {
             if (waited) log.info({ kind, waitedSec: Math.round((Date.now() - started) / 1000) }, "resources available, proceeding");
-            return leaseHandle(needDiskMB > 0 && s.diskFreeMB >= 0 ? needDiskMB : 0, r.release);
+            return r;
           }
-          leased = r;
-          reasons.push(leaseShortReason(s.diskFreeMB, r.leasedMB, r.jobs, required));
+          leased = { leasedMB: r.live.mb, jobs: r.live.diskJobs };
+          reasons.push(r.reason);
         }
         const reason = reasons.join("; ");
         // disk never frees itself by waiting — including the extra scratch on top of MIN_FREE_DISK_MB.
@@ -450,9 +618,28 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       }
     },
 
-    ffmpegThreads() {
-      // encode cores only; the filtergraph is always single-threaded (ffmpegThreadArgs)
-      return Math.max(1, Math.floor(cpus / Math.max(1, running)));
+    async withCpu(req, fn) {
+      const lease = await claim({ kind: req.kind, cpu: req.cpu, capacity: cpuPool, ids: req.ids });
+      // nothing refuses a CPU-only claim (it has no admit): the grant is at least the request's min
+      if ("ok" in lease) throw new Error(`CPU lease refused: ${lease.reason}`);
+      try {
+        return await fn(lease.cores);
+      } finally {
+        await lease.release();
+      }
+    },
+
+    cpuCapacity: () => cpuPool,
+
+    renderEncodeCpu() {
+      // the pool (every core less one) shared by the machine's renders (every process on it), as a fixed-size
+      // claim from the same pool scans are granted from. Rounded up: rounding down left cores idle (two renders on
+      // 4 cores got one thread each of a 3-core pool); up overshoots the pool by less than one thread per render,
+      // which the spare core absorbs. Encode cores only, the filtergraph is single-threaded (filterThreadArgs)
+      return (live) => {
+        const share = Math.max(1, Math.ceil(cpuPool / Math.max(1, live.kinds[RENDER_SLOT_KIND] ?? 0)));
+        return { min: share, max: share };
+      };
     },
 
     maxRenders() {
@@ -463,28 +650,53 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       return { running, limit: lastLimit, mode: fixed ? "fixed" : "auto" };
     },
 
-    async renderSlot({ signal, onWait }) {
+    async renderSlot({ signal, onWait, ids }) {
       const started = Date.now();
       let lastReason = "";
       for (;;) {
         if (signal?.aborted) throw new Error("job aborted while waiting for a render slot");
         const s = await sample();
-        lastLimit = renderLimit({ cpus, memAvailableMB: s.memAvailableMB, running, minFreeMemMB: config.MIN_FREE_MEM_MB, fixed });
-        if (running < lastLimit) {
+        // a pinned RENDER_CONCURRENCY is this process's own count, as the operator set it; auto is the host's
+        // renders, memory and CPUs, checked against every process's render leases in the same step as this one
+        const r: Lease | LeaseRefusal =
+          fixed && running >= fixed
+            ? { ok: false, reason: `${plural(running, "render")} running, RENDER_CONCURRENCY=${fixed}`, live: NO_LEASES }
+            : await claim({
+                kind: RENDER_SLOT_KIND,
+                memMB: RENDER_MEM_MB,
+                ids,
+                admit: fixed
+                  ? undefined
+                  : (live) => {
+                      const hostRenders = live.kinds[RENDER_SLOT_KIND] ?? 0;
+                      lastLimit = renderLimit({ cpus, memAvailableMB: s.memAvailableMB, running: hostRenders, minFreeMemMB: config.MIN_FREE_MEM_MB });
+                      return renderRefusal({
+                        cpus,
+                        hostRenders,
+                        memAvailableMB: s.memAvailableMB,
+                        memTotalMB: s.memTotalMB,
+                        memLeasedMB: live.memMB,
+                        minFreeMemMB: config.MIN_FREE_MEM_MB,
+                      });
+                    },
+              });
+        if (!("ok" in r)) {
           running++;
           let released = false;
           return () => {
-            if (!released) (released = true), running--;
+            if (released) return;
+            released = true;
+            running--;
+            void r.release();
           };
         }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000)
-          throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot (${running} running)`);
-        const reason = `${plural(running, "render")} running, room for ${lastLimit} (${s.cpus} CPUs, ${s.memAvailableMB} MB free)`;
-        if (reason !== lastReason) {
-          lastReason = reason;
-          onWait?.(`Waiting for a render slot: ${reason}`);
+          throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot: ${r.reason}`);
+        if (r.reason !== lastReason) {
+          lastReason = r.reason;
+          onWait?.(`Waiting for a render slot: ${r.reason}`);
         }
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((res) => setTimeout(res, 2000));
       }
     },
 

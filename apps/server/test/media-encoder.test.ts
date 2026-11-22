@@ -1,7 +1,7 @@
 /** Encoder selection: which encoders a setting probes, and the per-encoder ffmpeg arguments. */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { encoderCandidates, ffmpegThreadArgs, rgbFramesToPipe, videoEncodeArgs } from "../src/media.js";
+import { encoderCandidates, filterThreadArgs, rgbFramesToPipe, videoEncodeArgs } from "../src/media.js";
 import { normaliseArgs } from "../src/pipeline/bumpers.js";
 
 describe("video encoder", () => {
@@ -29,8 +29,8 @@ describe("video encoder", () => {
   });
 
   it("caps filtergraph threads at 1 so concurrent scale graphs cannot EAGAIN on reinit", () => {
-    assert.deepEqual(ffmpegThreadArgs(8), ["-threads", "8", "-filter_threads", "1", "-filter_complex_threads", "1"]);
-    assert.deepEqual(ffmpegThreadArgs(0), ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"]);
+    // the encode's own -threads comes from its CPU lease (media.ffmpeg opts.threads, ffmpeg-threads.test.ts)
+    assert.deepEqual(filterThreadArgs(), ["-filter_threads", "1", "-filter_complex_threads", "1"]);
   });
 
   it("frame samplers set one encoder thread as an output option, right before the pipe", () => {

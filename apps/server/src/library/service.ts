@@ -265,7 +265,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
       kind === "audio"
         ? null
         : await ensureBumperThumb(
-            { ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp },
+            { ffmpeg: (a) => svc.media.ffmpeg(a, { threads: "light" }), storage: svc.storage, dir: svc.paths.tmp },
             { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) },
             local,
           ).catch(() => null);

@@ -10,7 +10,7 @@
  */
 import { languageForModel } from "../ai/spoken-languages.js";
 import { spawn } from "node:child_process";
-import { CommandError } from "../media.js";
+import { CommandError, decodeThreadArgs } from "../media.js";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -42,7 +42,8 @@ function ffmpeg(bin: string, args: string[], signal?: AbortSignal): Promise<Buff
   const out: Buffer[] = [];
   let err = "";
   return new Promise((resolve, reject) => {
-    const p = spawn(bin, ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], { signal, stdio: ["ignore", "pipe", "pipe"] });
+    // audio windows and single frames: one decoder thread (decodeThreadArgs)
+    const p = spawn(bin, ["-hide_banner", "-loglevel", "error", "-nostdin", ...decodeThreadArgs(1), ...args], { signal, stdio: ["ignore", "pipe", "pipe"] });
     p.stdout.on("data", (d: Buffer) => out.push(d));
     p.stderr.on("data", (d: Buffer) => (err += d.toString()));
     p.on("error", reject);

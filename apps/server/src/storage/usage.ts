@@ -7,7 +7,7 @@ import path from "node:path";
 import { isNotNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
-import { LEASE_STALE_MS, volumeLeases } from "../disk-leases.js";
+import { LEASE_STALE_MS, hostLeases } from "../resource-leases.js";
 import { workerIdOf } from "../ops/workers.js";
 import { CACHE_KINDS, cacheIdleMs, planScratchSweep } from "./sweep.js";
 
@@ -102,9 +102,13 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const cache = planned.filter((r) => CACHE_KINDS.has(r.kind));
   const idleMs = cacheIdleMs(svc);
   const lease = svc.resources.leases();
-  const leased = lease.volume
-    ? await volumeLeases(db, { volume: lease.volume, selfId: workerIdOf(svc.config), staleMs: LEASE_STALE_MS })
-    : { mb: lease.ownMB, jobs: lease.own };
+  const leased =
+    lease.volume && lease.machine
+      ? await hostLeases(db, { volume: lease.volume, machine: lease.machine, selfId: workerIdOf(svc.config), staleMs: LEASE_STALE_MS }).then((h) => ({
+          mb: h.mb,
+          jobs: h.diskJobs,
+        }))
+      : { mb: lease.ownMB, jobs: lease.own };
 
   const live = await db
     .select({ url: schema.projects.sourceUrl, bytes: schema.projects.sourceBytes })

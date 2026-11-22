@@ -46,23 +46,36 @@ describe("detectScenes failure handling", () => {
 
   it("throws when ffmpeg exits with an error, instead of answering no cuts", async () => {
     const media = mediaWith(stub(dir, "ffmpeg-fail", "echo 'moov atom not found' >&2\nexit 1"));
-    await assert.rejects(media.detectScenes("/nope.mp4"), /Shot-change detection failed/);
+    await assert.rejects(media.detectScenes("/nope.mp4", { threads: 1 }), /Shot-change detection failed/);
   });
 
   it("throws when ffmpeg cannot be started", async () => {
     const media = mediaWith(path.join(dir, "does-not-exist"));
-    await assert.rejects(media.detectScenes("/nope.mp4"), /Shot-change detection failed/);
+    await assert.rejects(media.detectScenes("/nope.mp4", { threads: 1 }), /Shot-change detection failed/);
   });
 
   it("answers [] when the detector ran cleanly and found no cut", async () => {
     const media = mediaWith(stub(dir, "ffmpeg-empty", "exit 0"));
-    assert.deepEqual(await media.detectScenes("/still.mp4"), []);
+    assert.deepEqual(await media.detectScenes("/still.mp4", { threads: 1 }), []);
+  });
+
+  it("sizes the decoder: -threads goes before -i, the filtergraph stays at one thread", async () => {
+    const argsFile = path.join(dir, "scan-args.txt");
+    const media = mediaWith(stub(dir, "ffmpeg-args", `printf '%s\\n' "$@" > '${argsFile}'`));
+    await media.detectScenes("/src.mp4", { range: { start: 5, duration: 10 }, threads: 4 });
+    const args = fs.readFileSync(argsFile, "utf8").trim().split(/\r?\n/);
+    const input = args.indexOf("-i");
+    const threads = args.indexOf("-threads");
+    assert.ok(threads >= 0 && threads < input, `-threads must be an input option: ${args.join(" ")}`);
+    assert.equal(args[threads + 1], "4");
+    assert.equal(args[args.indexOf("-filter_threads") + 1], "1");
+    assert.equal(args.lastIndexOf("-threads"), threads, "one -threads only");
   });
 
   it("rethrows the abort of a stopped job", async () => {
     const media = mediaWith(stub(dir, "ffmpeg-slow", "sleep 5"));
     const ctl = new AbortController();
-    const p = media.detectScenes("/slow.mp4", undefined, ctl.signal);
+    const p = media.detectScenes("/slow.mp4", { signal: ctl.signal, threads: 1 });
     setTimeout(() => ctl.abort(new Error("job cancelled")), 50);
     await assert.rejects(p, /cancelled|abort/i);
   });

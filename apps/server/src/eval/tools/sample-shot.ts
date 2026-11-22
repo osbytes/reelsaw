@@ -6,9 +6,11 @@
  */
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
+import os from "node:os";
 import pino from "pino";
 import { loadConfig } from "../../config.js";
 import { createMediaTools } from "../../media.js";
+import { cpuCapacity, cpuGrant, sceneScanCpu } from "../../resources.js";
 import { sampleFaces, segmentLayouts, dropStaticFaces, type FaceSample } from "../../pipeline/layout.js";
 import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
@@ -32,6 +34,7 @@ if (out && existsSync(out)) {
   const det = await loadFaceDetector(config.FACE_MODEL_PATH);
   samples = await sampleFaces(det, {
     ffmpegPath: config.FFMPEG_PATH,
+    threads: 2,
     source: media,
     startSec: start,
     durationSec: end - start,
@@ -40,7 +43,7 @@ if (out && existsSync(out)) {
   });
   await det.release();
   const text = await loadTextDetector(config.TEXT_MODEL_PATH);
-  const frames = await sampleClipText({ detector: text, ffmpegPath: config.FFMPEG_PATH }, media, start, end - start, 2);
+  const frames = await sampleClipText({ detector: text, ffmpegPath: config.FFMPEG_PATH, threads: 2 }, media, start, end - start, 2);
   await text.release();
   const r3 = (v: number) => Number(v.toFixed(3));
   samples = attachText(
@@ -48,7 +51,10 @@ if (out && existsSync(out)) {
     frames.map((f) => ({ t: f.t, all: f.all.map((x) => ({ x1: r3(x.x1), y1: r3(x.y1), x2: r3(x.x2), y2: r3(x.y2) })) })),
   );
   const tools = createMediaTools(config, pino({ level: "warn" }));
-  cuts = await tools.detectScenes(media, undefined, undefined, { start, duration: end - start });
+  cuts = await tools.detectScenes(media, {
+    range: { start, duration: end - start },
+    threads: cpuGrant({ capacity: cpuCapacity(os.availableParallelism()), leased: 0, ...sceneScanCpu(config.SCENE_SCAN_THREADS) }),
+  });
   if (out) {
     await fs.writeFile(out, JSON.stringify(samples));
     await fs.writeFile(cutsFile!, JSON.stringify(cuts));

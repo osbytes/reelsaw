@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DISK_LEASE_TTL_MS, VOLUME_MARKER, volumeId } from "../src/disk-leases.js";
+import { LEASE_TTL_MS, VOLUME_MARKER, machineId, volumeId } from "../src/resource-leases.js";
 import { queueDefs } from "../src/queue/boss.js";
 
 describe("volumeId", () => {
@@ -33,9 +33,18 @@ describe("volumeId", () => {
   });
 });
 
-describe("DISK_LEASE_TTL_MS", () => {
+describe("LEASE_TTL_MS", () => {
   it("is the longest any job may be given before pg-boss expires it (24 h), so no lease outlives its job", () => {
-    assert.equal(DISK_LEASE_TTL_MS, 24 * 3600_000);
-    assert.ok(DISK_LEASE_TTL_MS >= Math.max(...queueDefs.map((q) => q.expireInSeconds)) * 1000);
+    assert.equal(LEASE_TTL_MS, 24 * 3600_000);
+    assert.ok(LEASE_TTL_MS >= Math.max(...queueDefs.map((q) => q.expireInSeconds)) * 1000);
+  });
+});
+
+describe("machineId", () => {
+  it("is the kernel's boot id, shared by every container of one machine", async () => {
+    assert.equal(await machineId(async () => "7f1c0d2e-aaaa-bbbb-cccc-0123456789ab\n"), "boot:7f1c0d2e-aaaa-bbbb-cccc-0123456789ab");
+  });
+  it("falls back to the hostname where there is no /proc", async () => {
+    assert.equal(await machineId(async () => Promise.reject(new Error("ENOENT"))), `host:${os.hostname()}`);
   });
 });

@@ -16,7 +16,7 @@
  * marked `verified: false` with the reason.
  */
 import { spawn } from "node:child_process";
-import { CommandError } from "../media.js";
+import { CommandError, decodeThreadArgs } from "../media.js";
 import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word, plural } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { supports } from "./language.js";
@@ -60,7 +60,11 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
   const chunks: Buffer[] = [];
   let err = "";
   return new Promise((resolve, reject) => {
-    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], { signal, stdio: ["ignore", "pipe", "pipe"] });
+    // audio windows only (-vn): one decoder thread (decodeThreadArgs)
+    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...decodeThreadArgs(1), ...args], {
+      signal,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.stderr.on("data", (d: Buffer) => (err += d.toString()));
     p.on("error", reject);

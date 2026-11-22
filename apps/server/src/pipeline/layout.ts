@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
-import { rgbFramesToPipe, CommandError } from "../media.js";
+import { decodeThreadArgs, rgbFramesToPipe, CommandError } from "../media.js";
 import { FULL_FRAME, isFullFrame, contentSide, verticalCrop, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, faceRaster, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { createFaceTracker } from "../vision/tracker.js";
@@ -107,6 +107,8 @@ export interface LayoutDecision {
 
 export interface LayoutOptions {
   ffmpegPath: string;
+  /** the decoder's threads, from a CPU lease (SAMPLE_CPU) */
+  threads: number;
   source: string;
   startSec: number;
   durationSec: number;
@@ -146,6 +148,7 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       "-loglevel",
       "error",
       "-nostdin",
+      ...decodeThreadArgs(opts.threads),
       "-ss",
       opts.startSec.toFixed(3),
       "-t",
