@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-21T22:33:54.269Z",
+  "updatedAt": "2026-11-22T04:31:29.665Z",
   "acceptedRegressions": [
     {
       "metric": "punctuatedEdges",
@@ -49,18 +49,18 @@
       "better": "higher"
     },
     "creatorRecallAtN": {
-      "value": 0.15,
+      "value": 0.23,
       "better": "higher",
       "ratio": {
-        "k": 2,
+        "k": 3,
         "n": 13
       }
     },
     "creatorPicksFound": {
-      "value": 0.4,
+      "value": 0.6,
       "better": "higher",
       "ratio": {
-        "k": 2,
+        "k": 3,
         "n": 5
       }
     },
@@ -68,23 +68,23 @@
       "value": 0.67,
       "better": "higher",
       "ratio": {
-        "k": 2,
-        "n": 3
+        "k": 4,
+        "n": 6
       }
     },
     "creatorLiveRecallAtN": {
-      "value": 0.15,
+      "value": 0.23,
       "better": "higher",
       "ratio": {
-        "k": 2,
+        "k": 3,
         "n": 13
       }
     },
     "creatorLivePicksFound": {
-      "value": 0.4,
+      "value": 0.6,
       "better": "higher",
       "ratio": {
-        "k": 2,
+        "k": 3,
         "n": 5
       }
     },
@@ -92,8 +92,8 @@
       "value": 0.67,
       "better": "higher",
       "ratio": {
-        "k": 2,
-        "n": 3
+        "k": 4,
+        "n": 6
       }
     },
     "unpunctuatedEdges": {
@@ -102,6 +102,46 @@
     },
     "punctuatedEdges": {
       "value": 0.93,
+      "better": "higher"
+    },
+    "creatorPoolRecall": {
+      "value": 0.38,
+      "better": "higher",
+      "ratio": {
+        "k": 5,
+        "n": 13
+      }
+    },
+    "creatorTiedShare": {
+      "value": 0.16,
+      "better": "lower",
+      "ratio": {
+        "k": 15,
+        "n": 96
+      }
+    },
+    "creatorMatchPercentile": {
+      "value": 0.56,
+      "better": "higher"
+    },
+    "creatorLivePoolRecall": {
+      "value": 0.38,
+      "better": "higher",
+      "ratio": {
+        "k": 5,
+        "n": 13
+      }
+    },
+    "creatorLiveTiedShare": {
+      "value": 0.16,
+      "better": "lower",
+      "ratio": {
+        "k": 15,
+        "n": 96
+      }
+    },
+    "creatorLiveMatchPercentile": {
+      "value": 0.56,
       "better": "higher"
     }
   }
