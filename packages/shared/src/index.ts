@@ -1,3 +1,4 @@
+import { objectKeys } from "ts-extras";
 import { z } from "zod";
 import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
 import { outputShapeSchema } from "./shape.js";
@@ -221,7 +222,7 @@ const LEGACY_CAPTION_Y: Record<CaptionPosition, number> = { top: 0.3, middle: 0.
 export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosition?: CaptionPosition | undefined }, override?: StyleOverride | null): Style {
   const legacyY = settings.captionY === undefined && settings.captionPosition ? LEGACY_CAPTION_Y[settings.captionPosition] : undefined;
   const base: Record<string, unknown> = {};
-  for (const k of Object.keys(styleSchema.shape) as Array<keyof Style>) {
+  for (const k of objectKeys(styleSchema.shape)) {
     const v = override?.[k] ?? settings[k as keyof typeof settings];
     if (v !== undefined) base[k] = v;
   }
@@ -338,7 +339,7 @@ export function regionLabel(r: ContentRegion): string {
 /** The adjustment of a section on its own (no times, no mode, nothing unset), for the project's default framing; undefined when there is none. */
 export function adjustOf(s: SectionAdjustFields): SectionAdjustFields | undefined {
   const out: SectionAdjustFields = {};
-  for (const k of Object.keys(sectionAdjustShape) as Array<keyof SectionAdjustFields>) {
+  for (const k of objectKeys(sectionAdjustShape)) {
     const v = s[k];
     if (v === undefined) continue;
     if (typeof v === "number" && !k.startsWith("subject") && Math.abs(v) < 1e-4) continue;

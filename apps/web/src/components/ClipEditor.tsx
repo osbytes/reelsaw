@@ -1,3 +1,4 @@
+import { objectKeys } from "ts-extras";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { SourceQualityOffer } from "./SourceQualityOffer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -207,7 +208,7 @@ const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator
 type Tab = "captions" | "framing" | "layers" | "text" | "cuts" | "transcript";
 const PANE_NAME = ["Top", "Bottom"] as const;
 /** every optional field of a layout section, from the schema: the saved form and the change check cover them all */
-const SECTION_FIELDS = (Object.keys(layoutSectionSchema.shape) as Array<keyof LayoutSection>).filter(
+const SECTION_FIELDS = objectKeys(layoutSectionSchema.shape).filter(
   (k): k is Exclude<keyof LayoutSection, "start" | "end" | "mode"> => k !== "start" && k !== "end" && k !== "mode",
 );
 const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
@@ -1640,7 +1641,7 @@ export function ClipEditor(props: Props) {
     (!!clip.layoutOverride && !forcedSections.length && clip.layoutOverride !== "auto");
   const styleOverride: StyleOverride = useMemo(() => {
     const o: Record<string, unknown> = {};
-    for (const k of Object.keys(style) as Array<keyof Style>) if (style[k] !== projectStyle[k]) o[k] = style[k];
+    for (const k of objectKeys(style)) if (style[k] !== projectStyle[k]) o[k] = style[k];
     return o as StyleOverride;
   }, [style, projectStyle]);
   const initialStyle = useMemo(() => resolveStyle(settings, clip.style), [settings, clip.style]);
@@ -2831,7 +2832,7 @@ export function ClipEditor(props: Props) {
                 ariaLabel="Platform"
                 value={platform}
                 onValueChange={(v) => setPlatform(v as Platform)}
-                options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))}
+                options={objectKeys(PLATFORM_NAME).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))}
               />
             </Field>
             {overlays.length > 0 && (

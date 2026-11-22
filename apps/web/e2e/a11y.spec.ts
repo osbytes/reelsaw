@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { z } from "zod";
 
 const BASELINE = path.join(import.meta.dirname, "axe-baseline.json");
 const SCREENS = [
@@ -18,7 +19,10 @@ const SCREENS = [
   { name: "settings", path: "/settings" },
 ];
 
-const baseline: Record<string, string[]> = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, "utf8")) : {};
+/** screen@viewport → the axe rule ids it still breaks */
+const baselineSchema = z.record(z.string(), z.array(z.string()));
+const readBaseline = () => (fs.existsSync(BASELINE) ? baselineSchema.parse(JSON.parse(fs.readFileSync(BASELINE, "utf8"))) : {});
+const baseline = readBaseline();
 
 for (const screen of SCREENS) {
   test(`${screen.name} has no new accessibility violations`, async ({ page }, info) => {
@@ -30,7 +34,7 @@ for (const screen of SCREENS) {
     const key = `${screen.name}@${info.project.name}`;
     const now = [...new Set(results.violations.map((v) => v.id))].sort();
     if (process.env.AXE_UPDATE) {
-      const current: Record<string, string[]> = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, "utf8")) : {};
+      const current = readBaseline();
       current[key] = now;
       fs.writeFileSync(BASELINE, `${JSON.stringify(Object.fromEntries(Object.entries(current).sort()), null, 2)}\n`);
       return;

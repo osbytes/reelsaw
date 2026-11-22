@@ -49,6 +49,7 @@
     "react-hotkeys-hook": "^5.3.3",
     "react-router": "^8.5.0",
     "sonner": "^2.0.8",
+    "ts-extras": "3.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

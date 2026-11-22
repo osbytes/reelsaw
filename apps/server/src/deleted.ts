@@ -136,7 +136,7 @@ export async function listDeleted(svc: Services, userId: string) {
     const refs = await db.select({ id: schema.assetRefs.assetId }).from(schema.assetRefs).where(inArray(schema.assetRefs.assetId, assetIds));
     for (const r of refs) referenced.add(r.id);
   }
-  const usage = assetIds.length ? await bumperUsageCounts(db, userId) : new Map();
+  const usage: Awaited<ReturnType<typeof bumperUsageCounts>> = assetIds.length ? await bumperUsageCounts(db, userId) : new Map();
 
   const items: DeletedItem[] = [
     ...projectRows.map((r) => ({

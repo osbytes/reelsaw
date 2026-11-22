@@ -23,6 +23,9 @@ importers:
       '@changesets/cli':
         specifier: ^3.0.3
         version: 3.0.3
+      '@total-typescript/ts-reset':
+        specifier: 0.6.1
+        version: 0.6.1
       lefthook:
         specifier: 2.2.2
         version: 2.2.2
@@ -209,6 +212,9 @@ importers:
       stripe:
         specifier: 23.0.0
         version: 23.0.0(@types/node@24.19.2)
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       undici:
         specifier: 7.30.1
         version: 7.30.1
@@ -363,6 +369,9 @@ importers:
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -412,6 +421,9 @@ importers:
       fuse.js:
         specifier: 7.1.0
         version: 7.1.0
+      ts-extras:
+        specifier: 3.0.0
+        version: 3.0.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -2863,6 +2875,9 @@ packages:
       '@types/react':
         optional: true
 
+  '@total-typescript/ts-reset@0.6.1':
+    resolution: {integrity: sha512-cka47fVSo6lfQDIATYqb/vO1nvFfbPw7uWLayIXIhGETj0wcOOlrlkobOMDNQOFr9QOafegUPq13V2+6vtD7yg==}
+
   '@trpc/client@11.19.0':
     resolution: {integrity: sha512-0MKkPq6MejsKB5Opca1Rl22KVIaqo2+A1EiXyZ8EGUsl9TLrPdpGn+Usux20TZKFwnSC2+wI/WilqNJaP4ODfw==}
     hasBin: true
@@ -4581,6 +4596,10 @@ packages:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
     engines: {node: '>=8.0'}
 
+  ts-extras@3.0.0:
+    resolution: {integrity: sha512-n3A9eyRX5Ka84sLdAT/pQl7crCg2E9oMZkx3mrunqh1zDXuK5LXHFUG5VTaljbb0jAdOQVikP3WEU+W0vaJm/Q==}
+    engines: {node: '>=22'}
+
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
@@ -4596,6 +4615,10 @@ packages:
   type-fest@5.10.0:
     resolution: {integrity: sha512-NoSdpq/WEiAg5sjmBkmV/hfxv6HJH4NqPNrqjtSO5CwRmpsDfaf4begxW34KdJykH/l1yHtwBWQkCRdoXO8mPA==}
     engines: {node: '>=20'}
+
+  type-fest@6.0.3:
+    resolution: {integrity: sha512-MOJXegkac3h+sWdVb6VY/ACclsa71z3BprNpedGV8ljIzYCo+LRWgyIkWhidKNoiNJOb6kUds1pNCyzQ2p6hJQ==}
+    engines: {node: '>=22'}
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -7292,6 +7315,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
+  '@total-typescript/ts-reset@0.6.1': {}
+
   '@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@trpc/server': 11.19.0(typescript@5.9.3)
@@ -8783,6 +8808,10 @@ snapshots:
     dependencies:
       is-number: 7.0.0
 
+  ts-extras@3.0.0:
+    dependencies:
+      type-fest: 6.0.3
+
   tslib@2.8.1: {}
 
   tsx@4.23.15:
@@ -8794,6 +8823,10 @@ snapshots:
   type-fest@0.20.2: {}
 
   type-fest@5.10.0:
+    dependencies:
+      tagged-tag: 1.0.0
+
+  type-fest@6.0.3:
     dependencies:
       tagged-tag: 1.0.0
 
