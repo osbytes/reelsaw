@@ -427,8 +427,8 @@ export function Timeline({
   const canSplitAt = (t: number) => sections.some((s) => t > s.start + MIN_SECTION && t < s.end - MIN_SECTION);
   function onContext(e: React.MouseEvent) {
     const el = e.target as HTMLElement;
-    const lane = el.closest<HTMLElement>("[data-lane]")?.dataset.lane ?? "ruler";
-    const layer = el.closest<HTMLElement>("[data-ly]")?.dataset.ly ?? null;
+    const lane = el.closest<HTMLElement>("[data-lane]")?.dataset["lane"] ?? "ruler";
+    const layer = el.closest<HTMLElement>("[data-ly]")?.dataset["ly"] ?? null;
     const t = Number(tAt(e.clientX).toFixed(2));
     const section = sectionAt(Math.max(range[0], Math.min(range[1] - 0.01, t)));
     setMenuAt({ t, lane, section, layer });
@@ -444,7 +444,7 @@ export function Timeline({
     const label = slot === "intro" ? "Intro" : "Outro";
     const node = b ? (
       <div
-        className={`absolute inset-y-0 flex cursor-pointer items-center gap-1.5 overflow-hidden border-2 border-dashed px-1.5 ${slot === "intro" ? "rounded-l-[8px] border-r-0" : "rounded-r-[8px] border-l-0"} ${open ? "border-acc bg-acc-soft" : "border-line2 bg-panel hover:bg-sunk"}`}
+        className={`absolute inset-y-0 flex cursor-pointer items-center gap-1.5 overflow-hidden border-2 border-dashed px-1.5 ${slot === "intro" ? "rounded-s-[8px] border-e-0" : "rounded-e-[8px] border-s-0"} ${open ? "border-acc bg-acc-soft" : "border-line2 bg-panel hover:bg-sunk"}`}
         style={{ left, width }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
@@ -566,7 +566,7 @@ export function Timeline({
         <div className="shrink-0" style={{ width: LABEL_W }}>
           <div className="h-6" />
           <div className={`${label} h-[26px]`}>Words</div>
-          <div className={`${label} mt-1.5 justify-between pr-2`} style={{ height: lyLaneH }}>
+          <div className={`${label} mt-1.5 justify-between pe-2`} style={{ height: lyLaneH }}>
             Layers
             {onLayerAdd && (
               <DropdownMenu.Root>
@@ -609,7 +609,7 @@ export function Timeline({
           <ContextMenu.Trigger asChild>
             <div
               ref={lanesRef}
-              className="relative mr-4 min-w-0 flex-1 overflow-hidden pb-2"
+              className="relative me-4 min-w-0 flex-1 overflow-hidden pb-2"
               onPointerMove={move}
               onPointerUp={end}
               onPointerCancel={end}
@@ -619,7 +619,7 @@ export function Timeline({
               {/* ruler */}
               <div data-lane="ruler" className={`${lane} h-6 cursor-ew-resize`} onPointerDown={(e) => begin(e, { kind: "scrub" })}>
                 {ticks.map((t) => (
-                  <div key={t} className="absolute top-0 h-6 border-l border-line2 pl-1 font-mono text-[10px] leading-4 text-ink3" style={{ left: x(t) }}>
+                  <div key={t} className="absolute top-0 h-6 border-s border-line2 ps-1 font-mono text-[10px] leading-4 text-ink3" style={{ left: x(t) }}>
                     {formatTime(t)}
                   </div>
                 ))}
@@ -700,7 +700,7 @@ export function Timeline({
                       {(["ly-start", "ly-end"] as const).map((k) => (
                         <div
                           key={k}
-                          className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ly-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
+                          className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ly-start" ? "start-0" : "end-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
                           onPointerDown={(e) => {
                             onLayerSelect?.(o.id);
                             begin(e, { kind: k, id: o.id });
@@ -802,7 +802,7 @@ export function Timeline({
                   );
                 })}
                 {hoverLane === "layout" && hoverT !== null && !drag && canSplitAt(hoverT) && (
-                  <div className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-acc" style={{ left: x(hoverT) }} />
+                  <div className="pointer-events-none absolute inset-y-0 z-10 border-s border-dashed border-acc" style={{ left: x(hoverT) }} />
                 )}
                 {sections.slice(1).map((s, k) => (
                   <div
@@ -829,17 +829,17 @@ export function Timeline({
                 .map((c) => (
                   <div
                     key={c}
-                    className="pointer-events-none absolute bottom-0 top-6 border-l-2 border-dashed border-warn opacity-60"
+                    className="pointer-events-none absolute bottom-0 top-6 border-s-2 border-dashed border-warn opacity-60"
                     style={{ left: x(c) }}
                     title={`Scene change ${formatTime(c)}`}
                   />
                 ))}
               {/* snap target while dragging */}
-              {drag && snapHit && <div className="pointer-events-none absolute bottom-0 top-6 z-[6] border-l-2 border-snap" style={{ left: x(snapHit.t) }} />}
+              {drag && snapHit && <div className="pointer-events-none absolute bottom-0 top-6 z-[6] border-s-2 border-snap" style={{ left: x(snapHit.t) }} />}
               {/* playhead */}
               {playX >= -2 && playX <= w + 2 && (
-                <div className="pointer-events-none absolute inset-y-0 z-[7] -ml-px w-0.5 bg-ink" style={{ left: playX }}>
-                  <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-ink" />
+                <div className="pointer-events-none absolute inset-y-0 z-[7] -ms-px w-0.5 bg-ink" style={{ left: playX }}>
+                  <div className="absolute -start-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-ink" />
                 </div>
               )}
             </div>
@@ -874,7 +874,7 @@ export function Timeline({
         </ContextMenu.Root>
       </div>
       {!compactHints && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pr-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pe-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
           <span>Drag the handles to trim; drag the clip to slide it · click the intro or outro to change it</span>
           <span>Snaps to words, scene changes and the playhead · hold Alt to drag freely</span>
           <span>{MOD} + scroll zooms · right-click for framing and layers</span>
@@ -932,11 +932,11 @@ function TimelineMenu(p: {
     <ContextMenu.Content className="menu z-[60] w-[240px]" collisionPadding={8}>
       <ContextMenu.Label className="px-2.5 py-1 font-mono text-[10px] text-ink3">{formatTime(at.t)}</ContextMenu.Label>
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
-        <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ml-auto">{SPLIT_SHORTCUT}</span>
+        <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ms-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
       {p.layer && p.onLayerRemove ? (
         <ContextMenu.Item className={item} onSelect={() => p.onLayerRemove!(p.layer!.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ml-auto">Delete</span>
+          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ms-auto">Delete</span>
         </ContextMenu.Item>
       ) : p.onLayerAdd ? (
         <>
@@ -1007,10 +1007,10 @@ function TimelineMenu(p: {
       </ContextMenu.Item>
       <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} disabled={!p.canUndo} onSelect={p.onUndo}>
-        <Undo2 className="h-3.5 w-3.5" /> Undo <span className="kbd ml-auto">{MOD}Z</span>
+        <Undo2 className="h-3.5 w-3.5" /> Undo <span className="kbd ms-auto">{MOD}Z</span>
       </ContextMenu.Item>
       <ContextMenu.Item className={item} disabled={!p.canRedo} onSelect={p.onRedo}>
-        <Redo2 className="h-3.5 w-3.5" /> Redo <span className="kbd ml-auto">{MOD}⇧Z</span>
+        <Redo2 className="h-3.5 w-3.5" /> Redo <span className="kbd ms-auto">{MOD}⇧Z</span>
       </ContextMenu.Item>
     </ContextMenu.Content>
   );

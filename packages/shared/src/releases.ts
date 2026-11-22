@@ -161,7 +161,7 @@ export function versionOfTag(tag: string): string {
 
 function eat(rest: string, re: RegExp): { cap: string; rest: string } | null {
   const m = re.exec(rest);
-  if (!m || m.index !== 0) return null;
+  if (m?.index !== 0) return null;
   return { cap: m[1] ?? "", rest: rest.slice(m[0].length) };
 }
 
@@ -396,7 +396,7 @@ export async function loadReleasesFeed(opts: LoadReleasesOpts): Promise<Releases
     "user-agent": opts.userAgent,
     "x-github-api-version": "2022-11-28",
   };
-  if (opts.token) headers.authorization = `Bearer ${opts.token}`;
+  if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
   const signal = opts.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS);
   const doFetch = opts.fetch;
 

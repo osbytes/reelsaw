@@ -39,7 +39,7 @@ async function toolVersion(cmd: string, args: string[]): Promise<string> {
 }
 
 function hashJobData(data: Record<string, unknown> | null) {
-  if (!data || typeof data.userId !== "string") return data;
+  if (!data || typeof data["userId"] !== "string") return data;
   const { userId, ...rest } = data;
   return { ...rest, ownerHash: hashOwner(userId) };
 }
@@ -114,7 +114,7 @@ export async function queueInfo(svc: Services, scope: { projectIds: string[] } |
         : { rows: [] };
     // job data carries the owner's user id (fair scheduling); the bundle pseudonymises it like project.json's ownerHash
     const hashed = failed.rows.map((r) => {
-      const d = r.data as Record<string, unknown> | null;
+      const d = r["data"] as Record<string, unknown> | null;
       return { ...r, data: hashJobData(d) };
     });
     return { scope: instance ? "instance" : "own", counts: counts.rows, recentFailures: hashed };
@@ -169,20 +169,28 @@ export async function recentErrors(
       } catch {
         continue;
       }
-      const t = Date.parse(String(d.time ?? ""));
+      const t = Date.parse(String(d["time"] ?? ""));
       if (Number.isFinite(t) && t < since) continue;
       if (own.instance) {
         out.push(redact(line));
         continue;
       }
-      const ids = [d.projectId, d.clipId].filter((x): x is string => typeof x === "string");
-      if (ids.length || d.jobId !== undefined) {
+      const ids = [d["projectId"], d["clipId"]].filter((x): x is string => typeof x === "string");
+      if (ids.length || d["jobId"] !== undefined) {
         if (ids.length && ids.every((id) => mine.has(id))) out.push(redact(line));
         continue; // a job or someone else's project: not ours to share
       }
-      const err = d.err as { type?: unknown; message?: unknown } | undefined;
+      const err = d["err"] as { type?: unknown; message?: unknown } | undefined;
       out.push(
-        redact(JSON.stringify({ time: d.time, level: d.level, msg: d.msg, module: d.module, err: err ? { type: err.type, message: err.message } : undefined })),
+        redact(
+          JSON.stringify({
+            time: d["time"],
+            level: d["level"],
+            msg: d["msg"],
+            module: d["module"],
+            err: err ? { type: err.type, message: err.message } : undefined,
+          }),
+        ),
       );
     }
   }

@@ -145,9 +145,9 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     projectId: r.projectId,
     title: r.title,
     at: r.at.getTime(),
-    clips: finiteNumber(r.payload.clips),
-    failed: finiteNumber(r.payload.failed),
-    rerender: r.payload.runReason === "rerender",
+    clips: finiteNumber(r.payload["clips"]),
+    failed: finiteNumber(r.payload["failed"]),
+    rerender: r.payload["runReason"] === "rerender",
   }));
   if (!mine.length) {
     log.debug({ reason: "nothing unseen" }, "completion notice skipped");

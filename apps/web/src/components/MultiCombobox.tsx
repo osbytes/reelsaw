@@ -90,7 +90,7 @@ export function MultiCombobox({
         <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border ${on ? "border-acc bg-acc text-white" : "border-line"}`}>
           {on && <Check className="h-3 w-3" />}
         </span>
-        {o.prefix && <span className="w-6 shrink-0 text-right font-mono text-xs text-ink3">{o.prefix}</span>}
+        {o.prefix && <span className="w-6 shrink-0 text-end font-mono text-xs text-ink3">{o.prefix}</span>}
         <span className="min-w-0 flex-1 truncate">{o.label}</span>
         {o.hint && <span className="shrink-0 text-xs text-ink3">{o.hint}</span>}
       </Command.Item>
@@ -101,13 +101,19 @@ export function MultiCombobox({
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger asChild disabled={disabled}>
         {trigger ?? (
-          <button type="button" role="combobox" aria-expanded={open} aria-label={label} className="input flex min-h-[38px] items-center gap-1.5 py-1 text-left">
+          <button
+            type="button"
+            role="combobox"
+            aria-expanded={open}
+            aria-label={label}
+            className="input flex min-h-[38px] items-center gap-1.5 py-1 text-start"
+          >
             <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
               {selected.length === 0 && <span className="text-ink3">{placeholder}</span>}
               {selected.map((o) => (
                 <span
                   key={o.value}
-                  className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-acc-soft py-0.5 pl-1.5 pr-0.5 text-xs font-semibold text-acc-text"
+                  className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-acc-soft py-0.5 ps-1.5 pe-0.5 text-xs font-semibold text-acc-text"
                 >
                   <span className="truncate">
                     {o.prefix ? `${o.prefix} ` : ""}

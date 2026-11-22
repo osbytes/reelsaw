@@ -6,9 +6,7 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { eq } from "drizzle-orm";
 import { lifecycleHarness } from "./lifecycle-harness.js";
-import { schema } from "../src/db/index.js";
 import { applyProjectFraming, deleteClip, deleteClips, restoreClip, updateProject } from "../src/projects/service.js";
 import { requestRender } from "../src/pipeline/lifecycle.js";
 

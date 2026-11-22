@@ -14,6 +14,7 @@
  *   pnpm docs:gen     rewrite the blocks
  *   pnpm docs:check   exit 1 when a block is stale or a variable / command is undocumented (run it in CI)
  */
+import { objectEntries } from "ts-extras";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,7 +181,7 @@ function suiteTable(rows: Awaited<ReturnType<typeof suiteRows>>): string {
 async function mcpTable(): Promise<string> {
   const { TOOLS } = await import("../src/mcp-tools.js");
   const lines = ["| Tool | What it does |", "| --- | --- |"];
-  for (const [name, t] of Object.entries(TOOLS) as Array<[string, { description: string }]>) {
+  for (const [name, t] of objectEntries(TOOLS)) {
     const first = /^.*?[.!?](?=\s|$)/.exec(t.description)?.[0] ?? t.description;
     lines.push(`| \`${name}\` | ${cell(first)} |`);
   }

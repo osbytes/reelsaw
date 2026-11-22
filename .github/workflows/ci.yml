@@ -38,6 +38,15 @@ jobs:
       - run: pnpm typecheck
       # Biome lint (biome.json); warnings show as annotations, errors fail the job
       - run: pnpm exec biome ci
+      # repo guards: no vendor-specific agent files (AGENTS.md only), the dup-of: ledger (a third use is due),
+      # and the ratchet (Biome rules old code still breaks, Knip unused exports and types: counts in
+      # scripts/lint-baseline.json may only go down; unused files and dependencies fail outright)
+      - run: pnpm guards
+      # the English catalogue (apps/web/src/locales/en.po) matches the messages in the code (docs/I18N.md)
+      - run: pnpm --filter @reelsaw/web i18n:check
+      # clone pairs (jscpd) that touch a file this PR changed, in the job summary; reports, never fails
+      - if: github.event_name == 'pull_request'
+        run: node scripts/clones.mjs origin/main
       # .env.example, docs/CONFIG.md and the CLI/suite tables are generated from the code (pnpm docs:gen)
       - run: pnpm docs:check
       # packages/shared/src/whisper-languages.ts is Whisper's own table at a pinned commit (the script regenerates it)

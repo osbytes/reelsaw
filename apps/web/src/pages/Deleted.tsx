@@ -230,7 +230,7 @@ export function DeletedPage() {
                     <Skeleton className="h-3.5 w-14" />
                   </ListCell>
                   <ListCell full>
-                    <Skeleton className="ml-auto h-3.5 w-10" />
+                    <Skeleton className="ms-auto h-3.5 w-10" />
                   </ListCell>
                   <ListCell full>
                     <Skeleton className="h-3.5 w-14" />
@@ -239,7 +239,7 @@ export function DeletedPage() {
                     <Skeleton className="h-3.5 w-16" />
                   </ListCell>
                   <ListCell>
-                    <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
+                    <Skeleton className="ms-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
                   </ListCell>
                 </ListRow>
               ))}

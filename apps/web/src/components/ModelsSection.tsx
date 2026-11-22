@@ -238,7 +238,7 @@ export function ModelsSection() {
         onConfirm={() => (clearing ? clearCredentials.mutateAsync({ provider: clearing }) : Promise.resolve())}
       />
       <StickyPanelFooter>
-        <span className="mr-auto text-[12px] text-ink3">
+        <span className="me-auto text-[12px] text-ink3">
           {dirty.length ? `${plural(dirty.length, "change")} to save; each is checked first (key, server, word timestamps)` : ""}
         </span>
         <span className="flex gap-2">

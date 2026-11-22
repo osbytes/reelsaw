@@ -18,34 +18,34 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
     return u;
   };
   const item = (g: Record<string, unknown>, sticker: boolean): ProviderItem | null => {
-    const img = obj(g.images);
-    const orig = obj(img.original);
-    const fw = obj(img.fixed_width);
+    const img = obj(g["images"]);
+    const orig = obj(img["original"]);
+    const fw = obj(img["fixed_width"]);
     // GIFs import as mp4; the panel must preview that file, not the .gif (a <video> will not play a GIF).
-    const gif = httpsUrl(fw.url) ?? httpsUrl(orig.url);
-    const mp4 = httpsUrl(fw.mp4) ?? httpsUrl(orig.mp4) ?? httpsUrl(obj(img.preview).mp4);
-    const still = httpsUrl(obj(img.fixed_width_small_still).url) ?? httpsUrl(obj(img.fixed_width_still).url) ?? gif;
+    const gif = httpsUrl(fw["url"]) ?? httpsUrl(orig["url"]);
+    const mp4 = httpsUrl(fw["mp4"]) ?? httpsUrl(orig["mp4"]) ?? httpsUrl(obj(img["preview"])["mp4"]);
+    const still = httpsUrl(obj(img["fixed_width_small_still"])["url"]) ?? httpsUrl(obj(img["fixed_width_still"])["url"]) ?? gif;
     const preview = sticker ? gif : (mp4 ?? gif);
-    if (!str(g.id) || !preview) return null;
-    const user = str(obj(g.user).display_name) ?? str(g.username);
+    if (!str(g["id"]) || !preview) return null;
+    const user = str(obj(g["user"])["display_name"]) ?? str(g["username"]);
     return {
       provider: "giphy",
-      externalId: `${sticker ? "sticker" : "gif"}:${g.id}`,
+      externalId: `${sticker ? "sticker" : "gif"}:${g["id"]}`,
       kind: sticker ? "image" : "video",
       mime: sticker ? "image/gif" : "video/mp4",
-      name: clip(str(g.title) ?? `GIF ${g.id}`, 120),
+      name: clip(str(g["title"]) ?? `GIF ${g["id"]}`, 120),
       previewUrl: preview,
       thumbUrl: sticker ? preview : (gif ?? still ?? preview),
-      width: num(orig.width),
-      height: num(orig.height),
+      width: num(orig["width"]),
+      height: num(orig["height"]),
       license: LICENSE,
       attribution: user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY",
-      url: httpsUrl(g.url),
+      url: httpsUrl(g["url"]),
     };
   };
   const file = (g: Record<string, unknown>, sticker: boolean) => {
-    const orig = obj(obj(g.images).original);
-    return sticker ? { url: httpsUrl(orig.url), ext: "gif" } : { url: httpsUrl(orig.mp4), ext: "mp4" };
+    const orig = obj(obj(g["images"])["original"]);
+    return sticker ? { url: httpsUrl(orig["url"]), ext: "gif" } : { url: httpsUrl(orig["mp4"]), ext: "mp4" };
   };
   return {
     id: "giphy",
@@ -61,12 +61,12 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
       const calls: Array<Promise<{ items: ProviderItem[]; next: number; more: boolean }>> = [];
       const run = (path: string, sticker: boolean) =>
         http.json("giphy", url(path, { q, limit: size, offset: String(offset), rating: "pg-13", lang: "en" })).then((r) => {
-          const p = obj(obj(r).pagination);
-          const count = num(p.count) ?? 0;
+          const p = obj(obj(r)["pagination"]);
+          const count = num(p["count"]) ?? 0;
           return {
-            items: arr(obj(r).data).flatMap((g) => item(obj(g), sticker) ?? []),
+            items: arr(obj(r)["data"]).flatMap((g) => item(obj(g), sticker) ?? []),
             next: offset + count,
-            more: offset + count < (num(p.total_count) ?? 0) && count > 0,
+            more: offset + count < (num(p["total_count"]) ?? 0) && count > 0,
           };
         });
       if (kind !== "image") calls.push(run("/gifs/search", false));
@@ -79,20 +79,20 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
       const [type, id] = externalId.split(":");
       if ((type !== "gif" && type !== "sticker") || !id || !/^[A-Za-z0-9]+$/.test(id))
         throw new ProviderError("That is not a Giphy id (gif:<id> or sticker:<id>).");
-      const g = obj(obj(await http.json("giphy", url(`/${type}s/${id}`))).data);
+      const g = obj(obj(await http.json("giphy", url(`/${type}s/${id}`)))["data"]);
       const f = file(g, type === "sticker");
       if (!f.url) throw new ProviderError("Giphy returned no file for that item.");
-      const user = str(obj(g.user).display_name) ?? str(g.username);
+      const user = str(obj(g["user"])["display_name"]) ?? str(g["username"]);
       return {
         url: f.url,
         ext: f.ext,
-        name: clip(str(g.title) ?? `GIPHY ${id}`, 120),
+        name: clip(str(g["title"]) ?? `GIPHY ${id}`, 120),
         kind: type === "sticker" ? "image" : "video",
         tags: [],
         provenance: {
           provider: "giphy",
           externalId,
-          url: httpsUrl(g.url),
+          url: httpsUrl(g["url"]),
           license: LICENSE,
           attribution: clip(user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", 300),
         },

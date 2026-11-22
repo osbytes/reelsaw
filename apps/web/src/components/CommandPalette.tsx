@@ -25,7 +25,7 @@ function PaletteLoading({ onClose }: { onClose: () => void }) {
       <div className="fixed inset-0 z-[85] bg-black/40" onClick={onClose} aria-hidden />
       <div
         role="status"
-        className="fixed left-1/2 top-[12dvh] z-[86] flex h-[52px] w-[min(640px,calc(100vw-24px))] -translate-x-1/2 items-center gap-3 rounded-[18px] border border-line bg-panel px-4 text-[15px] text-ink3 shadow-pop"
+        className="fixed start-1/2 top-[12dvh] z-[86] flex h-[52px] w-[min(640px,calc(100vw-24px))] -translate-x-1/2 items-center gap-3 rounded-[18px] border border-line bg-panel px-4 text-[15px] text-ink3 shadow-pop"
       >
         <Spinner />
         Search projects, clips and your library, or paste video links…

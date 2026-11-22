@@ -7,6 +7,7 @@
  * and leave this module a page at a time (`page`): a Speaches registry alone lists hundreds of models.
  * Keys never leave this module: listings carry model ids, names, sizes and prices.
  */
+import { objectKeys } from "ts-extras";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./registry.js";
@@ -404,7 +405,7 @@ export function createModelCatalog(
    */
   async function listOpenCode(out: CatalogProvider, key: string, kind: CatalogKind) {
     if (kind !== "language") return;
-    const plans = Object.keys(OPENCODE_PLANS) as OpenCodePlan[];
+    const plans = objectKeys(OPENCODE_PLANS);
     out.groups = plans.map((p) => ({ name: OPENCODE_PLANS[p].group, ...(OPENCODE_PLANS[p].notice ? { notice: OPENCODE_PLANS[p].notice } : {}) }));
     const root = (config.OPENCODE_BASE_URL || OPENCODE_DEFAULT_BASE_URL).replace(/\/+$/, "");
     const headers = { authorization: `Bearer ${key}`, "user-agent": opencodeUserAgent(config.REELSAW_VERSION) };
@@ -636,7 +637,7 @@ export function createModelCatalog(
     pulls: () => [...jobs.values()].map(({ abort: _a, ...j }) => j),
     cancelPull(id) {
       const j = jobs.get(id);
-      if (!j || j.status !== "running") return false;
+      if (j?.status !== "running") return false;
       j.abort.abort();
       return true;
     },

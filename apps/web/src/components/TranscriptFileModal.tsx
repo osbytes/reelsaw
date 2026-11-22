@@ -46,7 +46,9 @@ export function TranscriptFileModal({
   });
   const busy = imp.isPending;
   const base = `/api/projects/${projectId}/transcript`;
-  const runImport = () => (file ? imp.mutateAsync({ file, language: language.trim() || undefined }) : Promise.resolve());
+  const runImport = async () => {
+    if (file) await imp.mutateAsync({ file, language: language.trim() || undefined });
+  };
 
   return (
     <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title="Transcript files" width={460}>

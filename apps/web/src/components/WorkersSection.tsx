@@ -141,7 +141,7 @@ export function WorkersSection() {
                     {work} · {w.live ? ago(w.lastSeenAgoSec) : `gone ${ago(w.lastSeenAgoSec)}`}
                   </div>
                 </div>
-                <div className="hidden min-w-0 text-right sm:block">
+                <div className="hidden min-w-0 text-end sm:block">
                   <div className="truncate text-xs leading-5" title={work}>
                     {work}
                   </div>

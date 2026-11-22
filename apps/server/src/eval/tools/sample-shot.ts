@@ -27,8 +27,9 @@ let samples: FaceSample[];
 let cuts: number[] = [];
 const cutsFile = out ? out.replace(/\.json$/, ".cuts.json") : undefined;
 if (out && existsSync(out)) {
-  samples = JSON.parse(await fs.readFile(out, "utf8"));
-  if (cutsFile && existsSync(cutsFile)) cuts = JSON.parse(await fs.readFile(cutsFile, "utf8"));
+  // fixtures this tool wrote itself
+  samples = JSON.parse(await fs.readFile(out, "utf8")) as FaceSample[];
+  if (cutsFile && existsSync(cutsFile)) cuts = JSON.parse(await fs.readFile(cutsFile, "utf8")) as number[];
 } else {
   const det = await loadFaceDetector(config.FACE_MODEL_PATH);
   samples = await sampleFaces(det, {

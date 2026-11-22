@@ -16,7 +16,7 @@ const INLINE_SCRIPT_ESCAPE_MAP: Record<string, string> = {
 };
 
 function escapeUnsafeForInlineScript(str: string): string {
-  return str.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g, (ch) => INLINE_SCRIPT_ESCAPE_MAP[ch] ?? ch);
+  return str.replace(/[<>/\\\b\f\n\r\t\0\u2028\u2029]/g, (ch) => INLINE_SCRIPT_ESCAPE_MAP[ch] ?? ch);
 }
 
 // Runs before first paint. React's commitHostSingletonAcquisition (hydration

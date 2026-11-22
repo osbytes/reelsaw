@@ -94,15 +94,15 @@ export function errorReportOf(bindings: Record<string, unknown>, args: readonly 
   const [first, second] = args;
   const fields: Record<string, unknown> =
     first instanceof Error ? { err: first } : first && typeof first === "object" ? (first as Record<string, unknown>) : {};
-  if (fields.err === undefined || fields.err === null) return null;
+  if (fields["err"] === undefined || fields["err"] === null) return null;
   const message = typeof second === "string" ? second : typeof first === "string" ? first : "";
   const tags: Record<string, string> = {};
   for (const k of REPORT_TAG_KEYS) {
     const v = fields[k] ?? bindings[k];
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") tags[k] = String(v).slice(0, 200);
   }
-  if (message) tags.log = message.slice(0, 200);
-  return { err: fields.err, message, level: level >= 60 ? "fatal" : "error", tags };
+  if (message) tags["log"] = message.slice(0, 200);
+  return { err: fields["err"], message, level: level >= 60 ? "fatal" : "error", tags };
 }
 
 const isLevel = (s: string): s is LogLevel => (LOG_LEVELS as readonly string[]).includes(s);
@@ -255,7 +255,7 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
   const origChild = root.child as unknown as (this: Logger, bindings: Record<string, unknown>, options?: Record<string, unknown>) => Logger;
   // children of children reach this through the prototype chain (pino builds them with Object.create)
   (root as unknown as { child: unknown }).child = function (this: Logger, bindings: Record<string, unknown>, options?: Record<string, unknown>) {
-    const module = typeof bindings?.module === "string" ? bindings.module : moduleOf.get(this);
+    const module = typeof bindings?.["module"] === "string" ? bindings["module"] : moduleOf.get(this);
     const child = origChild.call(this, bindings, options);
     moduleOf.set(child, module);
     if (module) seen.add(module);

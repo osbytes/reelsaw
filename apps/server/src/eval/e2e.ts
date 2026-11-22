@@ -32,7 +32,6 @@ import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 import { plural } from "@reelsaw/shared";
 
 const argv = process.argv.slice(2);
-const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
 const flagValue = (name: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[i + 1] : undefined;
@@ -57,7 +56,7 @@ const dotenv = (() => {
 
 const COMPOSE_PROJECT = flagValue("project") ?? "reelsaw-bench";
 const BASE = flagValue("base") ?? "http://localhost:3200";
-const DB_URL = flagValue("db") ?? `postgres://reelsaw:${dotenv.POSTGRES_PASSWORD ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
+const DB_URL = flagValue("db") ?? `postgres://reelsaw:${dotenv["POSTGRES_PASSWORD"] ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
 const TIMEOUT_MIN = Number(flagValue("timeout-min") ?? 90);
 const STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
 
@@ -166,7 +165,7 @@ const compose = (extraFiles: string[], ...args: string[]) =>
 const containerUrl = (v: string) => v.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/])/g, "//host.docker.internal");
 
 /** The transcription model a profile runs with: its override, else the repo .env. */
-const sttOf = (profile: Profile) => profile.env.TRANSCRIPTION_MODEL ?? dotenv.TRANSCRIPTION_MODEL ?? "openai:whisper-1";
+const sttOf = (profile: Profile) => profile.env["TRANSCRIPTION_MODEL"] ?? dotenv["TRANSCRIPTION_MODEL"] ?? "openai:whisper-1";
 
 /**
  * Recreate the bench app with the profile's env and wait for it. The ASR cache (in the data volume)
@@ -211,15 +210,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * first use) so the bench projects show up when you log in to the bench stack; otherwise a throwaway.
  */
 async function signUp(): Promise<string> {
-  const email = process.env.BENCH_EMAIL ?? `bench-${randomUUID().slice(0, 8)}@example.test`;
-  const password = process.env.BENCH_PASSWORD ?? `pw-${randomUUID()}`;
+  const email = process.env["BENCH_EMAIL"] ?? `bench-${randomUUID().slice(0, 8)}@example.test`;
+  const password = process.env["BENCH_PASSWORD"] ?? `pw-${randomUUID()}`;
   const headers = { "content-type": "application/json", origin: BASE };
   const cookieOf = (res: Response) =>
     res.headers
       .getSetCookie()
       .map((c) => c.split(";")[0])
       .join("; ");
-  if (process.env.BENCH_EMAIL) {
+  if (process.env["BENCH_EMAIL"]) {
     const res = await fetch(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers, body: JSON.stringify({ email, password }) });
     if (res.ok) return cookieOf(res);
   }
@@ -350,14 +349,14 @@ async function collect(
     (await pool.query("select index, title, hook, start_sec, end_sec, score, status, layout from clips where project_id = $1 order by index", [projectId]))
       .rows as Array<Record<string, unknown>>
   ).map((c) => ({
-    index: Number(c.index),
-    title: String(c.title),
-    hook: String(c.hook),
-    startSec: round(Number(c.start_sec)),
-    endSec: round(Number(c.end_sec)),
-    score: Number(c.score),
-    status: String(c.status),
-    layout: (c.layout as string | null) ?? null,
+    index: Number(c["index"]),
+    title: String(c["title"]),
+    hook: String(c["hook"]),
+    startSec: round(Number(c["start_sec"])),
+    endSec: round(Number(c["end_sec"])),
+    score: Number(c["score"]),
+    status: String(c["status"]),
+    layout: (c["layout"] as string | null) ?? null,
   }));
 
   const llm = llmSummary(await llmLines(projectId, since, finishedAt));
@@ -461,8 +460,8 @@ function summaryTable(results: RunResult[]): { head: string[]; rows: string[][] 
     r.llm.calls ? secs(r.llm.totalSec) : "",
     r.llm.calls ? `${(r.llm.p50Ms / 1000).toFixed(1)}s` : "",
     r.llm.calls ? `${tokens(r.llm.inputTokens)}/${tokens(r.llm.outputTokens)}` : "",
-    r.models.language ?? r.env.AI_MODEL ?? "",
-    r.models.transcription ?? r.env.TRANSCRIPTION_MODEL ?? "",
+    r.models["language"] ?? r.env["AI_MODEL"] ?? "",
+    r.models["transcription"] ?? r.env["TRANSCRIPTION_MODEL"] ?? "",
   ]);
   return { head, rows };
 }

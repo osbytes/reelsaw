@@ -246,27 +246,27 @@ export function QueueSection() {
               <col />
             </colgroup>
             <thead>
-              <tr className="text-left text-xs text-ink3">
+              <tr className="text-start text-xs text-ink3">
                 <th scope="col" className="py-1 font-medium">
                   Stage
                 </th>
-                <th scope="col" className="py-1 text-right font-medium">
+                <th scope="col" className="py-1 text-end font-medium">
                   Running
                 </th>
-                <th scope="col" className="py-1 text-right font-medium">
+                <th scope="col" className="py-1 text-end font-medium">
                   Waiting
                 </th>
-                <th scope="col" className="py-1 text-right font-medium">
+                <th scope="col" className="py-1 text-end font-medium">
                   Longest wait
                 </th>
                 <th
                   scope="col"
-                  className="py-1 text-right font-medium"
+                  className="py-1 text-end font-medium"
                   title={`Wait from queued to picked up, jobs started in the last ${d.pickupWindowMinutes} min: median / 95th percentile`}
                 >
                   Pickup p50 / p95
                 </th>
-                <th scope="col" className="py-1 pl-4 font-medium">
+                <th scope="col" className="py-1 ps-4 font-medium">
                   <span className="sr-only">Note</span>
                 </th>
               </tr>
@@ -277,16 +277,16 @@ export function QueueSection() {
                 return (
                   <tr key={r.queue} className="border-t border-line/60">
                     <td className="truncate py-1.5">{r.label}</td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.running || "—"}</td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.waiting + r.retrying || "—"}</td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{r.oldestWaitingAt ? elapsed(r.oldestWaitingAt) : "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{r.running || "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{r.waiting + r.retrying || "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{r.oldestWaitingAt ? elapsed(r.oldestWaitingAt) : "—"}</td>
                     <td
-                      className="py-1.5 text-right font-mono text-xs tabular-nums text-ink2"
+                      className="py-1.5 text-end font-mono text-xs tabular-nums text-ink2"
                       title={r.pickup.started ? `${plural(r.pickup.started, "job")} started; longest wait ${formatSeconds(r.pickup.maxSec)}` : undefined}
                     >
                       {r.pickup.started ? `${formatSeconds(r.pickup.p50Sec)} / ${formatSeconds(r.pickup.p95Sec)}` : "—"}
                     </td>
-                    <td className={`truncate py-1.5 pl-4 text-xs font-semibold ${note?.tone ?? ""}`}>{note?.text}</td>
+                    <td className={`truncate py-1.5 ps-4 text-xs font-semibold ${note?.tone ?? ""}`}>{note?.text}</td>
                   </tr>
                 );
               })}
@@ -313,20 +313,20 @@ export function QueueSection() {
                 <col className="w-[7rem]" />
               </colgroup>
               <thead>
-                <tr className="text-left text-xs text-ink3">
+                <tr className="text-start text-xs text-ink3">
                   <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
                     Account
                   </th>
-                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-end font-medium">
                     Priority
                   </th>
-                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-end font-medium">
                     Running
                   </th>
-                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-end font-medium">
                     Waiting
                   </th>
-                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-end font-medium">
                     Longest wait
                   </th>
                 </tr>
@@ -341,15 +341,15 @@ export function QueueSection() {
                       {o.plan && o.plan !== "free" ? <span className="text-ink3"> · {o.plan}</span> : null}
                     </td>
                     <td
-                      className="py-1.5 text-right font-mono text-xs tabular-nums"
+                      className="py-1.5 text-end font-mono text-xs tabular-nums"
                       title={o.prioritySource === "override" ? "Set by an admin" : o.prioritySource === "plan" ? "From the plan" : "Default"}
                     >
                       {formatPriority(o.priority)}
                       {o.prioritySource === "override" ? <span className="text-ink3"> (set)</span> : null}
                     </td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.running || "—"}</td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.waiting || "—"}</td>
-                    <td className="py-1.5 text-right font-mono text-xs tabular-nums">{o.oldestWaitingAt ? elapsed(o.oldestWaitingAt) : "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{o.running || "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{o.waiting || "—"}</td>
+                    <td className="py-1.5 text-end font-mono text-xs tabular-nums">{o.oldestWaitingAt ? elapsed(o.oldestWaitingAt) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -372,7 +372,7 @@ export function QueueSection() {
                 <col className="w-[5.5rem]" />
               </colgroup>
               <thead>
-                <tr className="text-left text-xs text-ink3">
+                <tr className="text-start text-xs text-ink3">
                   <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
                     Project
                   </th>
@@ -382,7 +382,7 @@ export function QueueSection() {
                   <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
                     State
                   </th>
-                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-right font-medium">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 text-end font-medium">
                     For
                   </th>
                 </tr>
@@ -417,7 +417,7 @@ export function QueueSection() {
                         {j.attempt > 1 ? <span className="text-ink3"> · try {j.attempt}</span> : null}
                         {j.lastError ? <span className="text-ink2"> · {j.lastError}</span> : null}
                       </td>
-                      <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink2">{elapsed(j.startedAt ?? j.createdAt)}</td>
+                      <td className="py-1.5 text-end font-mono text-xs tabular-nums text-ink2">{elapsed(j.startedAt ?? j.createdAt)}</td>
                     </tr>
                   );
                 })}
@@ -431,7 +431,7 @@ export function QueueSection() {
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
           <h3 className="text-[13px] font-bold">
             {showDismissed ? "Dismissed failures" : "Failed work"}
-            {failures.data && total ? <span className="ml-1.5 font-normal text-ink3">{`${total}${truncated ? "+" : ""}`}</span> : null}
+            {failures.data && total ? <span className="ms-1.5 font-normal text-ink3">{`${total}${truncated ? "+" : ""}`}</span> : null}
           </h3>
           <div className="flex min-h-8 min-w-[10.5rem] flex-wrap items-center justify-end gap-2">
             {filtered && items.length > 0 && !showDismissed && filter.cause !== "input" ? (
@@ -492,7 +492,7 @@ export function QueueSection() {
           </button>
           <button
             type="button"
-            className="btn-quiet ml-auto h-4 px-0 text-xs text-ink3"
+            className="btn-quiet ms-auto h-4 px-0 text-xs text-ink3"
             aria-pressed={showDismissed}
             onClick={() => setShowDismissed((v) => !v)}
           >
@@ -506,119 +506,117 @@ export function QueueSection() {
             ))}
           </SkeletonRegion>
         ) : items.length > 0 ? (
-          <>
-            <ScrollArea className={SECTION_LIST_MAX_H}>
-              <table className="w-full min-w-[34rem] table-fixed text-[13px]">
-                <caption className="sr-only">Failed projects and clips, newest first</caption>
-                <colgroup>
-                  <col className="w-[38%]" />
-                  <col className="w-[6rem]" />
-                  <col />
-                  <col className="w-[5.5rem]" />
-                  <col className="w-[5rem]" />
-                </colgroup>
-                <thead>
-                  <tr className="text-left text-xs text-ink3">
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Item
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Stage
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Reason
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      When
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1">
-                      <span className="sr-only">Actions</span>
-                    </th>
+          <ScrollArea className={SECTION_LIST_MAX_H}>
+            <table className="w-full min-w-[34rem] table-fixed text-[13px]">
+              <caption className="sr-only">Failed projects and clips, newest first</caption>
+              <colgroup>
+                <col className="w-[38%]" />
+                <col className="w-[6rem]" />
+                <col />
+                <col className="w-[5.5rem]" />
+                <col className="w-[5rem]" />
+              </colgroup>
+              <thead>
+                <tr className="text-start text-xs text-ink3">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Item
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Stage
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Reason
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    When
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((row) => (
+                  <tr key={`${row.kind}:${row.id}`} className="border-t border-line/60">
+                    <td className="truncate py-1.5">
+                      <button
+                        type="button"
+                        className="block w-full truncate text-start text-ink hover:underline"
+                        onClick={() => openFail({ kind: row.kind, id: row.id })}
+                      >
+                        {row.title}
+                      </button>
+                      <div className="truncate text-[11px] text-ink3" title={row.ownerEmail}>
+                        {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
+                      </div>
+                    </td>
+                    <td className="truncate py-1.5">
+                      {row.stage}
+                      <div className={`truncate text-[11px] ${CAUSE[row.cause].tone}`} title={CAUSE[row.cause].title}>
+                        <span className="font-mono">{CAUSE[row.cause].glyph}</span> {CAUSE[row.cause].word}
+                      </div>
+                    </td>
+                    <td className="truncate py-1.5 pe-2 text-xs text-ink2">
+                      <button
+                        type="button"
+                        className="block w-full truncate text-start hover:underline"
+                        title={row.error ?? undefined}
+                        onClick={() => openFail({ kind: row.kind, id: row.id })}
+                      >
+                        {row.snippet}
+                      </button>
+                    </td>
+                    <td className="truncate py-1.5 text-xs tabular-nums text-ink3" title={ago(row.failedAt)}>
+                      {ago(row.failedAt)}
+                    </td>
+                    <td className="py-1.5 text-end">
+                      {showDismissed ? (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                        >
+                          Restore
+                        </button>
+                      ) : row.retryable ? (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
+                        >
+                          Retry
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-quiet h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          title="Clear from this list; the owner's project is untouched"
+                          onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                        >
+                          Dismiss
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.map((row) => (
-                    <tr key={`${row.kind}:${row.id}`} className="border-t border-line/60">
-                      <td className="truncate py-1.5">
-                        <button
-                          type="button"
-                          className="block w-full truncate text-left text-ink hover:underline"
-                          onClick={() => openFail({ kind: row.kind, id: row.id })}
-                        >
-                          {row.title}
-                        </button>
-                        <div className="truncate text-[11px] text-ink3" title={row.ownerEmail}>
-                          {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
-                        </div>
-                      </td>
-                      <td className="truncate py-1.5">
-                        {row.stage}
-                        <div className={`truncate text-[11px] ${CAUSE[row.cause].tone}`} title={CAUSE[row.cause].title}>
-                          <span className="font-mono">{CAUSE[row.cause].glyph}</span> {CAUSE[row.cause].word}
-                        </div>
-                      </td>
-                      <td className="truncate py-1.5 pr-2 text-xs text-ink2">
-                        <button
-                          type="button"
-                          className="block w-full truncate text-left hover:underline"
-                          title={row.error ?? undefined}
-                          onClick={() => openFail({ kind: row.kind, id: row.id })}
-                        >
-                          {row.snippet}
-                        </button>
-                      </td>
-                      <td className="truncate py-1.5 text-xs tabular-nums text-ink3" title={ago(row.failedAt)}>
-                        {ago(row.failedAt)}
-                      </td>
-                      <td className="py-1.5 text-right">
-                        {showDismissed ? (
-                          <button
-                            type="button"
-                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
-                          >
-                            Restore
-                          </button>
-                        ) : row.retryable ? (
-                          <button
-                            type="button"
-                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
-                          >
-                            Retry
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-quiet h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            title="Clear from this list; the owner's project is untouched"
-                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
-                          >
-                            Dismiss
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {(failures.hasNextPage || failures.isFetchingNextPage) && (
-                <div ref={more} className="flex h-10 items-center justify-center">
-                  <button
-                    type="button"
-                    className="btn-ghost h-8 min-w-[8rem] text-xs"
-                    disabled={failures.isFetchingNextPage}
-                    onClick={() => void failures.fetchNextPage()}
-                  >
-                    {failures.isFetchingNextPage ? "Loading…" : `Load ${Math.min(PAGE, Math.max(0, total - items.length))} more`}
-                  </button>
-                </div>
-              )}
-            </ScrollArea>
-          </>
+                ))}
+              </tbody>
+            </table>
+            {(failures.hasNextPage || failures.isFetchingNextPage) && (
+              <div ref={more} className="flex h-10 items-center justify-center">
+                <button
+                  type="button"
+                  className="btn-ghost h-8 min-w-[8rem] text-xs"
+                  disabled={failures.isFetchingNextPage}
+                  onClick={() => void failures.fetchNextPage()}
+                >
+                  {failures.isFetchingNextPage ? "Loading…" : `Load ${Math.min(PAGE, Math.max(0, total - items.length))} more`}
+                </button>
+              </div>
+            )}
+          </ScrollArea>
         ) : null}
       </div>
 

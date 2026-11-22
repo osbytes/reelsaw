@@ -263,7 +263,7 @@ export function InstanceSettingsGroup({
       {children}
       {/* always-present footer, so saving never shifts the rows above */}
       <StickyPanelFooter>
-        <span className="mr-auto min-h-5 text-xs text-ink3">
+        <span className="me-auto min-h-5 text-xs text-ink3">
           {problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}
         </span>
         <button type="button" className="btn-quiet" disabled={!dirty || save.isPending} onClick={() => setDraft({})}>
@@ -287,7 +287,7 @@ export function InstanceSettingsGroup({
         danger
         onConfirm={() => save.mutateAsync(patch)}
       >
-        <ul className="list-disc pl-5 text-sm leading-relaxed text-ink2">
+        <ul className="list-disc ps-5 text-sm leading-relaxed text-ink2">
           {risks.map((r) => (
             <li key={r}>{r}</li>
           ))}

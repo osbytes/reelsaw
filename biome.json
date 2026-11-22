@@ -24,10 +24,15 @@
       "preset": "recommended",
       "style": {
         "noNonNullAssertion": "off",
-        "useTemplate": "off"
+        "useTemplate": "off",
+        "useExponentiationOperator": "error"
       },
       "complexity": {
-        "noCommaOperator": "off"
+        "noCommaOperator": "off",
+        "useOptionalChain": "error",
+        "useLiteralKeys": "off",
+        "noUselessFragments": "error",
+        "noUselessEscapeInRegex": "error"
       },
       "suspicious": {
         "noAssignInExpressions": "off",
@@ -37,7 +42,13 @@
         "noExplicitAny": "warn"
       },
       "correctness": {
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "warn",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error"
+      },
+      "nursery": {
+        "useExhaustiveSwitchCases": "error"
       },
       "a11y": {
         "useButtonType": "warn",

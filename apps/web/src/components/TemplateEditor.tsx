@@ -265,7 +265,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
         onClick={() => onChange(!checked)}
         className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-acc" : "bg-line2"}`}
       >
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "start-[18px]" : "start-0.5"}`} />
       </button>
     </label>
   );
@@ -1109,7 +1109,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <span className="text-[13px] font-bold">Layers{layers.length ? ` · ${layers.length}` : ""}</span>
-        <span className="ml-auto text-[11px] text-ink3" title="Layers in this template">
+        <span className="ms-auto text-[11px] text-ink3" title="Layers in this template">
           {layers.length}/{MAX_CLIP_LAYERS}
         </span>
       </div>
@@ -1362,7 +1362,7 @@ export function TemplateEditor({ template, onExit }: Props) {
             <div className="shrink-0 px-4 pt-3">{canvasHeader}</div>
             {preview}
           </div>
-          <div className="flex min-h-0 flex-col border-l border-line bg-panel">{inspector}</div>
+          <div className="flex min-h-0 flex-col border-s border-line bg-panel">{inspector}</div>
           <div className="border-t border-line bg-panel" style={{ gridColumn: "1 / -1" }}>
             {timeline}
           </div>

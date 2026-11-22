@@ -28,7 +28,7 @@ export function UpdateDot() {
   if (!u?.available || !u.latest) return null;
   return (
     <span
-      className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-acc ring-2 ring-panel"
+      className="absolute -top-0.5 -end-0.5 h-2.5 w-2.5 rounded-full bg-acc ring-2 ring-panel"
       role="img"
       aria-label={`Reelsaw ${u.latest.version} is available`}
     />
@@ -39,7 +39,7 @@ export function UpdateDot() {
 export function UpdateMenuHint() {
   const u = useUpdateStatus().data;
   if (!u?.available || !u.latest) return null;
-  return <span className="ml-auto pl-3 font-mono text-[11px] text-acc-text">↑ {u.latest.version}</span>;
+  return <span className="ms-auto ps-3 font-mono text-[11px] text-acc-text">↑ {u.latest.version}</span>;
 }
 
 /** Settings → System heading: the running version with the update state and a "Check now". */

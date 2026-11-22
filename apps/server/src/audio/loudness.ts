@@ -37,8 +37,8 @@ export function parseLoudnorm(stderr: string): Loudness | null {
     const raw: unknown = JSON.parse(json[0]);
     if (!raw || typeof raw !== "object") return null;
     const rec = Object.fromEntries(Object.entries(raw));
-    const i = Number(rec.input_i);
-    const tp = Number(rec.input_tp);
+    const i = Number(rec["input_i"]);
+    const tp = Number(rec["input_tp"]);
     return Number.isFinite(i) && Number.isFinite(tp) ? { inputLufs: i, inputPeak: tp } : null;
   } catch {
     return null;

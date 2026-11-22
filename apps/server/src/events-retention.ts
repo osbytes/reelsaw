@@ -10,6 +10,7 @@
  * user_decisions is the exception (`byTime`): backfilled rows get new ids but old times, so id order does not track
  * time there, and it is pruned by created_at instead.
  */
+import { objectKeys } from "ts-extras";
 import type { Services } from "./services.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import { deadlineIn, expired } from "./lib/batch.js";
@@ -125,7 +126,7 @@ export async function pruneHistory(svc: Services, now = Date.now()): Promise<Rec
   const deadline = deadlineIn(PRUNE_BUDGET_MS, now);
   const out: Record<string, number> = {};
   let changed = false;
-  for (const which of Object.keys(TABLES) as Which[]) {
+  for (const which of objectKeys(TABLES)) {
     const cutoff = retentionCutoff(TABLES[which].days(svc.settings.get()), now);
     if (!cutoff) continue;
     const s = state[which] ?? {};

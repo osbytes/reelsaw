@@ -207,7 +207,7 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
     ...descriptionParts,
     "",
     ...(atUrl ? [`Full video: ${atUrl}`] : parentUrl ? [`Full video: ${parentUrl}`] : []),
-    ...(project.sourceMeta?.uploader ? [`From "${project.title}" by ${String(project.sourceMeta.uploader)}`] : [`From "${project.title}"`]),
+    ...(project.sourceMeta?.["uploader"] ? [`From "${project.title}" by ${String(project.sourceMeta["uploader"])}`] : [`From "${project.title}"`]),
     "",
     hashLine,
   ];
@@ -217,7 +217,7 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
     .trim()
     .slice(0, YOUTUBE_DESCRIPTION_MAX);
   const ytTags = fitYoutubeTags(
-    [...hashtags, ...((project.sourceMeta?.tags as string[] | undefined) ?? [])].map((t) => t.trim()).filter((t, i, a) => t && a.indexOf(t) === i),
+    [...hashtags, ...((project.sourceMeta?.["tags"] as string[] | undefined) ?? [])].map((t) => t.trim()).filter((t, i, a) => t && a.indexOf(t) === i),
   );
 
   const tiktokCaption = [clip.caption.trim() || clip.hook.trim(), hashtags.map((h) => `#${h}`).join(" ")]
@@ -314,7 +314,7 @@ export function buildManifest(input: ExportInput): ExportManifest {
       url: input.project.sourceType === "url" ? (input.project.sourceUrl ?? null) : null,
       platform: videoId ? "youtube" : input.project.sourceUrl ? "other" : null,
       videoId,
-      uploader: (input.project.sourceMeta?.uploader as string | undefined) ?? null,
+      uploader: (input.project.sourceMeta?.["uploader"] as string | undefined) ?? null,
     },
     ...(input.subset ? { subset: input.subset } : {}),
     clips,

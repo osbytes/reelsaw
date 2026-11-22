@@ -50,7 +50,7 @@ async function getJson(raw: string, headers: Record<string, string>): Promise<un
   const url = new URL(raw);
   if (url.username || url.password) {
     const basic = btoa(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`);
-    if (!headers.authorization) headers = { ...headers, authorization: `Basic ${basic}` };
+    if (!headers["authorization"]) headers = { ...headers, authorization: `Basic ${basic}` };
     url.username = "";
     url.password = "";
   }
@@ -75,8 +75,8 @@ export function deepgramModelLanguages(body: unknown, modelId: string): string[]
   const stt = (body as { stt?: Array<Record<string, unknown>> } | null)?.stt;
   if (!Array.isArray(stt)) return undefined;
   // not `name`: Deepgram reuses it across architectures ("general" is a nova-2 and a nova-3 model)
-  const named = stt.filter((m) => m && m.batch !== false && (m.architecture === modelId || m.canonical_name === modelId));
-  return named.length ? canonicalCodes(named.flatMap((m) => (Array.isArray(m.languages) ? m.languages : []))) : undefined;
+  const named = stt.filter((m) => m && m["batch"] !== false && (m["architecture"] === modelId || m["canonical_name"] === modelId));
+  return named.length ? canonicalCodes(named.flatMap((m) => (Array.isArray(m["languages"]) ? m["languages"] : []))) : undefined;
 }
 
 async function ask(svc: Deps, model: string): Promise<string[] | undefined> {

@@ -237,7 +237,7 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   // only a rendering project finishes here: while a re-analyze is still picking (the clips it kept go on rendering),
   // the analyze hand-off moves it to rendering and the last render finalizes. A rendering project with no live
   // clips (the last one was deleted) is finished too: nothing is left that could finalize it later
-  if (!project || project.status !== "rendering") return;
+  if (project?.status !== "rendering") return;
   const clips = await u.db
     .select({ status: schema.clips.status, failureCause: schema.clips.failureCause })
     .from(schema.clips)

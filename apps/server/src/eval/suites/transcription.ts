@@ -215,7 +215,7 @@ export const transcriptionSuite: Suite = {
           let words = heard.words;
           let applied = 0;
           if (lm) {
-            const r = await correctTranscript(lm, words, entities, { title: String(c.meta.title ?? ""), uploader: String(c.meta.uploader ?? "") });
+            const r = await correctTranscript(lm, words, entities, { title: String(c.meta["title"] ?? ""), uploader: String(c.meta["uploader"] ?? "") });
             words = r.words;
             applied = r.applied.length;
           }
@@ -271,9 +271,9 @@ export const transcriptionSuite: Suite = {
     return out;
   },
   summarize(results) {
-    const ran = results.filter((r) => !r.skipped && r.metrics?.wer !== undefined);
-    const syn = ran.filter((r) => r.metrics?.synthetic !== false);
-    const real = ran.filter((r) => r.metrics?.synthetic === false);
+    const ran = results.filter((r) => !r.skipped && r.metrics?.["wer"] !== undefined);
+    const syn = ran.filter((r) => r.metrics?.["synthetic"] !== false);
+    const real = ran.filter((r) => r.metrics?.["synthetic"] === false);
     const mean = (rs: CaseResult[], k: string) => Number((rs.reduce((a, r) => a + Number(r.metrics?.[k] ?? 0), 0) / (rs.length || 1)).toFixed(3));
     const sum = (rs: CaseResult[], k: string) => rs.reduce((a, r) => a + Number(r.metrics?.[k] ?? 0), 0);
     // unprefixed metrics are the synthetic (`say`) cases, as before real cases existed

@@ -39,7 +39,7 @@ async function main() {
 
   // Railway's edge puts the visitor in X-Real-IP; read from X-Forwarded-For, every sign-up shares one address
   // (abuse flags and the per-address sign-up cap stop meaning anything). Railway sets RAILWAY_ENVIRONMENT_NAME itself.
-  if (process.env.RAILWAY_ENVIRONMENT_NAME && config.TRUST_PROXY && config.TRUSTED_PROXY_HEADER === "x-forwarded-for") {
+  if (process.env["RAILWAY_ENVIRONMENT_NAME"] && config.TRUST_PROXY && config.TRUSTED_PROXY_HEADER === "x-forwarded-for") {
     log.warn({ header: config.TRUSTED_PROXY_HEADER }, "running on Railway: set TRUSTED_PROXY_HEADER=x-real-ip, or every client shares Railway's address");
   }
 
@@ -124,8 +124,8 @@ main().catch((err) => {
   // services may not exist yet: log with a standalone logger so the failure is still structured
   const log = createLogger(
     {
-      LOG_LEVEL: process.env.LOG_LEVEL || "info",
-      LOG_FORMAT: process.env.LOG_FORMAT === "json" || process.env.LOG_FORMAT === "pretty" ? process.env.LOG_FORMAT : "auto",
+      LOG_LEVEL: process.env["LOG_LEVEL"] || "info",
+      LOG_FORMAT: process.env["LOG_FORMAT"] === "json" || process.env["LOG_FORMAT"] === "pretty" ? process.env["LOG_FORMAT"] : "auto",
     },
     { module: "boot" },
   );

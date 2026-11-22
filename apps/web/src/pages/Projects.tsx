@@ -31,14 +31,14 @@ function NewProjectMenu() {
   const bumper = useRef<HTMLInputElement>(null);
   return (
     <div className="flex shrink-0">
-      <Link to="/new" className="btn-primary w-[9.5rem] justify-center rounded-r-none py-2.5 text-sm no-underline">
+      <Link to="/new" className="btn-primary w-[9.5rem] justify-center rounded-e-none py-2.5 text-sm no-underline">
         <Plus className="h-4 w-4" /> New project
       </Link>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            className="btn-primary w-10 justify-center rounded-l-none border-l border-white/30 px-0 py-2.5"
+            className="btn-primary w-10 justify-center rounded-s-none border-s border-white/30 px-0 py-2.5"
             aria-label="More ways to add"
             title="More ways to add"
           >
@@ -266,7 +266,7 @@ export function ProjectsPage() {
               <div key={p.id} className="group relative">
                 {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
                 <label
-                  className={`absolute left-2.5 top-2.5 z-20 grid h-7 w-7 cursor-pointer place-items-center rounded-[8px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting ? "opacity-100" : "opacity-0"}`}
+                  className={`absolute start-2.5 top-2.5 z-20 grid h-7 w-7 cursor-pointer place-items-center rounded-[8px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting ? "opacity-100" : "opacity-0"}`}
                 >
                   <input
                     type="checkbox"
@@ -297,7 +297,7 @@ export function ProjectsPage() {
                     )}
                     {p.clipThumbs.length > 0 && (
                       // the first few clips as a little fanned stack of 9:16 cards over the source thumbnail
-                      <div className="absolute bottom-2 left-2 flex h-[62%] items-end">
+                      <div className="absolute bottom-2 start-2 flex h-[62%] items-end">
                         {p.clipThumbs.map((src, i) => (
                           <img
                             key={src}
@@ -314,7 +314,7 @@ export function ProjectsPage() {
                           />
                         ))}
                         {p.clipsDone > p.clipThumbs.length && (
-                          <span className="z-10 mb-1 ml-1.5 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
+                          <span className="z-10 mb-1 ms-1.5 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
                             +{p.clipsDone - p.clipThumbs.length}
                           </span>
                         )}
@@ -323,7 +323,7 @@ export function ProjectsPage() {
                     {/* intro (left) and outro (right) assets, fanned like the clips */}
                     <PosterBumperCards bumpers={p.bumpers} />
                     {p.durationSec ? (
-                      <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">
+                      <span className="absolute bottom-2 end-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">
                         {formatTime(p.durationSec)}
                       </span>
                     ) : null}

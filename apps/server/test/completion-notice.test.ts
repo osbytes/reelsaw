@@ -17,16 +17,8 @@ import { eventHandlerMap } from "../src/event-handler-map.js";
 import { eeEventHandlerMap } from "../src/ee/event-handlers.js";
 import { EVENT_TYPES } from "../src/event-types.js";
 import { envSchema } from "../src/config.js";
-import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
 import { finiteNumber, firstName, truncate } from "@reelsaw/shared";
-
-const log = {
-  debug() {},
-  child() {
-    return log;
-  },
-} as unknown as Logger;
 
 function done(p: Partial<DoneNotice> & Pick<DoneNotice, "eventId" | "projectId" | "at">): DoneNotice {
   return { title: p.title ?? p.projectId, clips: p.clips ?? 2, failed: p.failed ?? 0, rerender: p.rerender ?? false, ...p };

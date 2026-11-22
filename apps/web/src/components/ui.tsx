@@ -163,7 +163,7 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/40" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[90dvh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none"
+          className="fixed start-1/2 top-1/2 z-[71] flex max-h-[90dvh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none"
           style={{ maxWidth: width }}
           onPointerDownOutside={keepIfMenu}
           onFocusOutside={keepIfMenu}
@@ -285,7 +285,7 @@ export function Select({
         <RadixSelect.Trigger
           aria-label={ariaLabel}
           onClick={onClick}
-          className={`flex h-full w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[placeholder]:text-ink3 data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls}`}
+          className={`flex h-full w-full items-center justify-between gap-2 border border-line bg-panel text-start text-ink outline-none transition focus:border-acc data-[placeholder]:text-ink3 data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls}`}
         >
           <span className="min-w-0 truncate">
             <RadixSelect.Value placeholder={placeholder} />
@@ -311,11 +311,11 @@ export function Select({
                 key={o.value || NONE}
                 value={o.value === "" ? NONE : o.value}
                 disabled={o.disabled}
-                className="menu-item pr-8 data-[state=checked]:font-semibold relative"
+                className="menu-item pe-8 data-[state=checked]:font-semibold relative"
               >
                 <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
                 {o.hint && <span className="menu-hint">{o.hint}</span>}
-                <RadixSelect.ItemIndicator className="absolute right-2.5 inline-flex">
+                <RadixSelect.ItemIndicator className="absolute end-2.5 inline-flex">
                   <Check className="h-4 w-4" />
                 </RadixSelect.ItemIndicator>
               </RadixSelect.Item>
@@ -368,7 +368,7 @@ export function Combobox({
           role="combobox"
           aria-expanded={open}
           aria-label={ariaLabel}
-          className={`flex w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}
+          className={`flex w-full items-center justify-between gap-2 border border-line bg-panel text-start text-ink outline-none transition focus:border-acc data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}
         >
           <span className={`min-w-0 truncate ${current ? "" : "text-ink3"}`}>{current?.label ?? placeholder}</span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
@@ -398,11 +398,11 @@ export function Combobox({
                       onValueChange(o.value);
                       setOpen(false);
                     }}
-                    className="menu-item relative pr-8 data-[selected=true]:bg-sunk"
+                    className="menu-item relative pe-8 data-[selected=true]:bg-sunk"
                   >
                     <span className={o.value === value ? "font-semibold" : ""}>{o.label}</span>
                     {o.hint && <span className="menu-hint">{o.hint}</span>}
-                    {o.value === value && <Check className="absolute right-2.5 h-4 w-4" />}
+                    {o.value === value && <Check className="absolute end-2.5 h-4 w-4" />}
                   </Command.Item>
                 ))}
               </Command.List>

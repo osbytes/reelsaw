@@ -123,7 +123,7 @@ export async function ingest(ctx: StageContext) {
   const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
   const upload =
     !stored && project.sourceType === "upload"
-      ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) })
+      ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.["uploadId"] ?? "")) })
       : undefined;
   // the upload row is written before the project that names it, so a missing one is gone for good, not late
   if (!stored && project.sourceType === "upload" && !upload) throw new NonRetryableError(UPLOAD_MISSING);
@@ -234,20 +234,20 @@ export async function ingest(ctx: StageContext) {
         info = JSON.parse(jsonLine) as Record<string, unknown>;
         meta = {
           ...meta,
-          title: info.title,
-          uploader: info.uploader ?? info.channel ?? meta.uploader,
-          duration: info.duration,
-          webpage_url: info.webpage_url,
+          title: info["title"],
+          uploader: info["uploader"] ?? info["channel"] ?? meta["uploader"],
+          duration: info["duration"],
+          webpage_url: info["webpage_url"],
           // the source fingerprint decisions point at (docs/specs/decision-log.md): videoId gets the video back, formatId says which encode
-          extractor: info.extractor_key,
-          videoId: info.id,
-          formatId: info.format_id,
-          thumbnail: meta.thumbnail ?? info.thumbnail,
-          ext: info.ext,
-          description: typeof info.description === "string" ? info.description.slice(0, 4000) : undefined,
-          tags: Array.isArray(info.tags) ? info.tags.slice(0, 40) : undefined,
-          chapters: Array.isArray(info.chapters)
-            ? (info.chapters as Array<{ title?: string }>)
+          extractor: info["extractor_key"],
+          videoId: info["id"],
+          formatId: info["format_id"],
+          thumbnail: meta["thumbnail"] ?? info["thumbnail"],
+          ext: info["ext"],
+          description: typeof info["description"] === "string" ? info["description"].slice(0, 4000) : undefined,
+          tags: Array.isArray(info["tags"]) ? info["tags"].slice(0, 40) : undefined,
+          chapters: Array.isArray(info["chapters"])
+            ? (info["chapters"] as Array<{ title?: string }>)
                 .map((c) => c.title)
                 .filter(Boolean)
                 .slice(0, 40)
@@ -287,7 +287,7 @@ export async function ingest(ctx: StageContext) {
     {
       sourceType: project.sourceType,
       reusedStoredSource: !!project.sourceKey && sourceKey === project.sourceKey,
-      ytdlp: project.sourceType === "url" ? { title: meta.title, uploader: meta.uploader, duration: meta.duration, ext: meta.ext } : undefined,
+      ytdlp: project.sourceType === "url" ? { title: meta["title"], uploader: meta["uploader"], duration: meta["duration"], ext: meta["ext"] } : undefined,
     },
     "source fetched",
   );
@@ -298,7 +298,7 @@ export async function ingest(ctx: StageContext) {
   if (!probe.width || !probe.height) throw new NonRetryableError(NO_VIDEO_MESSAGE);
   const sourceBytes = (await fs.stat(sourcePath)).size;
   // the exact bytes the transcript's timestamps refer to; a stored source already hashed keeps its hash
-  if (!(stored && typeof meta.sha256 === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
+  if (!(stored && typeof meta["sha256"] === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
   await ctx.release(); // the source is on disk, where free-space checks count it: the lease has done its job
   ctx.log.debug(
     {
@@ -308,8 +308,8 @@ export async function ingest(ctx: StageContext) {
       hasAudio: probe.hasAudio,
       sourceBytes,
       sourceType: project.sourceType,
-      sha256: meta.sha256,
-      videoId: meta.videoId,
+      sha256: meta["sha256"],
+      videoId: meta["videoId"],
     },
     "source facts",
   );
@@ -317,7 +317,7 @@ export async function ingest(ctx: StageContext) {
 
   // an upload has no platform thumbnail: a frame a tenth of the way in (past a black or fading first second) is its
   // poster on the project page and its tile until clips exist. Best effort: a poster is never worth failing ingest.
-  if (!meta.thumbnail && probe.width) {
+  if (!meta["thumbnail"] && probe.width) {
     // its own name: an upload's source path can sit in a folder other ingests share
     const posterPath = path.join(os.tmpdir(), `reelsaw-poster-${projectId}.jpg`);
     try {
@@ -335,7 +335,7 @@ export async function ingest(ctx: StageContext) {
   }
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
-  const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
+  const title = generic ? ((meta["title"] as string | undefined) ?? project.title) : project.title;
   // set inside the unit of work (which may run again after a deadlock), read after it commits
   const decided: { admitted: SourceAdmission | null } = { admitted: null };
   await ctx.complete({ sourceDurationSec: probe.durationSec, title }, async (u) => {

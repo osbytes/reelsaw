@@ -11,6 +11,8 @@ import { bootOtel } from "./lib/otel";
 import { installStaleChunkHandler } from "./lib/stale-chunk";
 import { authClient } from "./lib/auth";
 import { setSseUnauthorizedHandler } from "./lib/sse";
+import { I18nProvider } from "@lingui/react";
+import { activateLocale, i18n } from "./lib/i18n";
 
 installDiagnostics();
 installStaleChunkHandler();
@@ -19,6 +21,8 @@ async function main() {
   // Tracing is on before the first tRPC call, including system.status. The /api/otel fetch
   // that Vite dev uses to learn the config is the one request that happens first.
   await bootOtel();
+  // the catalogue is loaded before the first render, so nothing paints in the wrong language and swaps
+  await activateLocale();
   // An expired session answers 401: refetch the session so the app's own redirect to /login runs without a reload.
   const refetchSession = () => authClient.$store.notify("$sessionSignal");
   const isUnauthorized = (err: unknown) => err instanceof TRPCClientError && err.data?.code === "UNAUTHORIZED";
@@ -33,11 +37,13 @@ async function main() {
   const router = createBrowserRouter([{ path: "*", element: <App /> }]);
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-          <RouterProvider router={router} />
-        </TRPCProvider>
-      </QueryClientProvider>
+      <I18nProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+            <RouterProvider router={router} />
+          </TRPCProvider>
+        </QueryClientProvider>
+      </I18nProvider>
     </React.StrictMode>,
   );
 }

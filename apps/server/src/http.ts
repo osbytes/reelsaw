@@ -312,7 +312,7 @@ export function createApp(svc: Services) {
       );
       return guarded(c.req.raw);
     }
-    const who = await requester(auth, db, c.req.raw.headers, svc.log.child({ module: "auth" }));
+    const who = await requester(auth, db, c.req.raw.headers);
     if (!who) return mcpUnauthorized(c);
     const why = cannotUseApp(who.user, who.via);
     if (why) return c.json({ error: "forbidden", message: why }, 403);
@@ -428,7 +428,7 @@ export function createApp(svc: Services) {
       const { stdout } = await execFileAsync("fc-match", ["-f", "%{file}|%{family}", family]);
       const [file, matched] = stdout.trim().split("|");
       // fc-match falls back to any font when the family is missing: refuse that instead of serving the wrong face
-      if (!file || !matched || !matched.split(",").some((m) => m.trim().toLowerCase() === family.toLowerCase())) return c.text("font not installed", 404);
+      if (!file || !matched?.split(",").some((m) => m.trim().toLowerCase() === family.toLowerCase())) return c.text("font not installed", 404);
       // sendFile answers with its own headers, so the cache policy goes through it (a c.header here is dropped)
       return sendFile(c.req.raw, file, undefined, { cacheControl: shipped ? "public, max-age=604800, immutable" : "private, max-age=3600" });
     } catch (err) {

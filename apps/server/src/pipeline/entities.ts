@@ -456,7 +456,7 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
       confidence: d?.confidence,
       outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < minFlagConfidence ? "low confidence" : "flagged",
     });
-    if (!d || !d.replace || d.confidence < minFlagConfidence) continue;
+    if (!d?.replace || d.confidence < minFlagConfidence) continue;
     if (c.wordIndex < lastEnd) {
       tr.outcome = "overlaps an earlier fix";
       continue; // overlapping candidate

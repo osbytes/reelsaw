@@ -117,16 +117,16 @@ export class StartupError extends Error {
  */
 export async function createServices(env: NodeJS.ProcessEnv = process.env): Promise<Services> {
   // the logger comes first (from raw env, before validation) so config errors are logged too
-  const fmt = env.LOG_FORMAT === "json" || env.LOG_FORMAT === "pretty" ? env.LOG_FORMAT : "auto";
-  const role = env.REELSAW_CLI === "1" ? "cli" : env.RUN_HTTP === "false" ? "worker" : env.RUN_WORKERS === "false" ? "api" : "app";
+  const fmt = env["LOG_FORMAT"] === "json" || env["LOG_FORMAT"] === "pretty" ? env["LOG_FORMAT"] : "auto";
+  const role = env["REELSAW_CLI"] === "1" ? "cli" : env["RUN_HTTP"] === "false" ? "worker" : env["RUN_WORKERS"] === "false" ? "api" : "app";
   const log = createLogger(
     {
-      LOG_LEVEL: env.LOG_LEVEL || "info",
+      LOG_LEVEL: env["LOG_LEVEL"] || "info",
       LOG_FORMAT: fmt,
-      LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined,
-      WORKER_ID: env.WORKER_ID,
+      LOG_FILE: env["REELSAW_CLI"] === "1" ? undefined : env["LOG_FILE"] || undefined,
+      WORKER_ID: env["WORKER_ID"],
     },
-    { role: env.REELSAW_CLI === "1" ? "cli" : role },
+    { role: env["REELSAW_CLI"] === "1" ? "cli" : role },
   );
   const bootLog = log.child({ module: "boot" });
   const step = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
@@ -174,7 +174,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const llmTrace = await step("llm call capture", async () => {
     const t = await createLlmTracer(config, log);
-    if (env.REELSAW_CLI !== "1") await t.check();
+    if (env["REELSAW_CLI"] !== "1") await t.check();
     if (t.sinks.length) log.info({ module: "llm", sinks: t.sinks }, "capturing LLM calls");
     // AI SDK spans (model, tokens, latency per call; never prompt or answer) go out only through a registered integration
     if (otel.enabled) registerAiTelemetry();
@@ -288,7 +288,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const asr = await step("asr cache", async () => {
     const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate, storage);
-    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1")
+    if (config.ASR_CACHE_DAYS > 0 && env["REELSAW_CLI"] !== "1")
       void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
     return a;
   });
@@ -304,7 +304,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const settings = createInstanceSettings(config, log.child({ module: "settings" }), { emailEnabled: config.EMAIL_DRIVER !== "none" });
   await step("instance settings", () => settings.attach(database.db));
 
-  const logLevel = createLogLevelSettings(log, { listen: env.REELSAW_CLI !== "1" });
+  const logLevel = createLogLevelSettings(log, { listen: env["REELSAW_CLI"] !== "1" });
   const updates = createUpdateChecker(config, log.child({ module: "updates" }), { enabled: () => settings.get().UPDATE_CHECK });
   const releases = createReleaseFeed(config, log.child({ module: "releases" }));
   await step("log level settings", async () => {
@@ -429,7 +429,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     const e = createEmail(config, log.child({ module: "email" }));
     // only the HTTP process sends mail (sign-up, reset, approvals); a worker would only fail to boot over a mail server it never uses.
     // The driver's settings are still validated by the config schema above.
-    if (env.REELSAW_CLI !== "1" && config.RUN_HTTP) await e.check();
+    if (env["REELSAW_CLI"] !== "1" && config.RUN_HTTP) await e.check();
     return e;
   });
 

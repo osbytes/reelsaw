@@ -98,9 +98,9 @@ export function runsOf(log: LogEvent[]): Run[] {
       continue;
     }
     if (e.type === "run.started") {
-      const seq = num(p.seq) ?? runs.length + 1;
-      const reason = (typeof p.reason === "string" ? p.reason : null) as RunReason | null;
-      if (cur && cur.implicit && cur.empty) {
+      const seq = num(p["seq"]) ?? runs.length + 1;
+      const reason = (typeof p["reason"] === "string" ? p["reason"] : null) as RunReason | null;
+      if (cur?.implicit && cur.empty) {
         cur.run.seq = seq;
         cur.run.reason = reason;
         cur.implicit = false;
@@ -110,7 +110,7 @@ export function runsOf(log: LogEvent[]): Run[] {
     if (!cur && !explicit && LEGACY_STARTERS.has(e.type)) cur = open(runs.length + 1, null, t, true);
     if (!cur) continue; // stray event of a run that is not in this log (e.g. a window that starts mid-run)
     cur.empty = false;
-    const stage = p.stage;
+    const stage = p["stage"];
     if (e.type === "stage.started" && isStage(stage)) {
       cur.stageStart[stage] ??= t;
     } else if (e.type === "stage.completed" && isStage(stage)) {
@@ -119,7 +119,7 @@ export function runsOf(log: LogEvent[]): Run[] {
         // the fix in ingest, its payload carried the video's length as durationSec, and the wall clock is
         // the only thing that keeps those projects out of the time estimates
         const wall = cur.stageStart[stage] !== undefined ? (t - cur.stageStart[stage]!) / 1000 : undefined;
-        const reported = num(p.durationSec);
+        const reported = num(p["durationSec"]);
         const sec = reported !== undefined && wall !== undefined ? Math.min(reported, wall) : (reported ?? wall);
         if (sec !== undefined) cur.run.stages[stage] = r1(sec);
       }
@@ -131,13 +131,13 @@ export function runsOf(log: LogEvent[]): Run[] {
       const run = cur.run;
       run.finishedAt = new Date(t).toISOString();
       run.outcome = e.type === "project.done" ? "done" : "failed";
-      run.runSec = r1(num(p.runSec) ?? (t - cur.startMs) / 1000);
-      run.clips = { done: num(p.clips) ?? cur.clipsDone, failed: num(p.failed) ?? cur.clipsFailed };
-      if (typeof p.error === "string") run.error = p.error;
+      run.runSec = r1(num(p["runSec"]) ?? (t - cur.startMs) / 1000);
+      run.clips = { done: num(p["clips"]) ?? cur.clipsDone, failed: num(p["failed"]) ?? cur.clipsFailed };
+      if (typeof p["error"] === "string") run.error = p["error"];
       if (run.outcome === "done" && run.stages.render === undefined) {
         // render has no stage.completed: it runs per clip and ends with project.done
         const from = cur.renderFrom ?? cur.renderFromRefine;
-        const sec = num(p.renderSec) ?? (from !== undefined && t > from ? (t - from) / 1000 : undefined);
+        const sec = num(p["renderSec"]) ?? (from !== undefined && t > from ? (t - from) / 1000 : undefined);
         if (sec !== undefined && sec > 0) run.stages.render = r1(sec);
       }
       cur = null;

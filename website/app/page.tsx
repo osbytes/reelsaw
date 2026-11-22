@@ -14,7 +14,7 @@ import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
 import { DEMO_RUN, OTHER_SOURCES } from "@/content/demo";
 import { githubReleases } from "@/lib/github";
-import { SITE, appLink } from "@/lib/site";
+import { SITE } from "@/lib/site";
 
 const STEPS = [
   {

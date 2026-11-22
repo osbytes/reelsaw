@@ -139,7 +139,7 @@ export function productEvent(type: string, payload: Record<string, unknown>): { 
       return { event: type, properties: pick("clips", "failed", "runSec", "renderSec", "runReason", "runSeq") };
     case "project.failed":
       return {
-        event: payload.cancelled === true ? "project.cancelled" : type,
+        event: payload["cancelled"] === true ? "project.cancelled" : type,
         properties: pick("stage", "errorKind", "runSec", "renderSec", "runReason", "runSeq"),
       };
     case "clip.done":

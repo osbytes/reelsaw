@@ -14,7 +14,7 @@ import { rgbFramesToPipe } from "../../media.js";
 import { FACE_INPUT_W, FACE_INPUT_H } from "../../vision/faces.js";
 import { motionProber } from "../../pipeline/saliency.js";
 import type { FaceSample } from "../../pipeline/layout.js";
-import { materialize, type EvalContext } from "../framework.js";
+import { materialize, type EvalContext, type MediaSource } from "../framework.js";
 import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadTextDetector } from "../../vision/text.js";
@@ -25,7 +25,7 @@ const ctx = { root, cacheDir: path.join(root, ".cache"), offline: false, config:
 
 const withText = process.argv.includes("--text");
 for (const dir of process.argv.slice(2).filter((a) => !a.startsWith("--"))) {
-  const c = JSON.parse(await fs.readFile(path.join(dir, "case.json"), "utf8"));
+  const c = JSON.parse(await fs.readFile(path.join(dir, "case.json"), "utf8")) as { source: MediaSource; start: number; end: number }; // an eval fixture written by this repo
   const file = path.join(dir, "samples.json");
   let samples = JSON.parse(await fs.readFile(file, "utf8")) as FaceSample[];
   const media = await materialize(ctx, c.source);

@@ -345,7 +345,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         AI_MODEL: svc.models.get().language,
         TRANSCRIPTION_MODEL: svc.models.get().transcription,
         TRANSCRIPT_ALIGN_MODEL: svc.models.get().align,
-        env: { AI_MODEL: config.AI_MODEL, TRANSCRIPTION_MODEL: config.TRANSCRIPTION_MODEL, TRANSCRIPT_ALIGN_MODEL: config.TRANSCRIPT_ALIGN_MODEL },
+        env: { AI_MODEL: config["AI_MODEL"], TRANSCRIPTION_MODEL: config["TRANSCRIPTION_MODEL"], TRANSCRIPT_ALIGN_MODEL: config["TRANSCRIPT_ALIGN_MODEL"] },
       },
       media: [],
       notes: manifest.notes,
@@ -369,7 +369,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
     summary.warnings = scanForInjection([
       ["report.md (user description)", description],
       ["project title", project.title],
-      ["source description", typeof project.sourceMeta?.description === "string" ? project.sourceMeta.description : null],
+      ["source description", typeof project.sourceMeta?.["description"] === "string" ? project.sourceMeta["description"] : null],
       ["transcript", transcript?.text ?? null],
       ...clips.flatMap(
         (c): Array<[string, string]> => [
@@ -474,7 +474,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       });
     }
     summary.media.push(
-      `${clipRows.filter((c) => c.outputKey).length}/${clips.length} clip renders, ${clipRows.filter((c) => c.thumbnailKey).length} thumbnails`,
+      `${clipRows.filter((c) => c["outputKey"]).length}/${clips.length} clip renders, ${clipRows.filter((c) => c["thumbnailKey"]).length} thumbnails`,
     );
 
     const terminal = project.status === "done" || project.status === "failed";
@@ -545,9 +545,9 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       title: project.title,
       status: terminal ? project.status : "failed",
       error: project.error,
-      failedStage: lastFail ? String(lastFail.payload.stage ?? lastFail.type) : null,
+      failedStage: lastFail ? String(lastFail.payload["stage"] ?? lastFail.type) : null,
       clips: count(clips.map((c) => c.status)),
-      flags: count((transcript?.flags ?? []).map((f) => `${String(f.kind)}:${String(f.status)}`)),
+      flags: count((transcript?.flags ?? []).map((f) => `${String(f["kind"])}:${String(f["status"])}`)),
       models: { ...summary.models, ...Object.fromEntries(artifacts.map((a) => [`${a.stage}/${a.kind}`, a.models])) },
       next: [
         `reelsaw status ${projectId}`,

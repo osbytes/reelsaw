@@ -75,7 +75,7 @@ export default function BillingSection() {
     started.current = true;
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
     const p = q.data.plans.find((x) => x.name === wanted);
-    if (!p || !p.price) return;
+    if (!p?.price) return;
     if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
     setInterval_(wantedInterval);
     toast(`Taking you to Stripe for ${p.label}…`);
@@ -226,13 +226,13 @@ export default function BillingSection() {
                   })}
                 </dl>
                 {d.afterCancel.over.length > 0 && (
-                  <ul className="flex list-disc flex-col gap-1 pl-5 text-ink">
+                  <ul className="flex list-disc flex-col gap-1 ps-5 text-ink">
                     {d.afterCancel.over.map((o) => (
                       <li key={o.key}>{o.sentence}</li>
                     ))}
                   </ul>
                 )}
-                <ul className="flex list-disc flex-col gap-1 pl-5 text-ink2">
+                <ul className="flex list-disc flex-col gap-1 ps-5 text-ink2">
                   {d.afterCancel.expect.map((x) => (
                     <li key={x}>{x}</li>
                   ))}

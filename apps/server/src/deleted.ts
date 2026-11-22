@@ -4,7 +4,6 @@
  * MCP `list_deleted` (restore/purge loop the per-kind tools) and `reelsaw deleted <email>` all call these.
  */
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { eachItem, uniqueBy } from "./lib/each.js";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DeletedKind } from "@reelsaw/shared";
@@ -137,7 +136,7 @@ export async function listDeleted(svc: Services, userId: string) {
     const refs = await db.select({ id: schema.assetRefs.assetId }).from(schema.assetRefs).where(inArray(schema.assetRefs.assetId, assetIds));
     for (const r of refs) referenced.add(r.id);
   }
-  const usage = assetIds.length ? await bumperUsageCounts(db, userId) : new Map();
+  const usage: Awaited<ReturnType<typeof bumperUsageCounts>> = assetIds.length ? await bumperUsageCounts(db, userId) : new Map();
 
   const items: DeletedItem[] = [
     ...projectRows.map((r) => ({

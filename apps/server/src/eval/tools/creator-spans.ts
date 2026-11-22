@@ -154,7 +154,7 @@ export function alignSpans(short: CapWord[], episode: CapWord[], o: { n?: number
     const last = spans.at(-1);
     const continues = last && Math.abs(s.shortStart - last.shortEnd) <= 2;
     const apart = last ? s.start - last.end : Infinity;
-    const bothStrong = last && last.strong && s.strong;
+    const bothStrong = last?.strong && s.strong;
     if (last && (bothStrong ? apart <= merge : continues && apart <= 2 * merge)) {
       Object.assign(last, {
         end: Math.max(last.end, s.end),
@@ -301,7 +301,7 @@ async function fetchCaptions(id: string, cache: string, pauseSec: number, manual
       await sleep(pauseSec * 1000);
     }
     process.stderr.write(`  fetching captions for ${id}\n`);
-    const ytdlp = process.env.YTDLP_PATH || "yt-dlp";
+    const ytdlp = process.env["YTDLP_PATH"] || "yt-dlp";
     await fs.mkdir(cache, { recursive: true });
     await exec(ytdlp, [
       "--js-runtimes",
@@ -324,7 +324,7 @@ async function fetchCaptions(id: string, cache: string, pauseSec: number, manual
   const meta = JSON.parse(await fs.readFile(info, "utf8")) as Info & { subtitles?: Record<string, unknown> };
   return {
     info: { id: meta.id, title: meta.title, duration: meta.duration, upload_date: meta.upload_date } as Info,
-    hasManual: !!meta.subtitles?.en,
+    hasManual: !!meta.subtitles?.["en"],
     auto: JSON.parse(await fs.readFile(auto, "utf8")) as Json3,
     manual: existsSync(man) ? (JSON.parse(await fs.readFile(man, "utf8")) as Json3) : undefined,
   };

@@ -32,9 +32,9 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
       .then((r) => {
         const out = { ...FALLBACK_LICENSES };
         for (const [prefix, info] of Object.entries(obj(r))) {
-          const l = obj(obj(info).license);
-          const spdx = str(l.spdx)?.toLowerCase();
-          if (spdx && str(l.title)) out[prefix] = { id: spdx, name: str(l.title)!, url: str(l.url) };
+          const l = obj(obj(info)["license"]);
+          const spdx = str(l["spdx"])?.toLowerCase();
+          if (spdx && str(l["title"])) out[prefix] = { id: spdx, name: str(l["title"])!, url: str(l["url"]) };
         }
         return out;
       })
@@ -70,7 +70,7 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
         prefixes: ICONIFY_SETS.join(","),
       }).toString();
       const [r, lic] = await Promise.all([http.json("iconify", u), setLicenses()]);
-      const icons = arr(obj(r).icons).filter((i): i is string => typeof i === "string");
+      const icons = arr(obj(r)["icons"]).filter((i): i is string => typeof i === "string");
       const items = icons.flatMap((id) => {
         const [prefix, name] = id.split(":");
         const license = prefix ? lic[prefix] : undefined;
@@ -94,7 +94,7 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
           },
         ];
       });
-      const total = Number(obj(r).total) || 0;
+      const total = Number(obj(r)["total"]) || 0;
       const used = icons.length + start;
       return { items, ...(used < total && icons.length ? { nextCursor: String(used) } : {}) };
     },

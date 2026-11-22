@@ -18,6 +18,6 @@
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"
   },
-  "dependencies": { "fuse.js": "7.1.0", "zod": "^4.6.7" },
+  "dependencies": { "fuse.js": "7.1.0", "ts-extras": "3.0.0", "zod": "^4.6.7" },
   "devDependencies": { "cldr-misc-full": "49.0.0", "typescript": "5.9.3" }
 }

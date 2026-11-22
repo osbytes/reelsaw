@@ -32,7 +32,7 @@ export function processRole(c: Pick<Config, "RUN_HTTP" | "RUN_WORKERS">): Worker
 
 export function workerIdOf(c: Pick<Config, "WORKER_ID">, hostname = os.hostname(), pid = process.pid): string {
   const pinned = c.WORKER_ID?.trim();
-  return pinned && pinned.length ? pinned : `${hostname}:${pid}`;
+  return pinned?.length ? pinned : `${hostname}:${pid}`;
 }
 
 /** A heartbeat row for the same id this recent means another live process is using the pinned WORKER_ID. */

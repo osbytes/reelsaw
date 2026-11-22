@@ -38,109 +38,112 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
   const o: DescribeOpts = typeof opts === "function" ? { expectedSec: opts } : (opts ?? {});
   const errText = (v: unknown) => (typeof v === "string" && v.trim() ? summarizeError(v, { admin: o.admin }).summary : "Something went wrong");
   const p = e.payload as Record<string, unknown>;
-  const clip = typeof p.index === "number" ? `Clip ${p.index + 1}` : "A clip";
+  const clip = typeof p["index"] === "number" ? `Clip ${p["index"] + 1}` : "A clip";
   switch (e.type) {
     case "project.created":
-      return { text: `Project created${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
+      return { text: `Project created${p["title"] ? `: “${p["title"]}”` : ""}`, tone: "ok" };
     case "source.partial": {
-      const until = sec(p.untilSec);
-      const total = sec(p.durationSec);
+      const until = sec(p["untilSec"]);
+      const total = sec(p["durationSec"]);
       if (until === null || total === null) return null;
-      const why = p.reason === "first_video" ? "your first video's free minutes" : "the minutes left on your plan";
+      const why = p["reason"] === "first_video" ? "your first video's free minutes" : "the minutes left on your plan";
       return { text: `Clipping the first ${Math.round(until / 60)} of ${Math.round(total / 60)} minutes (${why}). Clip the rest any time.`, tone: "warn" };
     }
     case "project.extended": {
-      const from = sec(p.fromSec);
-      const until = sec(p.untilSec);
+      const from = sec(p["fromSec"]);
+      const until = sec(p["untilSec"]);
       if (from === null || until === null) return null;
       return {
-        text: `${p.automatic ? "Your plan changed: c" : "C"}lipping minutes ${Math.round(from / 60)}–${Math.round(until / 60)}, keeping the clips you have`,
+        text: `${p["automatic"] ? "Your plan changed: c" : "C"}lipping minutes ${Math.round(from / 60)}–${Math.round(until / 60)}, keeping the clips you have`,
         tone: "run",
       };
     }
     case "stage.started":
       // one-shot event: the fix is saved when it's emitted; only the re-renders are still running
-      if (p.stage === "review")
-        return p.rerendered
-          ? { text: `Transcript updated, re-rendering ${plural(Number(p.rerendered), "clip")}`, tone: "run" }
-          : { text: p.changed ? `Transcript updated (${plural(Number(p.changed), "fix", "fixes")})` : "Transcript updated", tone: "ok" };
-      if (p.stage === "refine" && Array.isArray(p.steps))
-        return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
-      if (p.stage === "analyze" && p.repick && typeof p.kept === "number" && p.kept > 0)
-        return { text: `Finding new moments. Kept ${plural(Number(p.kept), "clip")} you made or edited`, tone: "run" };
-      return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
+      if (p["stage"] === "review")
+        return p["rerendered"]
+          ? { text: `Transcript updated, re-rendering ${plural(Number(p["rerendered"]), "clip")}`, tone: "run" }
+          : { text: p["changed"] ? `Transcript updated (${plural(Number(p["changed"]), "fix", "fixes")})` : "Transcript updated", tone: "ok" };
+      if (p["stage"] === "refine" && Array.isArray(p["steps"]))
+        return { text: `Refining: ${(p["steps"] as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
+      if (p["stage"] === "analyze" && p["repick"] && typeof p["kept"] === "number" && p["kept"] > 0)
+        return { text: `Finding new moments. Kept ${plural(Number(p["kept"]), "clip")} you made or edited`, tone: "run" };
+      return { text: `${STAGE[String(p["stage"])] ?? p["stage"]} ${p["retried"] ? "restarted" : "started"}`, tone: "run" };
     case "run.started": {
-      const why = reasonLabel(p.reason);
-      return p.reason === "created" || !why ? null : { text: `Started: ${why}`, tone: "run" };
+      const why = reasonLabel(p["reason"]);
+      return p["reason"] === "created" || !why ? null : { text: `Started: ${why}`, tone: "run" };
     }
     case "stage.completed": {
-      const d = sec(p.durationSec);
-      const exp = d !== null && o.expectedSec ? o.expectedSec(String(p.stage)) : null;
-      const done = `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`;
-      if (p.stage === "transcribe" && typeof p.loops === "number" && p.loops > 0) {
-        return { text: `${done}. Collapsed ${plural(Number(p.loops), "looping stretch", "looping stretches")} — review them on the transcript`, tone: "warn" };
+      const d = sec(p["durationSec"]);
+      const exp = d !== null && o.expectedSec ? o.expectedSec(String(p["stage"])) : null;
+      const done = `${STAGE[String(p["stage"])] ?? p["stage"]} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`;
+      if (p["stage"] === "transcribe" && typeof p["loops"] === "number" && p["loops"] > 0) {
+        return {
+          text: `${done}. Collapsed ${plural(Number(p["loops"]), "looping stretch", "looping stretches")} — review them on the transcript`,
+          tone: "warn",
+        };
       }
       return { text: done, tone: "ok" };
     }
     case "stage.failed":
       // a refine step that gave up: optional work, the project went on without it
-      if (p.final === true && typeof p.step === "string")
-        return { text: `${STAGE[String(p.stage)] ?? p.stage} step "${p.step}" gave up, continuing without it: ${errText(p.error)}`, tone: "warn" };
-      return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };
+      if (p["final"] === true && typeof p["step"] === "string")
+        return { text: `${STAGE[String(p["stage"])] ?? p["stage"]} step "${p["step"]}" gave up, continuing without it: ${errText(p["error"])}`, tone: "warn" };
+      return { text: `${STAGE[String(p["stage"])] ?? p["stage"]} failed (attempt ${p["attempt"]} of ${p["max"]}): ${errText(p["error"])}`, tone: "err" };
     case "project.failed":
-      return { text: `Stopped: ${errText(p.error)}`, tone: "err" };
+      return { text: `Stopped: ${errText(p["error"])}`, tone: "err" };
     case "project.done": {
-      const t = sec(p.runSec);
-      const why = p.runReason === "created" ? null : reasonLabel(p.runReason);
+      const t = sec(p["runSec"]);
+      const why = p["runReason"] === "created" ? null : reasonLabel(p["runReason"]);
       return {
-        text: `All done: ${plural(Number(p.clips), "clip")} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`,
+        text: `All done: ${plural(Number(p["clips"]), "clip")} ready${p["failed"] ? `, ${p["failed"]} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`,
         tone: "ok",
       };
     }
     case "clip.created":
-      return { text: `Found a moment: “${p.title}”`, tone: "ok" };
+      return { text: `Found a moment: “${p["title"]}”`, tone: "ok" };
     case "clip.rendering":
       return { text: `Rendering a clip`, tone: "run" };
     case "clip.done":
       return { text: `${clip} is ready`, tone: "ok" };
     case "clip.failed":
-      return { text: `A clip failed to render: ${errText(p.error)}`, tone: "err" };
+      return { text: `A clip failed to render: ${errText(p["error"])}`, tone: "err" };
     case "clip.retrying":
-      return { text: `Retrying ${p.step} (attempt ${p.attempt} of ${p.max}) after: ${p.reason}`, tone: "warn" };
+      return { text: `Retrying ${p["step"]} (attempt ${p["attempt"]} of ${p["max"]}) after: ${p["reason"]}`, tone: "warn" };
     case "clip.bumper_skipped":
-      return { text: `${p.slot === "both" ? "Intro and outro" : p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
+      return { text: `${p["slot"] === "both" ? "Intro and outro" : p["slot"] === "outro" ? "Outro" : "Intro"} skipped: ${p["reason"]}`, tone: "warn" };
     case "clip.overlay_skipped":
-      return { text: `Overlay skipped: ${p.reason}`, tone: "warn" };
+      return { text: `Overlay skipped: ${p["reason"]}`, tone: "warn" };
     case "clip.cut_unverified":
-      return { text: `Applied your cut at ${formatTime(Number(p.at))} without a seam check: the audio around it couldn't be matched`, tone: "warn" };
+      return { text: `Applied your cut at ${formatTime(Number(p["at"]))} without a seam check: the audio around it couldn't be matched`, tone: "warn" };
     case "source.section_fetched": {
-      const span = `${formatTime(Number(p.start))}–${formatTime(Number(p.end))}`;
-      const n = typeof p.clips === "number" && p.clips > 1 ? ` for ${p.clips} clips` : "";
-      const how = p.stitched ? `, joining ${Number(p.downloadedSec ?? 0).toFixed(0)} s of new video to what was already fetched` : "";
-      return { text: `Fetched ${span} of the source at ${p.height}p${n}${how}`, tone: "ok" };
+      const span = `${formatTime(Number(p["start"]))}–${formatTime(Number(p["end"]))}`;
+      const n = typeof p["clips"] === "number" && p["clips"] > 1 ? ` for ${p["clips"]} clips` : "";
+      const how = p["stitched"] ? `, joining ${Number(p["downloadedSec"] ?? 0).toFixed(0)} s of new video to what was already fetched` : "";
+      return { text: `Fetched ${span} of the source at ${p["height"]}p${n}${how}`, tone: "ok" };
     }
     case "language.degraded":
-      return { text: `${languageLabel(String(p.language))}: ${p.reason}`, tone: "warn" };
+      return { text: `${languageLabel(String(p["language"]))}: ${p["reason"]}`, tone: "warn" };
     case "clip.preview_source":
-      return { text: `The full-quality video couldn't be fetched, so a clip rendered from the ${p.height}p preview: ${p.reason}`, tone: "warn" };
+      return { text: `The full-quality video couldn't be fetched, so a clip rendered from the ${p["height"]}p preview: ${p["reason"]}`, tone: "warn" };
     case "project.deleted":
-      return { text: `Project deleted (restorable for ${p.days} days)`, tone: "warn" };
+      return { text: `Project deleted (restorable for ${p["days"]} days)`, tone: "warn" };
     case "project.restored":
       return { text: "Project restored", tone: "ok" };
     case "clip.restored":
-      return { text: `${clip} restored${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
+      return { text: `${clip} restored${p["title"] ? `: “${p["title"]}”` : ""}`, tone: "ok" };
     case "clip.deleted":
-      return { text: `${clip} deleted${p.title ? `: “${p.title}”` : ""} (restorable for ${p.days} days)`, tone: "warn" };
+      return { text: `${clip} deleted${p["title"] ? `: “${p["title"]}”` : ""} (restorable for ${p["days"]} days)`, tone: "warn" };
     case "project.updated":
-      return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
+      return { text: `Project updated: ${Array.isArray(p["changed"]) ? p["changed"].join(", ") : "settings"}`, tone: "ok" };
     case "transcript.imported":
       return {
-        text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${plural(Number(p.warnings), "warning")}` : ""}`,
+        text: `Transcript imported from a ${String(p["format"]).toUpperCase()} file (${p["cues"]} cues, ${p["words"]} words)${Number(p["warnings"]) ? `, ${plural(Number(p["warnings"]), "warning")}` : ""}`,
         tone: "ok",
       };
     case "job.stalled":
       return {
-        text: typeof p.message === "string" ? `${p.message} ${p.hint ?? ""}`.trim() : `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`,
+        text: typeof p["message"] === "string" ? `${p["message"]} ${p["hint"] ?? ""}`.trim() : `No progress for ${p["idleMinutes"]} min. ${p["hint"] ?? ""}`,
         tone: "warn",
       };
     default:
@@ -168,12 +171,12 @@ export interface RunGroup {
 /** Group the log by run (newest run first, entries newest first). A run starts at `run.started`; older logs start one at `project.created`. */
 /** project.done for a run that rendered fewer clips than the project has: "Re-rendered 1 clip in 0:25 · 3 ready". */
 function runDoneText(p: Record<string, unknown>, renderedThisRun: number, fallback: string): string {
-  const total = Number(p.clips);
-  if (p.runReason === "created" || !renderedThisRun || renderedThisRun >= total) return fallback;
-  const t = sec(p.runSec);
-  const why = reasonLabel(p.runReason);
-  const verb = p.runReason === "rerender" ? "Re-rendered" : "Rendered";
-  return `${verb} ${plural(renderedThisRun, "clip")}${t !== null ? ` in ${formatTime(t)}` : ""} · ${total} ready${p.failed ? `, ${p.failed} failed` : ""}${why && p.runReason !== "rerender" ? ` · ${why}` : ""}`;
+  const total = Number(p["clips"]);
+  if (p["runReason"] === "created" || !renderedThisRun || renderedThisRun >= total) return fallback;
+  const t = sec(p["runSec"]);
+  const why = reasonLabel(p["runReason"]);
+  const verb = p["runReason"] === "rerender" ? "Re-rendered" : "Rendered";
+  return `${verb} ${plural(renderedThisRun, "clip")}${t !== null ? ` in ${formatTime(t)}` : ""} · ${total} ready${p["failed"] ? `, ${p["failed"]} failed` : ""}${why && p["runReason"] !== "rerender" ? ` · ${why}` : ""}`;
 }
 
 export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null, olderExist = false): RunGroup[] {
@@ -193,12 +196,12 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
     if (e.type === "stage.progress") continue;
     const t = new Date(e.createdAt).getTime();
     const p = e.payload as Record<string, unknown>;
-    const reason = typeof p.reason === "string" ? p.reason : null;
+    const reason = typeof p["reason"] === "string" ? p["reason"] : null;
     if (e.type === "run.started") {
-      if (cur && cur.entries.every((x) => x.e.type === "project.created")) {
-        cur.seq = Number(p.seq) || cur.seq;
+      if (cur?.entries.every((x) => x.e.type === "project.created")) {
+        cur.seq = Number(p["seq"]) || cur.seq;
         cur.reason = reason;
-      } else groups.push((cur = fresh(Number(p.seq) || groups.length + 1, reason, t)));
+      } else groups.push((cur = fresh(Number(p["seq"]) || groups.length + 1, reason, t)));
     } else if (!cur) {
       // a late event of a finished run (a stray clip event) stays with that run; otherwise this is an older log whose runs we can't see
       if (explicit && groups.length) {
@@ -217,7 +220,7 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
     if (d) cur!.entries.unshift({ e, d });
     if (e.type === "project.done" || e.type === "project.failed") {
       cur!.outcome = e.type === "project.done" ? "done" : "failed";
-      cur!.runSec = sec(p.runSec);
+      cur!.runSec = sec(p["runSec"]);
       cur = null;
     }
   }

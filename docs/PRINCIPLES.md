@@ -191,7 +191,26 @@ project already hit the problem it prevents.
   a type guard, `instanceof`, zod at the edge, a typed query (`db.execute<Row>(…)`), or a smaller
   parameter type (`Pick<Row, …>`) so the caller can pass what it has. `as const` and `satisfies` are
   fine; `{} as Record<Key, V>` while filling a record is tolerated; test fixtures may cast. A cast that
-  stays needs a comment saying what guarantees it.
+  stays needs a comment saying what guarantees it. The same goes for `!`: with
+  `noUncheckedIndexedAccess`, `rows[0]!` becomes `const [row] = rows; if (!row) …`. Old code holds
+  about two thousand of them; `scripts/lint-ratchet.mjs` counts them and the count may only go down.
+- **State is a discriminated union, and matches on it are exhaustive.** `{ status: "failed"; reason }`
+  and `{ status: "done"; output }`, not a status plus optional fields that are valid in some states.
+  A `switch` over a union covers every member (Biome's `useExhaustiveSwitchCases` is an error), so a
+  new member fails to compile until every switch handles it. Never replace the union with a class
+  hierarchy.
+- **Expected failures are values or a `TRPCError` with a code; anything else thrown is a bug.** A
+  `catch` handles the error, rethrows it with context (`new Error(msg, { cause })`), or logs it with
+  the ids it concerns. An empty or log-and-continue `catch` carries a comment saying why going on
+  is safe.
+- **Decisions are pure functions; services do the I/O around them.** A service loads rows, calls a
+  function that decides from plain data and `now` (which moments to keep, whether a quota is
+  exceeded, the next state), then writes the result in one unit of work. New deciding code takes
+  `now` as a parameter rather than calling `Date.now()`, so it is tested with plain values.
+- **Services depend on interfaces we own, never on an SDK's types.** Storage, email and model
+  providers are drivers behind our own interface (`STORAGE_DRIVER`, `EMAIL_DRIVER`, the provider
+  registry), and only the adapter imports the SDK. A wrapper with one implementation and no fake is a
+  pass-through layer: inline it. Postgres is not faked; tests use a real one.
 - **Locks have names.** Every advisory lock is taken through `locks.ts` (`txLock.quota(userId)`,
   `txLock.billing(userId)`, …), never by spelling a key string at the call site, so two paths that
   must exclude each other cannot drift apart.
@@ -202,6 +221,13 @@ project already hit the problem it prevents.
   the platform); a canonical, maintained library does it. Only then write it, and put it where the
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
+- **Generalise on the third use, and count it.** Copying or closely mirroring existing code on
+  purpose is fine once; say so at the copy with `// dup-of: <path>#<symbol>`.
+  `node scripts/dup-ledger.mjs --check` (in `pnpm guards`, run by CI) fails when a target reaches
+  its third use: merge them, or add `dup-ok: <reason>` next to a marker. Generalising earlier is fine
+  when the spec or config already names the cases (`STORAGE_DRIVER=local|s3`). An abstraction that
+  grows `if (kind === …)` branches and flags only one caller passes is the wrong one: inline it back
+  into its callers and extract again once the shared part is visible.
 - **A count that must not go down lives in a ledger, never in history a user can delete or forget.**
   Quota usage, first-video-free and the ready email's milestones count rows of `source_usage`, which
   survives deleting a project, purging it and "forget what Reelsaw learned", and goes only with the
@@ -428,6 +454,16 @@ nothing below hurts yet; every rule exists because a query or screen we already 
     `pendingToast` (`lib/pendingToast.ts`): a loading toast right away that becomes the result or the failure.
   - A button that runs work itself is `disabled` + `aria-busy` while `isPending`, its label wrapped in `Pending`.
   - Progress that has a count (chunked bulk work) says it ("120 of 400…") where the action was started.
+  - Every action answers within 100 ms: pressed, pending or optimistic. Toasts are for consequences
+    and Undo, not for every save.
+- **A disabled control says why.** Its `title` (or a line beside it) names what is missing, and
+  submit is never disabled just to signal validation errors: let it submit and show the errors
+  under the fields, with focus on the first.
+- **Unsaved work is not lost silently.** Closing or leaving with unsaved changes asks first (the clip
+  and template editors do, through `beforeunload`). New long-form inputs keep a draft that survives a
+  refresh; the editors do not yet.
+- **Motion is short and optional.** 150 to 200 ms, easing out, explaining a change. Reduced motion
+  is honoured for every element by one rule in `index.css`; spinners keep turning.
 - **Server state is TanStack Query.** Reads are `useQuery` / `useInfiniteQuery` (see "Loading is
   not empty"). Writes are `useMutation`: tRPC via `trpc.x.y.mutationOptions()`, anything else
   (better-auth, a one-shot `fetch`) via `mutationFn`. Pending, error and result come from the hook
@@ -509,6 +545,25 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   new `h-screen`). Run the relevant evals for pipeline work.
 - Commit and push only when asked. Commit messages describe the change and why; no
   tool-attribution trailers.
+- **One concern per pull request.** A refactor, a feature and a dependency bump are separate; a
+  sweeping rename lands on its own, before the change that needs it. Aim for under about 400
+  changed lines, generated files and lockfiles aside. The description says what changed, why, how
+  it was checked, and what was not checked.
+- **A refactor is its own commit, with no change in behaviour.** Make the change easy, then make the
+  easy change: refactor first, tests green after each step, and revert a refactor that did not make
+  the code clearer.
+- **A rule a machine can check is a check, not a sentence.** Lint is errors or off: a rule old code
+  still breaks stays at `warn` (or is listed in `scripts/lint-ratchet.mjs`) and its count in
+  `scripts/lint-baseline.json` may only go down; CI fails on a rise, and on a drop until the baseline
+  is lowered in the same change. When a count reaches 0 the rule becomes an error. A suppression
+  (`biome-ignore`, `@ts-expect-error`) always says why. A review comment made twice becomes a rule
+  (`biome.json`, a GritQL plugin, or a test that scans the source) before it becomes a line in
+  `AGENTS.md`.
+- **Every string a person reads goes through the catalogue.** Reelsaw ships in English and is
+  built for more: web copy uses Lingui's `<Trans>` and `t`, whole sentences as one message, plurals
+  as ICU messages; layout uses logical CSS classes only; check UI work in the `?locale=en-XA`
+  pseudo-locale. Log lines, config keys, MCP tool names and CLI flags stay English. How, and what
+  is left to wrap: [I18N.md](I18N.md).
 - **Fix the class, not the instance.** A bug is evidence that the codebase made a mistake easy.
   Patching the one place it showed up leaves every sibling in place and the next person free to
   write it again. Every fix answers four questions, in the same change:

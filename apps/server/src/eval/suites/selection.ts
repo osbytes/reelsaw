@@ -195,7 +195,7 @@ function gateCases(): CaseResult[] {
     }
   }
   // the relative rule keeps the same clips when a judge shifts and stretches its scale
-  const base = dists.generous!;
+  const base = dists["generous"]!;
   const a = scoreGate(base, { ...rel, floor: 0 }).keep.join();
   const b = scoreGate(
     base.map((t) => 0.5 * t - 10),
@@ -399,7 +399,7 @@ async function creatorFixtures(ctx: EvalContext) {
     if (!existsSync(path.join(dir, "picks.json"))) continue;
     const p = JSON.parse(await fs.readFile(path.join(dir, "picks.json"), "utf8")) as CreatorPicks;
     if (only && p.split !== only) continue;
-    const t = JSON.parse(await fs.readFile(path.join(dir, "transcript.json"), "utf8"));
+    const t = JSON.parse(await fs.readFile(path.join(dir, "transcript.json"), "utf8")) as TranscriptFixture & { windows: [number, number][] };
     const cf = path.join(dir, "candidates.json");
     out.push({ name, dir, p, t, recorded: existsSync(cf) ? (JSON.parse(await fs.readFile(cf, "utf8")) as CandidatesFile) : undefined });
   }
@@ -712,7 +712,7 @@ export const selectionSuite: Suite = {
     const inv = results.filter((r) => !r.id.startsWith("creator-picks/"));
     const edges = (variant: string) => {
       const rs = results.filter((r) => r.id.endsWith(`/${variant}`));
-      return Number((rs.reduce((n, r) => n + Number(r.metrics?.onSentence ?? 0), 0) / (rs.length || 1)).toFixed(2));
+      return Number((rs.reduce((n, r) => n + Number(r.metrics?.["onSentence"] ?? 0), 0) / (rs.length || 1)).toFixed(2));
     };
     return {
       passRate: { value: Number((inv.filter((r) => r.pass).length / (inv.length || 1)).toFixed(2)), better: "higher" },

@@ -664,7 +664,7 @@ ${plural(g.total, "account")} in ${plural(g.groups.length, "section")}${g.by ===
    * filter flags (`--all` for every account). Same path as the Users page selection bar and manage_users;
    * a command typed by name is its own confirmation, so it walks every page.
    */
-  async ["users-bulk"](svc) {
+  async "users-bulk"(svc) {
     const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule] [--ip address] [--shared-ip yes|no] [--in section]) [--reason text] [--json]`;
     const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
     if (!action) throw new Error(usage);
@@ -1303,21 +1303,21 @@ ${usage}`);
     const what = (d: (typeof page.items)[number]) => {
       const c = d.context;
       if (
-        Array.isArray(c.words) &&
-        c.target &&
-        typeof c.target === "object" &&
-        "index" in c.target &&
-        "span" in c.target &&
-        typeof c.target.index === "number" &&
-        typeof c.target.span === "number"
+        Array.isArray(c["words"]) &&
+        c["target"] &&
+        typeof c["target"] === "object" &&
+        "index" in c["target"] &&
+        "span" in c["target"] &&
+        typeof c["target"].index === "number" &&
+        typeof c["target"].span === "number"
       ) {
-        return c.words
-          .slice(c.target.index, c.target.index + c.target.span)
-          .map((w: { text?: string }) => w.text ?? "")
+        return c["words"]
+          .slice(c["target"].index, c["target"].index + c["target"].span)
+          .map((w) => (w && typeof w === "object" && "text" in w && typeof w.text === "string" ? w.text : ""))
           .join(" ")
           .slice(0, 40);
       }
-      return Array.isArray(c.fields) ? c.fields.join(",") : String(d.before?.title ?? d.after?.title ?? "").slice(0, 40);
+      return Array.isArray(c["fields"]) ? c["fields"].join(",") : String(d.before?.["title"] ?? d.after?.["title"] ?? "").slice(0, 40);
     };
     table(
       page.items.map((d) => ({
@@ -1382,7 +1382,7 @@ ${usage}`);
     const cli = { id: "cli", email: "cli" };
     if (sub === "add") {
       if (!pos[1]) throw new Error(usage);
-      const f = await addFont(svc, cli, { file: pos[1], filename: pos[1].split(/[\/]/).pop()! });
+      const f = await addFont(svc, cli, { file: pos[1], filename: pos[1].split(/[/]/).pop()! });
       console.log(`added ${f.id!.slice(0, 8)}  ${f.family}`);
       return;
     }
@@ -1415,7 +1415,7 @@ ${usage}`);
       })),
     );
   },
-  ["signup-rules"]: async (svc) => {
+  "signup-rules": async (svc) => {
     const usage = `usage: reelsaw signup-rules [list] | add <${SIGNUP_RULE_KINDS.join("|")}> <pattern> <${SIGNUP_RULE_ACTIONS.join("|")}> [--note text] | rm <id…> | test <email> [--ip addr]`;
     const sub = pos[0] ?? "list";
     const cli = { id: "cli", email: "cli" };
@@ -1756,7 +1756,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
    * unless `--cause` names another). Same path as the owner's Retry button. Cap 50 per call; run again if it
    * prints a next page.
    */
-  async ["retry-failures"](svc) {
+  async "retry-failures"(svc) {
     const r = await retryFailures(svc, failureFilterFlags("retry-failures"), null);
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     console.log(`retried ${r.retried}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
@@ -1765,7 +1765,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
    * Clear matching failures from Failed work (same filters as retry-failures, any cause), or bring dismissed
    * ones back with `--restore`. The owner's project is untouched. Cap 50 per call; run again for more.
    */
-  async ["dismiss-failures"](svc) {
+  async "dismiss-failures"(svc) {
     const r = await dismissFailures(svc, failureFilterFlags("dismiss-failures"), null, { restore: args.includes("--restore") });
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     console.log(`${args.includes("--restore") ? "restored" : "dismissed"} ${r.changed}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
@@ -2438,7 +2438,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
 
   async "log-level"(svc) {
     const { parseLogLevels, formatLogLevels } = await import("./log.js");
-    const env = parseLogLevels(process.env.LOG_LEVEL || "info");
+    const env = parseLogLevels(process.env["LOG_LEVEL"] || "info");
     const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number | undefined }) => {
       if (st.acks !== undefined)
         console.log(
@@ -3132,7 +3132,7 @@ async function run() {
     RUN_WORKERS: "false",
     OTEL_ENABLED: "false",
     REELSAW_CLI: "1",
-    LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn",
+    LOG_LEVEL: process.env["CLI_LOG_LEVEL"] ?? "warn",
   });
   try {
     await fn(svc);

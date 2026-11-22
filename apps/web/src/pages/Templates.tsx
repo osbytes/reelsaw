@@ -203,13 +203,13 @@ export function TemplatesPage() {
                     <Skeleton className="mt-1.5 h-3 w-3/5 min-[1040px]:hidden" />
                   </ListCell>
                   <ListCell full>
-                    <Skeleton className="ml-auto h-3.5 w-14" />
+                    <Skeleton className="ms-auto h-3.5 w-14" />
                   </ListCell>
                   <ListCell full>
                     <Skeleton className="h-3.5 w-14" />
                   </ListCell>
                   <ListCell>
-                    <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
+                    <Skeleton className="ms-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
                   </ListCell>
                 </ListRow>
               ))}

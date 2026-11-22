@@ -138,7 +138,7 @@ export async function checkRequestRate(db: Db, instance: InstanceLimits, userId:
   if (instance.MAX_REQUESTS_PER_MINUTE <= 0 && instance.MAX_REQUESTS_PER_HOUR <= 0 && !ent) {
     // nothing instance-wide and no plans: skip the override read too (self-hosted default path costs nothing)
     const [o] = await db.select({ limits: schema.userSettings.limits }).from(schema.userSettings).where(eq(schema.userSettings.userId, userId)).limit(1);
-    if (!o?.limits?.MAX_REQUESTS_PER_MINUTE && !o?.limits?.MAX_REQUESTS_PER_HOUR) return;
+    if (!o?.limits?.["MAX_REQUESTS_PER_MINUTE"] && !o?.limits?.["MAX_REQUESTS_PER_HOUR"]) return;
   }
   const s = await limitsFor(db, instance, userId, ent);
   if (s.MAX_REQUESTS_PER_MINUTE <= 0 && s.MAX_REQUESTS_PER_HOUR <= 0) return;

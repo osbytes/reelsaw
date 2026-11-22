@@ -1,6 +1,6 @@
 {
   "name": "@reelsaw/server",
-  "version": "0.49.0",
+  "version": "0.49.1",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -88,6 +88,7 @@
     "semver": "^7.8.5",
     "standardwebhooks": "^1.1.1",
     "stripe": "23.0.0",
+    "ts-extras": "3.0.0",
     "undici": "7.30.1",
     "wordlist-english": "^1.2.1",
     "yauzl": "3.4.0",

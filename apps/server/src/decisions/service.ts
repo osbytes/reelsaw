@@ -43,14 +43,14 @@ export function sourceRefOf(p: Pick<schema.Project, "sourceType" | "sourceUrl" |
   const m = p.sourceMeta ?? {};
   const ref: SourceRef = {
     type: p.sourceType,
-    url: p.sourceType === "url" ? (str(m.webpage_url) ?? p.sourceUrl ?? undefined) : undefined,
-    extractor: str(m.extractor),
-    videoId: str(m.videoId),
-    formatId: str(m.formatId),
-    durationSec: p.durationSec ?? num(m.duration),
-    sha256: str(m.sha256),
-    title: str(m.title) ?? p.title,
-    uploader: str(m.uploader),
+    url: p.sourceType === "url" ? (str(m["webpage_url"]) ?? p.sourceUrl ?? undefined) : undefined,
+    extractor: str(m["extractor"]),
+    videoId: str(m["videoId"]),
+    formatId: str(m["formatId"]),
+    durationSec: p.durationSec ?? num(m["duration"]),
+    sha256: str(m["sha256"]),
+    title: str(m["title"]) ?? p.title,
+    uploader: str(m["uploader"]),
   };
   return ref; // undefined keys are dropped when stored as jsonb
 }

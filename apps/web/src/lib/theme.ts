@@ -5,10 +5,10 @@ const KEY = "rs-theme";
 
 // one source of truth for every toggle (header, editor, ⌘K): <html data-theme>, remembered per browser
 const listeners = new Set<() => void>();
-const read = (): Theme => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+const read = (): Theme => (document.documentElement.dataset["theme"] === "dark" ? "dark" : "light");
 
 export function setTheme(t: Theme) {
-  document.documentElement.dataset.theme = t;
+  document.documentElement.dataset["theme"] = t;
   try {
     localStorage.setItem(KEY, t);
   } catch {
@@ -22,7 +22,7 @@ const subscribe = (l: () => void) => {
   // another tab changed it
   const onStorage = (e: StorageEvent) => {
     if (e.key === KEY && (e.newValue === "dark" || e.newValue === "light") && e.newValue !== read()) {
-      document.documentElement.dataset.theme = e.newValue;
+      document.documentElement.dataset["theme"] = e.newValue;
       l();
     }
   };
