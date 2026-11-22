@@ -42,7 +42,7 @@ services:
       DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
       PORT: "3000"
       DATA_DIR: /data
-      FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      FACE_MODEL_PATH: /app/server/models/yunet-2026may.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
       WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
       # JSON logs also go here so they survive container re-creation: `reelsaw logs <id>`. Each process writes its own
@@ -82,7 +82,7 @@ services:
     environment:
       DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
       DATA_DIR: /data
-      FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      FACE_MODEL_PATH: /app/server/models/yunet-2026may.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
       WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
       # JSON logs also go here so they survive container re-creation: `reelsaw logs <id>`. Each process writes its own

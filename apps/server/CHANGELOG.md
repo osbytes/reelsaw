@@ -1,5 +1,19 @@
 # @reelsaw/server
 
+## 0.48.0
+
+### Minor Changes
+
+- [#338](https://github.com/osbytes/reelsaw/pull/338) [`38078e4`](https://github.com/osbytes/reelsaw/commit/38078e46f3781c1abf93e4771aef701b6b20db3b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Phone footage edited into a 16:9 video between blurred or black bars is now cropped to the picture itself. A vertical clip fills the 9:16 frame instead of showing the whole frame, bars and all, at a third of the width; a square or 4:3 inset is shown at its own shape over a blurred copy of itself. Automatic framing only: "Whole frame" still shows the whole frame, and a crop set on the section wins. The editor labels these pieces "Inset video", and `get_clip` reports the crop as `inset` on the layout segment.
+
+- [#347](https://github.com/osbytes/reelsaw/pull/347) [`8151f8d`](https://github.com/osbytes/reelsaw/commit/8151f8d31d33ad227b2ecd5f1e5cec6912d4efef) Thanks [@adavila0703](https://github.com/adavila0703)! - OpenCode is a model provider. Paste one OpenCode Console key under Settings → Models (or set `OPENCODE_API_KEY`) and the picker lists both plans as sections of one card: pay-per-token Zen models as `opencode:<model>` and, if the key has a Go subscription, Go models as `opencode-go:<model>`. The prefix records which plan pays. Reelsaw talks to OpenCode over Chat Completions, so the picker shows the paid chat models OpenCode itself lists as served natively on Chat Completions (Kimi, GLM, DeepSeek and others); models it serves on other APIs lose structured output in translation and are left out, decided from OpenCode's listing, not from model names. Go is meant for coding agents and caps any 5 hours at 20% of the month, so its section says so; Reelsaw sends Go its own user agent and one `x-opencode-session` per project, as OpenCode asks. Language models only: keep a transcription provider for speech. The same listing is in `list_models` and `reelsaw models --provider opencode`.
+  
+  Structured output to OpenAI-compatible servers (the compat server, OpenCode) now asks for lenient JSON schemas like OpenAI already did, so models behind them no longer reject schemas with optional fields. A stage that times out now suggests the remedy that fits a cloud model too.
+
+### Patch Changes
+
+- [#344](https://github.com/osbytes/reelsaw/pull/344) [`d8365d2`](https://github.com/osbytes/reelsaw/commit/d8365d2a41fb4a64da23741566b3e789fc1662be) Thanks [@adavila0703](https://github.com/adavila0703)! - The Settings → Models picker no longer lags when you click a provider. A self-hosted Speaches server lists hundreds of downloadable models, and the picker used to draw all of them at once; it now shows the first 50 per provider, loads more as you scroll ("Showing 50 of 729"), and searches every provider on the server as you type. The models in use always come first. The same listing is the new MCP tool `list_models` and the `reelsaw models` command.
+
 ## 0.47.1
 
 ### Patch Changes

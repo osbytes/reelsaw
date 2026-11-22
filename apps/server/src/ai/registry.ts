@@ -5,6 +5,8 @@ import type { Logger } from "../log.js";
 import type { ProviderGate } from "./gate.js";
 import { APICallError } from "@ai-sdk/provider";
 import { compatTranscriptionModel, wordsFirst } from "./compat-transcription.js";
+import { createOpenCodeProviders } from "./opencode.js";
+import { credentialOwner } from "./provider-ids.js";
 import {
   askedFor,
   isStale,
@@ -20,7 +22,7 @@ import { plural } from "@reelsaw/shared";
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
  *   AI_MODEL=anthropic:claude-sonnet-4-5   TRANSCRIPTION_MODEL=deepgram:nova-3
- * Language: openai, anthropic, google, groq, gateway, <compat>   Transcription: openai, groq, deepgram, assemblyai, gateway, <compat>
+ * Language: openai, anthropic, google, groq, gateway, opencode, opencode-go, <compat>   Transcription: openai, groq, deepgram, assemblyai, gateway, <compat>
  */
 export interface AiService {
   languageModel(id?: string): Promise<LanguageModel>;
@@ -82,6 +84,9 @@ export const providerKeyEnv: Record<string, string[]> = {
   deepgram: ["DEEPGRAM_API_KEY"],
   assemblyai: ["ASSEMBLYAI_API_KEY"],
   gateway: ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"],
+  // one key, two plans (ai/opencode.ts); `opencode-go` borrows the `opencode` credential (ai/provider-ids.ts)
+  opencode: ["OPENCODE_API_KEY"],
+  "opencode-go": ["OPENCODE_API_KEY"],
 };
 
 /**
@@ -125,12 +130,17 @@ export function underlyingProvider(id: string): string {
  * any schema with a non-required property, and ours have some on purpose (`caption` defaults to "",
  * `confidence` / `relevance` are optional so weaker models can omit them). Ask for the lenient
  * json_schema mode instead: the model still gets the schema, the pipeline keeps its own salvage
- * and validation. Other providers ignore the option.
+ * and validation. @ai-sdk/openai-compatible (the compat server, OpenCode) defaults to strict too and
+ * reads `openaiCompatible`, so both keys carry it. Other providers ignore the option.
  */
 const lenientJsonSchema: LanguageModelMiddleware = {
   transformParams: async ({ params }) => ({
     ...params,
-    providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } },
+    providerOptions: {
+      ...params.providerOptions,
+      openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) },
+      openaiCompatible: { strictJsonSchema: false, ...(params.providerOptions?.openaiCompatible ?? {}) },
+    },
   }),
 };
 
@@ -199,6 +209,13 @@ export function createAi(
       deepgram: createDeepgram(key("deepgram")),
       assemblyai: createAssemblyAI(key("assemblyai")),
       gateway: createGateway(key("gateway")),
+      // no transcription wrapper: an opencode transcription id fails in resolve() with the usual sentence
+      ...(await createOpenCodeProviders({
+        baseUrl: config.OPENCODE_BASE_URL,
+        apiKey: c("opencode").apiKey,
+        version: config.REELSAW_VERSION,
+        structuredOutputs: true,
+      })),
     };
     const compatCreds = c(compat);
     if (compatCreds.baseUrl) {
@@ -253,7 +270,7 @@ export function createAi(
     // a self-hosted OpenAI-compatible server needs no key
     if (provider === "openai" && credentials.get("openai").baseUrl) return;
     if (keys && !credentials.get(provider).apiKey)
-      throw new Error(`"${id}" needs an API key for ${provider}: enter one under Settings → Models, or set ${keys.join(" or ")}`);
+      throw new Error(`"${id}" needs an API key for ${credentialOwner(provider)}: enter one under Settings → Models, or set ${keys.join(" or ")}`);
   }
 
   /**
