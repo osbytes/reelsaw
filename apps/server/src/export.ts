@@ -20,7 +20,7 @@ import { schema } from "./db/index.js";
 import type { Clip, Project } from "./db/schema.js";
 import type { Services } from "./services.js";
 import { findProject, type Actor } from "./projects/service.js";
-import { formatTime, toSrt, toVtt, plural } from "@reelsaw/shared";
+import { formatTime, toSrt, toVtt, plural, resolveStyle } from "@reelsaw/shared";
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
@@ -198,7 +198,9 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
   const parentUrl = project.sourceType === "url" ? (project.sourceUrl ?? null) : null;
   const atUrl = videoId ? `https://youtu.be/${videoId}?t=${start}` : parentUrl ? appendT(parentUrl, start) : null;
   const hashtags = Array.from(new Set(clip.hashtags.map(tag).filter(Boolean)));
-  const hashLine = ["Shorts", ...hashtags.filter((h) => h.toLowerCase() !== "shorts")].map((h) => `#${h}`).join(" ");
+  // a landscape clip is an ordinary YouTube video, not a Short
+  const landscape = resolveStyle(project.settings, clip.style).shape === "16:9";
+  const hashLine = [...(landscape ? [] : ["Shorts"]), ...hashtags.filter((h) => landscape || h.toLowerCase() !== "shorts")].map((h) => `#${h}`).join(" ");
 
   const descriptionParts = [clip.hook.trim(), clip.caption.trim()].filter(Boolean);
   const descriptionLines = [
@@ -379,7 +381,7 @@ export function buildReadme(m: ExportManifest) {
 ${plural(m.clips.length, "clip")}${m.subset ? ` (a selection: ${m.subset.requested} picked of ${m.subset.total} rendered)` : ""}, generated ${m.generatedAt}
 
 LAYOUT
-  clips/NN-title.mp4           vertical 1080x1920 H.264/AAC, ready to upload as-is
+  clips/NN-title.mp4           1080x1920 (or the shape chosen: 1080x1350, 1080x1080, 1920x1080) H.264/AAC, ready to upload as-is
   clips/NN-title.jpg           thumbnail (first frame)
   clips/NN-title.txt           paste-ready title, description, tags and caption
   clips/NN-title.youtube.json  YouTube Data API v3 "videos.insert" request body (snippet + status)

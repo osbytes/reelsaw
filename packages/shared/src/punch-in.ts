@@ -65,10 +65,12 @@ export function punchInAnchor(
   },
   srcW: number,
   srcH: number,
+  /** the output frame's width / height (`shape`) */
+  frameAspect = 9 / 16,
 ): number | null {
   const fixed = piece.crop ?? (piece.layout === "fit" ? piece.inset : undefined);
   if (piece.layout === "split" || piece.layout === "stack" || piece.layout === "none") return null;
-  if (fixed) return fillsFrame(fixed, srcW, srcH) ? 0.5 : null;
+  if (fixed) return fillsFrame(fixed, srcW, srcH, frameAspect) ? 0.5 : null;
   if (piece.layout === "fit") return null;
   if (piece.layout === "face" && piece.cy !== undefined) return Math.round(Math.max(PUNCH_IN.anchorMin, Math.min(PUNCH_IN.anchorMax, piece.cy)) * 100) / 100;
   return 0.5;

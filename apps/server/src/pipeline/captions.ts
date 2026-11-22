@@ -1,6 +1,7 @@
 import {
   CAPTION_FONT_FRAC,
   HOOK_FONT_FRAC,
+  frameScale,
   lineSecondsFor,
   captionMaxChars,
   lineDisplayEnd,
@@ -80,9 +81,22 @@ export const WATERMARK_LOGO = {
   /** gap between the logo's bottom edge and the text, fraction of the frame height */
   gap: 0.004,
 } as const;
-/** Centre y of the text line under the logo (logo height = w × 9/16 ÷ aspect of the frame height). */
-export const watermarkTextY = () =>
-  WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
+/**
+ * Where the watermark logo and its text go in a frame of any shape: `WATERMARK_LOGO` is laid out on a 1080x1920 frame,
+ * kept the same size and distance from the top-left corner in pixels of the short side (`frameScale`), as fractions of
+ * this frame. `textPx` is the text's font size.
+ */
+export function watermarkPlacement(width: number, height: number) {
+  const u = frameScale(width, height);
+  const logoW = WATERMARK_LOGO.w * 1080 * u;
+  const cx = WATERMARK_LOGO.x * 1080 * u;
+  const cy = WATERMARK_LOGO.y * 1920 * u;
+  const textPx = WATERMARK_LOGO.textSize * 1920 * u;
+  const textY = cy + logoW / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap * 1920 * u + textPx / 2;
+  return { x: cx / width, y: cy / height, w: logoW / width, textY: textY / height, textPx };
+}
+/** Centre y of the text line under the logo in a 9:16 frame (logo height = w × 9/16 ÷ aspect of the frame height). */
+export const watermarkTextY = () => watermarkPlacement(1080, 1920).textY;
 
 /**
  * The caption lines a render burns in, grouped exactly as `buildAss` groups them, shifted by the
@@ -135,11 +149,11 @@ export { groupCaptionLines as groupLines } from "@reelsaw/shared";
 import { groupCaptionLines as groupLines } from "@reelsaw/shared";
 
 /** Caption font size in output pixels for a frame of the given height (mirrors the web preview). */
-export function captionFontPx(height: number, size: number) {
-  return Math.round(CAPTION_FONT_FRAC * height * size);
+export function captionFontPx(width: number, height: number, size: number) {
+  return Math.round(CAPTION_FONT_FRAC * 1920 * frameScale(width, height) * size);
 }
-export function hookFontPx(height: number) {
-  return Math.round(HOOK_FONT_FRAC * height);
+export function hookFontPx(width: number, height: number) {
+  return Math.round(HOOK_FONT_FRAC * 1920 * frameScale(width, height));
 }
 
 /**
@@ -149,11 +163,13 @@ export function hookFontPx(height: number) {
 export function buildAss(input: Word[], opts: CaptionOptions): string {
   const words = monotonicWords(input);
   const { width, height, font, style } = opts;
-  const scale = height / 1920;
-  const captionSize = captionFontPx(height, style.captionSize);
-  const hookSize = hookFontPx(height);
+  // sizes are pixels of a 1080x1920 frame, scaled by the short side: a square or landscape frame keeps the same text
+  const scale = frameScale(width, height);
+  const captionSize = captionFontPx(width, height, style.captionSize);
+  const hookSize = hookFontPx(width, height);
   const outline = Math.max(2, Math.round(4 * scale));
-  const margin = Math.round(width * 0.06);
+  const margin = Math.round(1080 * scale * 0.06);
+  const mark = watermarkPlacement(width, height);
   const pos = (x: number, y: number) => `{\\an5\\pos(${Math.round(x * width)},${Math.round(y * height)})}`;
   // each line is placed once, at its midpoint, so a line never moves while it is on screen
   const capPosAt = (start: number, end: number) => pos(style.captionX, captionYAt(style, opts.seams ?? [], (start + end) / 2));
@@ -183,7 +199,7 @@ ${lang ? `Language: ${lang}\n` : ""}
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${captionStyle}
 Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,${encoding}
-Style: Watermark,${opts.watermarkFont ?? font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,${encoding}
+Style: Watermark,${opts.watermarkFont ?? font},${Math.round(1920 * scale * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,${encoding}
 Style: Text,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,${encoding}
 Style: TextBox,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,${encoding}
 
@@ -199,7 +215,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if (t.end - t.start < 0.05) continue;
     const alpha = Math.round((1 - Math.max(0.1, Math.min(1, t.opacity))) * 255);
     const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
-    const fs = Math.max(8, Math.round(t.size * height));
+    const fs = Math.max(8, Math.round(t.size * 1920 * scale));
     const fn = t.font && t.font !== font ? `\\fn${esc(t.font).replace(/[\\,]/g, "")}` : "";
     const fadeMs = t.fade ? Math.round(t.fade * 1000) : 0;
     const fad = fadeMs ? `\\fad(${fadeMs},${fadeMs})` : "";
@@ -211,7 +227,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed
   if (opts.watermark) {
     // under the logo: a bit smaller, just below the logo's bottom edge (WATERMARK_LOGO in render.ts)
-    const place = opts.watermarkUnderLogo ? `${pos(WATERMARK_LOGO.x, watermarkTextY())}{\\fs${Math.round(height * WATERMARK_LOGO.textSize)}}` : pos(0.5, 0.91);
+    const place = opts.watermarkUnderLogo ? `${pos(mark.x, mark.textY)}{\\fs${Math.round(mark.textPx)}}` : pos(0.5, 0.91);
     events.push(`Dialogue: 2,${assTime(0)},${assTime(Math.max(clipEnd, 1) + 3600)},Watermark,,0,0,0,,${place}${esc(opts.watermark)}`);
   }
 
