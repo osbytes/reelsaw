@@ -346,6 +346,12 @@ export function createMcpServer(
           effective: effectiveStyle,
           from: ownStyle ? "clip" : JSON.stringify(projectStyle) !== JSON.stringify(defaultStyle) ? "project" : "default",
         },
+        // punch-in zooms: whether the next render zooms and how far (style), and the zooms the last render burned in
+        punchIns: {
+          on: effectiveStyle.punchIn,
+          scale: effectiveStyle.punchInScale,
+          lastRender: clip.diagnostics?.punchIns ?? [],
+        },
         framing: {
           own: { layoutOverride: clip.layoutOverride, layoutSections: clip.layoutSections },
           effective: { mode: framing.mode, adjust: framing.adjust ?? null, sections: framing.sections },

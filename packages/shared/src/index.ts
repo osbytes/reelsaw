@@ -169,6 +169,12 @@ export const styleSchema = z.object({
   /** Colour the clip's key words (picked by the AI when scoring; editable per clip). */
   emphasis: z.boolean().describe("Colour the clip's key words (default true)").default(true),
   emphasisColor: hexColor.describe("Colour of emphasised words, #RRGGBB (default #39FF14)").default("#39FF14"),
+  /**
+   * Punch-in zooms on the key words (`punch-in.ts`): face and centre crops only, never across a cut. Off by default: a
+   * re-render must not change a clip's look unasked, and the key words are the model's guess.
+   */
+  punchIn: z.boolean().describe("Zoom in briefly on the clip's key words (face and centre crops only, never across a cut; default false)").default(false),
+  punchInScale: z.number().min(1.05).max(1.3).describe("How far a punch-in zooms (1.05-1.3x, default 1.12)").default(1.12),
   showHook: z.boolean().describe("Show the hook text at the start of the clip (default true)").default(true),
   hookX: frac("Hook centre, horizontal").default(0.5),
   hookY: frac("Hook centre, vertical (default 0.16)").default(0.16),
@@ -895,10 +901,21 @@ export interface ClipDiagnostics {
    * audio, music) and so were kept; `skipped: "mostly-sound"`: nothing trimmed because the quiet gaps
    * would have removed `wouldRemoveSec`, too much of the clip for pauses
    */
-  pauses?: { cuts: number; removedSec: number; maxPause: number; keptSound?: number; skipped?: "mostly-sound"; wouldRemoveSec?: number };
+  pauses?: {
+    cuts: number;
+    removedSec: number;
+    maxPause: number;
+    keptSound?: number;
+    skipped?: "mostly-sound";
+    wouldRemoveSec?: number;
+    /** the stretches cut, source seconds (renders from before it existed have none) */
+    ranges?: Array<{ start: number; end: number }>;
+  };
   /** the source range's measured loudness (LUFS, dBTP) and the gain that brought the speech to -14 LUFS */
   loudness?: { inputLufs: number; inputPeak: number; gainDb: number };
   layout: string;
+  /** punch-in zooms this render burned in (style `punchIn`), source seconds: the ease in starts at `start`, the ease out ends at `end` */
+  punchIns?: Array<{ start: number; end: number; word: string }>;
   cuts: {
     /**
      * `verified: false` (absent in renders from before it existed, meaning verified) = applied at the
@@ -1912,6 +1929,7 @@ export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
+export * from "./punch-in.js";
 export * from "./attribution.js";
 export * from "./languages.js";
 export * from "./whisper-languages.js";

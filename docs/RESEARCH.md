@@ -2,7 +2,7 @@
 
 **Scope:** what competitors do that Reelsaw doesn't yet do, and what 2021–2026 research suggests for each pipeline stage. Every source below is linked. Figures from vendor marketing pages are marked *(vendor claim)*.
 
-**Status (2026-10-24):** this is a snapshot of gaps and research at the time it was written. Several A2 items have since shipped: map-pool-rank selection with a run-relative gate (not one LLM pass), per-shot-cut layout sections and hand-set crops, keyword captions with drag-to-place, topic-focused clipping and an optional max-clip cap, layer templates, library B-roll and stock search, and background music with ducking. Still open: punch-in zooms, a learned active-speaker model, multi-aspect export, publishing, dubbing. Do not treat the A1/A2 tables as the current product surface; the README is.
+**Status (2026-10-24):** this is a snapshot of gaps and research at the time it was written. Several A2 items have since shipped: map-pool-rank selection with a run-relative gate (not one LLM pass), per-shot-cut layout sections and hand-set crops, keyword captions with drag-to-place, topic-focused clipping and an optional max-clip cap, layer templates, library B-roll and stock search, and background music with ducking. Since then punch-in zooms on the key words shipped (style `punchIn`, docs/LAYOUTS.md). Still open: a learned active-speaker model, multi-aspect export, publishing, dubbing. Do not treat the A1/A2 tables as the current product surface; the README is.
 
 ---
 

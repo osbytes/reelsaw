@@ -220,6 +220,8 @@ interface Props {
   tag?: string | undefined;
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
+  /** a punch-in at this moment (`punchInLevel`): the picture, not the captions or layers, scaled by `scale` about (ax, ay) */
+  zoom?: { scale: number; ax: number; ay: number } | null;
   className?: string;
 }
 
@@ -400,6 +402,7 @@ export function VerticalPreview({
   platform = "tiktok",
   tag,
   overlays,
+  zoom,
   className = "",
 }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -432,6 +435,8 @@ export function VerticalPreview({
   framingRef.current = framing;
   const overlaysRef = useRef(overlays ?? []);
   overlaysRef.current = overlays ?? [];
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   useEffect(() => {
     const el = boxRef.current;
@@ -458,6 +463,13 @@ export function VerticalPreview({
         const ctx = c.getContext("2d");
         if (ctx) {
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          // a punch-in scales the framed picture about its anchor, as the renderer's overlay of a scaled copy does
+          const z = zoomRef.current;
+          if (z && z.scale > 1) {
+            ctx.translate(z.ax * W, z.ay * H);
+            ctx.scale(z.scale, z.scale);
+            ctx.translate(-z.ax * W, -z.ay * H);
+          }
           paint(ctx, W, H, source, srcW, srcH, framingRef.current, overlaysRef.current);
         }
       }

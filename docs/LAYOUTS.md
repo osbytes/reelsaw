@@ -82,6 +82,30 @@ clips' own sections and re-renders them: the way to frame a slide deck with a we
 video. Editing the timeline of such a clip stores the clip's own sections again; "Use the project framing" takes
 them back.
 
+## Punch-in zooms
+
+Style `punchIn` (off by default) with `punchInScale` (1.05-1.3x, default 1.12x), on the project or the clip like
+any style field. The plan is one function, `planPunchIns` in `packages/shared/src/punch-in.ts`; the renderer writes
+the same curve as an ffmpeg expression (`punchInExpr`, `render.ts`) and the editor preview scales its canvas by it, so
+both zoom on the same words at the same moments.
+
+| rule | value |
+|---|---|
+| words | the clip's `emphasis` words, matched like caption emphasis (`emphasisKey`), each zoomed once, at its first occurrence that fits |
+| shape | ease in 0.18 s starting 0.1 s before the word, hold to 0.35 s after it ends (a word counts as at least 0.3 s), ease out 0.4 s (smoothstep both ways) |
+| spacing | at least 2.5 s from the end of one zoom to the start of the next |
+| where | a `face` or `center` piece, or a fixed crop or inset within 3% of the frame's shape (`punchInAnchor`); never `split`, `stack`, `fit` over a blur or `none` |
+| breaks | a zoom that would contain a scene cut, a jump cut (disfluency or pause) or a change of section or layout is dropped, not shortened |
+| anchor | horizontally the middle; vertically the face's height in a `face` crop, kept between 0.3 and 0.6, else the middle |
+
+In ffmpeg the framed piece is split, a copy is scaled up per frame (`scale=…:eval=frame`) and laid over the
+original about the anchor (`overlay` takes a frame size that changes per frame; a `crop` after `scale` would not).
+Captions, layers and the watermark are drawn afterwards and do not zoom. The render logs the plan at debug
+(`punch-ins planned`) and keeps it in the clip's diagnostics (`punchIns`, source seconds), which `get_clip`
+returns as `punchIns.lastRender` and `reelsaw clip` prints. The editor knows the scene cuts, sections, accepted
+cuts and the pauses the last render shortened, so its preview drops the same zooms; caption words are force-aligned
+in the render only, so a zoom can start up to about a tenth of a second apart.
+
 ## 2. How the decision is made
 
 **Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps, 320x240,
