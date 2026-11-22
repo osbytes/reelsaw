@@ -10,12 +10,12 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   // AXE_UPDATE rewrites one baseline file from every test: one worker, so the writes do not race
-  ...(process.env.AXE_UPDATE ? { workers: 1 } : {}),
-  forbidOnly: !!process.env.CI,
+  ...(process.env["AXE_UPDATE"] ? { workers: 1 } : {}),
+  forbidOnly: !!process.env["CI"],
   retries: 0,
-  reporter: process.env.CI ? [["list"], ["github"]] : "list",
+  reporter: process.env["CI"] ? [["list"], ["github"]] : "list",
   use: {
-    baseURL: process.env.REELSAW_URL ?? "http://localhost:3100",
+    baseURL: process.env["REELSAW_URL"] ?? "http://localhost:3100",
     storageState: "e2e/.auth/state.json",
     trace: "retain-on-failure",
   },
