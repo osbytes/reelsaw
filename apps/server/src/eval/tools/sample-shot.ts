@@ -61,11 +61,13 @@ for (const sg of segs)
   );
 for (const sg of segs) {
   if (sg.decision.layout !== "fit") continue;
-  const inside = samples.filter((s) => s.t >= sg.start && s.t < sg.end);
-  const f = subjectFraming(
-    inside,
-    cuts.filter((c) => c > sg.start && c < sg.end),
-    0.316,
-  );
-  console.log(`  fit ${(sg.start + start).toFixed(1)}: ${f.ok ? "ok" : f.rejected} votes ${f.votes}/${f.active}/${f.frames}`);
+  // per shot, as segmentLayouts decides it
+  const edges = [sg.start, ...cuts.filter((c) => c > sg.start && c < sg.end), sg.end];
+  for (let k = 0; k + 1 < edges.length; k++) {
+    const inside = samples.filter((s) => s.t >= edges[k]! && s.t < edges[k + 1]!);
+    const f = subjectFraming(inside, [], 0.316);
+    console.log(
+      `  fit ${(edges[k]! + start).toFixed(1)}-${(edges[k + 1]! + start).toFixed(1)}: ${f.ok ? "ok" : f.rejected} votes ${f.votes}/${f.active}/${f.frames}`,
+    );
+  }
 }

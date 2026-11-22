@@ -1047,7 +1047,7 @@ Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUB
 See [docs/RESEARCH.md](docs/RESEARCH.md) for the competitor audit and research review behind these priorities. Top items still open:
 
 - Punch-in zooms on the emphasis words.
-- Active speaker: more labelled two-way conversation cases; a learned audio-visual model (Light-ASD ONNX) if the synchrony heuristic plateaus. A still-image saliency model for faceless shots where nothing moves (a product on a table).
+- Active speaker: more labelled two-way conversation cases; a learned audio-visual model (Light-ASD ONNX) if the synchrony heuristic plateaus. Faceless shots where nothing moves (a product on a table): YOLOX-nano and U2-Netp were measured and rejected (low recall or precision for the cost, see docs/LAYOUTS.md); a plain-backdrop heuristic is the next thing to try.
 - Direct publishing to YouTube Shorts / TikTok / Instagram.
 
 ## License
