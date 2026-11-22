@@ -1310,9 +1310,9 @@ ${usage}`);
         typeof c["target"].index === "number" &&
         typeof c["target"].span === "number"
       ) {
-        return c["words"]
-          .slice(c["target"].index, c["target"].index + c["target"].span)
-          .map((w: { text?: string }) => w.text ?? "")
+        return c.words
+          .slice(c.target.index, c.target.index + c.target.span)
+          .map((w) => (w && typeof w === "object" && "text" in w && typeof w.text === "string" ? w.text : ""))
           .join(" ")
           .slice(0, 40);
       }

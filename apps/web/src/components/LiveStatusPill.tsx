@@ -17,7 +17,7 @@ export function LiveStatusPill({ status }: { status: StreamStatus }) {
   return (
     <div
       role="status"
-      className="pointer-events-none fixed bottom-4 left-4 z-[70] max-w-[calc(100vw-32px)] rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-ink2 shadow-pop"
+      className="pointer-events-none fixed bottom-4 start-4 z-[70] max-w-[calc(100vw-32px)] rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-ink2 shadow-pop"
     >
       {status === "closed" ? "Live updates stopped; sign in again to resume." : "Live updates paused, reconnecting…"}
     </div>

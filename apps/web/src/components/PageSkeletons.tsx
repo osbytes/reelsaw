@@ -83,7 +83,7 @@ export function ProjectPageSkeleton({ compact, width }: { compact: boolean; widt
             {source}
             {transcript}
           </section>
-          <aside className="border-l border-line bg-sunk">{clips}</aside>
+          <aside className="border-s border-line bg-sunk">{clips}</aside>
         </div>
       )}
     </SkeletonRegion>
@@ -97,14 +97,14 @@ export function ClipEditorSkeleton() {
       <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
         <Skeleton className="h-8 w-8 rounded-[8px]" />
         <Skeleton className="h-5 w-1/3" />
-        <Skeleton className="ml-auto h-9 w-24 rounded-[10px]" />
+        <Skeleton className="ms-auto h-9 w-24 rounded-[10px]" />
       </div>
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-w-0 flex-1 flex-col items-center gap-4 p-4">
           <Skeleton className="aspect-[9/16] max-h-[60dvh] w-full max-w-[340px] rounded-[14px]" />
           <Skeleton className="h-10 w-full max-w-[720px] rounded-[8px]" />
         </div>
-        <div className="flex w-full flex-col gap-4 border-t border-line p-4 lg:w-[360px] lg:border-l lg:border-t-0">
+        <div className="flex w-full flex-col gap-4 border-t border-line p-4 lg:w-[360px] lg:border-s lg:border-t-0">
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="flex flex-col gap-1.5">
               <Skeleton className="h-3.5 w-20" />

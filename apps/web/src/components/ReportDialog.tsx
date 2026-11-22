@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { z } from "zod";
 import { useShortcut } from "../lib/shortcuts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -15,14 +16,15 @@ import { closeReport, openReportHere, REPORT_SHORTCUT, useReportTarget } from ".
 import { sendIssueFeedback } from "../lib/telemetry";
 import { plural } from "@reelsaw/shared";
 
-interface Preview {
-  sourceType: "url" | "upload";
-  sourceUrl: string | null;
-  sourceBytes: number;
-  clipsBytes: number;
-  clips: number;
-  logs: boolean;
-}
+const previewSchema = z.object({
+  sourceType: z.enum(["url", "upload"]),
+  sourceUrl: z.string().nullable(),
+  sourceBytes: z.number(),
+  clipsBytes: z.number(),
+  clips: z.number(),
+  logs: z.boolean(),
+});
+type Preview = z.infer<typeof previewSchema>;
 
 const mb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(0.1, n / 1e6).toFixed(1)} MB`);
 
@@ -45,7 +47,7 @@ export function ReportDialog() {
     queryFn: async (): Promise<Preview | null> => {
       const r = await fetch(`/api/projects/${projectId}/report/preview`, { credentials: "include" });
       if (!r.ok) return null;
-      return r.json();
+      return previewSchema.parse(await r.json());
     },
     enabled: open && !!projectId && !feedbackOnly,
   });
@@ -189,7 +191,7 @@ export function ReportDialog() {
   return (
     <Modal open={open} onOpenChange={(o) => !o && !busy && closeReport()} title="Report an issue" width={520}>
       <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
-        <div className="flex flex-col gap-3 pr-3">
+        <div className="flex flex-col gap-3 pe-3">
           <Dialog.Description className="-mt-1 text-sm text-ink2">
             {projectId ? (
               <>

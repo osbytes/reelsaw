@@ -42,7 +42,7 @@ function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary 
       role="img"
       aria-label={`${text}${more > 0 ? `; ${more} more` : ""}`}
       title={text}
-      className={`absolute top-2 flex h-[17%] items-start ${outro ? "right-2 flex-row-reverse" : "left-2"}`}
+      className={`absolute top-2 flex h-[17%] items-start ${outro ? "end-2 flex-row-reverse" : "start-2"}`}
     >
       {shown.map((a, i) => {
         const all = a.withCount === summary.total;
@@ -59,14 +59,14 @@ function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary 
             }}
           >
             {a.thumbnailUrl && <img src={a.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />}
-            <span aria-hidden className="absolute bottom-0 right-0 rounded-tl-[4px] bg-black/75 px-[3px] text-[8px] leading-[11px] text-white">
+            <span aria-hidden className="absolute bottom-0 end-0 rounded-ss-[4px] bg-black/75 px-[3px] text-[8px] leading-[11px] text-white">
               {all ? "●" : "◐"}
             </span>
           </span>
         );
       })}
       {more > 0 && (
-        <span className={`z-10 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white ${outro ? "mr-1.5" : "ml-1.5"}`}>+{more}</span>
+        <span className={`z-10 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white ${outro ? "me-1.5" : "ms-1.5"}`}>+{more}</span>
       )}
     </div>
   );

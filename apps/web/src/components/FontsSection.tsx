@@ -62,7 +62,7 @@ export function FontsSection() {
     >
       <div className="flex flex-col gap-3 border-t border-line pt-4">
         <div className="flex items-center gap-3">
-          <p className="mr-auto text-xs font-semibold text-ink2">Uploaded fonts</p>
+          <p className="me-auto text-xs font-semibold text-ink2">Uploaded fonts</p>
           <input
             ref={input}
             type="file"

@@ -436,17 +436,17 @@ export function AdminUsersPage() {
       </ListCell>
       {[0, 1, 2].map((j) => (
         <ListCell key={j} full>
-          <Skeleton className="ml-auto h-3.5 w-8" />
+          <Skeleton className="ms-auto h-3.5 w-8" />
         </ListCell>
       ))}
       <ListCell full>
-        <Skeleton className="ml-auto h-3.5 w-12" />
+        <Skeleton className="ms-auto h-3.5 w-12" />
       </ListCell>
       <ListCell full>
         <Skeleton className="h-3.5 w-14" />
       </ListCell>
       <ListCell>
-        <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
+        <Skeleton className="ms-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
       </ListCell>
     </ListRow>
   );
@@ -1114,11 +1114,11 @@ function UserGroupSection({
             />
           </label>
         </td>
-        <SpanCells cols={colCount} minus={1} className={`${headCell} ${nested ? "pl-8 pr-3" : "px-3"}`}>
+        <SpanCells cols={colCount} minus={1} className={`${headCell} ${nested ? "ps-8 pe-3" : "px-3"}`}>
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="flex min-w-0 items-center gap-2 text-left"
+              className="flex min-w-0 items-center gap-2 text-start"
               aria-expanded={open}
               onClick={() => onToggle(id)}
               title={sentence(help)}
@@ -1135,7 +1135,7 @@ function UserGroupSection({
               <span className="shrink-0 text-xs tabular-nums text-ink2">{plural(total, "account")}</span>
               <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{split ? `${help}, by address` : help}</span>
             </button>
-            <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
+            <span className="ms-auto flex shrink-0 items-center gap-1 text-xs">
               {allOfHere ? (
                 <span className="text-ink2">All {num.format(total)} selected</span>
               ) : (
@@ -1166,7 +1166,7 @@ function UserGroupSection({
       {open && !split && rows.map((r) => renderRow(r, `${id}-${r.id}`))}
       {open && !split && list.hasNextPage && (
         <tr>
-          <SpanCells cols={colCount} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "pl-8 pr-3" : "px-3"}`}>
+          <SpanCells cols={colCount} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "ps-8 pe-3" : "px-3"}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="tabular-nums">
                 {num.format(rows.length)} of {num.format(total)} in {label}
@@ -1203,7 +1203,7 @@ function AddressSections({
   if (groups.error)
     return (
       <tr>
-        <SpanCells cols={shared.colCount} className="h-11 border-t border-line pl-8 pr-3 text-xs text-err">
+        <SpanCells cols={shared.colCount} className="h-11 border-t border-line ps-8 pe-3 text-xs text-err">
           {groups.error.message}
         </SpanCells>
       </tr>
@@ -1236,7 +1236,7 @@ function AddressSections({
 function MoreAddresses({ n, cols, nested = false }: { n: number; cols: { folded: number; full: number }; nested?: boolean }) {
   return (
     <tr>
-      <SpanCells cols={cols} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "pl-8 pr-3" : "px-3"}`}>
+      <SpanCells cols={cols} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "ps-8 pe-3" : "px-3"}`}>
         {plural(n, "more shared address", "more shared addresses")} not shown. Search or filter to narrow the list.
       </SpanCells>
     </tr>
@@ -1380,7 +1380,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
         }}
       >
         <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
-          <div className="flex flex-col gap-4 pr-3">
+          <div className="flex flex-col gap-4 pe-3">
             {hasPlans && (
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="limit-plan" className="text-xs font-semibold text-ink2">

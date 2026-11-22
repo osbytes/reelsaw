@@ -58,9 +58,11 @@ export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: stri
 
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="Reelsaw">
+    // the wordmark is an image of the name, so the link's name is "Reelsaw" and matches what it shows (WCAG 2.5.3)
+    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
+      <span className="sr-only sm:hidden">Reelsaw</span>
       <LogoMark />
-      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" aria-hidden>
+      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" role="img" aria-label="Reelsaw">
         reel<span className="mx-px font-medium text-acc-text">/</span>saw
       </span>
     </Link>
@@ -203,7 +205,7 @@ function usePendingUsers() {
 function PendingUsersHint() {
   const n = usePendingUsers();
   return n ? (
-    <span className="ml-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+    <span className="ms-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
       {n}
     </span>
   ) : null;
@@ -218,7 +220,7 @@ function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
     <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
       Users
       {pending ? (
-        <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+        <span className="ms-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
           {pending}
         </span>
       ) : null}
@@ -235,11 +237,16 @@ function SearchButton() {
       onPointerEnter={prefetchPalette}
       onFocus={prefetchPalette}
       className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]"
-      aria-label="Search"
+      // the name is the visible text (WCAG 2.5.3; on phones, where it is hidden, an sr-only one); the shortcut is
+      // announced through aria-keyshortcuts
+      aria-keyshortcuts={mod === "⌘" ? "Meta+K" : "Control+K"}
     >
-      <Search className="h-4 w-4 shrink-0" />
-      <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">Search or paste a link…</span>
-      <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
+      <Search className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="sr-only sm:hidden">Search</span>
+      <span className="hidden min-w-0 flex-1 truncate text-start text-ink2 sm:inline">Search or paste a link…</span>
+      <span className="kbd hidden shrink-0 text-ink2 opacity-100 sm:inline-grid" aria-hidden>
+        {mod}K
+      </span>
     </button>
   );
 }
@@ -306,7 +313,7 @@ function AppSkeleton() {
     <SkeletonRegion label="Loading…" className="flex h-dvh flex-col overflow-hidden">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-6">
         <Skeleton className="h-6 w-28" />
-        <Skeleton className="ml-auto h-8 w-8 rounded-full" />
+        <Skeleton className="ms-auto h-8 w-8 rounded-full" />
       </div>
       <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
         <Skeleton className="h-8 w-48" />

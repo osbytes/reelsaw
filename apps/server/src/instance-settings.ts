@@ -14,6 +14,7 @@
  * Machine-level configuration (ports, database, storage, models on disk, OAuth) stays in `.env`:
  * it is read once at boot and changing it needs a restart anyway.
  */
+import { objectKeys } from "ts-extras";
 import { z } from "zod";
 import { fontFamilySchema } from "@reelsaw/shared";
 import { eq } from "drizzle-orm";
@@ -262,7 +263,7 @@ export const RUNTIME_SETTINGS = {
 } satisfies Record<string, Def>;
 
 export type RuntimeKey = keyof typeof RUNTIME_SETTINGS;
-export const RUNTIME_KEYS = Object.keys(RUNTIME_SETTINGS) as RuntimeKey[];
+export const RUNTIME_KEYS = objectKeys(RUNTIME_SETTINGS);
 /** The settings in force, typed like the environment they default from. */
 export type RuntimeSettings = Pick<Config, RuntimeKey>;
 export type SettingsPatch = { [K in RuntimeKey]?: z.infer<(typeof RUNTIME_SETTINGS)[K]["schema"]> | null | undefined };
@@ -406,7 +407,7 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
     const use: Override = { ...next };
     for (let i = 0; i < RUNTIME_KEYS.length; i++) {
       const problems = problemsOf(resolveSettings(config, use), deps);
-      const bad = (Object.keys(problems) as RuntimeKey[]).find((k) => k in use);
+      const bad = objectKeys(problems).find((k) => k in use);
       if (!bad) break;
       ign[bad] = `${problems[bad]} The environment's value applies.`;
       delete use[bad];
@@ -427,7 +428,7 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
     lastSeen = seen;
     const { override, unreadable } = decode(row?.value);
     apply(override, unreadable, row);
-    const keys = Object.keys(applied) as RuntimeKey[];
+    const keys = objectKeys(applied);
     log.info({ keys, by: meta.updatedBy }, keys.length ? "instance settings override in force" : "instance settings: environment only");
     for (const [k, reason] of Object.entries(ignored)) log.warn({ key: k, reason }, "stored instance setting ignored");
   }
@@ -435,7 +436,7 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
   const state = (): SettingsState => ({
     values: maskAll(current as Record<string, unknown>),
     env: maskAll(env as Record<string, unknown>),
-    override: Object.fromEntries((Object.keys(applied) as RuntimeKey[]).map((k) => [k, mask(k, applied[k])])),
+    override: Object.fromEntries(objectKeys(applied).map((k) => [k, mask(k, applied[k])])),
     source: Object.fromEntries(RUNTIME_KEYS.map((k) => [k, k in applied ? "db" : "env"])) as SettingsState["source"],
     ignored: { ...ignored },
     groups: SETTING_GROUPS.map(([id, title]) => ({ id, title, keys: RUNTIME_KEYS.filter((k) => RUNTIME_SETTINGS[k].group === id) })),

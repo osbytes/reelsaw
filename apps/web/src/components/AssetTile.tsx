@@ -149,14 +149,14 @@ export function AssetTile({
             onError={() => setFailed(true)}
           />
         ) : t.kind === "audio" ? (
-          <AudioLines className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 text-ink3" aria-hidden />
+          <AudioLines className="absolute start-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 text-ink3" aria-hidden />
         ) : null}
         {picker ? (
           <button type="button" className="absolute inset-0" aria-label={`${pickLabel}: ${t.name}`} disabled={pending} onClick={onPick} />
         ) : (
           onOpen && <button type="button" className="absolute inset-0" aria-label={`View ${t.name}`} title="Details" onClick={onOpen} />
         )}
-        <span className={`pointer-events-none absolute left-1.5 top-1.5 ${chip}`}>
+        <span className={`pointer-events-none absolute start-1.5 top-1.5 ${chip}`}>
           {t.kind === "audio" ? (
             <AudioLines className="h-3 w-3" aria-hidden />
           ) : t.kind === "video" ? (
@@ -172,15 +172,15 @@ export function AssetTile({
             onClick={toggle}
             aria-label={playing ? `Pause ${t.name}` : `Play ${t.name}`}
             aria-pressed={playing}
-            className="absolute bottom-1.5 right-1.5 z-[1] grid h-8 w-8 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop hover:bg-white"
+            className="absolute bottom-1.5 end-1.5 z-[1] grid h-8 w-8 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop hover:bg-white"
           >
             {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="translate-x-px" />}
           </button>
         )}
         {t.usage ? (
-          <span className={`pointer-events-none absolute bottom-1.5 left-1.5 ${chip}`}>{t.usage}</span>
+          <span className={`pointer-events-none absolute bottom-1.5 start-1.5 ${chip}`}>{t.usage}</span>
         ) : t.kind !== "image" && t.durationSec ? (
-          <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white">
+          <span className="pointer-events-none absolute bottom-1.5 start-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white">
             {lengthText({ durationSec: t.durationSec })}
           </span>
         ) : null}
@@ -191,7 +191,7 @@ export function AssetTile({
             onClick={onPick}
             aria-label={pending ? "Adding…" : addLabel}
             title={pickLabel}
-            className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
+            className="absolute end-1.5 top-1.5 z-[1] inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
           >
             {pending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}
             {picker && !pending && <span>Add</span>}
@@ -200,7 +200,7 @@ export function AssetTile({
       </div>
       <div className="min-w-0 text-xs">
         {onSelect ? (
-          <button type="button" className="block w-full truncate text-left font-semibold text-ink" onClick={onSelect} title={`${t.name} (link to this item)`}>
+          <button type="button" className="block w-full truncate text-start font-semibold text-ink" onClick={onSelect} title={`${t.name} (link to this item)`}>
             {t.name}
           </button>
         ) : (

@@ -127,7 +127,7 @@ export function ListTable({
                 key={i}
                 scope="col"
                 aria-sort={c.sort?.dir ? (c.sort.dir === 1 ? "ascending" : "descending") : undefined}
-                className={`sticky top-0 z-10 h-9 border-b border-line bg-panel px-3 align-middle text-xs font-medium leading-4 text-ink3 ${c.right ? "text-right" : "text-left"} ${c.full ? FULL : ""} ${c.className ?? ""}`}
+                className={`sticky top-0 z-10 h-9 border-b border-line bg-panel px-3 align-middle text-xs font-medium leading-4 text-ink3 ${c.right ? "text-end" : "text-start"} ${c.full ? FULL : ""} ${c.className ?? ""}`}
               >
                 {c.srLabel && <span className="sr-only">{c.srLabel}</span>}
                 {c.sort ? (
@@ -182,10 +182,10 @@ export function ListRow({
 const VARIANT = {
   text: "",
   /** A count or a size: right aligned, digits line up. */
-  num: "text-right font-mono text-xs tabular-nums text-ink2",
+  num: "text-end font-mono text-xs tabular-nums text-ink2",
   /** A time or a secondary fact. */
   muted: "text-xs text-ink3",
-  actions: "text-right",
+  actions: "text-end",
 };
 
 export function ListCell({

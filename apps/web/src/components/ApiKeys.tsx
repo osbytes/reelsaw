@@ -209,7 +209,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
             {["w-1/3", "w-1/4"].map((w, i) => (
               <div key={i} className="flex items-center gap-3 py-2">
                 <Skeleton className={`h-4 ${w}`} />
-                <Skeleton className="ml-auto h-3.5 w-28" />
+                <Skeleton className="ms-auto h-3.5 w-28" />
                 <Skeleton className="h-7 w-16 rounded-[8px]" />
               </div>
             ))}
@@ -238,7 +238,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
                   <span className="truncate font-semibold">
                     {k.name ?? "unnamed"}
                     {adminLabel(k) && me.data?.role === "admin" ? (
-                      <span className="ml-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
+                      <span className="ms-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
                     ) : null}
                   </span>
                   <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">

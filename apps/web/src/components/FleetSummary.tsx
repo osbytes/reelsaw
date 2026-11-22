@@ -130,7 +130,7 @@ export function FleetSummary({ onJump }: { onJump: (id: string) => void }) {
           key={t.label}
           type="button"
           onClick={() => onJump(t.id)}
-          className="flex h-[5.5rem] min-w-0 flex-col justify-between rounded-[12px] border border-line bg-panel p-3 text-left transition hover:border-ink3 hover:bg-sunk/50"
+          className="flex h-[5.5rem] min-w-0 flex-col justify-between rounded-[12px] border border-line bg-panel p-3 text-start transition hover:border-ink3 hover:bg-sunk/50"
         >
           <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
             <span className="truncate text-ink3">{t.label}</span>

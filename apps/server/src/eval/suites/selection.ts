@@ -399,7 +399,7 @@ async function creatorFixtures(ctx: EvalContext) {
     if (!existsSync(path.join(dir, "picks.json"))) continue;
     const p = JSON.parse(await fs.readFile(path.join(dir, "picks.json"), "utf8")) as CreatorPicks;
     if (only && p.split !== only) continue;
-    const t = JSON.parse(await fs.readFile(path.join(dir, "transcript.json"), "utf8"));
+    const t = JSON.parse(await fs.readFile(path.join(dir, "transcript.json"), "utf8")) as TranscriptFixture & { windows: [number, number][] };
     const cf = path.join(dir, "candidates.json");
     out.push({ name, dir, p, t, recorded: existsSync(cf) ? (JSON.parse(await fs.readFile(cf, "utf8")) as CandidatesFile) : undefined });
   }
