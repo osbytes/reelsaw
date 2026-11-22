@@ -8,7 +8,7 @@ export interface MetaClip {
   layout: string | null;
   layoutOverride: string | null;
   layoutSections?: Array<{ mode: string }>;
-  layoutSegments?: Array<{ layout: string }>;
+  layoutSegments?: Array<{ layout: string; inset?: unknown }>;
   bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null;
   diagnostics?: {
     pauses?: { cuts: number; removedSec: number };
@@ -40,7 +40,7 @@ function framing(c: MetaClip, labels: Record<string, string>): string | null {
   if (!segs.length) return c.layout ? `${auto}${labels[c.layout] ?? c.layout}` : null;
   const names: string[] = [];
   for (const s of segs) {
-    const n = labels[s.layout] ?? s.layout;
+    const n = s.layout === "fit" && s.inset ? (labels.inset ?? "inset") : (labels[s.layout] ?? s.layout);
     if (names.at(-1) !== n) names.push(n);
   }
   return `${auto}${names.join(" → ")}${forced ? " (set)" : ""}`;

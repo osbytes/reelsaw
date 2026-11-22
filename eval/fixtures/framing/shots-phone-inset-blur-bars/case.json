@@ -1,0 +1,106 @@
+{
+  "kind": "shots",
+  "note": "Scammer Payback, \"I Snuck Into a Scam Call Center\" (standard licence: referenced by url and time only, no frames committed), source 15:00-16:00: a masked presenter shot full frame against a white wall, cut with the presenter's phone footage edited into the 16:9 frame between blurred, stretched copies of itself. 0.3-20.7 s a dark, roughly square phone clip (bars from 21% and 80% of the width), 27.6-42.0 s and 43.4-57.4 s a 9:16 phone clip (bars from 34% and 66%) with its own jump cuts, the presenter at 20.7-27.6, 42.0-43.4 and 57.4-60 s. Labels from 1 fps contact sheets. Expected: the phone clips cropped to the picture between the bars (a fit with an inset, 9:16 trimmed to fill the frame), never the whole frame with the bars or a face crop sliding onto them; the presenter followed. The dark square clip is often too dark for the probe (black frames, a phone in a pocket) and may show whole instead.",
+  "source": {
+    "id": "scampayback-inset-900-960",
+    "url": "https://www.youtube.com/watch?v=x5Iz9dSWeeg",
+    "start": 900,
+    "end": 960,
+    "sha256": "f660ec8d89e43a7b26962ca5026b6481845d84487ee46bee3b7c989468ba23a7"
+  },
+  "start": 0,
+  "end": 60,
+  "srcW": 1920,
+  "srcH": 1080,
+  "sceneCuts": [
+    0.283,
+    1.333,
+    1.9,
+    2.967,
+    3.867,
+    9.5,
+    10.3,
+    13.367,
+    14.533,
+    15.833,
+    16.5,
+    19.767,
+    20.683,
+    27.617,
+    29.45,
+    32.783,
+    33.383,
+    35.517,
+    38.817,
+    40.083,
+    41.983,
+    43.433,
+    45.033,
+    50.633,
+    51.833,
+    56.567,
+    57.417,
+    58.883,
+    59.967
+  ],
+  "expect": {
+    "minAgreement": 0.9,
+    "faceTol": 0.08,
+    "windows": [
+      {
+        "from": 0.3,
+        "to": 20.6,
+        "layout": [
+          "inset",
+          "fit"
+        ],
+        "inset": [
+          0.209,
+          0.797
+        ]
+      },
+      {
+        "from": 20.7,
+        "to": 27.6,
+        "layout": "face",
+        "faces": [
+          0.5
+        ]
+      },
+      {
+        "from": 27.7,
+        "to": 41.9,
+        "layout": "inset",
+        "inset": [
+          0.342,
+          0.658
+        ]
+      },
+      {
+        "from": 42,
+        "to": 43.4,
+        "layout": "face",
+        "faces": [
+          0.5
+        ]
+      },
+      {
+        "from": 43.5,
+        "to": 57.4,
+        "layout": "inset",
+        "inset": [
+          0.342,
+          0.658
+        ]
+      },
+      {
+        "from": 57.5,
+        "to": 60,
+        "layout": "face",
+        "faces": [
+          0.5
+        ]
+      }
+    ]
+  }
+}

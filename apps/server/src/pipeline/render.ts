@@ -391,7 +391,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     avoid,
     ...(d.content ? { content: d.content } : {}),
     ...(d.tile && !adjust?.crop ? { tile: shiftRegion(d.tile, adjust?.offsetX ?? 0, adjust?.offsetY ?? 0) } : {}),
-    ...(adjust?.crop ? { crop: adjust.crop } : {}),
+    // a picture inset between bars is shown on its own (a crop the user fixed wins): `fitPane` fills the output with it when it is 9:16
+    ...(adjust?.crop ? { crop: adjust.crop } : d.layout === "fit" && d.inset ? { crop: d.inset } : {}),
     ...(adjust?.crop2 ? { crop2: adjust.crop2 } : {}),
   });
   // Shot changes, on the clip's clock: from the scenes refine step when it ran for this project, else
@@ -541,7 +542,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   if (segments.length > 1)
     segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
   const first = segments[0]!;
-  const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
+  const summary = segments
+    .map((sg) => `${sg.decision.inset ? "inset" : sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`)
+    .join(", ");
   log.info(
     { layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount, sceneCuts: { n: sceneCuts.length, from: cutsFrom } },
     "layout resolved",
@@ -557,6 +560,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         faces: sg.decision.faceCount,
         ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}),
         ...(sg.decision.tile ? { tile: sg.decision.tile } : {}),
+        ...(sg.decision.inset ? { inset: sg.decision.inset } : {}),
       })),
       faceSamples: samples.length,
       sceneCuts: sceneCuts.length,
@@ -589,6 +593,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       ...(sg.adjust?.subjectX2 !== undefined ? { subjectX2: sg.adjust.subjectX2 } : {}),
       ...(sg.decision.layout === "stack" && sg.decision.content ? { content: sg.decision.content } : {}),
       ...(sg.decision.layout === "stack" && sg.decision.tile ? { tile: sg.decision.tile } : {}),
+      ...(sg.decision.layout === "fit" && sg.decision.inset ? { inset: sg.decision.inset } : {}),
     };
   });
   await db

@@ -1095,6 +1095,8 @@ export function ClipEditor(props: Props) {
           ...(lay === "stack" && det?.tile && !sec.crop ? { tile: shiftRegion(det.tile, paneOf(sec, 0).offsetX ?? 0, paneOf(sec, 0).offsetY ?? 0) } : {}),
           // crops the user fixed: the pane shows exactly that (`fitPane` in the render)
           ...(lay !== "none" && sec.crop ? { crop: sec.crop } : {}),
+          // the inset picture an Auto section's render found (a phone video between bars): shown on its own, as in the render
+          ...(lay === "fit" && sec.mode === "auto" && det?.inset && !det.manual ? { inset: det.inset } : {}),
           ...(lay === "split" && sec.crop2 ? { crop2: sec.crop2 } : {}),
         };
       },
