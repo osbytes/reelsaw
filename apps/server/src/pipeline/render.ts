@@ -48,7 +48,9 @@ import {
 import {
   OVERLAY_PAD_X,
   OVERLAY_PAD_Y,
-  verticalCrop,
+  frameCrop,
+  outputSize,
+  layoutForShape,
   resolveStyle,
   resolveFraming,
   speakerCrop,
@@ -69,6 +71,10 @@ import {
   type AudioLayer,
   type ContentRegion,
   masksSourceText,
+  planPunchIns,
+  punchInAnchor,
+  PUNCH_IN,
+  type PunchIn,
   layoutSeamY,
   mergeSeamRuns,
   type DetectedSegment,
@@ -77,7 +83,7 @@ import {
   type ClipOverlay,
   type ClipAudio,
 } from "@reelsaw/shared";
-import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
+import { WATERMARK_LOGO, watermarkPlacement, type TextOverlayEvent } from "./captions.js";
 import { ensureFontsDir, loadFontState, mergeGlyphs, missingGlyphs, pickFont, systemGlyphs, uploadedGlyphs } from "../fonts.js";
 import { languageCode } from "./language.js";
 import type { Logger } from "../log.js";
@@ -96,8 +102,6 @@ import {
   BUMPER_FPS,
 } from "./bumpers.js";
 
-const OUT_W = 1080;
-const OUT_H = 1920;
 /** Soft edge of a burned-in text blur, as a fraction of the source height (`sourceVideo`). */
 const BLUR_FEATHER = 0.01;
 /** How long a burned-in text blur takes to fade in before its text shows and out after it goes. */
@@ -126,6 +130,35 @@ export interface FrameGeometry {
   crop?: ContentRegion;
   /** the user's fixed crop for the bottom pane of a split */
   crop2?: ContentRegion;
+  /** the output frame (`outputSize` of the style's shape); absent = 1080x1920 */
+  out?: { w: number; h: number };
+  /** punch-in zooms on this piece's clock (`planPunchIns`), and how far they zoom; only for a piece `punchInAnchor` allows */
+  punchIn?: { zooms: PunchIn[]; scale: number };
+}
+
+/**
+ * The punch-in curve as an ffmpeg expression of `t` (the piece's clock): `punchInLevel` in @reelsaw/shared, written
+ * out per zoom (smoothstep up, smoothstep down, the lower of the two) so the render and the preview zoom alike.
+ */
+export function punchInExpr(zooms: PunchIn[], scale: number): string {
+  const sm = (u: string) => `(${u})*(${u})*(3-2*(${u}))`;
+  const terms = zooms.map((z) => `min(${sm(`clip((t-${z.start.toFixed(3)})/${PUNCH_IN.in},0,1)`)},${sm(`clip((${z.end.toFixed(3)}-t)/${PUNCH_IN.out},0,1)`)})`);
+  return `(1+${(scale - 1).toFixed(4)}*(${terms.join("+")}))`;
+}
+
+/**
+ * Zooms a framed piece (w x h) in place: a copy scaled up per frame is laid over it, about the zoom's anchor.
+ * `scale` with eval=frame changes its output size, which `overlay` takes frame by frame (a crop after it would not).
+ */
+function punchInChain(chain: string, w: number, h: number, p: NonNullable<FrameGeometry["punchIn"]>): string {
+  const z = punchInExpr(p.zooms, p.scale);
+  const zw = `2*trunc(${w}*${z}/2)`;
+  const zh = `2*trunc(${h}*${z}/2)`;
+  const { ax, ay } = p.zooms[0]!;
+  return (
+    `${chain},split=2[pzb][pzf];[pzf]scale=w='${zw}':h='${zh}':eval=frame:flags=bicubic[pzs];` +
+    `[pzb][pzs]overlay=x='-${ax}*(${zw}-${w})':y='-${ay}*(${zh}-${h})':eval=frame,setsar=1`
+  );
 }
 
 /**
@@ -153,6 +186,20 @@ export function layoutFilter(
   track2: LayoutDecision["track"] = [],
   geo: FrameGeometry = {},
 ): { chain: string; width: number; height: number } {
+  const out = framedChain(layout, srcW, srcH, track, track2, geo);
+  return geo.punchIn?.zooms.length ? { ...out, chain: punchInChain(out.chain, out.width, out.height, geo.punchIn) } : out;
+}
+
+function framedChain(
+  layout: Layout,
+  srcW: number,
+  srcH: number,
+  track: LayoutDecision["track"],
+  track2: LayoutDecision["track"],
+  geo: FrameGeometry,
+): { chain: string; width: number; height: number } {
+  const OUT_W = geo.out?.w ?? 1080;
+  const OUT_H = geo.out?.h ?? 1920;
   if (layout === "none") {
     const w = Math.round(srcW / 2) * 2;
     const h = Math.round(srcH / 2) * 2;
@@ -164,8 +211,8 @@ export function layoutFilter(
     return { chain: `${fitPane(srcW, srcH, geo.crop, OUT_W, OUT_H, "0:v", "")},setsar=1`, width: OUT_W, height: OUT_H };
   if (layout === "fit") return { chain: `${FIT_CHAIN(OUT_W, OUT_H)},setsar=1`, width: OUT_W, height: OUT_H };
 
-  // crop window: full height, 9:16 wide (or full width if the source is already narrower)
-  const vc = verticalCrop(srcW, srcH);
+  // crop window: full height, the frame's shape (or full width if the source is narrower than the frame)
+  const vc = frameCrop(srcW, srcH, OUT_W / OUT_H);
   const cropW = Math.round(vc.w);
   const cropH = Math.round(vc.h);
   const xs = track.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcW - cropW, p.x * srcW - cropW / 2)) }));
@@ -228,7 +275,7 @@ export function layoutFilter(
     };
   }
   if (layout === "stack") {
-    // top: whole frame letterboxed to 1080 wide; bottom: speaker crop sized to the (small) face
+    // top: whole frame letterboxed to the frame's width; bottom: speaker crop sized to the (small) face
     const fittedH = Math.round((OUT_W * srcH) / srcW / 2) * 2;
     // a portrait source already fills 9:16: leaving the speaker pane at 0 makes `scale=1080:0` fail
     const topH = Math.min(fittedH, OUT_H - 2);
@@ -328,6 +375,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
 
   const settings = project.settings;
+  const style = resolveStyle(settings, clip.style);
+  // the frame this clip renders into (style `shape`); every framing below is drawn at this size
+  const frame = outputSize(style.shape);
   const duration = clip.endSec - clip.startSec;
   log.debug(
     { gen, index: clip.index, startSec: clip.startSec, endSec: clip.endSec, durationSec: Number(duration.toFixed(2)), origin: clip.origin },
@@ -386,6 +436,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // a webcam tile is stored as detected; the pane's nudge moves its window here (and in the editor preview), kept inside the frame.
   // A crop the user fixed is shown as is (`adjustDecision` already dropped the tile and applied a top crop).
   const geoOf = (d: LayoutDecision, adjust?: SectionAdjust): FrameGeometry => ({
+    out: frame,
     size: d.speakerSizes?.[0] ?? d.faceSize,
     size2: d.speakerSizes?.[1],
     avoid,
@@ -541,6 +592,11 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   if (segments.length > 1)
     segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
+  // a shape too wide for two stacked panes (16:9) shows a split or stack as the whole frame
+  segments = segments.map((sg) => {
+    const layout = layoutForShape(sg.decision.layout, style.shape);
+    return layout === sg.decision.layout ? sg : { ...sg, decision: { ...sg.decision, layout, reason: `${sg.decision.reason}; whole frame at ${style.shape}` } };
+  });
   const first = segments[0]!;
   const summary = segments
     .map((sg) => `${sg.decision.inset ? "inset" : sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`)
@@ -644,6 +700,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       cuts = mergeRanges([...cuts, ...trim.cuts]);
       pauseInfo = {
         cuts: trim.cuts.length,
+        ...(trim.cuts.length
+          ? { ranges: trim.cuts.map((c) => ({ start: Number((c.start + clip.startSec).toFixed(3)), end: Number((c.end + clip.startSec).toFixed(3)) })) }
+          : {}),
         removedSec: Number(trim.cuts.reduce((n, c) => n + c.end - c.start, 0).toFixed(2)),
         maxPause,
         ...(trim.keptSound ? { keptSound: trim.keptSound } : {}),
@@ -709,16 +768,15 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       log.warn({ err }, "caption alignment failed; using transcript timings");
     }
   }
-  const words = clipWordsRel
-    .filter((w) => !cuts.some((c) => w.start >= c.start - 0.001 && w.end <= c.end + 0.001))
-    .map((w) => ({ text: w.text, start: plan.mapTime(w.start), end: Math.max(plan.mapTime(w.start) + 0.05, plan.mapTime(w.end)) }));
+  const spokenWords = clipWordsRel.filter((w) => !cuts.some((c) => w.start >= c.start - 0.001 && w.end <= c.end + 0.001));
+  const words = spokenWords.map((w) => ({ text: w.text, start: plan.mapTime(w.start), end: Math.max(plan.mapTime(w.start) + 0.05, plan.mapTime(w.end)) }));
   if (cuts.length) log.info({ cuts: cuts.length, inSec: Number(duration.toFixed(2)), outSec: Number(outDuration.toFixed(2)) }, "applying jump cuts");
   // decided at render time from the owner's plan and the admin's choice, never frozen into the project: a
   // re-render after an upgrade drops it
   const owner = await db.query.user.findFirst({ where: eq(schema.user.id, project.userId), columns: { id: true, role: true } });
   const watermark = owner ? await watermarkFor(db, svc.settings.get(), owner, svc.entitlements) : { on: false, text: "", source: "instance" as const };
   // the logo above the text: composited like an overlay for the whole body; a missing file leaves the text alone
-  const logo: LoadedOverlay[] = watermark.on ? await watermarkLogo(svc.config.WATERMARK_LOGO_PATH, outDuration, log) : [];
+  const logo: LoadedOverlay[] = watermark.on ? await watermarkLogo(svc.config.WATERMARK_LOGO_PATH, outDuration, log, frame) : [];
   // what is actually burned in: an empty WATERMARK_TEXT with no readable logo leaves nothing, and the clip must not
   // then be marked (and offered an upgrade) as watermarked
   const watermarkShown = watermark.on && (watermark.text.trim() !== "" || logo.length > 0);
@@ -728,7 +786,6 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const visualLayerCount = layers.filter((l) => l.kind !== "audio").length;
   const audioLayerCount = layers.length - visualLayerCount;
   const assPath = path.join(clipsDir, `${clip.id}.ass`);
-  const style = resolveStyle(settings, clip.style);
   // fonts (fonts.ts): the clip's, then the project's, then the instance's; the watermark always the instance's. A
   // family no longer available falls down that chain instead of leaving fontconfig to substitute something else
   const fontState = await loadFontState(svc.database.db);
@@ -743,10 +800,48 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     ...(watermark.on ? [instanceFont] : []),
     ...layers.map((l) => (l.kind === "text" ? pickFont(fontsAvailable, l.font, captionFont) : null)),
   ]);
+  // pieces = kept ranges (after cuts) split at layout boundaries; each piece gets its own framing and its own zooms
+  const keep = cuts.length ? plan.keep : [{ start: 0, end: duration }];
+  const pieces: Array<{ start: number; end: number; seg: (typeof segments)[number] }> = [];
+  for (const k of keep) {
+    for (const seg of segments) {
+      const a = Math.max(k.start, seg.start);
+      const b = Math.min(k.end, seg.end);
+      if (b - a >= 0.1) pieces.push({ start: a, end: b, seg });
+    }
+  }
+  // punch-in zooms on the key words, inside one piece each and never over a shot change (punch-in.ts)
+  const punchIns = style.punchIn
+    ? planPunchIns(spokenWords, clip.emphasis ?? [], {
+        start: 0,
+        end: duration,
+        breaks: [...sceneCuts, ...pieces.flatMap((pc) => [pc.start, pc.end])],
+        anchorAt: (t) => {
+          const pc = pieces.find((x) => t >= x.start && t < x.end);
+          if (!pc) return null;
+          const d = pc.seg.decision;
+          return punchInAnchor({ layout: d.layout, crop: pc.seg.adjust?.crop, inset: d.inset, cy: trackCenter(d.track).y }, srcW, srcH, frame.w / frame.h);
+        },
+      })
+    : [];
+  if (style.punchIn)
+    log.debug(
+      { scale: style.punchInScale, emphasis: clip.emphasis ?? [], zooms: punchIns.map((z) => ({ word: z.word, at: [z.start, z.end], ay: z.ay })) },
+      "punch-ins planned",
+    );
+  /** the zooms of one piece, on its own clock (it is trimmed to start at 0) */
+  const punchInOf = (start: number, end: number): Pick<FrameGeometry, "punchIn"> => {
+    const zooms = punchIns.filter((z) => z.start >= start - 0.001 && z.end <= end + 0.001).map((z) => ({ ...z, start: z.start - start, end: z.end - start }));
+    return zooms.length ? { punchIn: { zooms, scale: style.punchInScale } } : {};
+  };
   const assFilter = `ass='${escapeFilterPath(assPath)}'${uploadedFontsDir ? `:fontsdir='${escapeFilterPath(uploadedFontsDir)}'` : ""}`;
   // split / stack stretches on the body's post-cut clock: captions there sit on the line between the panes
   const seams = mergeSeamRuns(
-    segments.map((sg) => ({ start: plan.mapTime(sg.start), end: plan.mapTime(sg.end), y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH) })),
+    segments.map((sg) => ({
+      start: plan.mapTime(sg.start),
+      end: plan.mapTime(sg.end),
+      y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH, frame),
+    })),
   );
   const textLayers = layers.filter((l): l is TextLayer => l.kind === "text");
   const missingFontChars = await fontGapEvent(svc, {
@@ -797,6 +892,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     { intro: chosen.introSec, outro: chosen.outroSec },
     clip.id,
     log,
+    frame,
   );
   // overlays (logos, stickers, b-roll) from the library, in post-cut body time; an unusable one is skipped
   const overlayItems = await loadOverlays(
@@ -846,23 +942,12 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const withMusic = withOverlays && music.length > 0;
     const captioned = (inLabel: string) => {
       if (!composited.length) return `${inLabel}${assFilter}${vOut}`;
-      const o = overlayChain(composited, 1, OUT_W, OUT_H, inLabel);
+      const o = overlayChain(composited, 1, frame.w, frame.h, inLabel);
       return `${o.chain}${o.out}${assFilter}${vOut}`;
     };
     const ovl = composited.length > 0;
     const nOverlayInputs = composited.length;
     if (hasCutBranch) {
-      // pieces = kept ranges (after cuts) split at layout boundaries; each piece gets its own framing
-      const keep = cuts.length ? plan.keep : [{ start: 0, end: duration }];
-      const layoutSegs = segments;
-      const pieces: Array<{ start: number; end: number; seg: (typeof layoutSegs)[number] }> = [];
-      for (const k of keep) {
-        for (const seg of layoutSegs) {
-          const a = Math.max(k.start, seg.start);
-          const b = Math.min(k.end, seg.end);
-          if (b - a >= 0.1) pieces.push({ start: a, end: b, seg });
-        }
-      }
       const XF = 0.02; // crossfade length; each audio piece (but the last) is trimmed this much longer so the fade consumes it
       const src = sourceVideo(overlays, srcW, srcH, pieces.length);
       const parts = pieces.map((pc, i) => {
@@ -874,7 +959,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
             srcH,
             localTrack(d.track, pc.start, pc.end),
             d.track2 ? localTrack(d.track2, pc.start, pc.end) : [],
-            geoOf(d, pc.seg.adjust),
+            { ...geoOf(d, pc.seg.adjust), ...punchInOf(pc.start, pc.end) },
           ).chain,
           `s${i}`,
           `[t${i}]`,
@@ -902,9 +987,16 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       audioMap = ["-map", "[ca]"];
     } else {
       const src = sourceVideo(overlays, srcW, srcH, 1);
+      const zoom = punchInOf(0, duration);
+      const body = zoom.punchIn
+        ? layoutFilter(first.decision.layout, srcW, srcH, first.decision.track, first.decision.track2 ?? [], {
+            ...geoOf(first.decision, first.adjust),
+            ...zoom,
+          }).chain
+        : chain;
       graph = ovl
-        ? `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)}[body];${captioned("[body]")}`
-        : `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},${assFilter}${vOut}`;
+        ? `${src.prefix}${body.replace("[0:v]", src.labels[0]!)}[body];${captioned("[body]")}`
+        : `${src.prefix}${body.replace("[0:v]", src.labels[0]!)},${assFilter}${vOut}`;
       audioMap = ["-map", "0:a:0?"];
     }
     // the body's audio as one labelled stream when something has to be mixed in or joined after it
@@ -1137,6 +1229,15 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         }
       : {}),
     layout: summary,
+    ...(punchIns.length
+      ? {
+          punchIns: punchIns.map((z) => ({
+            start: Number((z.start + clip.startSec).toFixed(3)),
+            end: Number((z.end + clip.startSec).toFixed(3)),
+            word: z.word,
+          })),
+        }
+      : {}),
     cuts: {
       applied: cutResult.cuts.map((c) => ({
         start: Number((c.start + clip.startSec).toFixed(3)),
@@ -1222,6 +1323,7 @@ async function loadBumpers(
   secs: { intro?: number | undefined; outro?: number | undefined },
   clipId: string,
   log: Logger,
+  frame: { w: number; h: number },
 ) {
   const { svc, projectId, db } = ctx;
   const out: { intro?: LoadedBumper; outro?: LoadedBumper; skipped: string[] } = { skipped: [] };
@@ -1259,7 +1361,7 @@ async function loadBumpers(
           dir: path.join(svc.paths.root, "bumpers"),
         },
         used,
-        { width: OUT_W, height: OUT_H, fitChain: FIT_CHAIN(OUT_W, OUT_H) },
+        { width: frame.w, height: frame.h, fitChain: FIT_CHAIN(frame.w, frame.h) },
         ctx.signal,
       );
       out[slot] = { id, path: file, sec: bumperFrames(used.durationSec) / BUMPER_FPS };
@@ -1381,7 +1483,8 @@ async function loadOverlays(
  * zone, the "reelsaw.com" line goes right under it in the caption file). An unreadable file is
  * logged and skipped: the text watermark still renders.
  */
-export async function watermarkLogo(file: string, bodySec: number, log: Logger): Promise<LoadedOverlay[]> {
+export async function watermarkLogo(file: string, bodySec: number, log: Logger, frame = { w: 1080, h: 1920 }): Promise<LoadedOverlay[]> {
+  const at = watermarkPlacement(frame.w, frame.h);
   try {
     await fs.access(file);
   } catch (err) {
@@ -1397,9 +1500,9 @@ export async function watermarkLogo(file: string, bodySec: number, log: Logger):
       loop: false,
       start: 0,
       end: Number((bodySec + 1).toFixed(3)),
-      x: WATERMARK_LOGO.x,
-      y: WATERMARK_LOGO.y,
-      w: WATERMARK_LOGO.w,
+      x: at.x,
+      y: at.y,
+      w: at.w,
       opacity: WATERMARK_LOGO.opacity,
     },
   ];

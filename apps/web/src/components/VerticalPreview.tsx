@@ -4,7 +4,8 @@ import { cssFontFamily, useFonts } from "../lib/fonts";
 import {
   OVERLAY_PAD_X,
   OVERLAY_PAD_Y,
-  verticalCrop,
+  frameCrop,
+  outputSize,
   CAPTION_FONT_FRAC,
   HOOK_FONT_FRAC,
   groupCaptionLines,
@@ -49,7 +50,10 @@ export interface Framing {
   crop2?: ContentRegion | undefined;
   /** "fit": the picture is an inset between bars (detected); shown on its own like a fixed crop, but with nothing to drag */
   inset?: ContentRegion | undefined;
+  /** the output frame in pixels (`outputSize` of the style's shape); absent = 1080x1920 */
+  out?: { w: number; h: number } | undefined;
 }
+const outOf = (f: Framing) => f.out ?? { w: 1080, h: 1920 };
 /** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
 export type PaneHit = 0 | 1 | "top";
 export interface PreviewWord {
@@ -95,14 +99,15 @@ export type PreviewAssetOverlay =
       font?: string;
     };
 
-/** Where a layout's crop panes sit in the 9:16 frame, as [top, bottom] fractions; a stack's top part is content, not a crop. */
+/** Where a layout's crop panes sit in the frame, as [top, bottom] fractions; a stack's top part is content, not a crop. */
 export function paneBands(f: Framing, srcW: number, srcH: number): Array<[number, number]> {
+  const o = outOf(f);
   if (f.layout === "split")
     return [
       [0, 0.5],
       [0.5, 1],
     ];
-  if (f.layout === "stack") return [[isFullFrame(f.content) ? Math.min(0.9, (1080 * srcH) / srcW / 1920) : 0.5, 1]];
+  if (f.layout === "stack") return [[isFullFrame(f.content) ? Math.min(0.9, (o.w * srcH) / srcW / o.h) : 0.5, 1]];
   if (f.layout === "face" || f.layout === "center") return [[0, 1]];
   // a fitted frame has nothing to pan, unless the user fixed a crop on it (then the crop's window moves)
   if (f.layout === "fit" && f.crop) return [[0, 1]];
@@ -122,20 +127,22 @@ export function paneHitAt(f: Framing, srcW: number, srcH: number, yFrac: number)
   return f.layout === "stack" ? "top" : 0;
 }
 
-/** The shape of a pane in the 9:16 output (width / height), for a crop that should fill it exactly. */
+/** The shape of a pane in the output frame (width / height), for a crop that should fill it exactly. */
 export function paneAspect(f: Framing, srcW: number, srcH: number, hit: PaneHit): number {
-  if (f.layout === "split") return 9 / 8;
+  const o = outOf(f);
+  if (f.layout === "split") return (2 * o.w) / o.h;
   if (f.layout === "stack") {
-    if (!isFullFrame(f.content)) return 9 / 8;
-    const topH = (1080 * srcH) / srcW;
-    return hit === "top" ? srcW / srcH : 1080 / Math.max(1, 1920 - topH);
+    if (!isFullFrame(f.content)) return (2 * o.w) / o.h;
+    const topH = (o.w * srcH) / srcW;
+    return hit === "top" ? srcW / srcH : o.w / Math.max(1, o.h - topH);
   }
-  return 9 / 16;
+  return o.w / o.h;
 }
 
 /** The window of the source a pane shows, in source pixels: the same geometry `paint` draws (a fixed crop, a tile, or the face-sized / full-height window). */
 export function paneRect(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { x: number; y: number; w: number; h: number } {
-  const halfAspect = 9 / 8; // a split / stack half is 1080x960
+  const o = outOf(f);
+  const halfAspect = (2 * o.w) / o.h; // a split / stack half is 1080x960 in 9:16
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const fixed = pane === 0 ? f.crop : f.crop2;
   if (fixed) return tileCrop(srcW, srcH, fixed);
@@ -150,13 +157,13 @@ export function paneRect(f: Framing, srcW: number, srcH: number, pane: 0 | 1): {
     return { x: clamp(f.cx * srcW - g.zoom.w / 2, g.free.lo, g.free.hi - g.zoom.w), y: g.zoom.y, w: g.zoom.w, h: g.zoom.h };
   }
   if (f.layout === "stack") {
-    const topH = (1080 * srcH) / srcW;
-    const botH = Math.max(1, 1920 - topH);
-    const c = speakerCrop(srcW, srcH, 1080 / botH, { cy: f.cy, size: f.size ?? 0.17 });
+    const topH = (o.w * srcH) / srcW;
+    const botH = Math.max(1, o.h - topH);
+    const c = speakerCrop(srcW, srcH, o.w / botH, { cy: f.cy, size: f.size ?? 0.17 });
     return { x: cropX(srcW, c.w, f.cx), y: c.y, w: c.w, h: c.h };
   }
   if (f.layout === "fit" || f.layout === "none") return { x: 0, y: 0, w: srcW, h: srcH };
-  const v = verticalCrop(srcW, srcH);
+  const v = frameCrop(srcW, srcH, o.w / o.h);
   return { x: clamp(f.cx * srcW - v.w / 2, 0, srcW - v.w), y: (srcH - v.h) / 2, w: v.w, h: v.h };
 }
 /** The crop window of a pane as fractions of the source: how far the picture moves per unit of drag, and how far a face can be nudged before it leaves the pane. */
@@ -220,6 +227,8 @@ interface Props {
   tag?: string | undefined;
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
+  /** a punch-in at this moment (`punchInLevel`): the picture, not the captions or layers, scaled by `scale` about (ax, ay) */
+  zoom?: { scale: number; ax: number; ay: number } | null;
   className?: string;
 }
 
@@ -400,6 +409,7 @@ export function VerticalPreview({
   platform = "tiktok",
   tag,
   overlays,
+  zoom,
   className = "",
 }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -432,6 +442,8 @@ export function VerticalPreview({
   framingRef.current = framing;
   const overlaysRef = useRef(overlays ?? []);
   overlaysRef.current = overlays ?? [];
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   useEffect(() => {
     const el = boxRef.current;
@@ -441,6 +453,28 @@ export function VerticalPreview({
     setH(el.clientHeight);
     return () => ro.disconnect();
   }, []);
+  // a frame wider than 9:16 is fitted into the space it is given (whole, centred), measured from the parent: CSS cannot
+  // size a box by aspect ratio to fit both a width and a height
+  const shapeAspect = outputSize(style.shape).w / outputSize(style.shape).h;
+  const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const parent = boxRef.current?.parentElement;
+    if (!parent || style.shape === "9:16") {
+      setFitBox(null);
+      return;
+    }
+    const measure = () => {
+      const cs = getComputedStyle(parent);
+      const aw = parent.clientWidth - Number.parseFloat(cs.paddingLeft) - Number.parseFloat(cs.paddingRight);
+      const ah = parent.clientHeight - Number.parseFloat(cs.paddingTop) - Number.parseFloat(cs.paddingBottom);
+      const w = ah > 0 ? Math.min(aw, ah * shapeAspect) : aw;
+      setFitBox({ w: Math.floor(w), h: Math.floor(w / shapeAspect) });
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(parent);
+    measure();
+    return () => ro.disconnect();
+  }, [style.shape, shapeAspect]);
 
   // draw loop: cheap at preview size, keeps up with video playback without wiring media events
   useEffect(() => {
@@ -458,6 +492,13 @@ export function VerticalPreview({
         const ctx = c.getContext("2d");
         if (ctx) {
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          // a punch-in scales the framed picture about its anchor, as the renderer's overlay of a scaled copy does
+          const z = zoomRef.current;
+          if (z && z.scale > 1) {
+            ctx.translate(z.ax * W, z.ay * H);
+            ctx.scale(z.scale, z.scale);
+            ctx.translate(-z.ax * W, -z.ay * H);
+          }
           paint(ctx, W, H, source, srcW, srcH, framingRef.current, overlaysRef.current);
         }
       }
@@ -480,7 +521,10 @@ export function VerticalPreview({
     ? line.findIndex((w, i) => time >= (i === 0 ? line[0]!.start : w.start) && time < (i === line.length - 1 ? line[line.length - 1]!.end : line[i + 1]!.start))
     : -1;
   const showHook = style.showHook && !!hook && (alwaysShowHook || editingHook || time < style.hookSeconds);
-  const width = (h * 9) / 16;
+  const frame = outputSize(style.shape);
+  const width = (h * frame.w) / frame.h;
+  /** a 9:16 frame's height at this size: text is sized in it (the renderer scales text by the frame's short side) */
+  const unitH = (Math.min(width, h) * 1920) / 1080;
 
   function onPointerDown(kind: "caption" | "hook", e: React.PointerEvent) {
     if (!onStyleChange || (kind === "hook" && editingHook)) return;
@@ -593,8 +637,8 @@ export function VerticalPreview({
   const available = (f?: string | null) => (f ? fonts.fonts.find((x) => x.family.toLowerCase() === f.toLowerCase())?.family : undefined);
   const captionFamily = available(style.font) ?? fonts.defaultFamily;
   const FONT = cssFontFamily(captionFamily);
-  const capPx = h * CAPTION_FONT_FRAC * style.captionSize;
-  const hookPx = h * HOOK_FONT_FRAC;
+  const capPx = unitH * CAPTION_FONT_FRAC * style.captionSize;
+  const hookPx = unitH * HOOK_FONT_FRAC;
   const draggable = !!onStyleChange;
   const hookHint = draggable ? `Drag to move the hook${onHookChange ? ", double-click to edit" : ""}, right-click for more` : undefined;
   /** the hook's right-click menu: retype it, put it back in the middle, or hide it (the editor's style keeps the change) */
@@ -629,7 +673,8 @@ export function VerticalPreview({
   return withPaneMenu(
     <div
       ref={boxRef}
-      className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
+      style={fitBox ? { width: fitBox.w, height: fitBox.h } : undefined}
+      className={`relative mx-auto ${fitBox ? "shrink-0 self-center" : "aspect-[9/16] h-full max-w-full"} touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
       title={
         pannable
           ? framing.layout === "split"
@@ -686,7 +731,7 @@ export function VerticalPreview({
           );
         if (o.kind === "text") {
           // same font and plate as the captions, so the preview matches the ASS event the renderer writes
-          const px = h * o.size;
+          const px = unitH * o.size;
           return withMenu(
             <div
               key={o.id}
@@ -774,7 +819,7 @@ export function VerticalPreview({
           </span>
         </div>
       )}
-      {showSafeZones && !still && <SafeZones platform={platform} />}
+      {showSafeZones && !still && style.shape === "9:16" && <SafeZones platform={platform} />}
       {tag && !still && (
         <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>
       )}
@@ -1052,8 +1097,8 @@ function paint(
       return;
     }
     default: {
-      // face / center: full-height 9:16 window
-      const { w: cropW, h: cropH } = verticalCrop(srcW, srcH);
+      // face / center: a full-height window of the frame's shape
+      const { w: cropW, h: cropH } = frameCrop(srcW, srcH, W / H);
       const cx = f.cx;
       const x = clamp(cx * srcW - cropW / 2, 0, srcW - cropW);
       draw(x, (srcH - cropH) / 2, cropW, cropH, 0, 0, W, H);

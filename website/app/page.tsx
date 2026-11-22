@@ -57,13 +57,13 @@ const FEATURES = [
   },
   {
     icon: ScanFace,
-    title: "Smart 9:16 reframing",
-    body: "Face, split, stack and fit layouts chosen per shot cut. Webcam-tile stacks, crowds shown whole, hand-set crops, and one clip's framing copied to the project. Override per project, per clip or per section.",
+    title: "Smart reframing, any shape",
+    body: "Face, split, stack and fit layouts chosen per shot cut, rendered 9:16, 4:5, 1:1 or 16:9. Webcam-tile stacks, crowds shown whole, hand-set crops, and one clip's framing copied to the project. Override per project, per clip or per section.",
   },
   {
     icon: Captions,
     title: "Captions that read",
-    body: "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined. Drag caption and hook positions on a live preview with platform safe zones.",
+    body: "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones.",
   },
   {
     icon: Film,

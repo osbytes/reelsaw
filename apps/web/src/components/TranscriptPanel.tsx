@@ -1689,7 +1689,7 @@ function ClipMarker({
             onClick={() => clip.id && onPlay?.(clip.id)}
             aria-label="Play preview"
           >
-            {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+            {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full bg-black object-contain" />}
             {clip.videoUrl && <span className="absolute inset-0 grid place-items-center text-[10px] text-white [text-shadow:0_1px_2px_#000]">▶</span>}
           </button>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
