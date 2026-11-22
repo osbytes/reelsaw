@@ -1055,7 +1055,7 @@ export function TemplateEditor({ template, onExit }: Props) {
       await update.mutateAsync({ id: template.id, name: sent.name.trim(), layers: sent.layers, bumpers: sent.bumpers });
       setSaved(sent);
       await Promise.all([
-        qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() }),
+        qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.pathKey() }),
         qc.invalidateQueries({ queryKey: trpc.layerTemplates.get.queryKey({ id: template.id }) }),
       ]);
       toast("Saved");

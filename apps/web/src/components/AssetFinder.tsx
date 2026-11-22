@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
-import { Loader2, Search, Upload, X } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useLocation, useNavigate } from "react-router";
 import { DELETED_PATH, plural } from "@reelsaw/shared";
@@ -21,7 +21,8 @@ import { createFuzzy } from "../lib/fuzzy";
 import { KIND_FILTERS, SEARCH_KEYS, searchable, type LibraryKind } from "../lib/library";
 import { AssetLightbox, DeleteAssetDialog, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
 import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
-import { Modal, Notice } from "./ui";
+import { Modal, Notice, Skeleton } from "./ui";
+import { ListLoadMore, ListSearch } from "./ListToolbar";
 import { useRestoreWindow } from "../lib/retention";
 import { useDebounced } from "../lib/useDebounced";
 
@@ -338,27 +339,13 @@ export function AssetFinder({
     <div className={`flex min-h-0 flex-col gap-4 ${className}`}>
       <div className="flex shrink-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-          <div className="relative min-w-0 flex-1 basis-full sm:basis-auto">
-            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
-            <input
-              className="input h-[38px] w-full ps-9 pe-9"
-              type="search"
-              value={q}
-              placeholder="Search uploads, the catalog and providers…"
-              aria-label="Search uploads, the catalog and providers"
-              onChange={(e) => setFilters({ q: e.target.value })}
-            />
-            {q && (
-              <button
-                type="button"
-                className="absolute end-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink"
-                aria-label="Clear search"
-                onClick={() => setFilters({ q: "" })}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+          <ListSearch
+            className="flex-1 basis-full sm:basis-auto"
+            value={q}
+            onChange={(v) => setFilters({ q: v })}
+            placeholder="Search uploads, the catalog and providers…"
+            label="Search uploads, the catalog and providers"
+          />
           {mode === "library" && onUpload && (
             <button
               type="button"
@@ -371,16 +358,32 @@ export function AssetFinder({
             </button>
           )}
         </div>
-        {kindChips.length > 0 && (
-          <div className="flex min-h-7 flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
-            <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
-              All
-            </Chip>
-            {kindChips.map((k) => (
-              <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
-                {k.label}
-              </Chip>
-            ))}
+        {/* one small facet stays visible as chips (no Filter menu); the count of your files sits on the same line, above the grid */}
+        {(kindChips.length > 0 || mode === "library") && (
+          <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+            {kindChips.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
+                <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
+                  All
+                </Chip>
+                {kindChips.map((k) => (
+                  <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
+                    {k.label}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            {mode === "library" && (
+              <span className="ms-auto text-xs tabular-nums text-ink3" aria-live="polite">
+                {list.isPending ? (
+                  <Skeleton className="h-3 w-24" />
+                ) : q.trim() || kind ? (
+                  `${plural(rows.length, "match", "matches")} in your files`
+                ) : (
+                  plural(list.data?.total ?? all.length, "file")
+                )}
+              </span>
+            )}
           </div>
         )}
         {mode === "library" && actions.jobs.length > 0 && <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />}
@@ -413,10 +416,7 @@ export function AssetFinder({
         )}
         {nextId && (
           <div className="flex justify-center py-1">
-            <button type="button" className="btn-ghost" disabled={fetchingMore} onClick={() => fetchers.current[nextId]?.()}>
-              {fetchingMore ? <Loader2 size={14} className="animate-spin" /> : null}
-              {fetchingMore ? "Loading…" : "Show more"}
-            </button>
+            <ListLoadMore hasMore auto={false} loading={fetchingMore} onMore={() => fetchers.current[nextId]?.()} />
           </div>
         )}
         {mode === "library" && !list.isPending && all.length > 0 && (

@@ -8,7 +8,9 @@ import {
   IP_GROUP_REST,
   isFlagGroup,
   isUserGroupBy,
+  isTemplateSortKey,
   isUserSortKey,
+  TEMPLATE_SORT_KEYS,
   type SortDir,
   USER_GROUP_BY,
   USER_SORT_KEYS,
@@ -192,7 +194,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
  *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
  *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
- *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *   templates list [--q words] [--sort updated|created|name] [--dir asc|desc] | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
  *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative),
  *                                           plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a
  *                                           clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them
@@ -2794,17 +2796,21 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
   },
 
   async templates(svc) {
-    const { pos: p, rerender, addMode, layers, ...slot } = bumperArgs();
+    const { pos: p, rerender, addMode, layers, q, sort, dir, ...slot } = bumperArgs();
     const usage =
-      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+      "usage: reelsaw templates list [--q words] [--sort updated|created|name] [--dir asc|desc] | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
     const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) =>
       console.log(`${t.id}  ${t.name}  (${plural(t.layerCount, "layer")}${templateBumpersText(t.bumpers)})`);
     if (sub === "list") {
-      const r = await api.layerTemplates.list({ limit: 500 });
-      if (!r.items.length) console.log("no layer templates");
+      // the same search and order as the Templates page and list_layer_templates
+      if (sort !== undefined && !isTemplateSortKey(sort)) throw new Error(`--sort takes ${TEMPLATE_SORT_KEYS.join(", ")}`);
+      if (dir !== undefined && dir !== "asc" && dir !== "desc") throw new Error("--dir takes asc or desc");
+      if (dir !== undefined && sort === undefined) throw new Error("--dir goes with --sort");
+      const r = await api.layerTemplates.list({ limit: 500, q, sort, dir });
+      if (!r.items.length) console.log(q ? "no layer templates match" : "no layer templates");
       else
         table(
           r.items.map((t) => ({
@@ -2815,7 +2821,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
             updated: t.updatedAt,
           })),
         );
-      if (r.nextCursor) console.log(`showing the newest ${r.items.length} of ${r.total}`);
+      if (r.nextCursor) console.log(`showing the first ${r.items.length} of ${r.total}`);
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
         table(r.deleted.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, deleted: t.deletedAt })));
@@ -2995,7 +3001,9 @@ function bumperArgs() {
     duck: false,
     noDuck: false,
     noLoop: false,
-    // library search
+    // library search; templates list
+    sort: undefined as string | undefined,
+    dir: undefined as string | undefined,
     source: undefined as string | undefined,
     license: undefined as string | undefined,
   };
@@ -3028,6 +3036,8 @@ function bumperArgs() {
     else if (a === "--add-sound") out.addSound = val();
     else if (a === "--kind") out.kind = val();
     else if (a === "--q") out.q = val();
+    else if (a === "--sort") out.sort = val();
+    else if (a === "--dir") out.dir = val();
     else if (a === "--tags") out.tags = val();
     else if (a === "--name") out.name = val();
     else if (a === "--source") out.source = val();

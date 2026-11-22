@@ -1,6 +1,8 @@
-/** Keyset pagination helpers: opaque cursors and LIKE escaping. Pure, no database. */
+/** Keyset pagination helpers: opaque cursors, sorted keysets and LIKE escaping. Pure, no database. */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { asc, desc, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import type { SortDir } from "@reelsaw/shared";
 
 /** Opaque cursor: the sort-key tuple of the last row on a page, as base64url JSON. */
 export function encodeCursor(parts: readonly (string | number)[]): string {
@@ -53,4 +55,26 @@ export function pageOf<T>(rows: T[], limit: number, key: (last: T) => readonly (
   if (rows.length <= limit) return { items: rows, nextCursor: null };
   const items = rows.slice(0, limit);
   return { items, nextCursor: encodeCursor(key(items[items.length - 1]!)) };
+}
+
+/** One sortable column of a keyset list: its SQL value (never null, so row comparisons page cleanly) and its type. */
+export type SortColumn = { expr: SQL; type: "text" | "numeric" | "real" | "timestamptz" };
+
+/**
+ * A keyset page in a chosen order (PRINCIPLES: "Sorting happens in the database"): the rows after the cursor, the
+ * ORDER BY, the value to select (as text, exactly what the cursor carries back) and the cursor of a row. The cursor
+ * names its sort ([key, dir, value, id]), so one from another order is refused instead of misread. The Users list has
+ * the same shape with its own default order (accounts-list.ts).
+ */
+export function sortedKeyset(col: SortColumn, key: string, dir: SortDir, id: AnyColumn, cursor: string | undefined) {
+  const c = pageCursor(cursor, 4);
+  if (c && (c[0] !== key || c[1] !== dir))
+    throw new TRPCError({ code: "BAD_REQUEST", message: "That page link is for another order. Start again from the first page." });
+  const at = c ? sql`(${String(c[2])}::${sql.raw(col.type)}, ${String(c[3])})` : null;
+  return {
+    after: at ? (dir === "asc" ? sql`(${col.expr}, ${id}) > ${at}` : sql`(${col.expr}, ${id}) < ${at}`) : undefined,
+    orderBy: dir === "asc" ? [asc(col.expr), asc(id)] : [desc(col.expr), desc(id)],
+    value: sql<string>`(${col.expr})::text`,
+    cursorOf: (value: string, rowId: string): readonly string[] => [key, dir, value, rowId],
+  };
 }

@@ -143,13 +143,13 @@ import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsse
 import { applyFlags } from "../pipeline/entities.js";
 import { userDefaults } from "../pipeline/settings.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
 import { touchLastActive } from "../presence.js";
 import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
+import { projectListInput, templateListInput } from "../list-schemas.js";
 import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
 import {
   capacityOfferFor,
@@ -1435,47 +1435,41 @@ const restRouter = router({
     }),
 
   projects: router({
-    /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
-    list: protectedProcedure
-      .input(
-        z
-          .object({
-            cursor: z.string().max(300).optional(),
-            limit: z.number().int().min(1).max(100).default(24),
-            status: z.enum(PROJECT_STATUSES).optional(),
-            deleted: z.boolean().optional().describe("true = only deleted projects that can still be restored"),
-          })
-          .optional(),
-      )
-      .query(async ({ ctx, input }) => {
-        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, {
-          cursor: input?.cursor,
+    /** Keyset page of the caller's projects in the chosen order (default newest activity first), searched and filtered in SQL. */
+    list: protectedProcedure.input(projectListInput.optional()).query(async ({ ctx, input }) => {
+      const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, {
+        cursor: input?.cursor,
+        limit: input?.limit ?? 24,
+        status: input?.status,
+        deleted: input?.deleted,
+        q: input?.q,
+        sort: input?.sort,
+        dir: input?.dir,
+      });
+      const keepDays = ctx.svc.settings.get().DELETED_RETENTION_DAYS;
+      ctx.log.debug(
+        {
           limit: input?.limit ?? 24,
-          status: input?.status,
-          deleted: input?.deleted,
-        });
-        const keepDays = ctx.svc.settings.get().DELETED_RETENTION_DAYS;
-        ctx.log.debug(
-          {
-            limit: input?.limit ?? 24,
-            cursor: !!input?.cursor,
-            status: input?.status ?? null,
-            items: page.rows.length,
-            hasMore: !!page.nextCursor,
-            total: page.total,
-          },
-          "projects page",
-        );
-        return {
-          items: page.rows.map(({ p, ...card }) => ({
-            ...publicProject(p),
-            ...card,
-            purgeAt: p.deletedAt && keepDays > 0 ? new Date(p.deletedAt.getTime() + keepDays * 86_400_000).toISOString() : null,
-          })),
-          nextCursor: page.nextCursor,
+          cursor: !!input?.cursor,
+          status: input?.status ?? null,
+          searched: !!input?.q,
+          sort: input?.sort ?? null,
+          items: page.rows.length,
+          hasMore: !!page.nextCursor,
           total: page.total,
-        };
-      }),
+        },
+        "projects page",
+      );
+      return {
+        items: page.rows.map(({ p, ...card }) => ({
+          ...publicProject(p),
+          ...card,
+          purgeAt: p.deletedAt && keepDays > 0 ? new Date(p.deletedAt.getTime() + keepDays * 86_400_000).toISOString() : null,
+        })),
+        nextCursor: page.nextCursor,
+        total: page.total,
+      };
+    }),
     /** Header numbers: all projects, how many are processing, clips rendered. */
     stats: protectedProcedure.query(({ ctx }) => projectStats(ctx.svc.database.db, ctx.user.id)),
     /** Projects processing right now (id, status, stage, progress): the Projects page polls this, not the list. */
@@ -1934,8 +1928,8 @@ const restRouter = router({
  * Same service functions as the `*_layer_template` MCP tools and `reelsaw templates`.
  */
 const layerTemplatesRouter = router({
-  /** A page of the account's templates (`items`, `nextCursor`, `total`) plus the ones removed in the last 30 days (`deleted`). */
-  list: protectedProcedure.input(listPageInput).query(({ ctx, input }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id, input ?? {})),
+  /** A page of the account's templates, searched and sorted in SQL (`items`, `nextCursor`, `total` of the matches) plus the ones removed in the last 30 days (`deleted`). */
+  list: protectedProcedure.input(templateListInput.optional()).query(({ ctx, input }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id, input ?? {})),
   get: protectedProcedure
     .input(z.object({ id: templateIdSchema }))
     .query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),

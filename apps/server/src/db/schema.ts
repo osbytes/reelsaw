@@ -567,8 +567,11 @@ export const projects = pgTable(
     index("projects_upload_id_idx").on(sql`(${t.sourceMeta}->>'uploadId')`).where(sql`${t.sourceMeta}->>'uploadId' is not null`),
     // source retention (every reconciler tick when enabled)
     index("projects_source_retention_idx").on(t.updatedAt).where(sql`${t.sourceKey} is not null and ${t.sourceExpiredAt} is null`),
-    // palette search (`search`): ILIKE '%q%' on the title
+    // palette search (`search`) and the Projects list's `q`: ILIKE '%q%' on the title
     index("projects_title_trgm_idx").using("gin", t.title.op("gin_trgm_ops")),
+    // the Projects list sorted by title or by length (projects-list.ts P_SORT: the same expressions)
+    index("projects_user_title_idx").on(t.userId, sql`lower(${t.title})`),
+    index("projects_user_duration_idx").on(t.userId, sql`coalesce(${t.durationSec}, 0)`),
   ],
 );
 

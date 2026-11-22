@@ -23,6 +23,9 @@ import {
   type ClipLayer,
   type TemplateBumpers,
   type TemplateLayer,
+  listSortFirstDir,
+  type SortDir,
+  type TemplateSortKey,
 } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -32,7 +35,8 @@ import { resolveClipBumpers } from "../pipeline/bumpers.js";
 import { assetVisibleTo } from "./visible.js";
 import { syncClipsRefs } from "./refs.js";
 import { cleanLayers } from "./layers.js";
-import { LIST_LIMIT_DEFAULT, pageCursor, pageOf } from "../pagination.js";
+import { LIST_LIMIT_DEFAULT, pageOf, sortedKeyset, type SortColumn } from "../pagination.js";
+import { near, setSearchThreshold, words } from "../search.js";
 
 /** Removed templates stay restorable this long; after that they drop off the list (the row remains until purge). */
 export const TEMPLATE_RESTORE_DAYS = 30;
@@ -87,32 +91,49 @@ const notFound = () =>
     message: `No such layer template. A removed template can be restored for ${RESTORE_DAYS} days (restore_layer_template).`,
   });
 
+/** Each sort of the Templates list as one non-null SQL value; an account's templates are few, read through `layer_templates_user_idx`. */
+const T_SORT: Record<TemplateSortKey, SortColumn> = {
+  updated: { expr: sql`${schema.layerTemplates.updatedAt}`, type: "timestamptz" },
+  created: { expr: sql`${schema.layerTemplates.createdAt}`, type: "timestamptz" },
+  name: { expr: sql`lower(${schema.layerTemplates.name})`, type: "text" },
+};
+
 /**
- * One keyset page of the account's templates, newest change first (`items`, `nextCursor`, `total` of all live ones), and
- * the ones removed in the last 30 days (restorable; at most 200, newest first).
+ * One keyset page of the account's templates in the chosen order (default newest change first): `items`, `nextCursor`,
+ * `total` of the live ones matching `q` (every word in the name, literally or close: search.ts `near`), and the ones
+ * removed in the last 30 days (restorable; at most 200, newest first).
  */
-export async function listLayerTemplates(db: Db, userId: string, opts: { limit?: number; cursor?: string | undefined } = {}) {
+export async function listLayerTemplates(
+  db: Db,
+  userId: string,
+  opts: { limit?: number; cursor?: string | undefined; q?: string | undefined; sort?: TemplateSortKey | undefined; dir?: SortDir | undefined } = {},
+) {
   const T = schema.layerTemplates;
   const limit = opts.limit ?? LIST_LIMIT_DEFAULT;
-  const cur = pageCursor(opts.cursor, 2);
-  const live = and(eq(T.userId, userId), isNull(T.deletedAt));
+  const key = opts.sort ?? "updated";
+  const order = sortedKeyset(T_SORT[key], key, opts.dir ?? listSortFirstDir(key), T.id, opts.cursor);
+  const ws = words(opts.q ?? "");
+  const live = and(eq(T.userId, userId), isNull(T.deletedAt), ...ws.map((w) => near(T.name, w)));
   const cutoff = new Date(Date.now() - RESTORE_DAYS * 86_400_000);
-  const [fetched, [counted], removed] = await Promise.all([
-    db
-      .select({ row: T, ts: sql<string>`${T.updatedAt}::text` })
-      .from(T)
-      .where(and(live, cur ? sql`(${T.updatedAt}, ${T.id}) < (${String(cur[0])}::timestamptz, ${String(cur[1])})` : undefined))
-      .orderBy(desc(T.updatedAt), desc(T.id))
-      .limit(limit + 1),
-    db.select({ total: sql<number>`count(*)::int` }).from(T).where(live),
-    db
-      .select()
-      .from(T)
-      .where(and(eq(T.userId, userId), isNotNull(T.deletedAt), gt(T.deletedAt, cutoff)))
-      .orderBy(desc(T.updatedAt), desc(T.id))
-      .limit(200),
-  ]);
-  const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.ts, r.row.id]);
+  const [fetched, [counted], removed] = await db.transaction(async (tx) => {
+    if (ws.length) await setSearchThreshold(tx);
+    return Promise.all([
+      tx
+        .select({ row: T, sortValue: order.value })
+        .from(T)
+        .where(and(live, order.after))
+        .orderBy(...order.orderBy)
+        .limit(limit + 1),
+      tx.select({ total: sql<number>`count(*)::int` }).from(T).where(live),
+      tx
+        .select()
+        .from(T)
+        .where(and(eq(T.userId, userId), isNotNull(T.deletedAt), gt(T.deletedAt, cutoff)))
+        .orderBy(desc(T.updatedAt), desc(T.id))
+        .limit(200),
+    ]);
+  });
+  const { items, nextCursor } = pageOf(fetched, limit, (r) => order.cursorOf(r.sortValue, r.row.id));
   return { items: items.map((r) => publicTemplate(r.row)), nextCursor, total: counted?.total ?? 0, deleted: removed.map(publicTemplate) };
 }
 
