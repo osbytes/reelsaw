@@ -19,8 +19,9 @@ writing; search for the function name if they drifted.
 | `stack` | small webcam over a screen share or slides | whole frame on top, zoomed speaker below | median face under `LAYOUT_MIN_FACE_SIZE`, or face centre in a corner (x < 0.22 or > 0.78 and y < 0.3 or > 0.7) (`layout.ts:106`) | section mode "Screen + speaker" |
 | `stack` with a webcam tile | the speaker is a picture-in-picture box (Zoom, Teams, Meet, OBS) over the screen or in a flat band beside it | the tile alone below, at its own aspect over a blurred copy of itself; on top the whole frame, or the frame without the tile's flat band | the small / corner rule above, or a face seen too rarely for `face` whose tile stands steady; `probeTiles` + `aggregateTile` (`webcam-tile.ts`): see thresholds below | the tile applies to a forced "Screen + speaker" too (it is the speaker's own bounds, not a content region); a drag on the pane moves the tile's window |
 | `stack` with a content region | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectContentRegion` (`content-region.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
-| `fit` | no usable face: graphics, b-roll, screencasts, slides | whole frame over a blurred background | face in under `LAYOUT_MIN_FACE_RATIO` of frames; or a text-heavy run (`fitTextHeavy`, `layout.ts:605`) | section mode "Whole frame" |
+| `fit` | no usable face: graphics, b-roll, screencasts, slides | whole frame over a blurred background | face in under `LAYOUT_MIN_FACE_RATIO` of frames and no clearly moving subject; or a text-heavy run (`fitTextHeavy`, `layout.ts:605`) | section mode "Whole frame" |
 | `fit` with an inset | a narrower picture in the middle of the frame between flat or blurred bars (pillarboxing): a phone video in a 16:9 edit, a square or 4:3 clip | just the picture: trimmed to exactly 9:16 and filling the frame when its shape is within 12% of 9:16, else fitted at its own aspect over a blurred copy of itself (`fitPane`) | `probeInset` + `insetRuns` (`inset.ts`): see thresholds below; overrides whatever the faces decided inside the run (a face crop would drift onto the bars) | none of its own: "Whole frame" shows the whole frame with the bars; a fixed crop on the section wins; the clip's `layoutSegments` carry `inset`, the editor labels the piece "Inset video" |
+| `center` with a subject | no usable face, one thing clearly moving: b-roll of a ship or a car, a product in the hand, a worker at a machine | full-height 9:16 crop on the moving subject: held still when it stays put, else the tripod camera of `face` following it (`focus: "subject"`) | rule 1 below, when `subjectFraming` (`saliency.ts`) finds clear evidence: see thresholds below | none of its own: "Whole frame" shows the frame, "Centre crop" the static centre; drag the picture to offset it; the editor labels the piece "Follow subject" |
 | `center` | anything | static centre crop | only when there is no face detector, or a manual mode found no face | section mode "Centre crop" |
 | `none` | anything | original aspect, no reframing | manual / legacy only; mixed with other pieces it becomes `fit` | project reframe setting or legacy per-clip override |
 
@@ -58,6 +59,20 @@ Inset thresholds (`INSET`, `inset.ts`), from the same 320x240 frames:
 | shape | at most 1.37 wide:high in source pixels (4:3 and narrower); a wider "inset" is a frame with margins |
 | per clip | frames grouped by bounds (within 0.015, around the bounds most frames share); members up to 1 s apart, or 3 s with other insets between, form a stretch; kept when at least 2 s long with the inset in 70% of its frames; overlapping stretches: the longer wins. The picture's own cuts do not break a stretch, edges snap to a scene cut within 0.6 s |
 | decision | `fit` with `inset { x1, y1, x2, y2 }` (pulled 0.003 in from the bars, trimmed to 9:16 when close); reason "vertical video inside the frame (34–66% of the width), cropped to it" |
+
+Subject thresholds (`SALIENCY`, `saliency.ts`), from the same 320x240 frames, as an 80x60 luma grid:
+
+| signal | threshold |
+|---|---|
+| camera motion | per sample (0.25 s), the global shift up to 6 x 4 cells (7.5% of the width) that best matches the previous frame is removed first, so a pan does not read as motion and a pan that follows a subject leaves the background still |
+| moving cell | luma change over 14 (0-255) and over 3x the frame's median change; stored per frame as the moving share of 40 column bins (`motion`) |
+| active frame | 0.6% to 35% of the frame moved (more is a cut, a flash or a whip pan) |
+| vote | at least 70% of the frame's motion inside one window 0.85x the crop's width, and that window at least 2.5% moving (a flag fluttering at the frame's edge is not a subject) |
+| per shot | at least 2 s of probed frames (a frame whose previous sample lies across a scene cut is skipped); motion in at least 50% of them, and at least 65% of the active frames vote |
+| stationary or track | vote centres spread (10th to 90th percentile) at most 0.08: one crop at their median; else the votes drive `tripodTrack` (dead zone, capped pan, hard cut at a scene cut) |
+| text | text whose centre lies between 10% and 90% of the height, cut by the crop's edge or left outside the crop as 3+ lines (a post or caption card beside an embedded video), in over 25% of the frames that show text: the shot stays whole |
+| source | a 9:16 crop that keeps 90% of the width or more (a vertical source): nothing to follow |
+| decision | `center` with `focus: "subject"` and the track; reason "no face detected; crop on the moving subject at 81% (100% of active frames)" or "… crop follows the moving subject …" |
 
 Where the user can override: project setting `reframe` (`reframeModeSchema`, `packages/shared/src/index.ts:50`),
 per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; `coverTimeline`,
@@ -136,7 +151,7 @@ box the id of the face it belongs to across frames: boxes are matched to each tr
 (constant velocity) by overlap, with a gate strict enough that a cut to another person, or a jump no
 face makes in a quarter second, starts a new track. The 320x240 frames feed a per-frame vertical-divider probe
 (`probeDivider`, `content-region.ts`) and the webcam-tile probe around the largest face
-(`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
+(`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). The same frames give the motion probe (`motionProber`, `saliency.ts`: what changed since the previous sample with the camera's shift removed), read only by rule 1 for shots without a usable face. One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
 (`attachText`) and are the only text input the layout reads. Scene cuts (`scenes.ts`, adaptive
 threshold) are detected once per project before clip selection (`ensureSceneCuts`, `analyze.ts`) and
@@ -155,7 +170,7 @@ tripod (`trackBreaks`) never treats a step within one track as a cut.
 
 **Order of rules in `decideLayout`** (first match wins):
 
-1. face in fewer than `LAYOUT_MIN_FACE_RATIO` of frames: `fit`
+1. face in fewer than `LAYOUT_MIN_FACE_RATIO` of frames: `fit`, or `center` following the moving subject when `subjectFraming` finds one (thresholds above); a steady webcam tile still makes it a `stack` (rule 4)
 2. three or more people (boxes over the second-face floor, at least 60% of the second face's height,
    not overlapping each other horizontally) in at least 50% of frames: `fit` (a couch, a panel: a 9:16
    crop cannot hold them and a split would show two of them; AutoFlip pads in the same situation)
@@ -251,7 +266,10 @@ decision is stored per clip (`layoutSegments`, with `content`) and shown in the 
   inset). Not handled: letterboxing (bars above and below), a picture placed off centre, and a picture so
   dark the bars cannot be told from it (a phone in a pocket shows whole). The face-size thresholds of a
   shot the inset does not cover are still measured against the full frame.
-- Screen recordings with only a cursor have no face: `fit`.
+- Screen recordings with only a cursor have no face: `fit` (the cursor is too small to vote, and the text the crop would cut keeps the shot whole).
+- The subject crop needs motion: a product standing on a table, a still landscape or a photo stays `fit`. Two model-based fallbacks were measured and not shipped (2026-11-22, per shot on faceless shots a render showed whole: a product unboxing reel, a car commercial, the VOA package and the cooking demo of the fixtures). YOLOX-nano (COCO detector, 3.6 MB) framed a subject in 2 of 42 product and car shots, added no correct crop on the other footage, picked a parked carrier over the moving submarine in the fleet shot, and took 250-500 ms a frame. U2-Netp (salient-object segmentation, 4.6 MB) found the product in about 4 of 23 product shots (3 of them dead centre, where a centre crop does as well), but also highlighted a recipe card's nutrition box, a wide dockside carrier and factory machinery, at 600-950 ms a frame. Neither pays for its cost at the precision this layout needs; a better candidate is a cheaper heuristic for one object on a plain backdrop, or a model that is both faster and trained on video framing. Motion that is everywhere (a crowd, water, foliage, a football pitch, 3D gameplay whose camera turns rather than slides) stays `fit` too, and so does a subject wider than about 27% of a 16:9 frame (a whole ship side on).
+- The camera's shift is one translation per frame: a zoom, a rotation or parallax leaves residual motion over the whole frame, so such shots stay `fit` rather than follow the wrong thing.
+- The subject is what moves, not what matters: a hand gesturing beside a still product is followed, a person walking past behind it is too.
 - Captions default to 72% of the height, over the speaker half of a panel stack; moved to the top they
   would sit on the panel.
 - Forced "Screen + speaker" on a side-panel shot gives the plain stack (the panel is not applied to
@@ -274,7 +292,8 @@ committed samples (faces, plus text boxes and divider for `panel` cases), so it 
 | `stack` with a webcam tile in a flat band (Zoom webinar, face seen in 3% of frames) | `tile-webinar-black-band` |
 | `stack` with a corner webcam tile over a screencast, no band | `tile-screencast-corner-webcam`, `shots-screencast-corner-webcam` (the tile check; the case still fails on the split, see below) |
 | `fit` with an inset: a 9:16 and a square phone clip between blurred bars, cut with a full-frame presenter | `shots-phone-inset-blur-bars` (negatives: every other shots / tile case's source shows no inset; `apps/server/test/inset.test.ts`) |
-| `fit`: no face (b-roll, graphics) | no fixture yet |
+| `center` following the subject: no-face b-roll (a speedboat's wake, a worker on a lift; a worker at a machine, which fails since YuNet boxes the profile face and the small-face rule stacks it) beside interviews, a chart animation and diffuse shots that stay `fit`; hands husking corn beside a recipe card that stays `fit` | `shots-no-face-broll-subject`, `shots-no-face-hands-product` |
+| `fit`: no face, nothing clearly moving (graphics, landscapes, crowds) | the `fit` windows of `shots-no-face-broll-subject`; `shots-pov-hands-no-face` (fit or centre); a tweet card with an embedded video (`shots-couch-multicam-guest-story`, 0-12 s: the post's text keeps it from a subject crop, though since YuNet the face in its video makes it a corner stack); unit tests (`apps/server/test/saliency.test.ts`) |
 | `fit`: text-heavy run over a speaker | no fixture yet |
 | negatives: lower-third text, text on both sides, room edges, narrow panel | unit tests only (`apps/server/test/side-panel.test.ts`); no real-footage fixture yet |
 | two faces close together, profile faces, glare, tiny webcam | no fixture yet |

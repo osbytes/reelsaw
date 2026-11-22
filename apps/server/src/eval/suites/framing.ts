@@ -23,7 +23,10 @@
  *    with no face must not grow one), and `minCropWidth` the face crop's share of the source width
  *    (a vertical source should come out near the identity).
  *    A window labelled "inset" wants a fit showing just the picture inset between bars (a phone
- *    video in a 16:9 edit); its `inset` gives the bounds that picture must be cropped to.
+ *    video in a 16:9 edit); its `inset` gives the bounds that picture must be cropped to. A window
+ *    labelled "subject" wants the crop that follows the moving subject of a shot without a face
+ *    (`center` with `focus: "subject"`; a plain centre crop is "center"); its `subject` gives the x the
+ *    crop must sit on (median of the window's track, within `faceTol`).
  *  - tile cases: a webcam tile (picture-in-picture box) over a screen share or in a meeting layout.
  *    The range must segment as a stack whose decision carries the tile at the labelled bounds
  *    (+-`tol`), a forced "Screen + speaker" must find the same tile, the detected faces must lie
@@ -65,6 +68,8 @@ interface ShotWindow {
   uncertain?: boolean;
   /** layout "inset": the picture's bounds across the width the crop must show (+-0.02), as [x1, x2] */
   inset?: [number, number];
+  /** layout "subject": x (0..1 of the source width) of the moving subject the crop should sit on */
+  subject?: number;
 }
 
 interface FramingCase {
@@ -213,6 +218,10 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   }
 }
 
+/** What a shots window compares: the layout, or "inset" / "subject" for the automatic variants of fit / center. */
+const shotKind = (d: { layout: string; inset?: unknown; focus?: string | undefined }) =>
+  d.layout === "fit" && d.inset ? "inset" : d.layout === "center" && d.focus === "subject" ? "subject" : d.layout;
+
 /** Segment a shots case the way a render does and score it against its labelled windows. */
 function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Parameters<typeof segmentLayouts>[1]): CaseResult {
   const samples = dropStaticFaces(raw).samples;
@@ -220,7 +229,7 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   const fails: string[] = [];
   const faceFrames = samples.filter((s) => s.boxes.length > 0).length / Math.max(1, samples.length);
   const checks: Record<string, number | string> = {
-    segments: segs.map((sg) => `${sg.decision.inset ? "inset" : sg.decision.layout}@${sg.start.toFixed(1)}`).join(","),
+    segments: segs.map((sg) => `${shotKind(sg.decision)}@${sg.start.toFixed(1)}`).join(","),
     faceFrames: Number(faceFrames.toFixed(3)),
   };
   if (c.expect.maxFaceFrames !== undefined && faceFrames > c.expect.maxFaceFrames)
@@ -230,19 +239,26 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   let agreed = 0;
   let worstFace = 0;
   let worstInset = 0;
+  let worstSubject = 0;
   for (const w of c.expect.windows ?? []) {
     const allowed = Array.isArray(w.layout) ? w.layout : [w.layout];
     let ok = 0;
     for (const sg of segs) {
       const a = Math.max(w.from, sg.start);
       const b = Math.min(w.to, sg.end);
-      // "inset" is a fit showing just the picture between the bars; a plain fit is "fit"
-      const kind = sg.decision.layout === "fit" && sg.decision.inset ? "inset" : sg.decision.layout;
+      // "inset" is a fit showing just the picture between the bars, "subject" a crop following the moving subject
+      const kind = shotKind(sg.decision);
       if (b <= a || !allowed.includes(kind)) continue;
       if (kind === "inset" && w.inset && !w.uncertain) {
         const err = Math.max(Math.abs(sg.decision.inset!.x1 - w.inset[0]), Math.abs(sg.decision.inset!.x2 - w.inset[1]));
         worstInset = Math.max(worstInset, err);
         if (err > 0.02) continue;
+      }
+      if (kind === "subject" && w.subject !== undefined && !w.uncertain) {
+        const inWin = sg.decision.track.filter((p) => p.t >= a - 1e-6 && p.t <= b + 1e-6);
+        const x = trackCenter(inWin.length ? inWin : sg.decision.track).x;
+        worstSubject = Math.max(worstSubject, Math.abs(x - w.subject));
+        if (Math.abs(x - w.subject) > tol) continue;
       }
       ok += b - a;
       if (w.uncertain || !w.faces?.length || sg.decision.layout === "fit" || sg.decision.layout === "center" || sg.decision.layout === "none") continue;
@@ -264,6 +280,7 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   checks.agreement = Number(agreement.toFixed(3));
   checks.faceErr = Number(worstFace.toFixed(3));
   checks.insetErr = Number(worstInset.toFixed(3));
+  checks.subjectErr = Number(worstSubject.toFixed(3));
   const minAgree = c.expect.minAgreement ?? 0.8;
   if (agreement < minAgree)
     fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);

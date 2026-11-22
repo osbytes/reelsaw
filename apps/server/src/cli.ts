@@ -1953,7 +1953,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     table(
       (layoutSegments ?? []).map((s) => ({
         range: `${s.start}-${s.end}`,
-        layout: s.inset ? `${s.layout} (inset ${s.inset.x1.toFixed(2)}-${s.inset.x2.toFixed(2)})` : s.layout,
+        layout: s.inset ? `${s.layout} (inset ${s.inset.x1.toFixed(2)}-${s.inset.x2.toFixed(2)})` : s.focus ? `${s.layout} (follows the subject)` : s.layout,
         manual: s.manual,
         cx: s.cx,
         offsets: offsetsLabel(s),

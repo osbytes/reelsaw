@@ -1053,6 +1053,7 @@ export function ClipEditor(props: Props) {
         // a shape too wide for two stacked panes (16:9) shows a split or stack whole, as the renderer does (`layoutForShape`)
         const lay: PreviewLayout = layoutForShape(sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode, style.shape);
         const clamp = (v: number) => Math.max(0, Math.min(1, v));
+        const subjectCrop = lay === "center" && sec.mode === "auto" && det?.focus === "subject" && !det.manual;
         const at = (tr: Array<[number, number]> | undefined): number | undefined => {
           if (!tr?.length) return undefined;
           const k = tr.findIndex(([pt]) => pt > t);
@@ -1084,7 +1085,8 @@ export function ClipEditor(props: Props) {
             const near = [own, other].find((c) => c && Math.abs(c.x - a.subjectX!) <= 0.12);
             base = near ? { x: near.x, y: near.y } : { x: a.subjectX, y: base.y };
           }
-          if (lay === "center") base = { x: 0.5, y: base.y };
+          // a centre crop is the frame's centre, unless an Auto section's render followed the shot's moving subject (no face)
+          if (lay === "center" && !subjectCrop) base = { x: 0.5, y: base.y };
           return { x: clamp(base.x + (a.offsetX ?? 0)), y: clamp(base.y + (a.offsetY ?? 0)) };
         };
         const c1 = centre(0);
@@ -1111,6 +1113,7 @@ export function ClipEditor(props: Props) {
           ...(lay !== "none" && sec.crop ? { crop: sec.crop } : {}),
           // the inset picture an Auto section's render found (a phone video between bars): shown on its own, as in the render
           ...(lay === "fit" && sec.mode === "auto" && det?.inset && !det.manual ? { inset: det.inset } : {}),
+          ...(subjectCrop ? { focus: "subject" as const } : {}),
           ...(lay === "split" && sec.crop2 ? { crop2: sec.crop2 } : {}),
         };
       },
@@ -2793,7 +2796,10 @@ export function ClipEditor(props: Props) {
             : `Not adjustable in ${MODE_LABEL[framing.layout]}`
         }
       >
-        Crop <span className="max-w-[12rem] truncate font-mono">{curSec && hasAdjust(curSec) ? adjustLabel(curSec) : "follows the speaker"}</span>
+        Crop{" "}
+        <span className="max-w-[12rem] truncate font-mono">
+          {curSec && hasAdjust(curSec) ? adjustLabel(curSec) : framing.focus === "subject" ? "follows the subject" : "follows the speaker"}
+        </span>
         <button className="font-semibold text-acc-text disabled:hidden" disabled={!curSec || !hasAdjust(curSec)} onClick={() => resetOffset(secIdx)}>
           Reset
         </button>

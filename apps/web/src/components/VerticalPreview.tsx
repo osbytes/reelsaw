@@ -50,6 +50,8 @@ export interface Framing {
   crop2?: ContentRegion | undefined;
   /** "fit": the picture is an inset between bars (detected); shown on its own like a fixed crop, but with nothing to drag */
   inset?: ContentRegion | undefined;
+  /** "center": the crop follows the moving subject of a shot without a face (detected), not the frame's centre */
+  focus?: "subject" | undefined;
   /** the output frame in pixels (`outputSize` of the style's shape); absent = 1080x1920 */
   out?: { w: number; h: number } | undefined;
 }
