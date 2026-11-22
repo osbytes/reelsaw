@@ -19,6 +19,13 @@ import { reportedCost } from "../eval/meter.js";
 import type { DecisionScore } from "../decisions/scores.js";
 import { createLangfuseSink, type LangfuseDeps, type LangfuseSink } from "./langfuse.js";
 
+/** One part of a multi-part message as plain text: its text for a text part, `[type]` for anything else (an image, a file). */
+function contentPartText(p: unknown): string {
+  if (!p || typeof p !== "object") return "";
+  const type = "type" in p && typeof p.type === "string" ? p.type : "unknown";
+  return type === "text" && "text" in p && typeof p.text === "string" ? p.text : `[${type}]`;
+}
+
 export interface LlmContext {
   projectId?: string;
   clipId?: string;
@@ -76,12 +83,7 @@ type Prompt = Array<{ role: string; content: unknown }>;
 function promptText(prompt: Prompt): Array<{ role: string; content: string }> {
   return prompt.map((m) => ({
     role: m.role,
-    content:
-      typeof m.content === "string"
-        ? m.content
-        : Array.isArray(m.content)
-          ? m.content.map((p: { type?: string; text?: string }) => (p.type === "text" ? p.text : `[${p.type}]`)).join("")
-          : String(m.content),
+    content: typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.map(contentPartText).join("") : String(m.content),
   }));
 }
 /**

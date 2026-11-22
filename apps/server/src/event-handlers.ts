@@ -42,6 +42,7 @@
  * it to a lookup. Only `u.emit` runs handlers; a row written any other way (`eventRow` outside a unit
  * of work, an issue-report import copying history in report/import.ts) runs nothing.
  */
+import { objectEntries } from "ts-extras";
 import { z } from "zod";
 import { EVENT_TYPES, eventSchemas, type EventPayload, type EventType } from "./event-types.js";
 import type { QueuePolicy } from "pg-boss";
@@ -151,7 +152,7 @@ export function eventHandlerQueues(...maps: readonly EventHandlerMap[]): EventHa
   for (const map of maps) {
     // the cast widens each handler to every event type; defineEventHandlers keyed it by its own event, and the
     // worker only hands it jobs from that event's queue (parseEventHandlerJob checks the type)
-    for (const [type, handlers] of Object.entries(map) as Array<[EventType, Record<string, EventHandler<EventType>> | undefined]>) {
+    for (const [type, handlers] of objectEntries(map)) {
       for (const [name, def] of Object.entries(handlers ?? {})) {
         const queue = eventHandlerQueue(type, name);
         if (out.some((q) => q.name === queue)) throw new Error(`event handler ${name} on ${type} is defined twice`);

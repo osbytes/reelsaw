@@ -12,6 +12,7 @@
  * instead of running silently and finding nothing (or the wrong thing). Add a language to them only together with
  * the data the stage needs for it.
  */
+import { objectKeys } from "ts-extras";
 import { languageLabel, languageProfile, spokenLanguageCode, type LanguageProfile } from "@reelsaw/shared";
 import { missingGlyphs, type Glyphs } from "../fonts.js";
 
@@ -119,7 +120,7 @@ function onlyFor(stage: LanguageStage): Check {
       : { level: "none", message: `not available for ${name} yet: it works for ${codes.map((c) => languageLabel(c)).join(", ")} only` };
 }
 
-export const LANGUAGE_STAGES = Object.keys(STAGES) as LanguageStage[];
+export const LANGUAGE_STAGES = objectKeys(STAGES);
 
 /** "en", "en-US", "English" → "en"; empty → undefined. The one normaliser, shared with the web app. */
 export function languageCode(lang: string | null | undefined): string | undefined {
