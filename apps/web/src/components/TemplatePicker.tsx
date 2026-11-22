@@ -181,7 +181,7 @@ export function TemplateGallery({ value, onChange, emptyExtra }: { value: string
   const list = useLayerTemplates();
   const templates = list.data?.templates ?? [];
   const names = useTemplateAssetNames(templates);
-  const card = "flex w-full flex-col gap-2 rounded-[12px] border p-2.5 text-left";
+  const card = "flex w-full flex-col gap-2 rounded-[12px] border p-2.5 text-start";
   if (list.isPending && !list.error)
     return (
       <SkeletonRegion label="Loading templates…" className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">

@@ -203,7 +203,7 @@ function usePendingUsers() {
 function PendingUsersHint() {
   const n = usePendingUsers();
   return n ? (
-    <span className="ml-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+    <span className="ms-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
       {n}
     </span>
   ) : null;
@@ -218,7 +218,7 @@ function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
     <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
       Users
       {pending ? (
-        <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+        <span className="ms-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
           {pending}
         </span>
       ) : null}
@@ -238,7 +238,7 @@ function SearchButton() {
       aria-label="Search"
     >
       <Search className="h-4 w-4 shrink-0" />
-      <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">Search or paste a link…</span>
+      <span className="hidden min-w-0 flex-1 truncate text-start sm:inline">Search or paste a link…</span>
       <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
     </button>
   );
@@ -306,7 +306,7 @@ function AppSkeleton() {
     <SkeletonRegion label="Loading…" className="flex h-dvh flex-col overflow-hidden">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-6">
         <Skeleton className="h-6 w-28" />
-        <Skeleton className="ml-auto h-8 w-8 rounded-full" />
+        <Skeleton className="ms-auto h-8 w-8 rounded-full" />
       </div>
       <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
         <Skeleton className="h-8 w-48" />

@@ -226,13 +226,13 @@ export default function BillingSection() {
                   })}
                 </dl>
                 {d.afterCancel.over.length > 0 && (
-                  <ul className="flex list-disc flex-col gap-1 pl-5 text-ink">
+                  <ul className="flex list-disc flex-col gap-1 ps-5 text-ink">
                     {d.afterCancel.over.map((o) => (
                       <li key={o.key}>{o.sentence}</li>
                     ))}
                   </ul>
                 )}
-                <ul className="flex list-disc flex-col gap-1 pl-5 text-ink2">
+                <ul className="flex list-disc flex-col gap-1 ps-5 text-ink2">
                   {d.afterCancel.expect.map((x) => (
                     <li key={x}>{x}</li>
                   ))}

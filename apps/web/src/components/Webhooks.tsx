@@ -235,7 +235,7 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
             {items.map((d) => (
               <li key={d.id} className="py-1.5">
                 <button
-                  className="grid w-full grid-cols-[6rem_minmax(0,1fr)_2.5rem] items-center gap-x-3 text-left md:grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem]"
+                  className="grid w-full grid-cols-[6rem_minmax(0,1fr)_2.5rem] items-center gap-x-3 text-start md:grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem]"
                   onClick={() => setOpen(open === d.id ? null : d.id)}
                   aria-expanded={open === d.id}
                 >
@@ -243,8 +243,8 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
                     {DELIVERY[d.status].glyph} <span className="text-ink2">{DELIVERY[d.status].word}</span>
                   </span>
                   <span className="truncate font-mono text-xs">{d.type}</span>
-                  <span className="text-right text-xs tabular-nums text-ink2">{d.lastStatusCode ?? "–"}</span>
-                  <span className="col-span-2 col-start-2 text-xs text-ink3 md:col-span-1 md:col-start-auto md:text-right">{when(d.createdAt)}</span>
+                  <span className="text-end text-xs tabular-nums text-ink2">{d.lastStatusCode ?? "–"}</span>
+                  <span className="col-span-2 col-start-2 text-xs text-ink3 md:col-span-1 md:col-start-auto md:text-end">{when(d.createdAt)}</span>
                 </button>
                 {open === d.id && (
                   <div className="mt-2 flex flex-col gap-2 text-xs">
@@ -364,7 +364,7 @@ export function WebhooksSection() {
             {["w-1/3", "w-1/4"].map((w, i) => (
               <div key={i} className="flex items-center gap-3 py-2">
                 <Skeleton className={`h-4 ${w}`} />
-                <Skeleton className="ml-auto h-3.5 w-28" />
+                <Skeleton className="ms-auto h-3.5 w-28" />
                 <Skeleton className="h-7 w-28 rounded-[8px]" />
               </div>
             ))}
@@ -387,7 +387,7 @@ export function WebhooksSection() {
                 key={e.id}
                 className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_9.5rem] items-center gap-x-3 py-2 md:grid-cols-[minmax(0,1fr)_7rem_9rem_9.5rem]"
               >
-                <button className="flex min-w-0 flex-col text-left" onClick={() => setSelected(selected === e.id ? null : e.id)} title="Show the delivery log">
+                <button className="flex min-w-0 flex-col text-start" onClick={() => setSelected(selected === e.id ? null : e.id)} title="Show the delivery log">
                   <span className="truncate font-semibold">{e.description ?? e.urlMasked}</span>
                   <span className="truncate text-xs text-ink3">
                     {e.description ? `${e.urlMasked} · ` : ""}

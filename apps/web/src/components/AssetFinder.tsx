@@ -339,9 +339,9 @@ export function AssetFinder({
       <div className="flex shrink-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           <div className="relative min-w-0 flex-1 basis-full sm:basis-auto">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
+            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
             <input
-              className="input h-[38px] w-full pl-9 pr-9"
+              className="input h-[38px] w-full ps-9 pe-9"
               type="search"
               value={q}
               placeholder="Search uploads, the catalog and providers…"
@@ -351,7 +351,7 @@ export function AssetFinder({
             {q && (
               <button
                 type="button"
-                className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink"
+                className="absolute end-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink"
                 aria-label="Clear search"
                 onClick={() => setFilters({ q: "" })}
               >
@@ -386,7 +386,7 @@ export function AssetFinder({
         {mode === "library" && actions.jobs.length > 0 && <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />}
       </div>
 
-      <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}`}>
+      <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pe-1" : ""}`}>
         <ul className={gridClass(mode)} aria-label="Library, catalog and provider results">
           {list.isPending && Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />)}
           {rows.map(libraryTile)}

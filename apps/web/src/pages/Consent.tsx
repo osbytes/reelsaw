@@ -60,7 +60,7 @@ export function ConsentPage() {
   return (
     <ScrollArea className="h-dvh">
       <div className="relative flex min-h-dvh items-center justify-center p-6">
-        <ThemeToggle className="absolute right-4 top-4" />
+        <ThemeToggle className="absolute end-4 top-4" />
         <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
           <AuthCardHeader title="Allow access?" titleClassName="text-[22px]" />
           <p className="text-sm leading-relaxed text-ink2">
@@ -76,7 +76,7 @@ export function ConsentPage() {
             </div>
           </div>
           {scopes.length > 0 && (
-            <ul className="list-disc pl-5 text-sm text-ink2">
+            <ul className="list-disc ps-5 text-sm text-ink2">
               {scopes.map((s) => (
                 <li key={s}>{what[s] ?? s}</li>
               ))}

@@ -382,7 +382,7 @@ function SystemTab() {
               {env.map(([k, v]) => (
                 <div key={k} className="contents">
                   <dt className="text-ink2">{k}</dt>
-                  <dd className="truncate text-right font-mono text-xs leading-5" title={v}>
+                  <dd className="truncate text-end font-mono text-xs leading-5" title={v}>
                     {v}
                   </dd>
                 </div>

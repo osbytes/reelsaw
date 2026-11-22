@@ -525,7 +525,7 @@ export function NewProjectPage() {
             </section>
 
             <section className={sec}>
-              <button type="button" className="flex items-center gap-1.5 text-left text-[15px] font-bold" aria-expanded={more} onClick={() => setMore(!more)}>
+              <button type="button" className="flex items-center gap-1.5 text-start text-[15px] font-bold" aria-expanded={more} onClick={() => setMore(!more)}>
                 <ChevronRight className={`h-4 w-4 transition ${more ? "rotate-90" : ""}`} /> Advanced
               </button>
               {more && (

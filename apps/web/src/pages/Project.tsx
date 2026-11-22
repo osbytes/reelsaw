@@ -382,7 +382,7 @@ export function ProjectPage() {
           </div>
           {["w-4/5", "w-3/5", "w-2/3", "w-1/2", "w-3/4"].map((w, i) => (
             <div key={i} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2">
-              <Skeleton className="ml-auto h-3 w-11" />
+              <Skeleton className="ms-auto h-3 w-11" />
               <Skeleton className="h-3 w-3 rounded-full" />
               <Skeleton className={`h-3.5 ${w}`} />
             </div>
@@ -411,7 +411,7 @@ export function ProjectPage() {
         return (
           <section key={g.seq} id={`run-${g.seq}`}>
             <button
-              className="flex h-6 w-full items-center gap-2 rounded-[6px] text-left hover:text-acc-text"
+              className="flex h-6 w-full items-center gap-2 rounded-[6px] text-start hover:text-acc-text"
               aria-expanded={open}
               onClick={() => {
                 setOpenRuns((o) => ({ ...o, [g.seq]: !open }));
@@ -433,13 +433,13 @@ export function ProjectPage() {
                   const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
                   return (
                     <li key={e.id} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2" title={d.text}>
-                      <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">
+                      <span className="whitespace-nowrap text-end font-mono text-[11px] tabular-nums leading-5 text-ink3">
                         {new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                       </span>
                       <ToneGlyph tone={d.tone} />
                       {target ? (
                         <button
-                          className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
+                          className="min-w-0 truncate text-start leading-5 hover:text-acc-text"
                           onClick={() => {
                             focusCard(target, true);
                             setActOpen(false);
@@ -478,7 +478,7 @@ export function ProjectPage() {
     <Popover.Root open={actOpen} onOpenChange={setActOpen}>
       <Popover.Trigger asChild>
         <button
-          className={`inline-flex min-w-0 max-w-[420px] items-center gap-2 rounded-[6px] text-left hover:text-ink ${live.tone === "err" ? "text-err" : live.tone === "warn" ? "text-warn" : live.tone === "ok" && !active ? "font-semibold text-ok" : "text-ink2"}`}
+          className={`inline-flex min-w-0 max-w-[420px] items-center gap-2 rounded-[6px] text-start hover:text-ink ${live.tone === "err" ? "text-err" : live.tone === "warn" ? "text-warn" : live.tone === "ok" && !active ? "font-semibold text-ok" : "text-ink2"}`}
           title="Activity"
         >
           {activityLoading ? (
@@ -510,7 +510,7 @@ export function ProjectPage() {
             <b>Activity</b>
             <span className="text-xs text-ink3">{active ? "updates live" : "history"}</span>
             {sortedClips.length > 0 && (
-              <span className={`ml-auto text-xs ${readyCount === sortedClips.length ? "font-semibold text-ok" : "text-ink2"}`}>
+              <span className={`ms-auto text-xs ${readyCount === sortedClips.length ? "font-semibold text-ok" : "text-ink2"}`}>
                 {readyCount} of {sortedClips.length} clips ready
               </span>
             )}
@@ -774,7 +774,7 @@ export function ProjectPage() {
             <button
               onClick={togglePlay}
               aria-label="Play"
-              className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop"
+              className="absolute start-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop"
             >
               ▶
             </button>
@@ -812,7 +812,7 @@ export function ProjectPage() {
           <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => seekSource(srcTime + 5)}>
             +5s
           </button>
-          <span className="ml-auto whitespace-nowrap font-mono text-xs text-ink2">
+          <span className="ms-auto whitespace-nowrap font-mono text-xs text-ink2">
             {formatTime(srcTime)} / {formatTime(dur)}
           </span>
           <button
@@ -1111,7 +1111,7 @@ export function ProjectPage() {
             {source}
             {transcriptBody}
           </section>
-          <aside className="flex min-h-0 flex-col border-l border-line bg-sunk">
+          <aside className="flex min-h-0 flex-col border-s border-line bg-sunk">
             {drawer ? (
               <>
                 {clipsHeader}
@@ -1134,7 +1134,7 @@ export function ProjectPage() {
       <Dialog.Root open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/60" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-[71] flex w-[min(380px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-4 shadow-pop outline-none">
+          <Dialog.Content className="fixed start-1/2 top-1/2 z-[71] flex w-[min(380px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-4 shadow-pop outline-none">
             <div className="flex items-center gap-2">
               <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{preview?.title}</Dialog.Title>
               <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">

@@ -148,7 +148,7 @@ export function ClipCard({
         {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
         {onToggleSelect && (
           <span
-            className={`absolute left-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
+            className={`absolute start-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
           >
             <input
               type="checkbox"
@@ -240,7 +240,7 @@ export function ClipCard({
                   <div className="h-1.5 rounded-full bg-line">
                     <div className="h-full rounded-full bg-acc" style={{ width: `${v}%` }} />
                   </div>
-                  <span className="text-right font-mono">{v}</span>
+                  <span className="text-end font-mono">{v}</span>
                 </div>
               );
             })
@@ -261,7 +261,7 @@ export function ClipCard({
 
       <div className="-mx-1 flex h-8 items-center gap-0.5">
         {clip.status === "failed" && (
-          <button className="btn-ink mr-1 h-8 px-2.5 text-xs" disabled={busy} onClick={onRerender}>
+          <button className="btn-ink me-1 h-8 px-2.5 text-xs" disabled={busy} onClick={onRerender}>
             ↻ Retry
           </button>
         )}

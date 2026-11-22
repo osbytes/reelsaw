@@ -36,7 +36,7 @@ const num = new Intl.NumberFormat();
 
 function PickerSkeleton() {
   return (
-    <div role="status" className="flex flex-col gap-2 text-left">
+    <div role="status" className="flex flex-col gap-2 text-start">
       <span className="sr-only">Asking providers…</span>
       {["w-2/3", "w-1/2", "w-3/5"].map((w) => (
         <Skeleton key={w} className={`h-4 ${w}`} />
@@ -143,7 +143,7 @@ export function ModelPicker({
           }
           choose(m.id, m);
         }}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-start text-sm hover:bg-sunk disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="grid h-4 w-4 shrink-0 place-items-center text-acc">{on && <Check className="h-4 w-4" />}</span>
         <span className="min-w-0 flex-1">
@@ -184,7 +184,7 @@ export function ModelPicker({
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button type="button" role="combobox" aria-expanded={open} aria-label={label} className="input flex min-h-[38px] items-center gap-2 py-1 text-left">
+        <button type="button" role="combobox" aria-expanded={open} aria-label={label} className="input flex min-h-[38px] items-center gap-2 py-1 text-start">
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={`truncate font-mono text-xs ${value ? "" : "text-ink3"}`}>{value || placeholder}</span>
             {/* always two lines, so pickers side by side stay the same height */}
@@ -214,7 +214,7 @@ export function ModelPicker({
                   <button
                     type="button"
                     onClick={() => choose(typed, null)}
-                    className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk"
+                    className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-start text-sm hover:bg-sunk"
                   >
                     <span className="w-4" />
                     <span className="min-w-0 flex-1 truncate">
@@ -240,7 +240,7 @@ export function ModelPicker({
             </ScrollArea>
           ) : (
             <div className="grid grid-cols-[200px_1fr]">
-              <ScrollArea className="max-h-[min(400px,calc(var(--radix-popover-content-available-height)-60px))] border-r border-line">
+              <ScrollArea className="max-h-[min(400px,calc(var(--radix-popover-content-available-height)-60px))] border-e border-line">
                 <div className="p-1">
                   {providers.map((p) => {
                     const st = statusOf(p);
@@ -250,7 +250,7 @@ export function ModelPicker({
                         key={p.provider}
                         type="button"
                         onClick={() => setPicked(p.provider)}
-                        className={`flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk ${picked === p.provider ? "bg-sunk" : ""}`}
+                        className={`flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-start text-sm hover:bg-sunk ${picked === p.provider ? "bg-sunk" : ""}`}
                       >
                         <span className="grid h-4 w-4 shrink-0 place-items-center text-ink3">
                           {p.selfHosted || s?.baseUrlEnv ? <Server className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}

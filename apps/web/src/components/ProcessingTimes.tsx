@@ -23,7 +23,7 @@ export function ProcessingTimes() {
         {Array.from({ length: 5 }, (_, i) => (
           <div key={i} className="flex h-8 items-center gap-4 border-t border-line/60">
             <Skeleton className="h-3.5 w-24" />
-            <Skeleton className="ml-auto h-3.5 w-14" />
+            <Skeleton className="ms-auto h-3.5 w-14" />
             <Skeleton className="h-3.5 w-14" />
             <Skeleton className="h-3.5 w-14" />
             <Skeleton className="h-3.5 w-16" />
@@ -50,22 +50,22 @@ export function ProcessingTimes() {
       </p>
       <table className="w-full text-[13px]">
         <thead>
-          <tr className="text-left text-xs text-ink3">
+          <tr className="text-start text-xs text-ink3">
             <th className="py-1 font-medium">Stage</th>
-            <th className="py-1 text-right font-medium">Per 10 min of video</th>
-            <th className="py-1 text-right font-medium">Actual avg</th>
-            <th className="py-1 text-right font-medium">Expected avg</th>
-            <th className="py-1 text-right font-medium">Basis</th>
+            <th className="py-1 text-end font-medium">Per 10 min of video</th>
+            <th className="py-1 text-end font-medium">Actual avg</th>
+            <th className="py-1 text-end font-medium">Expected avg</th>
+            <th className="py-1 text-end font-medium">Basis</th>
           </tr>
         </thead>
         <tbody className="font-mono text-xs tabular-nums">
           {d.stages.map((s) => (
             <tr key={s.stage} className="border-t border-line/60">
               <td className="py-1.5 font-sans text-[13px]">{STAGE[s.stage] ?? s.stage}</td>
-              <td className="py-1.5 text-right">~{formatTime(s.factor * TEN_MIN)}</td>
-              <td className="py-1.5 text-right">{s.actualAvgSec !== null ? formatTime(s.actualAvgSec) : "—"}</td>
-              <td className="py-1.5 text-right">{s.expectedAvgSec !== null ? formatTime(s.expectedAvgSec) : "—"}</td>
-              <td className="py-1.5 text-right font-sans text-xs text-ink3">{s.source === "history" ? `${plural(s.samples, "project")}` : "default"}</td>
+              <td className="py-1.5 text-end">~{formatTime(s.factor * TEN_MIN)}</td>
+              <td className="py-1.5 text-end">{s.actualAvgSec !== null ? formatTime(s.actualAvgSec) : "—"}</td>
+              <td className="py-1.5 text-end">{s.expectedAvgSec !== null ? formatTime(s.expectedAvgSec) : "—"}</td>
+              <td className="py-1.5 text-end font-sans text-xs text-ink3">{s.source === "history" ? `${plural(s.samples, "project")}` : "default"}</td>
             </tr>
           ))}
         </tbody>
@@ -75,11 +75,11 @@ export function ProcessingTimes() {
           <summary className="cursor-pointer text-xs text-ink3 hover:text-ink">Recent projects: actual / expected per stage</summary>
           <table className="mt-2 w-full">
             <thead>
-              <tr className="text-left text-xs text-ink3">
+              <tr className="text-start text-xs text-ink3">
                 <th className="py-1 font-medium">Project</th>
-                <th className="py-1 text-right font-medium">Length</th>
+                <th className="py-1 text-end font-medium">Length</th>
                 {d.stages.map((s) => (
-                  <th key={s.stage} className="py-1 text-right font-medium">
+                  <th key={s.stage} className="py-1 text-end font-medium">
                     {STAGE[s.stage] ?? s.stage}
                   </th>
                 ))}
@@ -93,11 +93,11 @@ export function ProcessingTimes() {
                       {r.title}
                     </a>
                   </td>
-                  <td className="py-1.5 text-right">{formatTime(r.durationSec)}</td>
+                  <td className="py-1.5 text-end">{formatTime(r.durationSec)}</td>
                   {d.stages.map((s) => {
                     const v = r.stages[s.stage];
                     return (
-                      <td key={s.stage} className={`py-1.5 text-right ${v && v.actualSec > v.expectedSec * 1.5 ? "text-warn" : ""}`}>
+                      <td key={s.stage} className={`py-1.5 text-end ${v && v.actualSec > v.expectedSec * 1.5 ? "text-warn" : ""}`}>
                         {v && v.actualSec > v.expectedSec * 1.5 ? "▲ " : ""}
                         {v ? `${formatTime(v.actualSec)} / ~${formatTime(v.expectedSec)}` : "—"}
                       </td>

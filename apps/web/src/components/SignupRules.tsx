@@ -154,7 +154,7 @@ export function SignupRulesSection() {
             <div key={i} className="flex items-center gap-3 py-2.5">
               <Skeleton className="h-4 w-12" />
               <Skeleton className={`h-4 ${["w-48", "w-36", "w-56"][i]}`} />
-              <Skeleton className="ml-auto h-8 w-20" />
+              <Skeleton className="ms-auto h-8 w-20" />
             </div>
           ))}
         </SkeletonRegion>
@@ -166,7 +166,7 @@ export function SignupRulesSection() {
         <ScrollArea className={SECTION_LIST_MAX_H}>
           <table className="w-full table-fixed text-sm">
             <caption className="sr-only">Sign-up rules, oldest first</caption>
-            <thead className="sticky top-0 bg-panel text-left text-xs text-ink3">
+            <thead className="sticky top-0 bg-panel text-start text-xs text-ink3">
               <tr>
                 <th scope="col" className="w-16 py-2 font-medium">
                   Action
@@ -174,7 +174,7 @@ export function SignupRulesSection() {
                 <th scope="col" className="py-2 font-medium">
                   Matches
                 </th>
-                <th scope="col" className="w-24 py-2 text-right font-medium">
+                <th scope="col" className="w-24 py-2 text-end font-medium">
                   Caught
                 </th>
                 <th scope="col" className="w-24 py-2">
@@ -196,7 +196,7 @@ export function SignupRulesSection() {
                       {r.createdBy ? ` by ${r.createdBy}` : ""}
                     </div>
                   </td>
-                  <td className="py-2.5 text-right align-top tabular-nums" title={r.lastHitAt ? `Last ${ago(r.lastHitAt)}` : "Not yet"}>
+                  <td className="py-2.5 text-end align-top tabular-nums" title={r.lastHitAt ? `Last ${ago(r.lastHitAt)}` : "Not yet"}>
                     {r.action === "hold" && r.hits > 0 ? (
                       <Link to={heldByHref(ruleLabel(r))} className="text-acc-text underline-offset-2 hover:underline" title="See the accounts this rule held">
                         {r.hits.toLocaleString()}
@@ -206,7 +206,7 @@ export function SignupRulesSection() {
                     )}
                     <div className="text-xs text-ink3">{r.lastHitAt ? ago(r.lastHitAt) : "never"}</div>
                   </td>
-                  <td className="py-2.5 text-right align-top">
+                  <td className="py-2.5 text-end align-top">
                     <button
                       type="button"
                       className="btn-ghost h-8 w-20 text-xs"

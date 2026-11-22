@@ -811,7 +811,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           {/* z-[85]/[86] sit above the confirm dialogs (z-[70]/[71]); the palette closes before a confirm opens */}
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/40" />
           <Dialog.Content
-            className="fixed left-1/2 top-[12dvh] z-[86] flex w-[min(640px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-[18px] border border-line bg-panel text-ink shadow-pop outline-none"
+            className="fixed start-1/2 top-[12dvh] z-[86] flex w-[min(640px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-[18px] border border-line bg-panel text-ink shadow-pop outline-none"
             aria-describedby={undefined}
             onEscapeKeyDown={(e) => {
               if (target) {
@@ -826,7 +826,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                 <button
                   type="button"
                   onClick={back}
-                  className="flex h-7 max-w-[45%] shrink-0 items-center gap-1 rounded-[8px] bg-sunk pl-1.5 pr-2.5 text-xs font-semibold text-ink2 hover:text-ink"
+                  className="flex h-7 max-w-[45%] shrink-0 items-center gap-1 rounded-[8px] bg-sunk ps-1.5 pe-2.5 text-xs font-semibold text-ink2 hover:text-ink"
                   aria-label="Back to results"
                   title="Back (←)"
                 >
@@ -918,7 +918,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     <div key={it.key}>
                       {head && <div className="px-2.5 pb-1 pt-2.5 text-[11px] font-semibold text-ink3">{head}</div>}
                       <div data-idx={i} onMouseMove={() => setCursor(i)} className={`flex w-full items-center gap-1 rounded-[10px] ${sel ? "bg-sunk" : ""}`}>
-                        <button onClick={it.run} className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2.5 py-2 text-left">
+                        <button onClick={it.run} className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2.5 py-2 text-start">
                           {it.thumb ? (
                             <img
                               src={it.thumb}
@@ -943,7 +943,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                             type="button"
                             tabIndex={-1}
                             onClick={() => enter(it.actions!)}
-                            className="mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink3 hover:bg-line hover:text-ink"
+                            className="me-1 grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink3 hover:bg-line hover:text-ink"
                             aria-label={`Actions for ${typeof it.label === "string" ? it.label : "this item"}`}
                             title="Actions (→)"
                           >
@@ -992,7 +992,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                   <span className="kbd">→</span> actions
                 </span>
               )}
-              <span className="ml-auto hidden sm:inline">{target ? "esc goes back" : `Drop videos anywhere to start projects · ${MOD}K`}</span>
+              <span className="ms-auto hidden sm:inline">{target ? "esc goes back" : `Drop videos anywhere to start projects · ${MOD}K`}</span>
             </div>
             <input
               ref={bumperFileRef}

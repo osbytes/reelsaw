@@ -37,7 +37,7 @@ export function LearningSection() {
           onClick={() => setLearning.mutate({ enabled: !enabled })}
           className={`relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-50 ${enabled ? "bg-acc" : "bg-line2"}`}
         >
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${enabled ? "left-[18px]" : "left-0.5"}`} />
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${enabled ? "start-[18px]" : "start-0.5"}`} />
         </button>
       </label>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">

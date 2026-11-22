@@ -298,7 +298,7 @@ export function OverlayMenuItem({
     <ContextMenu.Item className="menu-item" disabled={disabled} onSelect={onSelect}>
       {icon}
       {label}
-      {kbd && <span className="kbd ml-auto">{kbd}</span>}
+      {kbd && <span className="kbd ms-auto">{kbd}</span>}
     </ContextMenu.Item>
   );
 }
@@ -642,7 +642,7 @@ export function VerticalPreview({
   const capPx = unitH * CAPTION_FONT_FRAC * style.captionSize;
   const hookPx = unitH * HOOK_FONT_FRAC;
   const draggable = !!onStyleChange;
-  const hookHint = draggable ? `Drag to move the hook${onHookChange ? ", double-click to edit" : ""}, right-click for more` : undefined;
+  const hookHint = draggable ? `Drag to move the hook${onHookChange ? ", double-click to edit" : ""}, end-click for more` : undefined;
   /** the hook's right-click menu: retype it, put it back in the middle, or hide it (the editor's style keeps the change) */
   const hookMenu = (
     <>
@@ -682,8 +682,8 @@ export function VerticalPreview({
           ? framing.layout === "split"
             ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them"
             : framing.crop
-              ? "Drag the picture to move the crop; right-click to set it exactly"
-              : "Drag the picture to re-centre the crop; right-click to set it exactly"
+              ? "Drag the picture to move the crop; end-click to set it exactly"
+              : "Drag the picture to re-centre the crop; end-click to set it exactly"
           : paneMenu
             ? "Right-click to fix the crop"
             : undefined
@@ -707,14 +707,14 @@ export function VerticalPreview({
         const isEditing = editing === o.id;
         const handle = sel && onOverlayChange && !isEditing && (
           <span
-            className="absolute bottom-0.5 right-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc"
+            className="absolute bottom-0.5 end-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc"
             onPointerDown={(e) => onOverlayStart(o, "size", e)}
             aria-label={`Resize ${name}`}
           />
         );
         const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${isEditing ? "cursor-text" : onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
         const hint = onOverlayChange
-          ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", right-click for more" : ""}`
+          ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", end-click for more" : ""}`
           : name;
         // the editor's right-click menu around the block; right-clicking selects the layer first
         const withMenu = (node: ReactNode) =>
@@ -816,14 +816,16 @@ export function VerticalPreview({
       {still && (
         <div className="absolute inset-0 z-[5] bg-black">
           <img src={still.url} alt="" className="h-full w-full object-cover" />
-          <span className="pointer-events-none absolute left-2 top-2 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+          <span className="pointer-events-none absolute start-2 top-2 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
             {still.tag}
           </span>
         </div>
       )}
       {showSafeZones && !still && style.shape === "9:16" && <SafeZones platform={platform} />}
       {tag && !still && (
-        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>
+        <span className="pointer-events-none absolute start-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+          {tag}
+        </span>
       )}
       {panning &&
         (() => {
@@ -838,7 +840,7 @@ export function VerticalPreview({
         })()}
       {drag === "caption" || drag === "hook" ? (
         <>
-          {snappedX && <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-0 border-l-2 border-snap" />}
+          {snappedX && <div className="pointer-events-none absolute inset-y-0 start-1/2 z-10 w-0 border-s-2 border-snap" />}
           {snappedY && <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0 border-t-2 border-snap" />}
         </>
       ) : null}
