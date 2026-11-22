@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import {
   QuotaExceededError,
   type SourceAdmission,
+  admitRanges,
   admitSource,
   hasMinuteLimits,
   recordSourceDuration,
@@ -12,7 +13,12 @@ import {
   trackIngestRefusal,
 } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
-import { eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { eq, inArray, sql } from "drizzle-orm";
+import { planRanges, rangeProblemMessage } from "@reelsaw/shared";
+import type { Project, ProjectRange } from "../db/schema.js";
+import type { UnitOfWork } from "../uow.js";
+import type { Services } from "../services.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
@@ -345,7 +351,11 @@ export async function ingest(ctx: StageContext) {
     await takeTxLock(u.db, txLock.quota(project.userId));
     decided.admitted = null;
     const recorded = await recordedSourceSec(u.db, projectId);
-    if (recorded === null) {
+    // ranges, then the project row: the ranges a person or a caller chose are admitted whole or refused, never cut short
+    const ranges = await u.db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, projectId)).for("update");
+    const chosen = ranges.filter((r) => r.origin !== "whole");
+    const rangesSec = chosen.length && recorded === null ? await settleRanges(svc, u, project, chosen, probe.durationSec) : null;
+    if (recorded === null && rangesSec === null) {
       try {
         decided.admitted = await admitSource(
           u.db,
@@ -365,7 +375,8 @@ export async function ingest(ctx: StageContext) {
       }
     }
     const admitted = decided.admitted;
-    const limit = admitted ? admitted.until : (project.sourceLimitSec ?? null);
+    // ranges bound the work themselves; a whole video may be cut to the start the minutes cover
+    const limit = chosen.length ? null : admitted ? admitted.until : (project.sourceLimitSec ?? null);
     await u.db
       .update(schema.projects)
       .set({
@@ -381,6 +392,11 @@ export async function ingest(ctx: StageContext) {
         updatedAt: new Date(),
       })
       .where(eq(schema.projects.id, projectId));
+    if (rangesSec !== null) await recordSourceDuration(u.db, projectId, rangesSec);
+    if (!ranges.length) {
+      const end = limit === null ? probe.durationSec : Math.min(limit, probe.durationSec);
+      await u.db.insert(schema.projectRanges).values({ id: randomUUID(), projectId, startSec: 0, endSec: end, mode: "find", origin: "whole", billedSec: end });
+    }
     if (admitted) {
       // the ledger counts what is processed: the whole video, or the start a partial project covers
       await recordSourceDuration(u.db, projectId, admitted.until ?? probe.durationSec);
@@ -401,6 +417,39 @@ export async function ingest(ctx: StageContext) {
       totalMinutes: Math.round(probe.durationSec / 60),
     });
   void svc;
+}
+
+/**
+ * The ranges a project was created with, now that the file's length is known: clamped to it (the length announced
+ * before downloading can differ by a second), joined where they overlap, priced, and admitted against the account's
+ * minutes (refused with the upgrade offer when they do not fit). Returns the billed seconds. In the ingest's unit,
+ * under the quota lock and with the ranges locked.
+ */
+async function settleRanges(svc: Services, u: UnitOfWork, project: Project, chosen: ProjectRange[], durationSec: number): Promise<number> {
+  // modes were settled when the ranges were chosen; here only the length can change them
+  const plan = planRanges(
+    chosen.map((r) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode })),
+    { durationSec, maxClipSec: Number.POSITIVE_INFINITY },
+  );
+  if (!plan.ok) throw new NonRetryableError(plan.problems.map(rangeProblemMessage).join(" "));
+  const dropped: string[] = [];
+  for (const r of plan.ranges) {
+    const [keep, ...rest] = r.inputs.map((i) => chosen[i]).filter((x): x is ProjectRange => x !== undefined);
+    if (!keep) continue;
+    dropped.push(...rest.map((x) => x.id));
+    await u.db
+      .update(schema.projectRanges)
+      .set({ startSec: r.startSec, endSec: r.endSec, mode: r.mode, billedSec: r.billedSec })
+      .where(eq(schema.projectRanges.id, keep.id));
+  }
+  if (dropped.length) await u.db.delete(schema.projectRanges).where(inArray(schema.projectRanges.id, dropped));
+  try {
+    await admitRanges(u.db, svc.settings.get(), project.userId, project.id, plan.billedSec, svc.entitlements);
+  } catch (err) {
+    if (err instanceof QuotaExceededError) trackIngestRefusal(svc.telemetry, project.userId, err);
+    throw err;
+  }
+  return plan.billedSec;
 }
 
 /**

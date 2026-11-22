@@ -777,7 +777,10 @@ export async function admitSource(
   throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
-/** Which minutes limit a video of `durationSec` would pass, with the sentence; `projectId` (when it exists) is left out of the counts. */
+/**
+ * Which minutes limit `durationSec` of video would pass, with the sentence; `projectId` (when it exists) is left out of
+ * the counts. `what` words it for a whole video or for the ranges of one (docs/specs/range-clipping.md).
+ */
 async function minutesOver(
   db: Db,
   instance: InstanceLimits,
@@ -785,10 +788,12 @@ async function minutesOver(
   projectId: string | null,
   durationSec: number,
   ent?: Entitlements | null,
+  what: "video" | "ranges" = "video",
 ): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const mins = Math.round(durationSec / 60);
+  const lead = what === "ranges" ? `These ranges are ${mins} minutes` : `This video is ${mins} minutes`;
   const except = projectId ?? undefined;
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
     const used = await minutesToday(db, userId, except);
@@ -796,8 +801,8 @@ async function minutesOver(
       return {
         d,
         key: "MAX_SOURCE_MINUTES_PER_DAY",
-        message: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
-        sentence: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
+        message: `${lead} and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
+        sentence: `${lead} and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
         firstVideo: false,
       };
   }
@@ -811,12 +816,29 @@ async function minutesOver(
       // a new account has used nothing: "0 already used passes the limit" read like a fault, so say what does fit
       const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
       const sentence = m.firstPending
-        ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.`
-        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${formatDay(period.end, { year: false, utc: true })}.`;
+        ? `${lead}. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. ${what === "ranges" ? "Choose ranges" : "Try a video"} under ${fits} minutes.`
+        : `${lead} and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${formatDay(period.end, { year: false, utc: true })}.`;
       return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${upgrade}`, sentence, firstVideo: m.firstPending };
     }
   }
   return null;
+}
+
+/**
+ * A project of ranges (docs/specs/range-clipping.md): its billed seconds are admitted whole or refused with the
+ * upgrade offer, never cut to their start the way a whole video is (`admitSource`), since which ranges to drop is the
+ * person's choice. Call under the account's quota lock, in the unit that records the seconds.
+ */
+export async function admitRanges(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  projectId: string | null,
+  billedSec: number,
+  ent?: Entitlements | null,
+): Promise<void> {
+  const over = await minutesOver(db, instance, userId, projectId, billedSec, ent, "ranges");
+  if (over) throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
 /** Whole minutes still free under a cap, never negative. */

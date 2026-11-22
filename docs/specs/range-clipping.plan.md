@@ -37,14 +37,18 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       `parseClock` (now also the clip editor's time fields) and `parseRangeArg` for the CLI. Tests:
       apps/server/test/ranges-plan.test.ts. Named "ranges", not "sections": a clip's framing spans are already
       `sections` in `update_clip`.
-- [ ] 1.2 Migration: `project_ranges` (`id`, `project_id`, `start_sec`, `end_sec`, `mode`, `label`, `ref`,
-      `origin` user | api | most_replayed | whole, `run_id`, `created_at`; index `(project_id, start_sec)`) and
-      `clips.range_id` (nullable, set null on delete). Backfill: every project gets one `whole` range
-      `[0, coalesce(source_limit_sec, duration_sec))` so the code below has no "no ranges" branch.
-- [ ] 1.3 Quota: `admitSource` takes billed seconds (the planner's `billedSec`) instead of the length; the ledger
-      row records them. A ranges project over the room is refused (`QuotaExceededError` with seconds to remove),
-      never trimmed; a whole-video project keeps `partialUntil`. Tests: two ranges ingests of one account under the
-      quota lock cannot jointly pass the cap.
+- [x] 1.2 Migration 0068: `project_ranges` (`id`, `project_id`, `start_sec`, `end_sec`, `mode`, `origin` user | api |
+      most_replayed | whole, `label`, `ref`, `billed_sec`, `picked_at`, `created_at`; index `(project_id, start_sec)`)
+      and `clips.range_id` (set null on delete). `picked_at` rather than a run id: a retry starts a new run but must not
+      pick again in ranges already picked from. Backfill: every project with a length gets one `whole` range
+      `[0, least(source_limit_sec, duration_sec))`, picked when it has AI clips; clips inside it point at it. Ingest
+      inserts the `whole` range for a new video, `extendProject` one per part it adds.
+- [~] 1.3 Quota: `admitRanges` (quota.ts) admits a ranges project's billed seconds whole or refuses them ("These ranges
+      are N minutes…", with the upgrade offer), never trimmed; a whole video keeps `admitSource` / `partialUntil`.
+      Ingest settles chosen ranges once the file's length is known (`settleRanges`: clamp, merge, price, admit) in the
+      unit that records the seconds, under the quota lock, and the ledger records the billed seconds. Tests:
+      test/ranges-stack.test.ts (admit, refuse, other projects counted). Left: two ranges ingests of one account
+      racing past the cap (a stack test with two concurrent ingests).
 - [ ] 1.4 Transcript coverage becomes spans: `transcripts.covered` (jsonb `[start, end][]`) replacing `coveredSec`
       (migration copies `[0, coveredSec]`). Transcribe extracts audio per padded range (`extractAudio` gains
       `fromSec`), keeps chunk offsets on the source clock, and appends words only inside spans not yet covered.

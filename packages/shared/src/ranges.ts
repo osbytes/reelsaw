@@ -10,6 +10,13 @@ import { formatTime } from "./index.js";
 export const RANGE_MODES = ["find", "clip"] as const;
 export type RangeMode = (typeof RANGE_MODES)[number];
 
+/**
+ * Where a project's range came from: picked by a person, sent by a caller (MCP, API, CLI), a Most replayed peak, or
+ * `whole`: the video (or the start a partly processed project covers, and each part "Clip the rest" adds).
+ */
+export const RANGE_ORIGINS = ["user", "api", "most_replayed", "whole"] as const;
+export type RangeOrigin = (typeof RANGE_ORIGINS)[number];
+
 /** Seconds fetched and transcribed on each side of a range for context; never counted. */
 export const RANGE_PAD_SEC = 15;
 /** Ranges closer than this (after padding) are fetched as one download; still separate ranges, billed apart. */
