@@ -197,7 +197,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | `scenes` | media | shot-cut detection on real footage (dark/low-contrast included): precision and recall vs hand-verified cuts |
 | `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause, inserted sound without speech kept |
 | `alignment` | nothing (runs offline) | wav2vec2 forced alignment: deleted words land inside cuts verified clean by ear; spans ordered and in bounds |
-| `speakers` | media | active speaker detection (mouth motion × audio envelope synchrony) vs known talkers, incl. a drinking listener |
+| `speakers` | media | active speaker detection (LR-ASD audio-visual model; the mouth-motion × audio synchrony fallback with --set ASD_MODEL=false) vs known talkers, incl. a drinking listener |
 | `overlays` | media | burned-in captions/watermarks: per-frame detection recall and whole-video aggregation (no scene text) |
 | `cuts` | models | disfluency jump cuts on real audio: removed cleanly, refused safely, or broken |
 | `transcription` | models, media | WER + entity recall through the configured STT, bias and correction: synthetic `say` audio, and real speech graded against human captions |

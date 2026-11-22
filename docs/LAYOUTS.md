@@ -158,10 +158,21 @@ threshold) are detected once per project before clip selection (`ensureSceneCuts
 kept on the transcript (a saved `scene-cuts` step the scenes refine step shares; a failed decode throws and retries rather than storing "no cuts"); a project from before that, or an imported report, has none, and the render
 detects them on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the
 layout always has the edits. The `layout resolved` log line says how many and from
-where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
-correlated with the audio envelope) runs only on `split` segments of 3 s or more. Static "faces"
-(posters, photos) are dropped first (`dropStaticFaces`: face tracks that never move, clustered by
-place; a track that moves is a person and is kept even where it passes a poster).
+where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`) runs only on `split` segments of 3 s or more. It uses
+LR-ASD (`vision/asd.ts`, `ASD_MODEL`): faces detected at 12.5 fps on the 480 px decode and matched to
+the two seats (a box under half the height of the frame's largest face is a passer-by, not a seat), each
+seat's box median-smoothed over ±0.25 s and widened 1.35× (YuNet boxes are tighter than the S3FD boxes
+the model was trained on), 112×112 grayscale crops at 25 fps scored against the segment's
+MFCCs (`audio/mfcc.ts`), a speaking logit per frame. During speech the face that clearly speaks leads
+(logit above 0 and 1 above the other); when only one face is visible, its logit decides between it and
+the other seat, which is how an off-camera interviewer is attributed. A leader takes the turn after
+0.6 s and runs under 2.5 s fold into their neighbours. Without the model (`ASD_MODEL=false`, files
+missing, or a failure on the segment, logged) the older heuristic runs: 10 fps mouth motion correlated
+with the audio envelope, with the same turn rules. The `active speaker detection` log line names the
+`method`. A third face about as large as the speakers' makes the result "unsure" (keep the split);
+printed faces do not count: `dropStaticFaces` finds boxes that never move, and of those the ones whose
+thumbnail still changes over a second (a still person blinks and breathes; a poster does not) are kept.
+Cost: about one second of CPU per second of split footage.
 
 Track ids are used where identity matters: `assignPair` keeps each split speaker on the face it had
 last frame (a spurious box is a track of its own, and a box picked by position while the speaker's

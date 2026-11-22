@@ -245,11 +245,11 @@ function useLandOnSection(ids: readonly string[], ready: boolean, landing?: stri
 }
 
 /** "text, alignment on cpu; vad on cpu (always)" or, when a GPU provider was asked for, which models got it. */
-function onDeviceSummary(d: { requested: string; faces: string | null; text: string | null; vad: string | null; aligner: string | null }) {
-  const on = (["text", "aligner", "vad"] as const).filter((k) => d[k]);
+function onDeviceSummary(d: { requested: string; faces: string | null; text: string | null; vad: string | null; aligner: string | null; asd: string | null }) {
+  const on = (["text", "aligner", "asd", "vad"] as const).filter((k) => d[k]);
   if (!on.length) return "all off";
   const byProvider = new Map<string, string[]>();
-  for (const k of on) byProvider.set(d[k]!, [...(byProvider.get(d[k]!) ?? []), k === "aligner" ? "alignment" : k]);
+  for (const k of on) byProvider.set(d[k]!, [...(byProvider.get(d[k]!) ?? []), k === "aligner" ? "alignment" : k === "asd" ? "active speaker" : k]);
   const parts = [...byProvider].map(([p, ks]) => `${ks.join(", ")} on ${p}`);
   return d.requested !== "cpu" && !on.some((k) => d[k] === d.requested) ? `${parts.join("; ")} (${d.requested} unavailable)` : parts.join("; ");
 }

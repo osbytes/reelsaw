@@ -1,19 +1,12 @@
 {
-  "updatedAt": "2026-11-22T02:29:20.484Z",
-  "acceptedRegressions": [
-    {
-      "id": "sistercircle-couch-handover",
-      "reason": "YuNet replaces UltraFace and speaker.ts now detects on its full 640x480 frame (YuNet on the squashed 320x240 downscale invented three static faces on the Apollo set and made it unsure). sistercircle-couch-handover switches at 13.9 s instead of ~10 s (agreement 0.76, needs 0.8) with both faces found in every frame and boxes within 0.01 of UltraFace's: the mouth-band heuristic is on a knife edge here; a landmark mouth band and a smoothed box were tried and were worse. The learned ASD model (parallel work) replaces this heuristic",
-      "at": "2026-11-22T02:29:20.484Z"
-    }
-  ],
+  "updatedAt": "2026-11-22T17:27:31.432Z",
   "cases": {
     "apollo-left-monologue-drinking": true,
-    "sistercircle-couch-handover": false,
+    "sistercircle-couch-handover": true,
     "sistercircle-couch-smiling-listener": true,
     "sistercircle-threeshot-unsure": true,
-    "oxford-qa-offcamera-interviewer": false,
-    "oxford-offcamera-monologue": false
+    "oxford-qa-offcamera-interviewer": true,
+    "oxford-offcamera-monologue": true
   },
   "metrics": {}
 }

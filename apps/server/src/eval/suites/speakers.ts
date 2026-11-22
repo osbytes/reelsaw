@@ -8,7 +8,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadFaceDetector } from "../../vision/faces.js";
 import { loadVad, VAD_SR } from "../../audio/vad.js";
-import { activeSpeakers, speechAt, envelopeAt } from "../../pipeline/speaker.js";
+import { activeSpeakers, speechAt } from "../../pipeline/speaker.js";
+import { loadAsdModel, type AsdModel } from "../../vision/asd.js";
 import { materialize, MediaDriftError, type CaseResult, type MediaSource, type Suite } from "../framework.js";
 
 interface Spec {
@@ -25,15 +26,18 @@ interface Spec {
 
 export const speakersSuite: Suite = {
   name: "speakers",
-  description: "active speaker detection (mouth motion × audio envelope synchrony) vs known talkers, incl. a drinking listener",
+  description:
+    "active speaker detection (LR-ASD audio-visual model; the mouth-motion × audio synchrony fallback with --set ASD_MODEL=false) vs known talkers, incl. a drinking listener",
   needs: ["media"],
   async run(ctx) {
     const cfg = ctx.config();
     const spec = JSON.parse(await fs.readFile(path.join(ctx.fixtures("speakers"), "cases.json"), "utf8")) as Spec;
     let faces, vad;
+    let asd: AsdModel | null = null;
     try {
       faces = await loadFaceDetector(cfg.FACE_MODEL_PATH);
       vad = await loadVad(cfg.VAD_MODEL_PATH);
+      if (cfg.ASD_MODEL) asd = await loadAsdModel(cfg.ASD_MODEL_DIR);
     } catch (err) {
       return [{ id: "(models)", pass: false, skipped: `models unavailable: ${(err as Error).message.slice(0, 100)}` }];
     }
@@ -74,7 +78,16 @@ export const speakersSuite: Suite = {
         const pcm = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
         const probs = await vad.probabilities(pcm);
         const t0 = Date.now();
-        const tl = await activeSpeakers({ faces, ffmpegPath: cfg.FFMPEG_PATH }, media, s0, s1 - s0, c.speakers, speechAt(probs, 0), envelopeAt(pcm, 0));
+        const [srcW, srcH] = (
+          await ctx.exec(cfg.FFPROBE_PATH, ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", media])
+        )
+          .toString()
+          .trim()
+          .split(",")
+          .map(Number);
+        const tl = await activeSpeakers({ faces, ffmpegPath: cfg.FFMPEG_PATH, asd }, media, s0, s1 - s0, c.speakers, speechAt(probs, 0), pcm, {
+          srcAspect: srcW! / srcH!,
+        });
         const ms = Date.now() - t0;
         // agreement over 0.1 s steps
         let agree = 0;
@@ -98,12 +111,15 @@ export const speakersSuite: Suite = {
             unsure: unsure ? 1 : 0,
             ms,
           },
-          notes: unsure ? "unsure (no runs)" : tl.runs.map((r) => `${r.who === 0 ? "A" : "B"} ${r.start}-${r.end}`).join(", "),
+          notes:
+            (tl.fallback ? `model failed (${tl.fallback}), heuristic: ` : "") +
+            (unsure ? "unsure (no runs)" : tl.runs.map((r) => `${r.who === 0 ? "A" : "B"} ${r.start}-${r.end}`).join(", ")),
         });
       }
     } finally {
       await faces.release();
       await vad.release();
+      await asd?.release();
     }
     return out;
   },

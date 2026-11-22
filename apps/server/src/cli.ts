@@ -1574,6 +1574,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       text: svc.text?.provider ?? null,
       vad: svc.vad ? "cpu" : null,
       aligner: svc.aligner?.provider ?? null,
+      asd: svc.asd?.provider ?? null,
     };
     const renders = { ...svc.resources.renders(), max: svc.resources.maxRenders() };
     if (args.includes("--json"))
@@ -1600,7 +1601,7 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     );
     line(
       "on-device",
-      `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`,
+      `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, active speaker ${onDevice.asd ?? "off (heuristic)"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`,
     );
     line("models", `${svc.models.get().language}, ${svc.models.get().transcription}${svc.models.get().align ? `, align ${svc.models.get().align}` : ""}`);
     const proxies = svc.media.ytdlpProxies();
