@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        If it is about one project, attach the zip from "Report an issue" on that project (or
+        `reelsaw report <projectId>` on the box). Secrets and API keys are left out of it.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`reelsaw version`, or Settings → System"
+    validations:
+      required: true
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: How is it deployed?
+      options:
+        - One-command installer (deploy/install.sh or install.ps1)
+        - Compose by hand
+        - App store template (Unraid, Docker MCP Catalog, …)
+        - From source
+        - Hosted (app.reelsaw.com)
+    validations:
+      required: true
+  - type: input
+    id: models
+    attributes:
+      label: Models
+      description: The language and transcription models in use (Settings → Models), if the problem involves picking or captions.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`docker compose logs app` around the time of the problem. Remove secrets."
+      render: text
