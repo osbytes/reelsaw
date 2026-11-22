@@ -629,12 +629,18 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 - **Split crops must be speaker-sized.** A full-height 9:8 crop of a wide two-shot is ~60% of the frame and pins
   edge speakers off-centre; `speakerCrop` (@reelsaw/shared, used by renderer and preview) sizes each crop to
   ~3.2 face-heights and keeps it out of burned-in text bands.
-- **Face detectors see posters.** UltraFace returned a wall object as a face (score ~0.88, identical box every
-  frame) and split paired it with the real speaker. `dropStaticFaces` removes face clusters that never move.
+- **Face detectors see posters.** UltraFace (the detector before YuNet) returned a wall object as a face (score
+  ~0.88, identical box every frame) and split paired it with the real speaker. `dropStaticFaces` removes face
+  tracks that never move.
+- **Face detectors see pans.** UltraFace boxed round stainless pans seen from above with scores up to 0.99 (38% of
+  the frames of a face-free POV clip, eval `framing/shots-pov-hands-no-face`); YuNet at 640x360 puts a face on a
+  few percent. The fix was the model, not another probe: when a class of false faces appears, check the detector
+  first.
 - **Pair speakers by continuity, not by box size.** Taking the two largest boxes per frame and sorting them
   left/right let a spurious box beside one speaker (a second detection, a hand) outrank the other speaker, so
   that crop panned onto the wrong person and back ("lazy eye"). `assignPair` gives each box to the speaker it's
-  nearer to and holds the last position when a speaker has none (eval `framing/split-spurious-box-beside-speaker`).
+  nearer to and holds the last position when a speaker has none (eval `framing/split-spurious-box-beside-speaker`);
+  with face tracks it keeps each speaker on its own track first.
 - **Speakers disappear for seconds** (drinking, turning away). Split holds through short one-face stretches when the
   visible face matches one of the split speakers; otherwise the layout flips for a sip.
 - **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across

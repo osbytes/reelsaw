@@ -12,7 +12,7 @@ import { rgbFramesToPipe, CommandError } from "../media.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import type { TextDetector } from "../vision/text.js";
 import { TEXT_INPUT_W, TEXT_INPUT_H } from "../vision/text.js";
-import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector } from "../vision/faces.js";
+import type { FaceDetector } from "../vision/faces.js";
 import { mapLimit } from "./select.js";
 
 const GX = 48;
@@ -149,23 +149,6 @@ export function splitInterface<O extends Box>(overlays: O[]): { kept: O[]; ui: O
   return { kept: overlays.filter((o) => !ui.includes(o)), ui };
 }
 
-/** Nearest-neighbour resize of a text-detector frame to the face detector's input (both stretch the source). */
-function toFaceInput(rgb: Uint8Array): Uint8Array {
-  const out = new Uint8Array(FACE_INPUT_W * FACE_INPUT_H * 3);
-  for (let y = 0; y < FACE_INPUT_H; y++) {
-    const sy = Math.min(TEXT_INPUT_H - 1, Math.floor(((y + 0.5) * TEXT_INPUT_H) / FACE_INPUT_H));
-    for (let x = 0; x < FACE_INPUT_W; x++) {
-      const sx = Math.min(TEXT_INPUT_W - 1, Math.floor(((x + 0.5) * TEXT_INPUT_W) / FACE_INPUT_W));
-      const si = (sy * TEXT_INPUT_W + sx) * 3;
-      const di = (y * FACE_INPUT_W + x) * 3;
-      out[di] = rgb[si]!;
-      out[di + 1] = rgb[si + 1]!;
-      out[di + 2] = rgb[si + 2]!;
-    }
-  }
-  return out;
-}
-
 /**
  * A render never blurs someone's face. A text region that keeps landing on a face is either scene
  * texture (cabinet edges, a shelf above a speaker's head in a static shot) or a caption band in a tight
@@ -279,7 +262,7 @@ export async function detectOverlays(
     // paragraphs are content: only the remaining lines count as evidence of an overlay
     const { evidence: boxes, textHeavy, slide } = splitText(all);
     const cells = textCells(boxes);
-    const faces = deps.faces ? await deps.faces.detect(toFaceInput(rgb)).catch(() => []) : [];
+    const faces = deps.faces ? await deps.faces.detect(rgb, { w: TEXT_INPUT_W, h: TEXT_INPUT_H }).catch(() => []) : [];
     return { scene: sceneOf(t), cells, boxes, faces, slide, textHeavy };
   });
   const sampled = grids.filter((g): g is NonNullable<typeof g> => !!g);
