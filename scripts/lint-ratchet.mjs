@@ -57,7 +57,8 @@ const problems = [];
 for (const rule of new Set([...Object.keys(baseline), ...Object.keys(sorted)])) {
   const was = baseline[rule] ?? 0;
   const now = sorted[rule] ?? 0;
-  if (now > was) problems.push(`${rule}: ${now} (baseline ${was}). New code must not add these; fix them or run biome lint --only=${rule} to find them.`);
+  const find = rule.startsWith("i18n/") ? "node scripts/i18n-literals.mjs --list" : `biome lint --only=${rule}`;
+  if (now > was) problems.push(`${rule}: ${now} (baseline ${was}). New code must not add these; fix them (${find} lists them).`);
   else if (now < was) problems.push(`${rule}: ${now}, below the baseline ${was}. Lower it: node scripts/lint-ratchet.mjs --update`);
 }
 if (problems.length) {

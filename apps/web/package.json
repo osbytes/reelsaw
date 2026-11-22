@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "e2e": "playwright test",
     "i18n:extract": "lingui extract --clean",
     "i18n:check": "lingui check sync"
   },
@@ -51,9 +52,11 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@lingui/cli": "6.12.0",
     "@lingui/format-po": "6.12.0",
     "@lingui/vite-plugin": "6.12.0",
+    "@playwright/test": "1.65.1",
     "@reelsaw/server": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.3.0",

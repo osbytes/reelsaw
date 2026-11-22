@@ -97,6 +97,16 @@ body { @apply bg-bg font-sans text-[14px] text-ink antialiased; }
 @layer base {
   :focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
   ::selection { background: var(--acc-soft); }
+  /* reduced motion, honoured everywhere (docs/UI.md, "Motion"): transitions and decorative animations end at
+     once; spinners keep turning because they are status, not decoration */
+  @media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin), ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @utility film { background: repeating-linear-gradient(135deg, var(--film) 0 10px, var(--film2) 10px 11px); }

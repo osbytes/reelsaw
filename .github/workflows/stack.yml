@@ -85,6 +85,17 @@ jobs:
       - run: curl -fsS http://localhost:3100/api/health
       # only the files that need the stack: the `check` job in ci.yml runs the rest (test:unit)
       - run: pnpm --filter @reelsaw/server test:stack
+      # every main screen at desktop and phone width through axe (apps/web/e2e); new violations fail,
+      # existing ones are in apps/web/e2e/axe-baseline.json and may only go down
+      - run: pnpm --filter @reelsaw/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @reelsaw/web e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/test-results
+          if-no-files-found: ignore
+          retention-days: 14
       - name: app logs
         if: failure()
         run: docker compose logs --no-color app > app.log 2>&1 || true

@@ -58,9 +58,11 @@ export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: stri
 
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="Reelsaw">
+    // the wordmark is an image of the name, so the link's name is "Reelsaw" and matches what it shows (WCAG 2.5.3)
+    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
+      <span className="sr-only sm:hidden">Reelsaw</span>
       <LogoMark />
-      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" aria-hidden>
+      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" role="img" aria-label="Reelsaw">
         reel<span className="mx-px font-medium text-acc-text">/</span>saw
       </span>
     </Link>
@@ -235,11 +237,16 @@ function SearchButton() {
       onPointerEnter={prefetchPalette}
       onFocus={prefetchPalette}
       className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]"
-      aria-label="Search"
+      // the name is the visible text (WCAG 2.5.3; on phones, where it is hidden, an sr-only one); the shortcut is
+      // announced through aria-keyshortcuts
+      aria-keyshortcuts={mod === "⌘" ? "Meta+K" : "Control+K"}
     >
-      <Search className="h-4 w-4 shrink-0" />
-      <span className="hidden min-w-0 flex-1 truncate text-start sm:inline">Search or paste a link…</span>
-      <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
+      <Search className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="sr-only sm:hidden">Search</span>
+      <span className="hidden min-w-0 flex-1 truncate text-start text-ink2 sm:inline">Search or paste a link…</span>
+      <span className="kbd hidden shrink-0 text-ink2 opacity-100 sm:inline-grid" aria-hidden>
+        {mod}K
+      </span>
     </button>
   );
 }
