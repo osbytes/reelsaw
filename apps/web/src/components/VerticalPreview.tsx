@@ -674,7 +674,7 @@ export function VerticalPreview({
     <div
       ref={boxRef}
       style={fitBox ? { width: fitBox.w, height: fitBox.h } : undefined}
-      className={`relative mx-auto ${fitBox ? "shrink-0" : "aspect-[9/16] h-full max-w-full"} touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
+      className={`relative mx-auto ${fitBox ? "shrink-0 self-center" : "aspect-[9/16] h-full max-w-full"} touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
       title={
         pannable
           ? framing.layout === "split"
