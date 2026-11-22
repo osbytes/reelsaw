@@ -10,7 +10,7 @@ import { HeroLinkForm } from "@/components/hero-link-form";
 import { HeroReel } from "@/components/hero-reel";
 import { ClipStrip } from "@/components/clip-strip";
 import { FeatureTabs } from "@/components/feature-tabs";
-import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
+import { ALTERNATIVE_LINKS, GUIDE_NAV, USE_CASE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
 import { DEMO_RUN, OTHER_SOURCES } from "@/content/demo";
 import { githubReleases } from "@/lib/github";
@@ -380,8 +380,8 @@ export default async function HomePage() {
                 ))}
               </nav>
               <nav aria-label="Guides" className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">Guides</h3>
-                {GUIDE_NAV.map((l) => (
+                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">Use cases and guides</h3>
+                {[...USE_CASE_NAV, ...GUIDE_NAV].map((l) => (
                   <a key={l.href} href={l.href} className="prose-link w-fit text-[15px]">
                     {l.label}
                   </a>

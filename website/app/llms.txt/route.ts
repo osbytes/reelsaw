@@ -1,5 +1,6 @@
 import { COMPETITORS } from "@/content/competitors";
 import { GUIDES } from "@/content/guides";
+import { USE_CASES } from "@/content/use-cases";
 import { CHECKED } from "@/content/reelsaw";
 import { SITE } from "@/lib/site";
 
@@ -32,6 +33,11 @@ export function GET() {
     `- [Operator CLI](${SITE.cliDocs}): the same operations from a shell inside the container`,
     `- [MCP registry listing](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.osbytes/reelsaw)`,
     `- [Glama](${SITE.glama})`,
+    "",
+    "## Use cases",
+    "",
+    `- [All use cases](${SITE.url}/use-cases)`,
+    ...USE_CASES.map((u) => `- [${u.h1}](${SITE.url}/${u.slug}): ${u.metaDescription}`),
     "",
     "## Guides",
     "",

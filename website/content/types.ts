@@ -51,4 +51,11 @@ export type Guide = {
   sections: Section[];
   faqs: Faq[];
   sources: Link[];
+  /** ISO date the page's facts were last checked; guides without one use CHECKED */
+  updated?: string;
+  /** Small print under the page, such as "not affiliated with" a game publisher */
+  disclaimer?: string;
 };
+
+/** A use-case page: a guide aimed at one kind of footage or one trending search, with a short nav label. */
+export type UseCase = Guide & { updated: string; nav: string; hint: string };

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { GUIDES, guideBySlug } from "@/content/guides";
-import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
+import { ARTICLES, articleBySlug } from "@/content/articles";
+import { ALTERNATIVE_LINKS, GUIDE_NAV, USE_CASE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
 import { ArticleHeader, DataTable, FaqSection, LinkList, TryIt } from "@/components/seo";
 import { Footer } from "@/components/footer";
@@ -13,13 +13,14 @@ type Props = { params: Promise<{ slug: string }> };
 
 export const dynamicParams = false;
 export function generateStaticParams() {
-  return GUIDES.map((g) => ({ slug: g.slug }));
+  return ARTICLES.map((a) => ({ slug: a.page.slug }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const g = guideBySlug(slug);
-  if (!g) return {};
+  const a = articleBySlug(slug);
+  if (!a) return {};
+  const g = a.page;
   const path = `/${g.slug}`;
   return {
     title: g.metaTitle,
@@ -31,22 +32,28 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function GuidePage({ params }: Props) {
   const { slug } = await params;
-  const g = guideBySlug(slug);
-  if (!g) notFound();
-  const navLabel = GUIDE_NAV.find((l) => l.href === `/${g.slug}`)?.label ?? g.h1;
+  const a = articleBySlug(slug);
+  if (!a) notFound();
+  const g = a.page;
+  const path = `/${g.slug}`;
+  const isUseCase = a.kind === "useCase";
+  const navLabel = [...USE_CASE_NAV, ...GUIDE_NAV].find((l) => l.href === path)?.label ?? g.h1;
+  const crumbs = isUseCase
+    ? [
+        { href: "/", label: SITE.name },
+        { href: "/use-cases", label: "Use cases" },
+        { href: path, label: navLabel },
+      ]
+    : [
+        { href: "/", label: SITE.name },
+        { href: path, label: navLabel },
+      ];
+  const related = isUseCase ? [...USE_CASE_NAV, ...GUIDE_NAV] : [...GUIDE_NAV, ...USE_CASE_NAV, ...ALTERNATIVE_LINKS];
   return (
     <>
       <Header />
       <main id="main" className="container-page flex max-w-[880px] flex-col gap-14 py-12 sm:py-16">
-        <ArticleHeader
-          crumbs={[
-            { href: "/", label: SITE.name },
-            { href: `/${g.slug}`, label: navLabel },
-          ]}
-          eyebrow="Guide"
-          h1={g.h1}
-          intro={g.intro}
-        />
+        <ArticleHeader crumbs={crumbs} eyebrow={isUseCase ? "Use case" : "Guide"} h1={g.h1} intro={g.intro} />
         {g.sections.map((s) => (
           <section key={s.heading} className="flex flex-col gap-4" aria-label={s.heading}>
             <h2 className="text-[24px] font-bold tracking-tight">{s.heading}</h2>
@@ -79,9 +86,12 @@ export default async function GuidePage({ params }: Props) {
         ))}
         <TryIt />
         <FaqSection faqs={g.faqs} />
-        <LinkList heading="Related" links={[...GUIDE_NAV.filter((l) => l.href !== `/${g.slug}`), ...ALTERNATIVE_LINKS]} />
+        <LinkList heading="Related" links={related.filter((l) => l.href !== path)} />
         <LinkList heading="Sources" links={g.sources} external />
-        <p className="text-xs text-ink3">Last updated {CHECKED}.</p>
+        <div className="flex flex-col gap-1 text-xs text-ink3">
+          <p>Last updated {g.updated ?? CHECKED}.</p>
+          {g.disclaimer && <p>{g.disclaimer}</p>}
+        </div>
       </main>
       <Footer />
     </>

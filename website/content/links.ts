@@ -1,8 +1,11 @@
 import { COMPETITORS } from "./competitors";
 import { GUIDES } from "./guides";
+import { USE_CASES } from "./use-cases";
 import type { Link } from "./types";
 
 export const ALTERNATIVE_LINKS: Link[] = COMPETITORS.map((c) => ({ href: `/alternatives/${c.slug}`, label: `Reelsaw vs ${c.name}` }));
+/** One per use-case page, with its short label */
+export const USE_CASE_NAV: Link[] = USE_CASES.map((u) => ({ href: `/${u.slug}`, label: u.nav }));
 export const GUIDE_LINKS: Link[] = GUIDES.map((g) => ({ href: `/${g.slug}`, label: g.h1 }));
 /** Short labels for navigation surfaces */
 export const GUIDE_NAV: Link[] = [

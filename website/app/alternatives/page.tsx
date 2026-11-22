@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ArrowRight } from "lucide-react";
 import { COMPETITORS } from "@/content/competitors";
-import { GUIDE_NAV } from "@/content/links";
+import { GUIDE_NAV, USE_CASE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
 import { Breadcrumbs, LinkList, TryIt } from "@/components/seo";
 import { Footer } from "@/components/footer";
@@ -54,6 +54,7 @@ export default function AlternativesIndex() {
           ))}
         </ul>
         <TryIt />
+        <LinkList heading="Use cases" links={USE_CASE_NAV} />
         <LinkList heading="Guides" links={GUIDE_NAV} />
         <p className="text-xs text-ink3">Pricing checked {CHECKED}. Vendors change plans without notice; verify before you buy.</p>
       </main>
