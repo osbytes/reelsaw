@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
-import { ModelPicker, type PickerProvider } from "./ModelPicker";
+import { ModelPicker } from "./ModelPicker";
 import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
 import { ConfirmDialog, ProgressBar, Skeleton } from "./ui";
 import { formatBytes, plural } from "@reelsaw/shared";
@@ -32,9 +32,7 @@ export function ModelsSection() {
     ...trpc.admin.models.get.queryOptions(),
     refetchInterval: (q) => (q.state.data?.pulls.some((p) => p.status === "running") ? 1000 : 10_000),
   });
-  const language = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "language" }));
-  const transcription = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "transcription" }));
-  const catalogs = { language, transcription };
+  // each picker loads its own listing a page at a time (ModelPicker → admin.models.catalog)
   const providers = useQuery(trpc.admin.providers.get.queryOptions());
   const refreshCatalogs = () => {
     void qc.invalidateQueries({ queryKey: trpc.admin.providers.pathKey() });
@@ -106,7 +104,9 @@ export function ModelsSection() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningKey]);
-  const pulling = useMemo(() => new Set(running.map((p) => `${p.provider}:${p.model}`)), [running]);
+  // keyed by the models, not the poll: progress ticks every second and must not hand the pickers a new Set each time
+  const pullingKey = running.map((p) => `${p.provider}:${p.model}`).join("\n");
+  const pulling = useMemo(() => new Set(pullingKey ? pullingKey.split("\n") : []), [pullingKey]);
 
   const sourceOf = (k: Kind) =>
     s?.override[k]
@@ -148,7 +148,6 @@ export function ModelsSection() {
                 <Skeleton className="h-[38px] w-full rounded-[10px]" />
               </div>
             );
-          const providerList = (catalogs[catalog].data ?? []) as PickerProvider[];
           const value = shown(kind);
           const changed = draft[kind] !== undefined && draft[kind] !== s?.current[kind];
           return (
@@ -158,12 +157,11 @@ export function ModelsSection() {
                 <span className="text-[11px] text-ink3">{changed ? "unsaved" : sourceOf(kind)}</span>
               </div>
               <ModelPicker
+                kind={catalog}
                 label={title}
                 value={value}
                 onChange={(id) => setDraft((d) => ({ ...d, [kind]: id }))}
-                providers={providerList}
                 states={providers.data ?? []}
-                loading={catalogs[catalog].isLoading}
                 onPull={(id) => pull.mutate({ id })}
                 pulling={pulling}
                 onSaveCredentials={onSaveCredentials}

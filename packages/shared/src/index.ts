@@ -1940,6 +1940,7 @@ export * from "./format.js";
 export * from "./partial.js";
 export * from "./punch-in.js";
 export * from "./shape.js";
+export * from "./fuzzy.js";
 export * from "./attribution.js";
 export * from "./languages.js";
 export * from "./whisper-languages.js";
