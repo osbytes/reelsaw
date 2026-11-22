@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
+import { outputShapeSchema } from "./shape.js";
 
 /** Canonical source repository (app UI, emails, update checks). */
 export const REPO_URL = "https://github.com/osbytes/reelsaw";
@@ -49,6 +50,7 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
 
 /**
  * auto   – detect faces per clip: big face → "face", webcam-in-corner/small face → "stack", no face → "fit";
+ *          no face but one clearly moving subject (b-roll, a product in the hand) → "center" following it (`DetectedSegment.focus`);
  *          a picture inset between bars (a phone video in a 16:9 edit) → "fit" showing just the inset (`DetectedSegment.inset`)
  * face   – 9:16 crop that follows the detected face (falls back to center crop when none is found)
  * split  – two speakers, one crop stacked above the other
@@ -60,7 +62,7 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
 export const reframeModeSchema = z
   .enum(["auto", "face", "split", "stack", "fit", "center", "none"])
   .describe(
-    "Framing: auto (detect per section; a video inset between bars, like a phone clip in a 16:9 edit, is cropped to the inset), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)",
+    "Framing: auto (detect per section; a shot without a face follows its moving subject when one clearly stands out, else shows whole; a video inset between bars, like a phone clip in a 16:9 edit, is cropped to the inset), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)",
   );
 export type ReframeMode = z.infer<typeof reframeModeSchema>;
 
@@ -147,6 +149,8 @@ export function bodyEdgeFades(
  * the text block as a fraction of the 9:16 frame, so the browser preview and the ASS renderer agree.
  */
 export const styleSchema = z.object({
+  /** The rendered video's shape (`shape.ts`); positions below are fractions of that frame. */
+  shape: outputShapeSchema.default("9:16"),
   captions: captionStyleSchema.default("karaoke"),
   /** Caption and hook typeface; unset or null = the instance caption font (CAPTION_FONT). */
   font: fontFamilySchema
@@ -169,6 +173,12 @@ export const styleSchema = z.object({
   /** Colour the clip's key words (picked by the AI when scoring; editable per clip). */
   emphasis: z.boolean().describe("Colour the clip's key words (default true)").default(true),
   emphasisColor: hexColor.describe("Colour of emphasised words, #RRGGBB (default #39FF14)").default("#39FF14"),
+  /**
+   * Punch-in zooms on the key words (`punch-in.ts`): face and centre crops only, never across a cut. Off by default: a
+   * re-render must not change a clip's look unasked, and the key words are the model's guess.
+   */
+  punchIn: z.boolean().describe("Zoom in briefly on the clip's key words (face and centre crops only, never across a cut; default false)").default(false),
+  punchInScale: z.number().min(1.05).max(1.3).describe("How far a punch-in zooms (1.05-1.3x, default 1.12)").default(1.12),
   showHook: z.boolean().describe("Show the hook text at the start of the clip (default true)").default(true),
   hookX: frac("Hook centre, horizontal").default(0.5),
   hookY: frac("Hook centre, vertical (default 0.16)").default(0.16),
@@ -812,6 +822,11 @@ export interface DetectedSegment {
    * output shows just this part of the source: filling the frame when it is 9:16, else at its own shape over a blurred copy
    */
   inset?: ContentRegion;
+  /**
+   * "center" only (automatic): a shot without a usable face whose crop follows its moving subject (a ship, a car, a product
+   * in the hand) along `track`, instead of the frame's centre
+   */
+  focus?: "subject";
 }
 
 /**
@@ -895,10 +910,21 @@ export interface ClipDiagnostics {
    * audio, music) and so were kept; `skipped: "mostly-sound"`: nothing trimmed because the quiet gaps
    * would have removed `wouldRemoveSec`, too much of the clip for pauses
    */
-  pauses?: { cuts: number; removedSec: number; maxPause: number; keptSound?: number; skipped?: "mostly-sound"; wouldRemoveSec?: number };
+  pauses?: {
+    cuts: number;
+    removedSec: number;
+    maxPause: number;
+    keptSound?: number;
+    skipped?: "mostly-sound";
+    wouldRemoveSec?: number;
+    /** the stretches cut, source seconds (renders from before it existed have none) */
+    ranges?: Array<{ start: number; end: number }>;
+  };
   /** the source range's measured loudness (LUFS, dBTP) and the gain that brought the speech to -14 LUFS */
   loudness?: { inputLufs: number; inputPeak: number; gainDb: number };
   layout: string;
+  /** punch-in zooms this render burned in (style `punchIn`), source seconds: the ease in starts at `start`, the ease out ends at `end` */
+  punchIns?: Array<{ start: number; end: number; word: string }>;
   cuts: {
     /**
      * `verified: false` (absent in renders from before it existed, meaning verified) = applied at the
@@ -1659,12 +1685,18 @@ export function isFullFrame(c: ContentRegion | undefined | null): boolean {
  * source letterboxed to the frame width over the speaker). Null for one-pane layouts, and for a seam
  * too close to an edge to carry captions (a portrait source in a stack).
  */
-export function layoutSeamY(layout: string, content: ContentRegion | undefined | null, srcW: number, srcH: number): number | null {
+export function layoutSeamY(
+  layout: string,
+  content: ContentRegion | undefined | null,
+  srcW: number,
+  srcH: number,
+  out: { w: number; h: number } = { w: 1080, h: 1920 },
+): number | null {
   if (layout === "split") return 0.5;
   if (layout !== "stack") return null;
   if (!isFullFrame(content)) return 0.5;
-  const topH = Math.min(Math.round((1080 * srcH) / srcW / 2) * 2, 1918);
-  const y = topH / 1920;
+  const topH = Math.min(Math.round((out.w * srcH) / srcW / 2) * 2, out.h - 2);
+  const y = topH / out.h;
   return y >= 0.15 && y <= 0.85 ? Number(y.toFixed(4)) : null;
 }
 
@@ -1912,6 +1944,8 @@ export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
+export * from "./punch-in.js";
+export * from "./shape.js";
 export * from "./fuzzy.js";
 export * from "./attribution.js";
 export * from "./languages.js";

@@ -215,7 +215,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 
 Framing track tolerances are fractions of the source width (`maxErrFrac`, `maxPanFracPerSec` in `case.json`; 0.015625 and 0.625 equal 30 px and 1200 px/s on a 1920 px source), so a case means the same on any source size. The legacy `maxErrPx` / `maxPanPxPerSec` keys (1920 px pixels) still load and are converted. Face-size thresholds in the layout code are relative to the shorter source side, which is identical to the old height fractions for landscape input.
 
-Framing `shots` cases (`kind: "shots"`) label time windows with the layout(s) a human editor would accept and, where a crop should follow people, their x positions (`faces`, left to right). The suite drops static faces, passes the source aspect and the case's `sceneCuts` (the cuts `media.detectScenes` finds on the clip, checked on contact sheets) to `segmentLayouts`, then requires `minAgreement` of the labelled time to agree and every crop within `faceTol` of its face. Windows marked `uncertain` (a wide three-person couch shot: fit the couch or split the talkers?) are shown with a `?` and never scored. `maxFaceFrames` bounds the share of sampled frames with any face box (for footage with no face), and `minCropWidth` the face crop's share of the width (a 9:16 source should stay near the identity). The summary's `worstShotAgreement` is the lowest agreement over these cases. `shots-pov-hands-no-face` failed on purpose under UltraFace, which boxed round pans seen from above in 38% of the frames of a face-free POV clip; YuNet at 640x360 puts a face on 2% and the case passes. The switch to YuNet (2026-11) made two cases fail instead, recorded failing in the baseline as findings, not label problems: `shots-screencast-corner-webcam` (the stack after the Twitch page finds the webcam tile in 58% of its frames, under the 60% the tile needs; UltraFace's boxes, the same within 0.007, gave 64%) and `shots-couch-multicam-guest-story` (the tweet card in its first 12 s holds a phone video with a real face that YuNet sees in over 60% of the frames, UltraFace in 56%, so the card becomes a corner stack instead of fit: no rule yet says a face inside a picture in the content is not the speaker). `shots-couch-multicam-guest-story` is the clip from a 2026-10-24 issue report: a close-up alternating every 1-3 s with a four-person couch shot (`fit`) and a 1.1 s two-shot (`split`); it is why cuts bound pieces down to `MIN_SHOT_SEC`. Frames (`t<sec>.jpg`, seconds in the materialised media) are committed only for CC BY sources; the vertical short is standard licence and is referenced by url and time only.
+Framing `shots` cases (`kind: "shots"`) label time windows with the layout(s) a human editor would accept and, where a crop should follow people, their x positions (`faces`, left to right). The suite drops static faces, passes the source aspect and the case's `sceneCuts` (the cuts `media.detectScenes` finds on the clip, checked on contact sheets) to `segmentLayouts`, then requires `minAgreement` of the labelled time to agree and every crop within `faceTol` of its face. Windows marked `uncertain` (a wide three-person couch shot: fit the couch or split the talkers?) are shown with a `?` and never scored. `maxFaceFrames` bounds the share of sampled frames with any face box (for footage with no face), and `minCropWidth` the face crop's share of the width (a 9:16 source should stay near the identity). The summary's `worstShotAgreement` is the lowest agreement over these cases. `shots-pov-hands-no-face` failed on purpose under UltraFace, which boxed round pans seen from above in 38% of the frames of a face-free POV clip; YuNet at 640x360 puts a face on 2% and the case passes. The switch to YuNet (2026-11) made two cases fail instead, recorded failing in the baseline as findings, not label problems: `shots-screencast-corner-webcam` (the stack after the Twitch page finds the webcam tile in 58% of its frames, under the 60% the tile needs; UltraFace's boxes, the same within 0.007, gave 64%) and `shots-couch-multicam-guest-story` (the tweet card in its first 12 s holds a phone video with a real face that YuNet sees in over 60% of the frames, UltraFace in 56%, so the card becomes a corner stack instead of fit: no rule yet says a face inside a picture in the content is not the speaker). `shots-couch-multicam-guest-story` is the clip from a 2026-10-24 issue report: a close-up alternating every 1-3 s with a four-person couch shot (`fit`) and a 1.1 s two-shot (`split`); it is why cuts bound pieces down to `MIN_SHOT_SEC`. A window labelled `subject` wants the crop that follows the moving subject of a shot without a face (`center` with `focus: "subject"`, `saliency.ts`), with `subject` the x it must sit on (within `faceTol`); `shots-no-face-broll-subject` (news b-roll: a submarine's wake, a worker on a lift, a worker at a machine; a chart, a docked ship with a waving flag at its edge and a wide carrier that must stay whole; recorded failing since YuNet, which boxes the machine worker's profile face in every frame, so the small-face rule stacks that shot) and `shots-no-face-hands-product` (hands husking corn; a recipe card that must stay whole) cover it. Samples carry a per-frame `motion` probe since then; `src/eval/tools/add-motion.ts` adds it to older samples.json without touching their faces or text (`--text` also scans text where a case has none, as `shots-couch-multicam-guest-story` needed: without the text a render sees, its tweet card's embedded video looked like a subject), and `src/eval/tools/sample-shot.ts` samples and segments any stretch of a video for finding new cases. Frames (`t<sec>.jpg`, seconds in the materialised media) are committed only for CC BY sources; the vertical short is standard licence and is referenced by url and time only.
 
 Scene-cut defaults (`SCENE_FLOOR`, `SCENE_RATIO` in `pipeline/scenes.ts`) were tuned on one dark podcast. The `scenes` suite now also covers bright footage, labelled by eye (4 fps contact sheet of the graded window, then frames at -0.3/-0.1/+0.1/+0.3 s around each candidate; never from detector output): `bradford-highlights-bright` (football highlights, CC BY; 9 hard cuts graded, motion-graphic ident and 6 dissolves excluded), `voa-news-package` (news b-roll and interviews, standard licence so url + time only; 37 hard cuts) and `sister-circle-studio` (multi-camera studio talk show, CC BY; 28 hard cuts in 0-120 s). Result with the current constants: recall 1.00 on all three; precision 1.00 on the football and studio cases and 0.93 on the news package, whose three false positives (104.0 s, 107.4 s, 125.0 s) are fast in-shot motion (a sweeping arm, a gimbal move, a hand covering the lens). So the constants held up on these three clips; they are still unvalidated on dark or very low-contrast footage other than apollo, and on cuts hidden inside a dissolve. A case may list `gradual: [[from, to], ...]` windows (dissolves, wipes, graphic transitions): a detection inside one is neither a hit nor a false positive and is shown as `inGradual`.
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
@@ -294,6 +294,12 @@ Traps:
 - `matching` / `matchingKept`: candidates that match a creator span, and how many of them the
   relative score gate (`scoreGate`, analyze.ts, with the `.env` `ANALYZE_*` settings) keeps.
 - `picksFound`: shorts with at least one span recalled.
+- `inPool` (summary `creatorPoolRecall`): creator spans matched by any pooled candidate, whatever its rank. The
+  ceiling ranking can reach: a span missing from the pool is the map pass's miss, not the judge's.
+- `matchPercentile` (summary `creatorMatchPercentile`): mean rank percentile of the candidates that match a span
+  (1 = ranked first, 0.5 = what a random order gives). Finer than recall@N, which moves in whole spans.
+- `tied` (summary `creatorTiedShare`): the largest group of scored candidates sharing one rubric total, as a share
+  of the scored ones. A judge copying the prompt's example numbers shows up here.
 - Summary: `creatorRecallAtN`, `creatorPicksFound`, `creatorGateKeepsMatches` as k/n ratios with
   Wilson intervals (n is tiny: read them as a smoke test).
 
@@ -316,24 +322,39 @@ by loosening the IoU. `passRate` covers only the invariant cases.
 (cd apps/server && npx tsx src/eval/run.ts selection --offline)              # replays / uses candidates.json
 ```
 
-Recorded run (2026-10-18, `compat:qwen2.5:14b` on local Ollama, 1 score sample, no pairwise, as the
-pipeline runs a self-hosted judge; 44 LLM calls, 51 min; `candidates.json` in each fixture):
+Recorded runs (`compat:qwen2.5:14b` on local Ollama, all on the same map answers, so only scoring and
+ranking differ; `candidates.json` in each fixture is the last row's):
 
-| fixture | recall@N | N | best rank | gate keeps matches | our top N from the negative stretch |
+| run | recall@N | pool recall | match percentile | tied share | unscored |
 |---|---|---|---|---|---|
-| `dwarkesh-sheppard` | 1/6 (`_hH7vnTWnq8` 4076-4096 at rank 5) | 8 | 5 | 1/2 (fails) | 4 |
-| `huberman-kanoski` | 0/1 | 3 | none | n/a | 1 |
-| `lex-dhh` | 1/6 (13835-13877 at rank 5) | 8 | 5 | 1/1 | 2 |
+| 2026-10-18 recorded (score-1 prompt, 1 sample) | 2/13 = 0.15 | 3/13 | 0.75 (3 matches) | 17/38 = 0.45 | 25/63 |
+| 2026-11-21 live, score-1, 1 sample | 3/13 = 0.23 | 5/13 | | | 35/96 |
+| live, score-1, 3 samples | 3/13 = 0.23 | 5/13 | | | |
+| live, score-2, 3 samples (rotated) | 2/13 = 0.15 | 5/13 | 0.47 | | 0 |
+| live, score-2, 1 sample, pairwise 1 pass | 3/13 = 0.23 | 5/13 | 0.56 | 0.16 | 0 |
+| **live, score-2, 1 sample (the default)** | **3/13 = 0.23** | **5/13** | **0.56** | **15/96 = 0.16** | **0** |
 
-Summary: recall@N 2/13 = 0.15 (95% CI 0.04-0.42), shorts with a span found 2/5. What it says:
-- **The right moment, the wrong bounds.** Huberman: our rank-1 candidate (6397-6449, "Rewiring
-  Cravings") is the creator's moment, but starts 21 s late and runs 35 s past it (IoU 0.23).
-- **The judge cannot separate candidates.** One sample from a 14B model gives most candidates the same
-  total (68); ties keep pool order, so rank among them is noise, and moments from the negative stretch
-  (which the creator did not cut) fill a quarter to a half of the top N.
-- **The relative gate collapses on ties.** With most totals equal, MAD = 0 and the threshold is the
-  median: on Dwarkesh it drops a candidate matching the creator's "How Spain Got Rich" span (total
-  39 against a threshold of 68).
+What it says:
+- **The ties and the unscored third were a prompt defect, not the judge.** The score prompt's JSON example listed
+  one candidate with hook 7, flow 6, value 8, shareability 5, which is a rubric total of exactly 68. qwen2.5:14b
+  answered only the first candidate of a batch of 4 (a third of the pool was unscored and ranked last, whatever its
+  quality) and gave the example's numbers to many of the rest. `score-2` shows one entry per candidate with no
+  numbers to copy, and `scoreSample` asks again, one by one, for any candidate an answer leaves out. The tie share
+  fell from 0.45 to 0.16 and every candidate is scored.
+- **The judge itself is near chance on these moments.** With every candidate scored, the candidates matching a
+  creator span sit at a mean rank percentile of 0.47-0.56; random order gives 0.5. Two of the creator's Dwarkesh
+  moments (the Aztec capture culture, 4258-4300) are scored at the bottom of 40 in every run. More samples (3,
+  rotated so each candidate is read from 3 places of its batch) and a pairwise pass do not move recall@N, so a
+  self-hosted judge keeps 1 sample and no pairwise. Recall@N 2-3/13 is the noise band at n = 13.
+- **Position bias inside a batch.** The same candidate scores about 2 points lower in the last place of a batch than
+  in the first (probe: reversed batches). Samples beyond the first read the batch rotated.
+- **The pool is the ceiling.** 5/13 spans have a candidate at IoU >= 0.3 anywhere in the pool; 4 more have one at
+  0.18-0.28. The map pass proposes short clips (median 29 s, creators' spans median 42 s, and creators stitch
+  several spans into one short of 87-255 s), so better ranking alone cannot pass 5/13 here.
+- **Bounds have no one-sided bias to snap away.** Against the nearest creator span our clips start from 8 s early
+  to 74 s late and end from 71 s early to 28 s late; Huberman's rank-1 "starts late, runs past" (2026-10-18) is one
+  side of that spread. Snapping keeps the model's proposal (it only grows a clip to the minimum), so the bounds are
+  the map model's, not `snapCandidate`'s.
 - Long creator spans (the 124 s Spain short, the 100 s Lex piece) can only be matched loosely by a
   60 s clip; that is the length setting, not the picker.
 

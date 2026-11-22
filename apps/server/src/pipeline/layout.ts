@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import { rgbFramesToPipe, CommandError } from "../media.js";
-import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
+import { FULL_FRAME, isFullFrame, contentSide, verticalCrop, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, faceRaster, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { createFaceTracker } from "../vision/tracker.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
 import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
 import { probeTiles, aggregateTile, tileContent, tileReason, TILE, type TileProbe } from "./webcam-tile.js";
 import { probeInset, insetRuns, insetReason, type InsetProbe } from "./inset.js";
+import { motionProber, subjectFraming, subjectReason, type MotionProbe } from "./saliency.js";
 
 /**
  * Layout thresholds config. Face sizes are normalized to the frame height, so their meaning shifts
@@ -74,6 +75,8 @@ export interface FaceSample {
   tiles?: TileProbe[];
   /** a narrower picture in the middle of the frame, between flat or blurred bars (pillarboxing); `insetRuns` keeps the steady ones */
   inset?: InsetProbe;
+  /** what moved since the previous sample, the camera's own motion removed (`probeMotion`); for the subject crop of a shot without a face */
+  motion?: MotionProbe;
 }
 
 export interface LayoutDecision {
@@ -98,6 +101,8 @@ export interface LayoutDecision {
   tile?: ContentRegion | undefined;
   /** "fit" only: the picture is an inset at these bounds (a phone video between blurred bars); the output shows just it */
   inset?: ContentRegion | undefined;
+  /** "center" only: the crop follows the shot's moving subject (no face; `subjectFraming`), not the frame's centre */
+  focus?: "subject" | undefined;
 }
 
 export interface LayoutOptions {
@@ -157,6 +162,7 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
   let stderr = "";
   ff.stderr.on("data", (d) => (stderr += d.toString()));
   const samples: FaceSample[] = [];
+  const motion = motionProber(FACE_INPUT_W, FACE_INPUT_H);
   let buf = Buffer.alloc(0);
   let i = 0;
   for await (const chunk of ff.stdout) {
@@ -170,12 +176,14 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       const t = i / fps;
       tracker.update(t, sorted);
       const inset = probeInset(px, FACE_INPUT_W, FACE_INPUT_H);
+      const moved = motion(px);
       const sample: FaceSample = {
         t,
         box: sorted[0] ?? null,
         boxes: sorted,
         divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H),
         ...(inset ? { inset } : {}),
+        ...(moved ? { motion: moved } : {}),
       };
       // the webcam tile around the face; a frame where the detector blinked (a tiny webcam face is missed
       // more often than not) is probed around the last face seen, or the next one, since a tile does not move
@@ -210,7 +218,8 @@ function median(xs: number[]) {
  *  - a big face most of the time → "face": 9:16 crop that follows the face
  *  - a face that is small or parked in a corner (webcam over a slide/screen) → "stack": full frame on top, zoomed face below
  *  - a big face beside an app screen or title card (side-by-side composite) → "stack" with a `content` region: just that region on top, the speaker below (see content-region.ts)
- *  - no face → "fit": whole frame over a blurred background (graphics, b-roll, screencasts without a webcam)
+ *  - no face, one clearly moving subject that fits a 9:16 window → "center" with `focus: "subject"`: a crop that follows it (see saliency.ts)
+ *  - no face otherwise → "fit": whole frame over a blurred background (graphics, b-roll, screencasts without a webcam)
  */
 export function decideLayout(samples: FaceSample[], config: LayoutConfig, sceneCuts: number[] = [], opts: { content?: boolean } = {}): LayoutDecision {
   const withFace = samples.filter((s) => s.box);
@@ -232,7 +241,11 @@ export function decideLayout(samples: FaceSample[], config: LayoutConfig, sceneC
     // steady through the clip (probed around the last face seen): stack the tile, not the whole frame
     const { reasonSuffix, ...stack } = webcamStack(samples);
     if (stack.tile && withFace.length >= 2) return { ...base, ...stack, reason: `face in only ${Math.round(faceRatio * 100)}% of frames${reasonSuffix}` };
-    return { ...base, layout: "fit", reason: withFace.length ? `face in only ${Math.round(faceRatio * 100)}% of frames` : "no face detected" };
+    const noFace = withFace.length ? `face in only ${Math.round(faceRatio * 100)}% of frames` : "no face detected";
+    // one thing clearly moving and nothing else (a ship, a car, a product in the hand): a crop that follows it
+    const subject = subjectDecision(samples, config, sceneCuts);
+    if (subject) return { ...base, ...subject, reason: `${noFace}; ${subject.reason}` };
+    return { ...base, layout: "fit", reason: noFace };
   }
   // three or more people most of the time (a couch, a panel): the whole frame, not two of them
   const crowd = samples.filter((s) => isCrowd(s, config)).length / Math.max(1, samples.length);
@@ -264,6 +277,33 @@ export function decideLayout(samples: FaceSample[], config: LayoutConfig, sceneC
     return { ...base, layout: "stack", content, contentSignals: signals, reason: contentReason(content, signals) };
   }
   return { ...base, layout: "face", contentSignals: found, reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+}
+
+/**
+ * The subject crop of a shot without a usable face (`subjectFraming`), or undefined when the evidence
+ * is not clear. A stationary subject is one crop position; a moving one is followed by the tripod
+ * camera of the face crop (dead zone, capped pan, a hard cut at a scene cut).
+ */
+function subjectDecision(
+  samples: FaceSample[],
+  config: LayoutConfig,
+  sceneCuts: number[],
+): Pick<LayoutDecision, "layout" | "focus" | "track" | "reason"> | undefined {
+  const aspect = config.srcAspect ?? 16 / 9;
+  const share = verticalCrop(aspect, 1).w / aspect;
+  const f = subjectFraming(samples, sceneCuts, share);
+  if (!f.ok) return undefined;
+  let track: LayoutDecision["track"];
+  if (f.mode === "stationary") track = [{ t: samples[0]!.t, x: Number(f.points[0]!.x.toFixed(4)), y: 0.5 }];
+  else {
+    const at = new Map(f.points.map((p) => [p.t, p.x]));
+    const pseudo: FaceSample[] = samples.map((s) => {
+      const x = at.get(s.t);
+      return { t: s.t, box: x === undefined ? null : { x1: x - 0.01, x2: x + 0.01, y1: 0.49, y2: 0.51, score: 1 }, boxes: [] };
+    });
+    track = tripodTrack(pseudo, sceneCuts);
+  }
+  return { layout: "center", focus: "subject", track, reason: subjectReason(f) };
 }
 
 /**
@@ -741,7 +781,7 @@ export const newLayoutDiag = (): LayoutDiag => ({ frames: 0, voting: 0, candidat
 export function sameFraming(a: LayoutDecision, b: LayoutDecision): boolean {
   if (a.layout !== b.layout) return false;
   const kind = (d: LayoutDecision) => (isFullFrame(d.content) ? "full" : (contentSide(d.content!) ?? "inset"));
-  if (kind(a) !== kind(b) || !!a.inset !== !!b.inset) return false;
+  if (kind(a) !== kind(b) || !!a.inset !== !!b.inset || a.focus !== b.focus) return false;
   // two insets are one framing when their bounds agree (the same phone video across a cut)
   return !a.inset || !b.inset || (["x1", "y1", "x2", "y2"] as const).every((k) => Math.abs(a.inset![k] - b.inset![k]) <= 0.02);
 }

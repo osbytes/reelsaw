@@ -25,7 +25,11 @@ import {
   repairTimestamps,
   pairwiseRank,
   pairwiseCalls,
-  scoreCandidates,
+  aggregateScores,
+  scoreBatches,
+  scoreSample,
+  SCORE_PROMPT_VERSION,
+  type ScoreItem,
   type LlmOpts,
   type ScoreInput,
   type ScoreResult,
@@ -269,6 +273,8 @@ interface RankedCandidate {
   /** rubric total; the map pass's own guess when scoring failed (`scored: false`) */
   total: number;
   scored: boolean;
+  /** the map pass's own 0-100 guess (the pool's order before scoring) */
+  mapScore?: number;
 }
 
 /** `candidates.json`: a recorded run of the real picker on the fixture's transcript, so the metrics run without a model. */
@@ -294,8 +300,14 @@ export const CREATOR_IOU = 0.3;
 /**
  * Model-free scoring of a ranked candidate list against creator spans:
  *  - recall@N: share of creator spans matched (IoU ≥ 0.3) by one of our top N, N = spans + 2
+ *  - inPool: creator spans matched by any pooled candidate, whatever its rank: the ceiling ranking can reach
+ *    (a span missing from the pool is the map pass's miss, not the judge's)
  *  - bestRank: rank of our best-placed candidate that matches any span (-1: none does)
  *  - gate: does the relative score gate keep every scored candidate that matches a span?
+ *  - matchPercentile: mean rank percentile of the candidates matching a span (1 = ranked first, 0 = last), summed
+ *    as `matchPctSum` over `matching`: a finer read of the ranking than recall@N, which moves in whole spans
+ *  - tied: the most scored candidates that share one rubric total (a judge copying the prompt's example gave a
+ *    third of the pool 68), summed as `tiedShare` over `scoredCount`
  *  - negativesInTopN: our top N that start in the stretch the creator cut nothing from (a weak
  *    negative: the creator only posts a few shorts, so an unpicked moment is not necessarily a bad one)
  */
@@ -311,7 +323,14 @@ export function creatorPickMetrics(p: Pick<CreatorPicks, "picks" | "negative">, 
       const v = iou1([c.startSec, c.endSec], span);
       if (v > bestIou) [best, bestIou] = [i, v];
     });
-    return { shortId, span, recalled: top.some((c) => matches(c, span)), bestRank: best + 1, bestIou: Number(bestIou.toFixed(2)) };
+    return {
+      shortId,
+      span,
+      recalled: top.some((c) => matches(c, span)),
+      inPool: ranked.some((c) => matches(c, span)),
+      bestRank: best + 1,
+      bestIou: Number(bestIou.toFixed(2)),
+    };
   });
   const matching = ranked.map((c, i) => ({ c, i })).filter(({ c }) => spans.some(({ span }) => matches(c, span)));
   const scored = ranked.filter((c) => c.scored);
@@ -320,18 +339,29 @@ export function creatorPickMetrics(p: Pick<CreatorPicks, "picks" | "negative">, 
     gate,
   );
   const kept = new Set(scored.filter((_, i) => g.keep[i]));
+  const byTotal = new Map<number, number>();
+  for (const c of scored) byTotal.set(c.total, (byTotal.get(c.total) ?? 0) + 1);
+  const tied = Math.max(0, ...byTotal.values());
   const matchingScored = matching.filter(({ c }) => c.scored);
   const recalled = perSpan.filter((s) => s.recalled).length;
+  const pct = (i: number) => (ranked.length > 1 ? 1 - i / (ranked.length - 1) : 1);
+  const matchPctSum = matching.reduce((a, { i }) => a + pct(i), 0);
   return {
     spans: spans.length,
     n,
     recalled,
     recallAtN: Number((recalled / (spans.length || 1)).toFixed(2)),
+    inPool: perSpan.filter((s) => s.inPool).length,
     picksFound: p.picks.filter((k) => perSpan.some((s) => s.shortId === k.shortId && s.recalled)).length,
     picks: p.picks.length,
     bestRank: matching.length ? matching[0]!.i + 1 : -1,
     negativesInTopN: p.negative ? top.filter((c) => c.startSec >= p.negative![0] && c.startSec < p.negative![1]).length : 0,
     matching: matchingScored.length,
+    matchingAll: matching.length,
+    scoredCount: scored.length,
+    tied,
+    matchPercentile: matching.length ? Number((matchPctSum / matching.length).toFixed(2)) : -1,
+    matchPctSum: Number(matchPctSum.toFixed(3)),
     matchingKept: matchingScored.filter(({ c }) => kept.has(c)).length,
     gateThreshold: g.threshold,
     gateKept: kept.size,
@@ -454,10 +484,17 @@ async function runPicker(ctx: EvalContext, t: TranscriptFixture & { windows: Arr
       .join(" ")
       .slice(0, 2500);
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c) }));
-  const scoredList = await cached(["score", judgeId, inputs, sc, samples], async () => [
-    ...(await scoreCandidates((await models()).judge, inputs, sc, samples, 1)).entries(),
-  ]);
-  const scored = new Map<number, ScoreResult>(scoredList);
+  // like analyze(): each batch's raw answers per sample (the score:<i> steps), aggregated afterwards, so a change to the
+  // aggregation replays offline
+  const raw: ScoreItem[][] = [];
+  for (const batch of scoreBatches(inputs))
+    for (let k = 0; k < samples; k++)
+      raw.push(
+        await cached(["score-sample", SCORE_PROMPT_VERSION, judgeId, batch, sc, samples, k], async () =>
+          scoreSample((await models()).judge, batch, sc, samples, k),
+        ),
+      );
+  const scored = new Map<number, ScoreResult>(aggregateScores(inputs, sc, raw));
   const byTotal = (a: { total: number }, b: { total: number }) => b.total - a.total;
   const rated = pooled.map((c, id) => ({ c, id, total: scored.get(id)?.total ?? Math.round(c.score), scored: scored.has(id) }));
   let ranked = [...rated.filter((x) => x.scored).sort(byTotal), ...rated.filter((x) => !x.scored).sort(byTotal)];
@@ -487,7 +524,15 @@ async function runPicker(ctx: EvalContext, t: TranscriptFixture & { windows: Arr
     samples,
     pairwise,
     settings: { minSec: sc.minSec, maxSec: sc.maxSec },
-    candidates: ranked.map(({ c, total, scored: s }) => ({ startSec: c.startSec, endSec: c.endSec, title: c.title, hook: c.hook, total, scored: s })),
+    candidates: ranked.map(({ c, total, scored: s }) => ({
+      startSec: c.startSec,
+      endSec: c.endSec,
+      title: c.title,
+      hook: c.hook,
+      total,
+      scored: s,
+      mapScore: Math.round(c.score),
+    })),
   };
 }
 
@@ -538,7 +583,12 @@ function creatorSummary(results: CaseResult[], live: boolean, prefix: string): R
   });
   return {
     [`${prefix}RecallAtN`]: ratio(sum("recalled"), sum("spans")),
+    [`${prefix}PoolRecall`]: ratio(sum("inPool"), sum("spans")),
     [`${prefix}PicksFound`]: ratio(sum("picksFound"), sum("picks")),
+    // the largest group of scored candidates on one rubric total, as a share of the scored ones
+    [`${prefix}TiedShare`]: ratio(sum("tied"), sum("scoredCount"), "lower"),
+    // mean rank percentile of every candidate that matches a creator span, over all fixtures (1 = always ranked first)
+    [`${prefix}MatchPercentile`]: { value: Number((sum("matchPctSum") / (sum("matchingAll") || 1)).toFixed(2)), better: "higher" },
     [`${prefix}GateKeepsMatches`]: ratio(sum("matchingKept"), sum("matching")),
   };
 }

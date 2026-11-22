@@ -88,3 +88,10 @@ test("clipsText joins clips with a rule", () => {
     "A\n\nc\n\n#x #y\n\n---\n\nB",
   );
 });
+
+test("automatic variants of a layout are named as what they did: an inset video, a crop following the subject", () => {
+  const labels = { ...modeLabel, fit: "Whole frame", center: "Centre crop", inset: "Inset video", subject: "Follow subject" };
+  const segs = [{ layout: "face" }, { layout: "center", focus: "subject" }, { layout: "fit", inset: { x1: 0.3, y1: 0, x2: 0.7, y2: 1 } }, { layout: "center" }];
+  const m = clipMeta({ ...base, layoutSegments: segs }, { ...proj, modeLabel: labels, projectHasIntro: false, projectHasOutro: false });
+  assert.equal(m.text, "Auto · Follow speaker → Follow subject → Inset video → Centre crop");
+});

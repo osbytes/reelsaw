@@ -166,7 +166,7 @@ export function ClipCard({
           className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default"
           style={{ aspectRatio: "9 / 16" }}
         >
-          {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+          {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full bg-black object-contain" />}
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
             {clip.status === "failed" ? (
               "!"
