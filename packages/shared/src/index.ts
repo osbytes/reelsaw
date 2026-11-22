@@ -1949,6 +1949,7 @@ export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
+export * from "./ranges.js";
 export * from "./punch-in.js";
 export * from "./shape.js";
 export * from "./fuzzy.js";
