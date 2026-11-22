@@ -49,9 +49,23 @@ import {
 } from "../components/ListPage";
 import { SelectionBar } from "../components/SelectionBar";
 import { RuleFromUserDialog } from "../components/SignupRules";
-import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Segmented, Select, Skeleton } from "../components/ui";
+import {
+  type ActiveFilter,
+  ChoiceMenu,
+  FilterMenu,
+  facetChips,
+  type ListFacet,
+  ListLoadMore,
+  ListSearch,
+  ListToolbar,
+  listSortToggle,
+  type SortOption,
+  SortMenu,
+} from "../components/ListToolbar";
 import { pageTitle, useDocumentTitle } from "../lib/title";
 import { useDebounced } from "../lib/useDebounced";
+import { useLingui } from "@lingui/react/macro";
 
 type Usage = {
   projects: number;
@@ -95,9 +109,9 @@ const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * section per shared sign-up address (then the rest); or one flat list. In the hash as group=flag or group=ip.
  */
 const GROUP_OPTIONS = [
-  { value: "", label: "No grouping" },
-  { value: "flag", label: "Group by flag" },
-  { value: "ip", label: "Group by address" },
+  { value: "", label: "None" },
+  { value: "flag", label: "Flag" },
+  { value: "ip", label: "Sign-up address" },
 ];
 const asGroup = (v: string | null): UserGroupBy | "" => (isUserGroupBy(v) ? v : "");
 type UserFilterInput = {
@@ -148,19 +162,31 @@ const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
   suspended: { glyph: "✕", tone: "text-err", word: "Suspended" },
 };
 const STATUS_OPTIONS = [
-  { value: "", label: "Any status" },
+  { value: "", label: "Any" },
   { value: "pending", label: "Pending" },
   { value: "active", label: "Active" },
   { value: "suspended", label: "Suspended" },
 ];
 const VERIFIED_OPTIONS = [
-  { value: "", label: "Any email" },
+  { value: "", label: "Any" },
   { value: "yes", label: "Verified" },
   { value: "no", label: "Unverified" },
 ];
 
 type BulkAction = "approve" | "hold" | "suspend" | "reinstate" | "delete";
 type BulkResult = { changed: number; unchanged: number; skipped: Array<{ id: string; email: string; reason: string }> };
+/** The Sort menu: the same columns as the sortable headers, for widths where the headers fold away. */
+const SORT_OPTIONS: SortOption<UserSortKey>[] = [
+  { value: "name", label: "Name", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
+  { value: "status", label: "Status", firstDir: "asc", asc: "Active, pending, suspended", desc: "Suspended, pending, active" },
+  { value: "created", label: "Signed up", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
+  { value: "lastActive", label: "Last active", firstDir: "desc", asc: "Longest ago first", desc: "Most recent first" },
+  { value: "projects", label: "Projects (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
+  { value: "sourceMinutes", label: "Minutes (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
+  { value: "clipsRendered", label: "Clips (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
+  { value: "storedBytes", label: "Stored", firstDir: "desc", asc: "Smallest first", desc: "Largest first" },
+];
+
 /** Accounts per bulk call (BULK_USERS on the server): a longer selection goes in several calls. */
 const BULK_CHUNK = 50;
 const BULK_DONE: Record<BulkAction, string> = {
@@ -185,6 +211,7 @@ const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "
  */
 export function AdminUsersPage() {
   useDocumentTitle(pageTitle("Users"));
+  const { t } = useLingui();
   const trpc = useTRPC();
   const client = useTRPCClient();
   const qc = useQueryClient();
@@ -297,11 +324,11 @@ export function AdminUsersPage() {
   const flagCounts = useQuery(trpc.admin.users.flagCounts.queryOptions());
   const flagOptions = useMemo(() => {
     const c = flagCounts.data;
-    const n = (k: "any" | AbuseFlag) => (c ? ` (${num.format(c[k])})` : "");
+    const n = (k: "any" | AbuseFlag) => (c ? num.format(c[k]) : undefined);
     return [
-      { value: "", label: "Any flags" },
-      { value: "any", label: `Flagged${n("any")}` },
-      ...ABUSE_FLAGS.map((f) => ({ value: f, label: `${sentence(FLAG_LABEL[f])}${n(f)}` })),
+      { value: "", label: "Any" },
+      { value: "any", label: "Any flag", hint: n("any") },
+      ...ABUSE_FLAGS.map((f) => ({ value: f, label: sentence(FLAG_LABEL[f]), hint: n(f) })),
     ];
   }, [flagCounts.data]);
   const refresh = () => void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
@@ -621,15 +648,12 @@ export function AdminUsersPage() {
       </ListRow>
     );
   };
-  // first click: the column's natural direction; second: the other one; third: back to the default order
-  const sortable = (k: UserSortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => {
-    const first = userSortFirstDir(k);
-    return {
-      dir: sort?.key === k ? (sort.dir === "asc" ? 1 : -1) : null,
-      title: usage ? "All time. Sorts every matching account" : "Sorts every matching account",
-      onToggle: () => setSort(sort?.key !== k ? { key: k, dir: first } : sort.dir === first ? { key: k, dir: first === "asc" ? "desc" : "asc" } : null),
-    };
-  };
+  // the same state as the Sort menu: natural direction, the other one, then the default order
+  const sortable = (k: UserSortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => ({
+    dir: sort?.key === k ? (sort.dir === "asc" ? 1 : -1) : null,
+    title: usage ? "All time. Sorts every matching account" : "Sorts every matching account",
+    onToggle: () => setSort(listSortToggle(sort, k, userSortFirstDir(k))),
+  });
   // the actions column fits the state button, Limits and the menu; below the fold width only the menu
   const columns: ListColumn[] = [
     {
@@ -663,6 +687,36 @@ export function AdminUsersPage() {
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
   const filtered = !!(flag || status || verified || heldBy || signupIp);
+  const facets: ListFacet[] = [
+    { id: "status", label: "Status", value: status, options: STATUS_OPTIONS, onChange: (v) => setStatus(asStatus(v)) },
+    { id: "verified", label: "Email", value: verified, options: VERIFIED_OPTIONS, onChange: (v) => setVerified(asYesNo(v)) },
+    { id: "flag", label: "Flag", value: flag, options: flagOptions, onChange: (v) => setFlag(v === "any" || isAbuseFlag(v) ? v : "") },
+  ];
+  /** what narrows the list, as chips: the facets, and the two filters that only arrive by link (a sign-up rule, one address) */
+  const activeFilters: ActiveFilter[] = [
+    ...facetChips(facets),
+    ...(heldBy
+      ? [
+          {
+            id: "held",
+            label: `Held by ${heldBy}`,
+            title: `Only accounts the sign-up rule ${heldBy} held. Click to show everyone.`,
+            onClear: () => setHeldBy(""),
+          },
+        ]
+      : []),
+    ...(signupIp
+      ? [
+          {
+            id: "ip",
+            label: `From ${signupIp}`,
+            title: `Only accounts that signed up from ${signupIp}. Click to show everyone.`,
+            onClear: () => setSignupIp(""),
+          },
+        ]
+      : []),
+  ];
+  const noun = (n: number) => plural(n, q ? "match" : "account", q ? "matches" : "accounts");
   const colCount = { folded: columns.filter((c) => !c.full).length, full: columns.length };
   /** what every section, at any depth, takes from the page */
   const sectionProps: SectionShared = {
@@ -688,67 +742,38 @@ export function AdminUsersPage() {
   return (
     <ListPage
       title="Users"
-      subtitle={`Who can use this instance${pending ? ` · ${num.format(pending)} waiting for approval` : ""}`}
-      actions={
+      subtitle={
         <>
-          {/* arrives with the link from a rule in Settings → Sign-up rules; nothing on this page turns it on, so it never moves the others */}
-          {heldBy && (
-            <button
-              type="button"
-              className="btn-ghost h-[38px] max-w-[16rem] gap-1.5 bg-sunk text-xs font-semibold"
-              onClick={() => setHeldBy("")}
-              title={`Only accounts the sign-up rule ${heldBy} held. Click to show everyone.`}
-            >
-              <span className="truncate">Held by {heldBy}</span>
-              <span aria-hidden>✕</span>
-              <span className="sr-only">Clear this filter</span>
-            </button>
+          Who can use this instance
+          {pending > 0 && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                className="text-acc-text hover:underline"
+                onClick={() => setStatus("pending")}
+                title={t`List the accounts waiting for approval`}
+              >
+                {num.format(pending)} waiting for approval
+              </button>
+            </>
           )}
-          {/* arrives with an address section's "Only this address"; clearing it shows everyone again */}
-          {signupIp && (
-            <button
-              type="button"
-              className="btn-ghost h-[38px] max-w-[16rem] gap-1.5 bg-sunk text-xs font-semibold"
-              onClick={() => setSignupIp("")}
-              title={`Only accounts that signed up from ${signupIp}. Click to show everyone.`}
-            >
-              <span className="truncate">From {signupIp}</span>
-              <span aria-hidden>✕</span>
-              <span className="sr-only">Clear this filter</span>
-            </button>
-          )}
-          <Select
-            className="h-[38px] w-[10.5rem]"
-            ariaLabel="Group accounts"
-            value={groupBy}
-            onValueChange={(v) => setGroupBy(asGroup(v))}
-            options={GROUP_OPTIONS}
-          />
-          <Select
-            className="h-[38px] w-[12rem]"
-            ariaLabel="Abuse flag"
-            value={flag}
-            onValueChange={(v) => setFlag(v === "any" || isAbuseFlag(v) ? v : "")}
-            options={flagOptions}
-          />
-          <Select className="h-[38px] w-[8.5rem]" ariaLabel="Status" value={status} onValueChange={(v) => setStatus(asStatus(v))} options={STATUS_OPTIONS} />
-          <Select
-            className="h-[38px] w-[8.5rem]"
-            ariaLabel="Email verification"
-            value={verified}
-            onValueChange={(v) => setVerified(asYesNo(v))}
-            options={VERIFIED_OPTIONS}
-          />
-          <input
-            className="input w-[14rem]"
-            placeholder="Search name or email"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search users"
-          />
         </>
       }
     >
+      <ListToolbar
+        label={t`Search and filter accounts`}
+        search={<ListSearch value={search} onChange={setSearch} placeholder={t`Search name or email`} label={t`Search users`} />}
+        controls={
+          <>
+            <FilterMenu facets={facets} />
+            <ChoiceMenu label={t`Group`} value={groupBy} options={GROUP_OPTIONS} onChange={(v) => setGroupBy(asGroup(v))} />
+            <SortMenu options={SORT_OPTIONS} value={sort} onChange={setSort} defaultLabel="Pending, then newest" />
+          </>
+        }
+        count={pendingList ? <Skeleton className="h-3 w-24" /> : groupBy ? `${noun(total)} in ${plural(sections.length, "section")}` : noun(total)}
+        filters={activeFilters}
+      />
       {listError && <ListError message={listError.message} />}
       {empty && (
         <ListEmpty icon={Users} title={q ? `No accounts match “${q}”` : "No accounts match"}>
@@ -797,11 +822,14 @@ export function AdminUsersPage() {
           </ListTable>
           <ListFooter
             action={
-              !groupBy &&
-              list.hasNextPage && (
-                <button type="button" className="btn-ghost h-9 min-w-[8rem]" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
-                  {list.isFetchingNextPage ? "Loading…" : `Load ${num.format(Math.min(PAGE, total - rows.length))} more`}
-                </button>
+              !groupBy && (
+                <ListLoadMore
+                  hasMore={!!list.hasNextPage}
+                  loading={list.isFetchingNextPage}
+                  busy={(list.isFetching && !list.isFetchingNextPage) || list.isPlaceholderData}
+                  onMore={() => void list.fetchNextPage()}
+                  left={Math.min(PAGE, total - rows.length)}
+                />
               )
             }
           >
@@ -810,7 +838,7 @@ export function AdminUsersPage() {
             ) : groupBy ? (
               `${plural(total, "account")} in ${plural(sections.length, "section")}${groupBy === "flag" && sections.length > 1 ? " · an account with two flags is in both" : ""}`
             ) : (
-              `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${plural(total, "account")}`
+              `${q && !sort && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${noun(total)}`
             )}
           </ListFooter>
           {(selected.length > 0 || allMatching) && (

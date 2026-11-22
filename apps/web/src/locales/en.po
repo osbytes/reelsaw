@@ -19,6 +19,10 @@ msgstr "After you sign in, your link is waiting on the New project page: <0>{sou
 msgid "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
 msgstr "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
 
+#: src/components/ListToolbar.tsx
+msgid "Ascending"
+msgstr "Ascending"
+
 #: src/pages/Login.tsx
 msgid "By creating an account you accept the <0>privacy policy</0>."
 msgstr "By creating an account you accept the <0>privacy policy</0>."
@@ -30,6 +34,14 @@ msgstr "By creating an account you accept the <0>terms</0> and <1>privacy policy
 #: src/pages/Login.tsx
 msgid "By creating an account you accept the <0>terms</0>."
 msgstr "By creating an account you accept the <0>terms</0>."
+
+#: src/components/ListToolbar.tsx
+msgid "Clear all"
+msgstr "Clear all"
+
+#: src/components/ListToolbar.tsx
+msgid "Clear search"
+msgstr "Clear search"
 
 #: src/pages/Login.tsx
 msgid "Could not continue the authorization"
@@ -47,6 +59,10 @@ msgstr "Create account"
 msgid "Create account · Reelsaw"
 msgstr "Create account · Reelsaw"
 
+#: src/components/ListToolbar.tsx
+msgid "Descending"
+msgstr "Descending"
+
 #: src/pages/Login.tsx
 msgid "Email"
 msgstr "Email"
@@ -55,13 +71,41 @@ msgstr "Email"
 msgid "Enter the email you signed up with."
 msgstr "Enter the email you signed up with."
 
+#: src/components/ListToolbar.tsx
+msgid "Filter"
+msgstr "Filter"
+
+#: src/components/ListToolbar.tsx
+msgid "Filter, {on} on"
+msgstr "Filter, {on} on"
+
 #: src/pages/Login.tsx
 msgid "Forgot password?"
 msgstr "Forgot password?"
 
+#: src/pages/AdminUsers.tsx
+msgid "Group"
+msgstr "Group"
+
 #: src/pages/Login.tsx
 msgid "Have an account? Sign in"
 msgstr "Have an account? Sign in"
+
+#: src/pages/AdminUsers.tsx
+msgid "List the accounts waiting for approval"
+msgstr "List the accounts waiting for approval"
+
+#: src/components/ListToolbar.tsx
+msgid "Load {n} more"
+msgstr "Load {n} more"
+
+#: src/components/ListToolbar.tsx
+msgid "Load more"
+msgstr "Load more"
+
+#: src/components/ListToolbar.tsx
+msgid "Loading…"
+msgstr "Loading…"
 
 #: src/pages/Login.tsx
 msgid "Name"
@@ -75,9 +119,49 @@ msgstr "Need an account? Sign up"
 msgid "New accounts wait for an admin to approve them before they can start projects."
 msgstr "New accounts wait for an admin to approve them before they can start projects."
 
+#: src/components/ListToolbar.tsx
+msgid "Order"
+msgstr "Order"
+
 #: src/pages/Login.tsx
 msgid "Password"
 msgstr "Password"
+
+#: src/components/ListToolbar.tsx
+msgid "Remove this filter"
+msgstr "Remove this filter"
+
+#: src/pages/AdminUsers.tsx
+msgid "Search and filter accounts"
+msgstr "Search and filter accounts"
+
+#: src/pages/Projects.tsx
+msgid "Search and filter projects"
+msgstr "Search and filter projects"
+
+#: src/pages/AdminUsers.tsx
+msgid "Search name or email"
+msgstr "Search name or email"
+
+#: src/pages/Projects.tsx
+msgid "Search project titles"
+msgstr "Search project titles"
+
+#: src/pages/Projects.tsx
+msgid "Search projects"
+msgstr "Search projects"
+
+#: src/pages/Templates.tsx
+msgid "Search template names"
+msgstr "Search template names"
+
+#: src/pages/Templates.tsx
+msgid "Search templates"
+msgstr "Search templates"
+
+#: src/pages/AdminUsers.tsx
+msgid "Search users"
+msgstr "Search users"
 
 #: src/pages/Login.tsx
 msgid "Send a new confirmation"
@@ -102,6 +186,18 @@ msgstr "Sign-ups are closed on this instance."
 #: src/pages/Login.tsx
 msgid "Something went wrong"
 msgstr "Something went wrong"
+
+#: src/components/ListToolbar.tsx
+msgid "Sort by"
+msgstr "Sort by"
+
+#: src/components/ListToolbar.tsx
+msgid "Sort:"
+msgstr "Sort:"
+
+#: src/components/ListToolbar.tsx
+msgid "Sort: {shown}"
+msgstr "Sort: {shown}"
 
 #: src/pages/Login.tsx
 msgid "This link expired"

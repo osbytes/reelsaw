@@ -1,0 +1,2 @@
+CREATE INDEX "projects_user_title_idx" ON "projects" USING btree ("user_id",lower("title"));--> statement-breakpoint
+CREATE INDEX "projects_user_duration_idx" ON "projects" USING btree ("user_id",coalesce("duration_sec", 0));

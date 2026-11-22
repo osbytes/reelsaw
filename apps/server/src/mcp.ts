@@ -165,9 +165,9 @@ export function createMcpServer(
     return assetMap(rows);
   };
 
-  server.registerTool("list_projects", TOOLS.list_projects, ({ cursor, limit, deleted }) =>
+  server.registerTool("list_projects", TOOLS.list_projects, (input) =>
     run(async () => {
-      const page = await api.projects.list({ cursor, limit, deleted });
+      const page = await api.projects.list(input);
       return { projects: page.items.map(projectSummary), total: page.total, nextCursor: page.nextCursor };
     }),
   );
@@ -572,7 +572,7 @@ export function createMcpServer(
   server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
 
   // ── layer templates ──────────────────────────────────────────────────────
-  server.registerTool("list_layer_templates", TOOLS.list_layer_templates, ({ cursor, limit }) => run(() => api.layerTemplates.list({ cursor, limit })));
+  server.registerTool("list_layer_templates", TOOLS.list_layer_templates, (input) => run(() => api.layerTemplates.list(input)));
   server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers, bumpers }) => {
     if ((clipId === undefined) === (layers === undefined))
       return Promise.resolve(

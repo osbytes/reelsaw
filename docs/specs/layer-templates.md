@@ -125,7 +125,7 @@ mode per layer, never the default.
 ## Surfaces
 | what | web | tRPC | MCP | CLI |
 |---|---|---|---|---|
-| list / get | Templates page | `layerTemplates.list` (a page: `items`, `nextCursor`, `total`, plus `deleted`) / `get` | `list_layer_templates` | `reelsaw templates list` / `show <id>` |
+| list / get | Templates page (search, sort) | `layerTemplates.list` (`q`, `sort`, `dir`; a page: `items`, `nextCursor`, `total` of the matches, plus `deleted`) / `get` | `list_layer_templates` | `reelsaw templates list [--q] [--sort] [--dir]` / `show <id>` |
 | create (from layers or a clip) | editor "Save as template…", page "New template" | `create` / `fromClip` | `save_layer_template { name, clipId \| layers, bumpers? }` | `templates save <projectId> <clipId> <name…>` |
 | edit | template editor | `update` (`bumpers` replaces the intro / outro, null = neither) | `update_layer_template { name?, layers?, bumpers? }` | `templates rename <id> <name…>` / `templates set <id> [--layers '<json>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n]` |
 | delete / restore / purge | page (toast: Undo / Delete forever / See deletions); restore and delete forever on Deleted (compact bar, Delete forever in ⋯) | `delete` / `restore` / `purge`; bulk `deleted.restore` / `deleted.purge` | `delete_layer_template` / `restore_layer_template` / `purge_layer_template` | `templates delete <id>` / `restore <id>` / `purge <id>` |

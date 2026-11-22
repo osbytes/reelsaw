@@ -340,8 +340,12 @@ form starts from them and can save its current values back. Admins also see the 
 with `HEALTH_DETAILS=true`).
 
 The Users page lists accounts a page at a time, pending first, with whether each email address is
-verified; search and the status, verification and flag filters (any flag, or one reason such as shared ip; a
-flag chip lists everyone flagged for that reason) run in the database and stay in the link. "Group by flag"
+verified. One bar above the list searches names and emails (a whole address finds just that account), filters by
+status, verification and flag (any flag, or one reason such as shared ip; a flag chip lists everyone flagged for
+that reason), groups and sorts; the filters in force show as chips beside the count of every match, and all of it
+runs in the database and stays in the link. Projects (search titles, filter by status, sort by date added, title,
+length or last change) and Templates (search names, sort) have the same bar, as do `list_projects` and
+`list_layer_templates` over MCP. "Group by flag"
 splits the same list into sections, one per reason and then the unflagged (folded), each with its own count,
 paging and "Select all" over just that section; an account flagged twice is in both. Inside shared ip and
 signup burst the accounts are split again by sign-up address, busiest first, so you see which accounts came from
@@ -574,7 +578,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 <!-- generated:mcp-tools -->
 | Tool | What it does |
 | --- | --- |
-| `list_projects` | Your projects, most recently updated first. |
+| `list_projects` | Your projects, most recently updated first (the Projects page). |
 | `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip; partial (non-null): only the video's start was processed (extend_project clips more). |
 | `check_source` | Before create_project: would this video be accepted now? |
 | `create_project` | Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. |
@@ -624,7 +628,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
 | `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
 | `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
-| `list_layer_templates` | Your layer templates (layers that fit any clip length, plus an optional intro / outro), newest first. |
+| `list_layer_templates` | Your layer templates (layers that fit any clip length, plus an optional intro / outro), newest change first (the Templates page). |
 | `save_layer_template` | Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge; plus the intro and outro the clip renders with) or layers (each with a timing, see list_layer_templates; [] with bumpers = an intro / outro only template). |
 | `update_layer_template` | Rename a layer template, replace its layers (the whole list, each with a timing) and/or replace its intro / outro (bumpers; null = it sets neither); a field left out is untouched. |
 | `delete_layer_template` | Delete a template (it goes to Deleted) and drop it from your project defaults; clips that already got its layers keep them. |

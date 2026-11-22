@@ -515,7 +515,7 @@ export function SaveAsTemplateDialog({
   const create = useMutation({
     ...trpc.layerTemplates.create.mutationOptions(),
     onSuccess: (r) => {
-      void qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
+      void qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.pathKey() });
       toast(`Saved “${r.name}” as a template`, { description: "Fix its timings on the Templates page." });
       onOpenChange(false);
     },

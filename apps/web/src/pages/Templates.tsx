@@ -1,15 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layers, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { DELETED_PATH, layerTemplateNameSchema, type TemplateBumpers, type TemplateLayer, plural } from "@reelsaw/shared";
+import {
+  DELETED_PATH,
+  isTemplateSortKey,
+  layerTemplateNameSchema,
+  listSortFirstDir,
+  plural,
+  type TemplateBumpers,
+  type TemplateLayer,
+  type TemplateSortKey,
+} from "@reelsaw/shared";
 import { templateSummary } from "../components/TemplatePicker";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
-import { useHashParams } from "../lib/hash";
+import { readHash, useHashParams, writeHash } from "../lib/hash";
+import { useDebounced } from "../lib/useDebounced";
+import { useLingui } from "@lingui/react/macro";
+import { ListLoadMore, ListSearch, ListToolbar, listSortToggle, type SortChoice, type SortOption, SortMenu } from "../components/ListToolbar";
 import { ago } from "../lib/time";
 import {
   LIST_ACTION,
@@ -43,13 +55,20 @@ interface TemplateRow {
   deletedAt: string | null;
 }
 
-/** name | what it holds (layers, intro / outro) | updated | actions */
-const COLUMNS: ListColumn[] = [
-  { label: "Name" },
-  { label: "Layers", width: "min-[1040px]:w-52", full: true, right: true },
-  { label: "Updated", width: "min-[1040px]:w-[6.5rem]", full: true },
-  { label: null, srLabel: "Actions", width: LIST_ACTIONS_WIDTH },
+const PAGE = 100;
+const SORT_OPTIONS: SortOption<TemplateSortKey>[] = [
+  { value: "name", label: "Name", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
+  { value: "created", label: "Date made", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
+  { value: "updated", label: "Last changed", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
 ];
+const readSort = (h: URLSearchParams): SortChoice<TemplateSortKey> => {
+  const key = h.get("sort");
+  if (!isTemplateSortKey(key)) return null;
+  const d = h.get("dir");
+  const dir = d === "asc" || d === "desc" ? d : listSortFirstDir(key);
+  // last change, newest first, is the default order: null, so the query and the hash carry nothing for it
+  return key === "updated" && dir === "desc" ? null : { key, dir };
+};
 
 /**
  * Layer templates (docs/specs/layer-templates.md): sets of layers that fit any clip length. New template opens the
@@ -58,13 +77,31 @@ const COLUMNS: ListColumn[] = [
  */
 export function TemplatesPage() {
   useDocumentTitle(pageTitle("Templates"));
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
   const loc = useLocation();
-  const highlighted = useHashParams().get("template");
-  const list = useQuery(trpc.layerTemplates.list.queryOptions({ limit: 500 }));
-  const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
+  const hash = useHashParams();
+  const highlighted = hash.get("template");
+  // search and sort run on the server and live in the hash (#q=logo&sort=name&dir=asc)
+  const [search, setSearch] = useState(() => readHash().get("q") ?? "");
+  const [sort, setSort] = useState<SortChoice<TemplateSortKey>>(() => readSort(readHash()));
+  const hashKey = hash.toString();
+  useEffect(() => {
+    const h = new URLSearchParams(hashKey);
+    setSearch(h.get("q") ?? "");
+    setSort(readSort(h));
+  }, [hashKey]);
+  const term = useDebounced(search.trim(), 200);
+  useEffect(() => writeHash({ q: term || null, sort: sort?.key ?? null, dir: sort?.dir ?? null }), [term, sort]);
+  const list = useInfiniteQuery(
+    trpc.layerTemplates.list.infiniteQueryOptions(
+      { limit: PAGE, q: term || undefined, ...(sort ? { sort: sort.key, dir: sort.dir } : {}) },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
+    ),
+  );
+  const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.pathKey() });
   const create = useMutation(trpc.layerTemplates.create.mutationOptions());
   const update = useMutation(trpc.layerTemplates.update.mutationOptions({ onSuccess: () => invalidate() }));
   const remove = useMutation(trpc.layerTemplates.delete.mutationOptions({ onSuccess: () => invalidate() }));
@@ -74,10 +111,32 @@ export function TemplatesPage() {
   const [draft, setDraft] = useState("");
   const [confirm, setConfirm] = useState<TemplateRow | null>(null);
 
-  const templates = list.data?.items ?? [];
-  const totalTemplates = list.data?.total ?? templates.length;
-  const deleted = list.data?.deleted ?? [];
-  const highlight = (id: string) => nav({ pathname: loc.pathname, hash: `#template=${id}` }, { replace: true });
+  const templates = useMemo(() => list.data?.pages.flatMap((pg) => pg.items) ?? [], [list.data]);
+  const totalTemplates = list.data?.pages[0]?.total ?? templates.length;
+  const deleted = list.data?.pages[0]?.deleted ?? [];
+  // the highlight joins the hash, so the search and sort in it stay
+  const highlight = (id: string) => {
+    const h = readHash();
+    h.set("template", id);
+    nav({ pathname: loc.pathname, search: loc.search, hash: `#${h.toString()}` }, { replace: true });
+  };
+  const noun = (n: number) => plural(n, term ? "match" : "template", term ? "matches" : "templates");
+  // name | what it holds (layers, intro / outro) | updated | actions; Name and Updated sort the server query
+  // null is last change, newest first: the Updated header shows it, and its toggle starts from it
+  const shownSort = sort ?? { key: "updated" as const, dir: "desc" as const };
+  const sortable = (k: TemplateSortKey, firstDir: "asc" | "desc"): NonNullable<ListColumn["sort"]> => ({
+    dir: shownSort.key === k ? (shownSort.dir === "asc" ? 1 : -1) : null,
+    onToggle: () => {
+      const next = listSortToggle<TemplateSortKey>(shownSort, k, firstDir);
+      setSort(next?.key === "updated" && next.dir === "desc" ? null : next);
+    },
+  });
+  const columns: ListColumn[] = [
+    { label: "Name", sort: sortable("name", "asc") },
+    { label: "Layers", width: "min-[1040px]:w-52", full: true, right: true },
+    { label: "Updated", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("updated", "desc") },
+    { label: null, srLabel: "Actions", width: LIST_ACTIONS_WIDTH },
+  ];
 
   // a deep-linked row scrolls into view once it is on the page
   useEffect(() => {
@@ -182,10 +241,22 @@ export function TemplatesPage() {
       {create.isPending && !create.variables?.layers.length ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New template
     </button>
   );
-  const empty = !!list.data && templates.length === 0;
+  const none = !!list.data && !list.isPlaceholderData && templates.length === 0;
+  // no templates at all (the call to action) vs none matching the search
+  const empty = none && !term;
+  const noMatch = none && !!term;
   return (
     <ListPage title="Templates" subtitle="Logos, stickers, text and sounds placed once, fitted to any clip length" actions={empty ? undefined : newButton}>
+      {!empty && (
+        <ListToolbar
+          label={t`Search templates`}
+          search={<ListSearch value={search} onChange={setSearch} placeholder={t`Search template names`} label={t`Search templates`} />}
+          controls={<SortMenu options={SORT_OPTIONS} value={sort} onChange={setSort} defaultKey="updated" />}
+          count={list.isPending ? <Skeleton className="h-3 w-24" /> : noun(totalTemplates)}
+        />
+      )}
       {list.error && <ListError message={list.error.message} />}
+      {noMatch && <ListEmpty icon={Layers} title={`No templates match “${term}”`} />}
       {empty && (
         <ListEmpty icon={Layers} title="No templates yet" action={newButton}>
           A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a
@@ -194,7 +265,7 @@ export function TemplatesPage() {
       )}
       {(templates.length > 0 || (list.isPending && !list.error)) && (
         <section className="flex flex-col gap-2">
-          <ListTable caption="Your layer templates" columns={COLUMNS} loading={list.isPending} loadingLabel="Loading templates…">
+          <ListTable caption="Your layer templates" columns={columns} loading={list.isPending} loadingLabel="Loading templates…">
             {list.isPending &&
               Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
                 <ListRow key={i} skeleton>
@@ -215,7 +286,23 @@ export function TemplatesPage() {
               ))}
             {templates.map((t) => row(t))}
           </ListTable>
-          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : showingCount(templates.length, totalTemplates, "template")}</ListFooter>
+          <ListFooter
+            action={
+              <ListLoadMore
+                hasMore={!!list.hasNextPage}
+                loading={list.isFetchingNextPage}
+                busy={(list.isFetching && !list.isFetchingNextPage) || list.isPlaceholderData}
+                onMore={() => void list.fetchNextPage()}
+                left={Math.min(PAGE, totalTemplates - templates.length)}
+              />
+            }
+          >
+            {list.isPending ? (
+              <Skeleton className="h-3 w-40" />
+            ) : (
+              showingCount(templates.length, totalTemplates, term ? "match" : "template", term ? "matches" : "templates")
+            )}
+          </ListFooter>
         </section>
       )}
 

@@ -319,7 +319,10 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - **Search and filtering happen in the database.** Matching runs in SQL against an index
   (`ILIKE` with `pg_trgm`, or `tsvector`), scoped by `user_id`, and returns a page. The client
   may narrow what it already fetched (Fuse over 20 results), never fetch everything to search it.
-  Debounce typing, keep the previous results while the next page loads.
+  Debounce typing, keep the previous results while the next page loads. Approximate matching
+  (`<%`, word similarity) is for plain words only (`fuzzyWord` in `search.ts`, through `near`): pg_trgm
+  splits text at punctuation, so a fuzzy `bob@example.com` matched every address at example.com. A
+  word with punctuation in it (an address, a domain, `v1.2`) is meant exactly and matches literally.
 - **Sorting happens in the database.** A paged list's sort is a query input (`sort`, `dir`), applied
   in SQL to every match and paged by a keyset on (sort value, `id`) whose cursor names its sort. A
   sortable column header changes the query, never the order of the rows already loaded: sorting a
@@ -469,6 +472,17 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   blob-download side effects, SSE.
 - **Lists align.** A full-page list is built from `components/ListPage.tsx` (page frame, table, empty
   state, count footer), so its width, row height, fold width and actions match the others.
+  - Search, filters, grouping and sort are one `ListToolbar` (`components/ListToolbar.tsx`) directly
+    above the list, in a fixed order: the search box (widest, first), one Filter menu holding every
+    facet, then Group and Sort. Never a row of selects in the page header. Under it, one line with the
+    count of every match ("1,204 accounts", "3 matches") and a removable chip per filter in force,
+    including filters that only arrive by link; it keeps its height when empty. The count is above
+    the list because it is what a search answers; the footer repeats "Showing 50 of 1,204".
+  - Sort is a toolbar menu as well as the column headers (`listSortToggle` is both), so it works on
+    cards and below the fold width where headers hide. Search, filters, group and sort are server
+    query inputs, in the hash, and the same inputs on the MCP tool and CLI command.
+  - A paged list loads the next page as its end scrolls near (`ListLoadMore`: a sentinel plus the
+    button, for keyboards and for saying what is left). Nobody hunts for "Load more" below the fold.
   - Rows of one list share one column grid (a `<table>` with fixed layout, or CSS grid with fixed
     tracks), never per-row flex that wraps differently. Every column has a fixed or minimum width
     and an explicit alignment: text left, numbers right with `tabular-nums`, status glyph plus word

@@ -38,8 +38,25 @@ export function escapeLike(s: string): string {
 export const words = (q: string) => q.trim().split(/\s+/).filter(Boolean).slice(0, MAX_WORDS);
 const contains = (col: Parameters<typeof ilike>[0], w: string) => ilike(col, `%${escapeLike(w)}%`);
 type Col = Parameters<typeof ilike>[0];
-/** the word is in the column literally, or (3+ characters) close to a word in it; the `<%` operator reads pg_trgm.word_similarity_threshold */
-export const near = (col: Col, w: string): SQL => (w.length >= FUZZY_MIN_CHARS ? or(contains(col, w), sql`${w} <% ${col}`)! : contains(col, w));
+/**
+ * Whether a query word may match approximately: three or more characters, and letters or digits only. pg_trgm splits
+ * text into words at every other character, so `bob@example.com` is the words bob, example and com, and `<%` finds
+ * it close to every address at example.com. A word with punctuation in it (an address, a domain, `v1.2`, `-cut`) is
+ * something the user copied or means exactly, so it matches literally only. Punctuation only at the edges of a word
+ * ("Hopper," from a pasted list, "(interview)", "budget.") is not part of it: `wordCore` trims it first.
+ */
+export const fuzzyWord = (w: string) => w.length >= FUZZY_MIN_CHARS && /^[\p{L}\p{N}]+$/u.test(w);
+/** the word without leading and trailing punctuation ("Hopper," → "Hopper"; "@example.test" → "example.test") */
+const wordCore = (w: string) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+/**
+ * The word is in the column literally (as typed, or without its edge punctuation), or its core is a plain word
+ * (`fuzzyWord`) close to a word in it; the `<%` operator reads pg_trgm.word_similarity_threshold.
+ */
+export const near = (col: Col, w: string): SQL => {
+  const core = wordCore(w);
+  const alts = [contains(col, w), ...(core && core !== w ? [contains(col, core)] : []), ...(fuzzyWord(core) ? [sql`${core} <% ${col}`] : [])];
+  return alts.length === 1 ? contains(col, w) : or(...alts)!;
+};
 /** weighted similarity of one word over weighted columns, plus the literal bonus */
 export function wordScore(w: string, cols: Array<[Col, number]>): SQL {
   const sims = cols.map(([c, weight]) => sql`word_similarity(${w}, ${c}) * ${weight}`);

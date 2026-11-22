@@ -36,6 +36,7 @@ import {
 } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 import { BULK_USERS, bulkUsersShape, userListToolInput } from "./accounts-schema.js";
+import { projectListShape, templateListShape } from "./list-schemas.js";
 import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
@@ -114,12 +115,8 @@ export const TOOLS = {
   list_projects: {
     title: "List projects",
     description:
-      'Your projects, most recently updated first. Returns { projects: [{ id, title, status, stage, clips: "n/m rendered", url }], total, nextCursor }; pass nextCursor as cursor for the next page. deleted: true lists restorable deletes (storedBytes still count until purge_project). For every kind of restorable delete (projects, clips, library, templates) use list_deleted. Use get_project for one project\'s clips, search_clips to find by words.',
-    inputSchema: {
-      cursor: z.string().optional().describe("nextCursor from the previous page; omit for the first page"),
-      limit: z.number().int().min(1).max(100).default(24).describe("Projects per page (1-100, default 24)"),
-      deleted: z.boolean().optional().describe("true = only deleted projects that restore_project can still bring back"),
-    },
+      'Your projects, most recently updated first (the Projects page). q, status, sort and dir narrow and order every match. Returns { projects: [{ id, title, status, stage, clips: "n/m rendered", url }], total, nextCursor }; pass nextCursor as cursor (same q, status, sort) for more. deleted: true lists restorable deletes; list_deleted has every kind. get_project has a project’s clips, search_clips finds clips by words.',
+    inputSchema: projectListShape,
     annotations: { readOnlyHint: true },
   },
   get_project: {
@@ -682,11 +679,8 @@ export const TOOLS = {
   list_layer_templates: {
     title: "List layer templates",
     description:
-      "Your layer templates (layers that fit any clip length, plus an optional intro / outro), newest first. Returns { items: [{ id, name, layerCount, layers, bumpers, updatedAt }], nextCursor, total, deleted } (nextCursor goes in cursor; deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
-    inputSchema: {
-      cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
-      limit: z.number().int().min(1).max(500).default(100).describe("Templates per page (1-500, default 100)"),
-    },
+      "Your layer templates (layers that fit any clip length, plus an optional intro / outro), newest change first; q, sort, dir as on the Templates page. Returns { items: [{ id, name, layerCount, layers, bumpers, updatedAt }], nextCursor, total, deleted } (deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (0 = the end); fill = whole clip; relative = fractions 0-1 of the length, within minSec to maxSec",
+    inputSchema: templateListShape,
     annotations: { readOnlyHint: true },
   },
   save_layer_template: {
