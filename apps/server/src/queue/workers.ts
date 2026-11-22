@@ -10,7 +10,7 @@ import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from
 import { renderClip, markClipFailed } from "../pipeline/render.js";
 import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError, NonRetryableError } from "../pipeline/common.js";
 import { attemptOutcome } from "../pipeline/steps.js";
-import { ResourceExhaustedError } from "../resources.js";
+import { AccountCeilingError, CAPACITY_WAIT_PREFIX, ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
 import { inflightJobs, setListeningQueues, trackJob } from "./inflight.js";
@@ -62,6 +62,24 @@ async function jobRetryLimit(svc: Services, jobId: string, fallback: number): Pr
 async function grantRetry(svc: Services, jobId: string): Promise<void> {
   await svc.database.pool.query("update pgboss.job set retry_limit = retry_limit + 1 where id = $1 and state = 'active'", [jobId]);
 }
+
+/** Longest a render refused by its own account's ceiling waits in the queue before it is tried again (pg-boss backoff cap). */
+const CAPACITY_RETRY_MAX_SECONDS = 60;
+
+/**
+ * A render refused by its account's ceiling or the paid reserve (resources.ts `AccountCeilingError`) goes back to the
+ * queue without spending an attempt: the budget is raised on the running row (as `grantRetry`) and the backoff capped,
+ * so it comes back within a minute while its slot takes the next job in fair-share order.
+ */
+async function deferForCapacity(svc: Services, jobId: string): Promise<void> {
+  await svc.database.pool.query("update pgboss.job set retry_limit = retry_limit + 1, retry_delay_max = $2 where id = $1 and state = 'active'", [
+    jobId,
+    CAPACITY_RETRY_MAX_SECONDS,
+  ]);
+}
+
+/** The previous attempt only waited for its account's capacity (`AccountCeilingError`): not a failure to report. */
+const waitedForCapacity = (reason?: string) => !!reason && reason.startsWith(CAPACITY_WAIT_PREFIX);
 
 /** Seconds of media a job worked on: the source's length, or the clip's for prepare and render. Null before ingest knows it. */
 async function mediaSeconds(svc: Services, projectId: string, clipId?: string): Promise<number | null> {
@@ -343,7 +361,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           { attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) },
           job.retryCount ? "job retry" : "job start",
         );
-        if (prev)
+        if (prev && !waitedForCapacity(prev))
           await svc.events
             .emit("clip.retrying", {
               projectId: projectId,
@@ -375,14 +393,22 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         }
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
+        if (err instanceof AccountCeilingError) {
+          // never wait in this slot for the account's own work to end: back to the queue, the slot takes the next job
+          log.info({ reason: err.message, attempt: job.retryCount + 1 }, "render back to the queue until the account has capacity");
+          await deferForCapacity(svc, job.id);
+          throw err;
+        }
         if (err instanceof NonRetryableError) {
           log.warn({ reason: err.message }, "render failed without retry");
           await markClipFailed(svc, projectId, clipId, err, gen);
           return; // handled: retrying cannot bring the source back
         }
-        log[job.retryCount >= max ? "error" : "warn"]({ err, attempt: job.retryCount + 1 }, "job failed");
+        // the row's budget, not the queue's: waits for capacity raised it (deferForCapacity)
+        const limit = job.retryCount >= max ? await jobRetryLimit(svc, job.id, max) : max;
+        log[job.retryCount >= limit ? "error" : "warn"]({ err, attempt: job.retryCount + 1 }, "job failed");
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.render, err.requiredMB);
-        if (job.retryCount >= max) {
+        if (job.retryCount >= limit) {
           await markClipFailed(svc, projectId, clipId, err, gen);
         }
         throw err;

@@ -90,6 +90,7 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
     firstVideoFreeMinutes: plan.firstVideoFreeMinutes,
     queuePriority: plan.queuePriority,
     sourceHeight: plan.sourceHeight,
+    resources: plan.resources,
     period,
     ...(next
       ? {
@@ -111,13 +112,16 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
 export function createEntitlements(deps: {
   graceDays: () => number;
   appUrl: string;
+  /** FREE_RESERVE_CORES: the cores of a machine Free accounts' leases leave for paid ones (0 = none) */
+  freeReserveCores?: () => number;
 }): Entitlements & { rowFor(db: Db, userId: string): Promise<BillingSubscriptionRow | null> } {
   const rowFor = async (db: Db, userId: string) =>
     (await db.query.billingSubscriptions.findFirst({ where: eq(schema.billingSubscriptions.userId, userId) })) ?? null;
   return {
     rowFor,
     async grantsFor(db, userId) {
-      return grantsOf(await rowFor(db, userId), deps.graceDays(), deps.appUrl);
+      const g = grantsOf(await rowFor(db, userId), deps.graceDays(), deps.appUrl);
+      return g.plan === FREE.name ? { ...g, reserveCores: deps.freeReserveCores?.() ?? 0 } : g;
     },
   };
 }

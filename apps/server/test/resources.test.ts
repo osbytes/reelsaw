@@ -16,6 +16,8 @@ import {
   sceneScanCpu,
   MAX_SCENE_SCAN_THREADS,
   claimOnLive,
+  AccountCeilingError,
+  type AccountLimits,
   renderRefusal,
   NO_LEASES,
   CPUS_PER_RENDER,
@@ -26,6 +28,7 @@ import {
 } from "../src/resources.js";
 import type { Config } from "../src/config.js";
 import type { Logger } from "../src/log.js";
+import { resourceCeilingOf, type Grants } from "../src/quota.js";
 
 describe("cpuGrant", () => {
   it("bursts into what is free, between the request's min and max", () => {
@@ -44,6 +47,73 @@ describe("cpuGrant", () => {
   it("the pool keeps one core back", () => {
     assert.equal(cpuCapacity(1), 1);
     assert.equal(cpuCapacity(6), 5);
+  });
+});
+
+describe("claimOnLive with an account's limits (hosted plans)", () => {
+  const free = (live: { cores: number; memMB: number }, reserveCores = 0): AccountLimits => ({
+    ceiling: { maxCores: 2, maxMemMB: 2400 },
+    reserveCores,
+    live,
+  });
+  const scan = { kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 7 };
+  const slot = { kind: RENDER_SLOT_KIND, memMB: RENDER_MEM_MB, capacity: 7 };
+  it("an elastic pass shrinks to the account's ceiling, down to one thread, and never waits", () => {
+    assert.equal((claimOnLive(scan, NO_LEASES, free({ cores: 0, memMB: 0 })) as { cores: number }).cores, 2);
+    assert.equal((claimOnLive(scan, NO_LEASES, free({ cores: 1, memMB: 0 })) as { cores: number }).cores, 1);
+    assert.equal((claimOnLive(scan, NO_LEASES, free({ cores: 5, memMB: 0 })) as { cores: number }).cores, 1, "past the ceiling: the floor");
+  });
+  it("a fixed-share encode shrinks too: threads never change the output", () => {
+    const encode = { kind: "render-encode", cpu: { min: 7, max: 7 }, capacity: 7 };
+    assert.equal((claimOnLive(encode, NO_LEASES, free({ cores: 0, memMB: 1200 })) as { cores: number }).cores, 2);
+    assert.equal((claimOnLive(encode, NO_LEASES) as { cores: number }).cores, 7, "no account: the host's share");
+  });
+  it("the reserve keeps the machine's last cores: a pass gets what is left above it", () => {
+    const busy = { ...NO_LEASES, cores: 3 };
+    const unbounded: AccountLimits = { ceiling: null, reserveCores: 2, live: { cores: 0, memMB: 0 } };
+    assert.equal((claimOnLive(scan, busy, unbounded) as { cores: number }).cores, 2, "7 cores, 3 leased, 2 kept: 2 left");
+    assert.equal((claimOnLive(scan, { ...NO_LEASES, cores: 6 }, unbounded) as { cores: number }).cores, 1);
+  });
+  it("a render slot past the memory ceiling is refused as the account's, not the host's", () => {
+    const r = claimOnLive(slot, NO_LEASES, free({ cores: 0, memMB: 2400 }));
+    assert.ok(!r.ok && r.account, "refused with account: the worker requeues it");
+    assert.match(!r.ok ? r.reason : "", /2400 MB of its 2400 MB memory/);
+    assert.ok(claimOnLive(slot, NO_LEASES, free({ cores: 0, memMB: 1200 })).ok, "a second render fits 2400 MB");
+  });
+  it("an account holding nothing may always start one, whatever its ceiling", () => {
+    const tiny: AccountLimits = { ceiling: { maxCores: 1, maxMemMB: 100 }, reserveCores: 0, live: { cores: 0, memMB: 0 } };
+    assert.ok(claimOnLive(slot, NO_LEASES, tiny).ok);
+  });
+  it("a reserved account's render waits in the queue while the machine's leases reach into the reserve", () => {
+    const r = claimOnLive(slot, { ...NO_LEASES, cores: 5 }, free({ cores: 0, memMB: 0 }, 2));
+    assert.ok(!r.ok && r.account);
+    assert.match(!r.ok ? r.reason : "", /kept for paid plans/);
+    assert.ok(claimOnLive(slot, { ...NO_LEASES, cores: 4 }, free({ cores: 0, memMB: 0 }, 2)).ok);
+  });
+  it("a reserve as large as the machine still lets an idle one start the work", () => {
+    const small = { ...slot, capacity: 2 };
+    assert.ok(claimOnLive(small, NO_LEASES, free({ cores: 0, memMB: 0 }, 8)).ok, "kept: at most capacity - 1");
+  });
+  it("the host's refusal stays the host's (bounded wait in the slot)", () => {
+    const r = claimOnLive({ ...slot, admit: () => "host full" }, NO_LEASES, free({ cores: 0, memMB: 2400 }));
+    assert.ok(!r.ok && !r.account && r.reason === "host full");
+  });
+});
+
+describe("resourceCeilingOf", () => {
+  const grants = (over: Partial<Grants> = {}): Grants => ({ plan: "free", planLabel: "Free", limits: {}, watermark: null, period: null, ...over });
+  it("an admin's override, else the plan's, else none", () => {
+    const plan = { maxCores: 2, maxMemMB: 2400 };
+    assert.deepEqual(resourceCeilingOf(null, grants({ resources: plan, reserveCores: 2 })), {
+      value: plan,
+      source: "plan",
+      plan,
+      override: null,
+      reserveCores: 2,
+    });
+    const o = { maxCores: 6, maxMemMB: 6000 };
+    assert.equal(resourceCeilingOf(o, grants({ resources: plan })).value, o);
+    assert.deepEqual(resourceCeilingOf(null, null), { value: null, source: "instance", plan: null, override: null, reserveCores: 0 });
   });
 });
 
@@ -219,6 +289,19 @@ describe("leases on the governor", () => {
     ledger.rows.set(6001, { worker: "two", kind: RENDER_SLOT_KIND, mb: 0, cores: 0, memMB: 0 });
     const cores = await g.withCpu({ kind: "render-encode", cpu: g.renderEncodeCpu() }, async (c) => c);
     assert.equal(cores, Math.max(1, Math.ceil(g.cpuCapacity() / 2)));
+  });
+  it("a render refused by its account's ceiling throws at once instead of waiting in the slot", async () => {
+    const g = gov();
+    let calls = 0;
+    g.setLeaser(async (req) => {
+      calls++;
+      return { ok: false, reason: `the account's jobs hold 2400 MB of its 2400 MB memory (${req.kind})`, live: NO_LEASES, account: true };
+    }, SCOPE);
+    const started = Date.now();
+    await assert.rejects(g.renderSlot({}), (err) => err instanceof AccountCeilingError && /^Waiting for capacity: /.test(err.message));
+    assert.equal(calls, 1, "one claim, no retry loop");
+    assert.ok(Date.now() - started < 1500, "no wait in the worker slot");
+    assert.equal(g.renders().running, 0);
   });
   it("a pinned RENDER_CONCURRENCY is this process's own count", async () => {
     const g = gov({ RENDER_CONCURRENCY: 1 } as Partial<Config>);

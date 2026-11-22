@@ -5,7 +5,7 @@
  * `website/content/pricing.ts` mirrors this list for reelsaw.com; the "pricing content" case in `test/billing.test.ts` keeps them equal.
  */
 import { FREE_PLAN } from "@reelsaw/shared";
-import type { Limits } from "../../quota.js";
+import type { Limits, ResourceCeiling } from "../../quota.js";
 
 export type Interval = "month" | "year";
 
@@ -34,6 +34,12 @@ export interface Plan {
    * (pipeline/sections.ts), so the proxy carries a few minutes of HD instead of the whole video.
    */
   sourceHeight: number | null;
+  /**
+   * The most cores and memory the account's jobs hold at once, across every machine (resource leases,
+   * docs/specs/resource-leases.md): a scan gets fewer threads, a render that would pass it goes back to the queue.
+   * An admin's per-user override replaces it (quota.ts `resourceCeilingFor`).
+   */
+  resources: ResourceCeiling;
   blurb: string;
   /** the plan to suggest when this one's limit is hit */
   next: string | null;
@@ -50,6 +56,7 @@ export const PLANS: Plan[] = [
     queuePriority: 0,
     watermark: null,
     sourceHeight: 240,
+    resources: { maxCores: 2, maxMemMB: 2400 },
     blurb: "Your first video free up to 60 minutes, then 20 minutes a month, with a small watermark.",
     next: "starter",
   },
@@ -63,6 +70,7 @@ export const PLANS: Plan[] = [
     queuePriority: 2,
     watermark: false,
     sourceHeight: null,
+    resources: { maxCores: 4, maxMemMB: 4800 },
     blurb: "100 minutes a month, 10 GB of storage, no watermark, ahead of Free in the queue.",
     next: "creator",
   },
@@ -76,6 +84,7 @@ export const PLANS: Plan[] = [
     queuePriority: 3,
     watermark: false,
     sourceHeight: null,
+    resources: { maxCores: 6, maxMemMB: 7200 },
     blurb: "300 minutes a month, 30 GB of storage, no watermark, ahead of Starter in the queue.",
     next: "pro",
   },
@@ -89,6 +98,7 @@ export const PLANS: Plan[] = [
     queuePriority: 5,
     watermark: false,
     sourceHeight: null,
+    resources: { maxCores: 8, maxMemMB: 9600 },
     blurb: "750 minutes a month, 100 GB of storage, unlimited projects, no watermark, top of the queue.",
     next: null,
   },

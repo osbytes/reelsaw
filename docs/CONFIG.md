@@ -211,6 +211,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `STRIPE_MANAGED_PAYMENTS` | `false` | Enable Stripe Managed Payments (Stripe as merchant of record: it files sales tax and VAT) on every Checkout Session. The Stripe account must be approved for it first. |
 | `STRIPE_API_BASE` | unset | Development only: an origin that stands in for api.stripe.com (stripe-mock, or `test/stripe-mock.ts`). Never set in production. |
 | `BILLING_GRACE_DAYS` | `7` | Days a past-due subscription keeps its plan after the first failed payment; then the account falls back to Free. |
+| `FREE_RESERVE_CORES` | `0` | Cores of each machine that Free accounts' jobs leave for paid ones: a Free scan is granted fewer threads and a Free render waits in the queue rather than take them. 0 = no reserve; hosted runs 2. |
 
 ### Resource governor and workers
 

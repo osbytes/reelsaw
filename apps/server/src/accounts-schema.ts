@@ -4,7 +4,22 @@
  * stdio bridge) can import it without the services behind it.
  */
 import { z } from "zod";
-import { ABUSE_FLAGS, FLAG_GROUPS, MAX_IP_GROUPS, SORT_DIRS, USER_GROUP_BY, USER_SORT_KEYS } from "@reelsaw/shared";
+import {
+  ABUSE_FLAGS,
+  FLAG_GROUPS,
+  MAX_IP_GROUPS,
+  RESOURCE_CEILING_MAX_CORES,
+  RESOURCE_CEILING_MAX_MEM_MB,
+  SORT_DIRS,
+  USER_GROUP_BY,
+  USER_SORT_KEYS,
+} from "@reelsaw/shared";
+
+/** An admin's per-account resource ceiling (accounts.ts setUserResources): admin.users.setResources, set_user_resources, `reelsaw limits --cores --mem-mb`. */
+export const resourceCeilingInput = z.object({
+  maxCores: z.number().int().min(1).max(RESOURCE_CEILING_MAX_CORES).describe("Most cores the account's jobs hold at once, across every machine"),
+  maxMemMB: z.number().int().min(1).max(RESOURCE_CEILING_MAX_MEM_MB).describe("Most MB of memory the account's jobs hold at once (a render leases 1200)"),
+});
 
 export const USER_STATUSES = ["pending", "active", "suspended"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];

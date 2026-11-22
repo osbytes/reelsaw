@@ -26,7 +26,8 @@ import type { Db } from "./db/index.js";
 import { schema } from "./db/index.js";
 import { takeTxLock, txLock } from "./locks.js";
 import { MAX_JOB_EXPIRE_SECONDS } from "./queue/boss.js";
-import { claimOnLive, type HostLeases, type Leaser } from "./resources.js";
+import { type Entitlements, resourceCeilingOf } from "./quota.js";
+import { type AccountLimits, claimOnLive, type HostLeases, type LeaseIds, type Leaser } from "./resources.js";
 import type { Services } from "./services.js";
 
 export const VOLUME_MARKER = ".volume-id";
@@ -127,16 +128,83 @@ export async function hostLeases(db: Pick<Db, "select">, p: LeaseScope & { selfI
   return live;
 }
 
-/** The shared ledger for the governor: check against the host's live totals and record the claim, as one locked transaction. */
-export function createLeaser(svc: Pick<Services, "database" | "log">, p: LeaseScope & { selfId: string; staleMs: number }): Leaser {
+/**
+ * What one account's live leases hold, summed over every machine: its plan ceiling is the most it may hold at once
+ * (docs/specs/resource-leases.md slice 3). The same liveness as `hostLeases`. `db` may be a transaction.
+ */
+async function accountLeases(
+  db: Pick<Db, "select">,
+  p: { userId: string; selfId: string; staleMs: number; now?: Date },
+): Promise<{ cores: number; memMB: number }> {
+  const now = p.now ?? new Date();
+  const t = schema.resourceLeases;
+  const [row] = await db
+    .select({
+      cores: sql<number>`(coalesce(sum(${t.cores}), 0))::int`,
+      memMB: sql<number>`(coalesce(sum(${t.memMB}), 0))::int`,
+    })
+    .from(t)
+    .leftJoin(schema.workerInstances, eq(schema.workerInstances.id, t.workerId))
+    .where(
+      and(
+        eq(t.userId, p.userId),
+        gt(t.expiresAt, now),
+        or(eq(t.workerId, p.selfId), gt(schema.workerInstances.lastSeenAt, new Date(now.getTime() - p.staleMs))),
+      ),
+    );
+  return { cores: row?.cores ?? 0, memMB: row?.memMB ?? 0 };
+}
+
+/**
+ * Whose work a lease is and what bounds that account (EE only): the caller's `userId`, else the project's owner. Null
+ * for work that is no one account's, and for admins (like the source-height cap, plans do not bound them).
+ */
+async function leaseAccount(tx: Db, ent: Entitlements, ids: LeaseIds | undefined): Promise<{ userId: string; limits: AccountLimits | null } | null> {
+  let userId = ids?.userId;
+  let role: string | undefined;
+  if (userId) {
+    role = (await tx.select({ role: schema.user.role }).from(schema.user).where(eq(schema.user.id, userId)))[0]?.role;
+  } else if (ids?.projectId) {
+    const [owner] = await tx
+      .select({ userId: schema.projects.userId, role: schema.user.role })
+      .from(schema.projects)
+      .innerJoin(schema.user, eq(schema.user.id, schema.projects.userId))
+      .where(eq(schema.projects.id, ids.projectId));
+    userId = owner?.userId;
+    role = owner?.role;
+  }
+  if (!userId) return null;
+  if (role === "admin") return { userId, limits: null };
+  const [row, grants] = await Promise.all([
+    tx.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { resources: true } }),
+    ent.grantsFor(tx, userId),
+  ]);
+  const r = resourceCeilingOf(row?.resources ?? null, grants);
+  if (!r.value && !r.reserveCores) return { userId, limits: null };
+  return { userId, limits: { ceiling: r.value, reserveCores: r.reserveCores, live: { cores: 0, memMB: 0 } } };
+}
+
+/**
+ * The shared ledger for the governor: check against the host's live totals and record the claim, as one locked
+ * transaction. On a hosted instance (`entitlements`, EE) the claim is also bounded by its account's plan ceiling and
+ * the paid reserve (`claimOnLive` with `AccountLimits`), checked against that account's live rows under a lock per
+ * account, in the same step; self-hosted the host's capacity is the only limit.
+ */
+export function createLeaser(svc: Pick<Services, "database" | "log" | "entitlements">, p: LeaseScope & { selfId: string; staleMs: number }): Leaser {
   const log = svc.log.child({ module: "resources" });
   return async (req) =>
     svc.database.db.transaction(async (tx) => {
-      // both scopes, always in this order: disk is checked per volume, cores and memory per machine
+      // both scopes, always in this order: disk is checked per volume, cores and memory per machine, then the account
       await takeTxLock(tx, txLock.leaseVolume(p.volume));
       await takeTxLock(tx, txLock.leaseMachine(p.machine));
+      const ent = svc.entitlements;
+      const acct = ent ? await leaseAccount(tx as unknown as Db, ent, req.ids) : null;
+      if (acct?.limits) {
+        await takeTxLock(tx, txLock.leaseAccount(acct.userId));
+        acct.limits.live = await accountLeases(tx, { userId: acct.userId, selfId: p.selfId, staleMs: p.staleMs });
+      }
       const live = await hostLeases(tx, p);
-      const claim = claimOnLive(req, live);
+      const claim = claimOnLive(req, live, acct?.limits);
       if (!claim.ok) return claim;
       const [row] = await tx
         .insert(schema.resourceLeases)
@@ -146,7 +214,7 @@ export function createLeaser(svc: Pick<Services, "database" | "log">, p: LeaseSc
           workerId: p.selfId,
           jobId: req.ids?.jobId ?? null,
           projectId: req.ids?.projectId ?? null,
-          userId: req.ids?.userId ?? null,
+          userId: acct?.userId ?? req.ids?.userId ?? null,
           kind: req.kind,
           mb: claim.mb,
           cores: claim.cores,
@@ -156,7 +224,7 @@ export function createLeaser(svc: Pick<Services, "database" | "log">, p: LeaseSc
         .returning({ id: schema.resourceLeases.id });
       if (!row) throw new Error("lease insert returned no row");
       const id = row.id;
-      log.debug({ kind: req.kind, mb: claim.mb, cores: claim.cores, memMB: claim.memMB, live, ...req.ids }, "leased");
+      log.debug({ kind: req.kind, mb: claim.mb, cores: claim.cores, memMB: claim.memMB, live, account: acct?.limits ?? undefined, ...req.ids }, "leased");
       return {
         ...claim,
         id,

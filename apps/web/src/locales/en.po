@@ -63,6 +63,14 @@ msgstr "Forgot password?"
 msgid "Have an account? Sign in"
 msgstr "Have an account? Sign in"
 
+#: src/pages/AdminUsers.tsx
+msgid "Most cores at once"
+msgstr "Most cores at once"
+
+#: src/pages/AdminUsers.tsx
+msgid "Most memory at once, MB"
+msgstr "Most memory at once, MB"
+
 #: src/pages/Login.tsx
 msgid "Name"
 msgstr "Name"
@@ -78,6 +86,10 @@ msgstr "New accounts wait for an admin to approve them before they can start pro
 #: src/pages/Login.tsx
 msgid "Password"
 msgstr "Password"
+
+#: src/pages/AdminUsers.tsx
+msgid "Resource ceiling"
+msgstr "Resource ceiling"
 
 #: src/pages/Login.tsx
 msgid "Send a new confirmation"

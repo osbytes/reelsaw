@@ -35,7 +35,7 @@ import {
   templateBumpersSchema,
 } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
-import { BULK_USERS, bulkUsersShape, userListToolInput } from "./accounts-schema.js";
+import { BULK_USERS, bulkUsersShape, resourceCeilingInput, userListToolInput } from "./accounts-schema.js";
 import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "./signup-rules-schema.js";
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
@@ -992,6 +992,16 @@ export const TOOLS = {
     inputSchema: {
       userId: z.string().min(1).max(80).describe("Account id (from list_users or get_queue owners)"),
       priority: z.number().int().min(QUEUE_PRIORITY_MIN).max(QUEUE_PRIORITY_MAX).nullable().describe("Points, or null to follow the plan"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  set_user_resources: {
+    title: "Set an account's resource ceiling",
+    description:
+      "Admins only, hosted plans: the most cores and memory one account's jobs hold at once across every machine, replacing the plan's (Free 2 cores / 2400 MB up to Pro 8 / 9600). A scan past it gets fewer threads; a render past it goes back to the queue until the account's other work ends, so it never holds a worker slot. null follows the plan again. Applies to the next lease. Refused on a self-hosted instance (no plans: the host's capacity is the only limit). Returns { ok, resources }.",
+    inputSchema: {
+      userId: z.string().min(1).max(80).describe("Account id (from list_users or get_queue owners)"),
+      resources: resourceCeilingInput.nullable().describe("{ maxCores, maxMemMB }, or null to follow the plan"),
     },
     annotations: { idempotentHint: true },
   },

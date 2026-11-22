@@ -63,6 +63,14 @@ msgstr ""
 msgid "Have an account? Sign in"
 msgstr ""
 
+#: src/pages/AdminUsers.tsx
+msgid "Most cores at once"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "Most memory at once, MB"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Name"
 msgstr ""
@@ -77,6 +85,10 @@ msgstr ""
 
 #: src/pages/Login.tsx
 msgid "Password"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "Resource ceiling"
 msgstr ""
 
 #: src/pages/Login.tsx
