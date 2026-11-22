@@ -32,7 +32,6 @@ import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 import { plural } from "@reelsaw/shared";
 
 const argv = process.argv.slice(2);
-const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
 const flagValue = (name: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[i + 1] : undefined;

@@ -1,11 +1,9 @@
 import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
 import { rendersFromSections } from "../pipeline/sections.js";
 import { z } from "zod";
-import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { mediaLinksRouter, webhooksRouter } from "./integrations.js";
@@ -97,37 +95,21 @@ import {
   bumperSecondsSchema,
   sectionModeSchema,
   sectionAdjustSchema,
-  overlayKind,
-  TEXT_OVERLAY_DEFAULTS,
-  ASSET_OVERLAY_DEFAULT_W,
-  CLIP_AUDIO_DEFAULTS,
-  clipAudioList,
-  TEXT_FONTS,
-  styleSchema,
   clipLayers,
-  layersToLegacy,
   assetTagsSchema,
-  assetProvenanceSchema,
-  SFX_MAX_SEC,
   layerTemplateNameSchema,
   layerTemplateLayersSchema,
-  type ClipLayer,
-  type ClipOverlay,
-  type ClipAudio,
   type EventsReplayed,
   type ProjectEvent,
   type TranscriptFlag,
   type Word,
 } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
-import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { lockProjectClips, requestRender } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
-import { keys } from "../storage/index.js";
-import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
-import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import {
   projectBumperSummaries,
   bumperUsageCounts,
@@ -178,7 +160,6 @@ import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
 import { testModel } from "../ai/model-test.js";
-import { takeTxLock, txLock } from "../locks.js";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
 
 /** The models a new stage would run with, for expected-time lookups. */
@@ -404,7 +385,6 @@ async function saveFlags(
   f: TranscriptFlag,
   rerender: boolean,
 ) {
-  const db = u.db;
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
   const segments = toSentences(words, undefined, t.language);
@@ -453,8 +433,6 @@ const periodOf = (g: Parameters<typeof periodFor>[0]) => {
   const p = periodFor(g);
   return { start: p.start.toISOString(), end: p.end.toISOString(), source: p.source };
 };
-
-const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 
 // appRouter is three routers merged (head, bumpers, rest) so the library router can be mounted under two names
 // (`bumpers` and `library`) without moving its code.

@@ -1,0 +1,17 @@
+{
+  "a11y/noAutofocus": 11,
+  "a11y/noLabelWithoutControl": 21,
+  "a11y/noStaticElementInteractions": 28,
+  "a11y/useAriaPropsSupportedByRole": 5,
+  "a11y/useButtonType": 209,
+  "a11y/useKeyWithClickEvents": 17,
+  "a11y/useMediaCaption": 6,
+  "a11y/useSemanticElements": 16,
+  "complexity/noBannedTypes": 1,
+  "correctness/useExhaustiveDependencies": 126,
+  "performance/noImgElement": 3,
+  "style/noNonNullAssertion": 2034,
+  "suspicious/noArrayIndexKey": 58,
+  "suspicious/noConfusingVoidType": 1,
+  "suspicious/noExplicitAny": 10
+}

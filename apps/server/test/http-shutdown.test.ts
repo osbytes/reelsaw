@@ -9,7 +9,7 @@ function portOf(s: http.Server): number {
 import { trackHttpServer } from "../src/http-shutdown.js";
 
 test("close() ends an open SSE stream with a final comment and resolves", async () => {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write("data: hi\n\n");
   });

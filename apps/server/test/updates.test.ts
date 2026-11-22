@@ -37,7 +37,7 @@ describe("upgradeHowTo", () => {
 describe("update checker", () => {
   it("reports a newer release with its link and the upgrade step", async () => {
     const calls: string[] = [];
-    const u = createUpdateChecker(cfg("0.5.0"), log, { fetch: async (url, init) => (calls.push(init.headers["user-agent"]!), release("v0.6.0")) });
+    const u = createUpdateChecker(cfg("0.5.0"), log, { fetch: async (_url, init) => (calls.push(init.headers["user-agent"]!), release("v0.6.0")) });
     assert.equal(u.state().available, null);
     const s = await u.check();
     assert.equal(s.available, true);

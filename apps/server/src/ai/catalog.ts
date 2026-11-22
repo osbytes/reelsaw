@@ -636,7 +636,7 @@ export function createModelCatalog(
     pulls: () => [...jobs.values()].map(({ abort: _a, ...j }) => j),
     cancelPull(id) {
       const j = jobs.get(id);
-      if (!j || j.status !== "running") return false;
+      if (j?.status !== "running") return false;
       j.abort.abort();
       return true;
     },

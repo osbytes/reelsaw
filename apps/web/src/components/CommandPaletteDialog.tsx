@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
-import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useMe } from "../lib/account";

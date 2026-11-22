@@ -161,7 +161,7 @@ export function versionOfTag(tag: string): string {
 
 function eat(rest: string, re: RegExp): { cap: string; rest: string } | null {
   const m = re.exec(rest);
-  if (!m || m.index !== 0) return null;
+  if (m?.index !== 0) return null;
   return { cap: m[1] ?? "", rest: rest.slice(m[0].length) };
 }
 

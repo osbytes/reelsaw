@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+// Lint ratchet: per-rule counts of the Biome diagnostics that are not errors yet may only go down.
+// biome.json keeps a rule at "warn" while old code still breaks it (or "off" with the rule listed in
+// TRACKED below); this script fails CI when any count rises above scripts/lint-baseline.json, and
+// when one falls below it, so the baseline is lowered in the same change that removed the
+// violations. A rule whose count reaches 0 moves to "error" in biome.json and leaves the baseline.
+//
+//   node scripts/lint-ratchet.mjs            check against the baseline
+//   node scripts/lint-ratchet.mjs --update   rewrite the baseline (only ever to lower it, in review)
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
+
+const BASELINE = "scripts/lint-baseline.json";
+// rules off in biome.json because old code breaks them too often to show as warnings, counted here
+const TRACKED = ["style/noNonNullAssertion"];
+const BIOME = createRequire(import.meta.url).resolve("@biomejs/biome/bin/biome");
+
+function diagnostics(extra) {
+  let out;
+  try {
+    // the package's Node launcher, so no shell or .cmd shim is involved on Windows
+    out = execFileSync(process.execPath, [BIOME, "lint", "--reporter=json", "--max-diagnostics=none", "--colors=off", ...extra], {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (e) {
+    out = e.stdout; // biome exits non-zero when there are errors; the report is still on stdout
+  }
+  return JSON.parse(out).diagnostics ?? [];
+}
+
+const counts = {};
+const add = (d) => {
+  if (d.severity === "error" || !d.category?.startsWith("lint/")) return;
+  const rule = d.category.slice("lint/".length);
+  counts[rule] = (counts[rule] ?? 0) + 1;
+};
+for (const d of diagnostics([])) add(d);
+for (const rule of TRACKED) for (const d of diagnostics([`--only=${rule}`])) if (d.category === `lint/${rule}`) add(d);
+
+const sorted = Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+if (process.argv.includes("--update")) {
+  writeFileSync(BASELINE, `${JSON.stringify(sorted, null, 2)}\n`);
+  console.log(`lint-ratchet: wrote ${BASELINE}`);
+  process.exit(0);
+}
+
+const baseline = existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, "utf8")) : {};
+const problems = [];
+for (const rule of new Set([...Object.keys(baseline), ...Object.keys(sorted)])) {
+  const was = baseline[rule] ?? 0;
+  const now = sorted[rule] ?? 0;
+  if (now > was) problems.push(`${rule}: ${now} (baseline ${was}). New code must not add these; fix them or run biome lint --only=${rule} to find them.`);
+  else if (now < was) problems.push(`${rule}: ${now}, below the baseline ${was}. Lower it: node scripts/lint-ratchet.mjs --update`);
+}
+if (problems.length) {
+  console.error(`lint-ratchet:\n  ${problems.join("\n  ")}`);
+  process.exit(1);
+}
+console.log(`lint-ratchet: ok (${Object.values(sorted).reduce((a, b) => a + b, 0)} old findings across ${Object.keys(sorted).length} rules)`);
