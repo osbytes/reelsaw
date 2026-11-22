@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.50.0
+
+### Minor Changes
+
+- [#363](https://github.com/osbytes/reelsaw/pull/363) [`4eefcef`](https://github.com/osbytes/reelsaw/commit/4eefcef21df2522d4901c82e62e990a63d2e2488) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Lists share one search, filter and sort bar. Users, Projects and Templates now have a search box, a single Filter menu, Group (Users) and Sort, with the number of matches and the filters in force shown above the list; the next page loads as you scroll. Projects can be searched by title, filtered by status and sorted by date, title or length, and Templates searched and sorted, in the app, through `list_projects` / `list_layer_templates`, and with `reelsaw templates list --q --sort`. Searching for a whole email address now finds just that account instead of everyone at the same domain.
+
+### Patch Changes
+
+- [#362](https://github.com/osbytes/reelsaw/pull/362) [`8980853`](https://github.com/osbytes/reelsaw/commit/89808539577bccbd8046f1f393b8a15269d7fe18) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Hosted plans bound how much of a machine one account's jobs hold at once: Free 2 cores and 2400 MB, Starter 4 / 4800, Creator 6 / 7200, Pro 8 / 9600. A scan past the ceiling runs with fewer threads; a render past it goes back to the queue until the account's other work ends, so it never holds a worker slot while another account's render waits; it is not counted as a failed attempt, moves up its queue as it waits, and gets past the paid reserve after a few minutes at most, so busy paid work delays a Free render but never starves it. The project shows the wait and, where a plan would help, an upgrade offer. `FREE_RESERVE_CORES` keeps the last cores of each machine for paid plans. Admins can override an account's ceiling in Users → Limits, `reelsaw limits <email> --cores N --mem-mb M` or `set_user_resources`. Self-hosted instances are unchanged: the host's capacity is the only limit.
+
+- [#360](https://github.com/osbytes/reelsaw/pull/360) [`8781e85`](https://github.com/osbytes/reelsaw/commit/8781e85cb33d96a36e61d14617eb5e6a3bf6e9d3) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The shot-cut scan decodes with up to 4 threads instead of one, about 3x faster on CPU-only hosts with the same cuts. Cores, memory and disk are now leased from one shared ledger per host (`resource_leases`): every video ffmpeg pass takes its threads from a lease, render encodes share the host's cores across every worker process on it, and a render leases its memory, so parallel scans, renders and worker replicas no longer over-commit the machine. Settings → System → Workers, `list_workers` and `reelsaw workers` show the leased cores and memory. `SCENE_SCAN_THREADS` pins the scan's thread count.
+
 ## 0.49.1
 
 ### Patch Changes
