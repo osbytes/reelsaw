@@ -140,6 +140,7 @@ export const TOOLS = {
   },
   create_project: {
     title: "Create project",
+    annotations: { destructiveHint: false },
     description:
       'Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: "queued", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.',
     inputSchema: {
@@ -282,6 +283,7 @@ export const TOOLS = {
   },
   update_clip: {
     title: "Update clip",
+    annotations: { idempotentHint: true },
     description:
       "Edit one clip (3 s-10 min): only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis, layers and intro/outro are burned in and re-render (~1 min) unless rerender is false. Returns the clip summary plus { changed, needsRerender, rerendered, hint }; poll get_clip until done.",
     inputSchema: {
@@ -322,6 +324,7 @@ export const TOOLS = {
   },
   create_clip: {
     title: "Create clip",
+    annotations: { destructiveHint: false },
     description:
       'Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Hosted Free allows one; the refusal names the upgrade. Returns the new clip summary { id, status: "preparing", queued: "prepare", hint }; preparation (title, hook, scores) is queued and the render follows by itself (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.',
     inputSchema: {
@@ -367,6 +370,7 @@ export const TOOLS = {
   },
   get_media_links: {
     title: "Get share links",
+    annotations: { destructiveHint: false, idempotentHint: true },
     description:
       "Links anyone can download without an Authorization header, for a scheduler (Buffer, Metricool), Instagram's video_url, Zapier/Make or a person. Returns { clips: [{ clipId, links: { clip, thumb, srt, vtt } }], export } with each link's { linkId, url, expiresAt }; unrendered clips say why. The active link is reused unless label or ttlDays ask for a separate one. A link serves the current render until it expires or revoke_media_link turns it off.",
     inputSchema: {
@@ -430,6 +434,7 @@ export const TOOLS = {
   },
   create_webhook: {
     title: "Create webhook",
+    annotations: { destructiveHint: false },
     description:
       "Subscribe a URL to events: project.created, project.done (with every clip, share links and the zip), project.failed, clip.done (also re-renders), clip.failed. This is how a Zapier or Make app subscribes (delete_webhook unsubscribes). Returns { endpoint, secret }: the whsec_ signing secret is shown only here; verify deliveries with any Standard Webhooks library. The URL must be public https unless the admin allows private networks.",
     inputSchema: {
@@ -466,6 +471,7 @@ export const TOOLS = {
   },
   test_webhook: {
     title: "Test webhook",
+    annotations: { destructiveHint: false },
     description: "Send a webhook.test delivery now and wait for the answer. Returns { ok, code, message, response (first 2 KB of what the receiver said) }.",
     inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
   },
@@ -484,6 +490,7 @@ export const TOOLS = {
   },
   resend_webhook_delivery: {
     title: "Resend webhook delivery",
+    annotations: { destructiveHint: false },
     description:
       "Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). The webhook must be on. Returns { ok, deliveryId, message }.",
     inputSchema: { deliveryId: z.number().int().positive().describe("Delivery id (from list_webhook_deliveries)") },
@@ -530,6 +537,7 @@ export const TOOLS = {
   },
   extend_project: {
     title: "Clip the rest of a video",
+    annotations: { destructiveHint: false },
     description:
       "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade via billing_checkout_url fromProjectId does it itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
     inputSchema: { id: projectId() },
@@ -543,18 +551,21 @@ export const TOOLS = {
   },
   start_upgrade_work: {
     title: "Start work an upgrade unlocks",
+    annotations: { destructiveHint: false },
     description:
       "Start the picked projects from list_upgrade_work: finish clips the rest of each video as far as the minutes go (like extend_project), rerender renders each project's watermarked clips again without the watermark. Each project on its own, so one refusal (minutes, the hour's re-render limit) leaves the others started. Returns { rerenderedClips, extendedProjects, failed, sentence, results: [{ id, action, ok, error? }] }; then wait_for_project.",
     inputSchema: startUpgradeWorkInput,
   },
   retry_project: {
     title: "Retry project",
+    annotations: { destructiveHint: false },
     description:
       "Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. Finished clips, the transcript and the source are kept. Returns { queue } (the stage restarted); then wait_for_project. To pick different clips use reanalyze_project instead.",
     inputSchema: { id: projectId() },
   },
   retry_projects: {
     title: "Retry projects",
+    annotations: { destructiveHint: false },
     description:
       "Resume several failed projects, each from its furthest completed stage (as retry_project). Projects that are not failed are skipped and left as they are; one project's failure does not stop the others. Returns { retried, skipped, failed, results: [{ id, ok, retried?, error? }] }; then wait_for_project on each.",
     inputSchema: { ids: z.array(z.string()).min(1).max(200).describe("Project ids (from list_projects), 1-200") },
@@ -579,6 +590,7 @@ export const TOOLS = {
   },
   reanalyze_project: {
     title: "Re-analyze project",
+    annotations: { destructiveHint: true },
     description:
       "Pick clips again from the existing transcript (needs one), optionally with new settings. Clips you created or edited are kept; untouched AI picks are replaced and restorable with restore_clip for a while. Returns { kept, replaced } at once; the picking runs in the background, so follow with wait_for_project. To only save settings use update_project; to resume a failure use retry_project.",
     inputSchema: { id: projectId(), settings: settingsInput.optional() },
@@ -603,6 +615,7 @@ export const TOOLS = {
   },
   add_asset: {
     title: "Add library asset",
+    annotations: { destructiveHint: false },
     description:
       "Add from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound) becomes one of your library uploads; a search_assets catalog / provider hit (provider + externalId) materializes one instance-shared copy (checksum verified, license recorded; not listed in your library). Returns { id, name, kind, mime, durationSec, duplicate, restored, owner } (the same file twice returns the existing item). setDefault on an upload makes it your default intro/outro for NEW projects only.",
     inputSchema: addAssetInput,
@@ -653,12 +666,14 @@ export const TOOLS = {
   },
   set_project_bumpers: {
     title: "Set a project's intro/outro",
+    annotations: { idempotentHint: true },
     description:
       'Set one project\'s intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. Clips with their own choice (set_clip_bumpers) keep it. Applies on each clip\'s next render; rerender: true re-renders finished clips now. Returns { rerendered }. set_default_bumper changes future projects instead.',
     inputSchema: setProjectBumpersInput,
   },
   set_clip_bumpers: {
     title: "Set clips' intro/outro",
+    annotations: { idempotentHint: true },
     description:
       'Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. rerender: true re-renders only these clips. Returns { updated, rerendered }.',
     inputSchema: setClipBumpersInput,
@@ -675,6 +690,7 @@ export const TOOLS = {
   },
   save_layer_template: {
     title: "Save layer template",
+    annotations: { destructiveHint: false },
     description:
       "Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge; plus the intro and outro the clip renders with) or layers (each with a timing, see list_layer_templates; [] with bumpers = an intro / outro only template). Returns the template { id, name, layerCount, layers, bumpers }. Use apply_layer_template to put it on clips",
     inputSchema: saveLayerTemplateInput,
@@ -911,6 +927,7 @@ export const TOOLS = {
   },
   retry_failures: {
     title: "Retry failed work",
+    annotations: { destructiveHint: false },
     description:
       "Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). Each item is its own transaction so live-job caps still apply. By filter it retries platform failures only unless cause is given (input and quota failures fail the same way again); ids retries exactly those rows. Cap 50 per call. Returns { retried, skipped, nextCursor }. Writes an admin event failures.retried. Hosted non-admins are refused.",
     inputSchema: {
@@ -1006,6 +1023,7 @@ export const TOOLS = {
   },
   add_font: {
     title: "Add a font",
+    annotations: { destructiveHint: false },
     description: `Admins only: turn an upload (POST /api/upload with the file; ${FONT_FILE_EXTS.join(", ")}, up to ${MAX_FONT_BYTES / 1048576} MB) into a font every account can pick. The family is read from the file, and a file the renderer cannot draw is refused, as is a family already installed (remove_fonts it first to replace it). Returns the font as list_fonts shows it.`,
     inputSchema: { uploadId: z.string().min(1).max(100).describe("The upload holding the font file") },
   },
@@ -1044,6 +1062,7 @@ export const TOOLS = {
   },
   billing_checkout_url: {
     title: "Checkout URL",
+    annotations: { destructiveHint: false },
     description:
       'Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). Returns { url, kind: "checkout" | "change" }; a person must open it in a browser, an agent cannot pay. Plans and intervals come from get_billing.',
     inputSchema: {
@@ -1073,6 +1092,7 @@ export const TOOLS = {
   },
   review_transcript_flags: {
     title: "Review transcript fixes",
+    annotations: { idempotentHint: true },
     description:
       "Accept or reject suggested transcript fixes (ids from list_transcript_flags), optionally with your own replacement text for an accepted name fix. The transcript is rebuilt; with rerender true (default) clips whose captions overlap a change are re-rendered. Returns { changed, rerendered, needsRerender, flags: [{ id, status, replacement }], hint }.",
     inputSchema: {
@@ -1096,6 +1116,7 @@ export const TOOLS = {
   },
   add_transcript_correction: {
     title: "Correct transcript words",
+    annotations: { destructiveHint: false },
     description:
       'Make captions show "text" instead of the words spoken between startSec and endSec (a misheard name, say); the span must cover whole words. Returns { ok, flagId, rerendered, hint }. Undo it by passing the flagId to review_transcript_flags with status rejected.',
     inputSchema: {
@@ -1108,6 +1129,7 @@ export const TOOLS = {
   },
   add_transcript_cut: {
     title: "Cut transcript words",
+    annotations: { destructiveHint: true },
     description:
       "Remove the words spoken between startSec and endSec from the transcript, so captions and the rendered video skip them; the span must cover whole words. Returns { ok, flagId, rerendered, hint }. Undo it by passing the flagId to review_transcript_flags with status rejected.",
     inputSchema: {
@@ -1194,6 +1216,7 @@ export const TOOLS = {
   },
   billing_portal_url: {
     title: "Billing portal URL",
+    annotations: { destructiveHint: false },
     description:
       "Hosted instances: a Stripe Billing Portal URL to see invoices, change the card or cancel at period end. Returns { url }; a person must open it in a browser. On a self-hosted Reelsaw this answers that billing is not enabled.",
   },

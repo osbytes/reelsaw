@@ -172,6 +172,21 @@ describe("mcp tool definitions", () => {
     }
   });
 
+  // A tool without annotations reads as "may destroy data, not idempotent" to clients (the MCP defaults), so
+  // every tool says what it does: readOnlyHint for reads, destructiveHint and/or idempotentHint for writes.
+  it("annotates every tool as a read or a kind of write", async () => {
+    const { tools } = await listTools();
+    const bare = tools.filter((t) => {
+      const a = t.annotations ?? {};
+      return a.readOnlyHint !== true && a.destructiveHint === undefined && a.idempotentHint === undefined;
+    });
+    assert.deepEqual(
+      bare.map((t) => t.name),
+      [],
+      "tools without readOnlyHint, destructiveHint or idempotentHint",
+    );
+  });
+
   it("maps which tool to use when in the server instructions", async () => {
     const { instructions } = await listTools();
     assert.equal(instructions, INSTRUCTIONS);
