@@ -141,7 +141,7 @@ export function BumperCombobox({
           role="combobox"
           aria-expanded={open}
           aria-label={label}
-          className={`input flex h-[38px] w-full min-w-0 items-center gap-2 py-1 text-left ${className}`}
+          className={`input flex h-[38px] w-full min-w-0 items-center gap-2 py-1 text-start ${className}`}
         >
           {pickedFixed ? (
             <span className="grid h-6 w-5 shrink-0 place-items-center text-ink2">{pickedFixed.icon}</span>

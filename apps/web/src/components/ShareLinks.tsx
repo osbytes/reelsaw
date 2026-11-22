@@ -212,7 +212,7 @@ export function ShareLinksSection() {
             {["w-1/3", "w-1/4", "w-2/5"].map((w, i) => (
               <div key={i} className="flex items-center gap-3 py-2">
                 <Skeleton className={`h-4 ${w}`} />
-                <Skeleton className="ml-auto h-3.5 w-28" />
+                <Skeleton className="ms-auto h-3.5 w-28" />
                 <Skeleton className="h-7 w-32 rounded-[8px]" />
               </div>
             ))}
@@ -231,7 +231,7 @@ export function ShareLinksSection() {
                   <span>Link</span>
                   <span>Status</span>
                   <span>Expires</span>
-                  <span className="text-right">Uses</span>
+                  <span className="text-end">Uses</span>
                   <span />
                 </li>
                 {items.map((l) => (
@@ -269,7 +269,7 @@ export function ShareLinksSection() {
                           ? formatDay(l.expiresAt, { month: "short" })
                           : "never"}
                     </span>
-                    <span className="hidden text-right text-xs tabular-nums text-ink2 md:block">{l.useCount}</span>
+                    <span className="hidden text-end text-xs tabular-nums text-ink2 md:block">{l.useCount}</span>
                     <span className="flex justify-end gap-1.5">
                       <button
                         className="btn-ghost w-[4.25rem] text-xs"

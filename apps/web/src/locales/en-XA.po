@@ -1,0 +1,112 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-11-22 12:17-0600\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: en-XA\n"
+
+#: src/pages/Login.tsx
+msgid "After you sign in, you pick up where you left off: the {plan} plan."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "After you sign in, your link is waiting on the New project page: <0>{source}</0>"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "By creating an account you accept the <0>privacy policy</0>."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "By creating an account you accept the <0>terms</0> and <1>privacy policy</1>."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "By creating an account you accept the <0>terms</0>."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Could not continue the authorization"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Could not send a new link"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Create account"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Create account · Reelsaw"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Email"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Enter the email you signed up with."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Forgot password?"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Have an account? Sign in"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Name"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Need an account? Sign up"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "New accounts wait for an admin to approve them before they can start projects."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Password"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Send a new confirmation"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Send me a new link"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Sign in"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Sign in · Reelsaw"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Sign-ups are closed on this instance."
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "Something went wrong"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "This link expired"
+msgstr ""
+
+#: src/pages/Login.tsx
+msgid "This link expired · Reelsaw"
+msgstr ""

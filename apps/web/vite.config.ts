@@ -1,9 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { lingui } from "@lingui/vite-plugin";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  // lingui: compiles .po catalogues on import and expands the Trans / t macros natively (no Babel); configPath so the
+  // config loads whatever the working directory (Knip reads this file from the repo root)
+  plugins: [react(), lingui({ macroTransform: true, configPath: fileURLToPath(new URL("./lingui.config.ts", import.meta.url)) }), tailwindcss()],
   server: {
     port: 5173,
     proxy: {

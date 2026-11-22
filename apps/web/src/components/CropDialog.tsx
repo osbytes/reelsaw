@@ -45,14 +45,14 @@ function regionOf(f: Fields): ContentRegion | null {
 
 type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 const HANDLES: Array<{ h: Handle; cls: string; cursor: string }> = [
-  { h: "nw", cls: "-left-1.5 -top-1.5", cursor: "cursor-nwse-resize" },
-  { h: "n", cls: "left-1/2 -top-1.5 -translate-x-1/2", cursor: "cursor-ns-resize" },
-  { h: "ne", cls: "-right-1.5 -top-1.5", cursor: "cursor-nesw-resize" },
-  { h: "e", cls: "-right-1.5 top-1/2 -translate-y-1/2", cursor: "cursor-ew-resize" },
-  { h: "se", cls: "-right-1.5 -bottom-1.5", cursor: "cursor-nwse-resize" },
-  { h: "s", cls: "left-1/2 -bottom-1.5 -translate-x-1/2", cursor: "cursor-ns-resize" },
-  { h: "sw", cls: "-left-1.5 -bottom-1.5", cursor: "cursor-nesw-resize" },
-  { h: "w", cls: "-left-1.5 top-1/2 -translate-y-1/2", cursor: "cursor-ew-resize" },
+  { h: "nw", cls: "-start-1.5 -top-1.5", cursor: "cursor-nwse-resize" },
+  { h: "n", cls: "start-1/2 -top-1.5 -translate-x-1/2", cursor: "cursor-ns-resize" },
+  { h: "ne", cls: "-end-1.5 -top-1.5", cursor: "cursor-nesw-resize" },
+  { h: "e", cls: "-end-1.5 top-1/2 -translate-y-1/2", cursor: "cursor-ew-resize" },
+  { h: "se", cls: "-end-1.5 -bottom-1.5", cursor: "cursor-nwse-resize" },
+  { h: "s", cls: "start-1/2 -bottom-1.5 -translate-x-1/2", cursor: "cursor-ns-resize" },
+  { h: "sw", cls: "-start-1.5 -bottom-1.5", cursor: "cursor-nesw-resize" },
+  { h: "w", cls: "-start-1.5 top-1/2 -translate-y-1/2", cursor: "cursor-ew-resize" },
 ];
 type Drag =
   | { kind: "move"; grab: { x: number; y: number }; orig: ContentRegion }
@@ -232,8 +232,8 @@ export function CropDialog({
     <label className="flex flex-col gap-1 text-xs text-ink2">
       {label}
       <span className="relative">
-        <input className="input pr-7 font-mono" inputMode="decimal" value={fields[k]} onChange={set(k)} aria-label={`${label}, percent of the source`} />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink3">%</span>
+        <input className="input pe-7 font-mono" inputMode="decimal" value={fields[k]} onChange={set(k)} aria-label={`${label}, percent of the source`} />
+        <span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-xs text-ink3">%</span>
       </span>
     </label>
   );
@@ -297,7 +297,7 @@ export function CropDialog({
               Match the pane's shape
             </button>
           )}
-          <label className="ml-auto flex items-center gap-1.5 text-ink2">
+          <label className="ms-auto flex items-center gap-1.5 text-ink2">
             <input
               type="checkbox"
               className="accent-[var(--acc)]"
@@ -323,7 +323,7 @@ export function CropDialog({
               Back to automatic
             </button>
           )}
-          <button type="button" className="btn-ghost ml-auto" onClick={() => onOpenChange(false)}>
+          <button type="button" className="btn-ghost ms-auto" onClick={() => onOpenChange(false)}>
             Cancel
           </button>
           <button type="submit" className="btn-primary" disabled={!region}>

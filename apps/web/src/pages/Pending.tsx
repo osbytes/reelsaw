@@ -13,7 +13,7 @@ export function PendingPage() {
   return (
     <ScrollArea className="h-dvh">
       <div className="relative flex min-h-dvh items-center justify-center p-6">
-        <ThemeToggle className="absolute right-4 top-4" />
+        <ThemeToggle className="absolute end-4 top-4" />
         <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
           <AuthCardHeader title={suspended ? "Account suspended" : "Waiting for approval"} titleClassName="text-[22px]" />
           <p className="text-sm leading-relaxed text-ink2">
@@ -32,7 +32,7 @@ export function PendingPage() {
             </button>
           </div>
         </div>
-        <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
+        <p className="absolute bottom-4 start-0 end-0 text-center text-xs text-ink3">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
             github.com/osbytes/reelsaw
           </a>

@@ -383,7 +383,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
         onClick={() => onChange(!checked)}
         className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-acc" : "bg-line2"}`}
       >
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "start-[18px]" : "start-0.5"}`} />
       </button>
     </label>
   );
@@ -2106,7 +2106,7 @@ export function ClipEditor(props: Props) {
                 {style.emphasis && <Swatches label="Key word" colors={KW} value={style.emphasisColor} onChange={(c) => setStyle({ emphasisColor: c })} />}
                 <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] border border-line bg-panel p-1.5">
                   {emphasis.map((w, i) => (
-                    <span key={w} className="inline-flex items-center gap-1 rounded-full bg-sunk py-0.5 pl-2.5 pr-1 text-xs font-semibold">
+                    <span key={w} className="inline-flex items-center gap-1 rounded-full bg-sunk py-0.5 ps-2.5 pe-1 text-xs font-semibold">
                       {w}
                       <button
                         className="grid h-4 w-4 place-items-center rounded-full text-ink3 hover:bg-line hover:text-ink"
@@ -2273,7 +2273,7 @@ export function ClipEditor(props: Props) {
               </span>
               <Select
                 size="sm"
-                className="ml-auto w-[9.5rem]"
+                className="ms-auto w-[9.5rem]"
                 ariaLabel="Section mode"
                 value={s.mode}
                 onClick={(e) => e.stopPropagation()}
@@ -2388,7 +2388,7 @@ export function ClipEditor(props: Props) {
         <button className="btn-ghost text-xs" onClick={() => setTemplateOpen(true)} title="A saved set of layers, fitted to this clip's length">
           <LayoutTemplate className="h-3.5 w-3.5" /> Template
         </button>
-        <span className="ml-auto text-[11px] text-ink3" title="Layers on this clip">
+        <span className="ms-auto text-[11px] text-ink3" title="Layers on this clip">
           {layers.length}/{MAX_CLIP_LAYERS}
         </span>
       </div>
@@ -2467,7 +2467,7 @@ export function ClipEditor(props: Props) {
       <Field label="Hashtags" hint="no re-render needed">
         <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] border border-line bg-panel p-1.5">
           {hashtags.map((h, i) => (
-            <span key={`${h}${i}`} className="inline-flex items-center gap-1 rounded-full bg-acc-soft py-0.5 pl-2.5 pr-1 text-xs font-semibold text-acc-text">
+            <span key={`${h}${i}`} className="inline-flex items-center gap-1 rounded-full bg-acc-soft py-0.5 ps-2.5 pe-1 text-xs font-semibold text-acc-text">
               #{h}
               <button
                 className="grid h-4 w-4 place-items-center rounded-full hover:bg-acc/20"
@@ -2550,12 +2550,12 @@ export function ClipEditor(props: Props) {
           tabIndex={0}
           onClick={() => seek(Math.max(range[0], f.start - 1))}
           onKeyDown={(e) => e.key === "Enter" && seek(Math.max(range[0], f.start - 1))}
-          className="flex cursor-pointer flex-col gap-1 rounded-[12px] border border-line p-2.5 text-left hover:bg-sunk"
+          className="flex cursor-pointer flex-col gap-1 rounded-[12px] border border-line p-2.5 text-start hover:bg-sunk"
         >
           <div className="flex items-center gap-2">
             <s className="text-[13px] font-semibold">{f.heard}</s>
             <span className="font-mono text-[11px] text-ink3">{fmtPrecise(f.start - range[0])}</span>
-            <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
+            <span className={`ms-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
           </div>
           <span className="whitespace-pre-line text-xs leading-snug text-ink2">{reason}</span>
           <a
@@ -2670,11 +2670,11 @@ export function ClipEditor(props: Props) {
           platform={platform}
         />
         {buffering && (
-          <div className="pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">Loading…</div>
+          <div className="pointer-events-none absolute start-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">Loading…</div>
         )}
         {/* overlaid on the frame: a warning that pushed the transport down would move the buttons under the cursor */}
         {capWarn && (
-          <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 w-[min(320px,90%)] -translate-x-1/2 rounded-[10px] bg-warn-soft/95 px-3 py-1.5 text-center text-xs text-ink shadow-pop">
+          <div className="pointer-events-none absolute bottom-3 start-1/2 z-10 w-[min(320px,90%)] -translate-x-1/2 rounded-[10px] bg-warn-soft/95 px-3 py-1.5 text-center text-xs text-ink shadow-pop">
             {capWarn}
           </div>
         )}
@@ -2777,7 +2777,7 @@ export function ClipEditor(props: Props) {
         <span className={chip} title="Framing of the section under the playhead (Framing tab for all sections)">
           <Select
             size="sm"
-            className="-ml-2 h-6 border-0 bg-transparent"
+            className="-ms-2 h-6 border-0 bg-transparent"
             ariaLabel="Section framing"
             value={curSec.mode}
             onValueChange={(v) => setMode(secIdx, v as SectionMode)}
@@ -2841,7 +2841,7 @@ export function ClipEditor(props: Props) {
                 title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours"
               >
                 <span>
-                  <span className="mr-1 font-mono text-[10px]">CC</span> Burned-in text is blurred in every clip
+                  <span className="me-1 font-mono text-[10px]">CC</span> Burned-in text is blurred in every clip
                 </span>
                 <button
                   className="w-max font-semibold text-acc-text disabled:opacity-50"
@@ -3088,7 +3088,7 @@ export function ClipEditor(props: Props) {
           style={{ gridTemplateColumns: layout === "transcript" ? "320px minmax(0,1fr) 380px" : "minmax(0,1fr) 380px", gridTemplateRows: "minmax(0,1fr) auto" }}
         >
           {layout === "transcript" && (
-            <div className="flex min-h-0 flex-col border-r border-line bg-panel">
+            <div className="flex min-h-0 flex-col border-e border-line bg-panel">
               <div className="shrink-0 border-b border-line px-4 py-3 text-[13px] font-bold">Transcript</div>
               {transcript}
             </div>
@@ -3097,7 +3097,7 @@ export function ClipEditor(props: Props) {
             <div className="shrink-0 px-4 pt-3">{canvasHeader}</div>
             {preview}
           </div>
-          <div className="flex min-h-0 flex-col border-l border-line bg-panel">{inspector}</div>
+          <div className="flex min-h-0 flex-col border-s border-line bg-panel">{inspector}</div>
           <div className="border-t border-line bg-panel" style={{ gridColumn: "1 / -1" }}>
             {timeline}
           </div>

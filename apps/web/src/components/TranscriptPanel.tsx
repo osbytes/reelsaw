@@ -735,7 +735,7 @@ export function TranscriptPanel({
                   {g.clip && (
                     <>
                       <div
-                        className={`absolute bottom-2 left-[11px] top-3 w-0.5 rounded-full ${activeClipId && g.clip.id === activeClipId ? "bg-acc" : "bg-acc/40"}`}
+                        className={`absolute bottom-2 start-[11px] top-3 w-0.5 rounded-full ${activeClipId && g.clip.id === activeClipId ? "bg-acc" : "bg-acc/40"}`}
                       />
                       <div className="sticky top-2 z-[5] pt-2">
                         <ClipMarker
@@ -761,11 +761,11 @@ export function TranscriptPanel({
           </div>
         </ScrollArea>
         {listOpen && orderedFlags.length > 0 && (
-          <aside className="absolute inset-y-0 right-0 z-20 flex w-full flex-col sm:w-[340px] border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
+          <aside className="absolute inset-y-0 end-0 z-20 flex w-full flex-col sm:w-[340px] border-s border-line bg-panel shadow-pop xl:static xl:shadow-none">
             <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
               <b className="text-[13px]">Fixes</b>
               <span className="text-xs text-ink3">{filter === "deleted" ? deletedFlags.length : orderedFlags.filter(visibleFlag).length} shown</span>
-              <button className="ml-auto text-ink2 hover:text-ink" onClick={() => setListOpen(false)} aria-label="Close fixes list">
+              <button className="ms-auto text-ink2 hover:text-ink" onClick={() => setListOpen(false)} aria-label="Close fixes list">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -779,7 +779,7 @@ export function TranscriptPanel({
                       >
                         {flagGlyph(f)}
                       </span>
-                      <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
+                      <button className="min-w-0 text-start" onClick={() => onSeek(f.start)} title="Seek here">
                         <span className="block truncate text-[13px] text-ink2">
                           {isCutFlag(f) ? `“${f.heard}”` : isLoopFlag(f) ? `Collapsed ${f.heard}` : `${f.heard} → ${f.replacement ?? f.suggested}`}
                         </span>
@@ -815,7 +815,7 @@ export function TranscriptPanel({
                       <button
                         data-flag-nav
                         onClick={() => jumpToFlag(i)}
-                        className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
+                        className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-start hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
                       >
                         <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(f)}`}>
                           {flagGlyph(f)}
@@ -863,7 +863,7 @@ export function TranscriptPanel({
         >
           {fixText !== null ? (
             <div className="flex items-center gap-1">
-              <span className="pl-2 pr-1 text-[11px] opacity-70">Should read</span>
+              <span className="ps-2 pe-1 text-[11px] opacity-70">Should read</span>
               <input
                 autoFocus
                 aria-label="Corrected text"
@@ -970,10 +970,10 @@ export function TranscriptPanel({
       )}
       {!following && !playheadInView && segments.length > 0 && (
         <button
-          className="absolute left-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop"
+          className="absolute start-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop"
           onClick={resume}
         >
-          <ArrowDown className="mr-1 inline h-3 w-3" /> Resume following · {formatTime(currentTime)}
+          <ArrowDown className="me-1 inline h-3 w-3" /> Resume following · {formatTime(currentTime)}
         </button>
       )}
       {nDecided > 0 && (
@@ -1307,7 +1307,7 @@ function FlagWord({
             </>
           )}
           {pending && !isDeletion && !isLoop ? shown : display}
-          <sup className={`ml-0.5 font-mono text-[9px] font-semibold ${pending ? "text-warn" : isDeletion ? "text-ink3" : "text-acc-text"}`}>{glyph}</sup>
+          <sup className={`ms-0.5 font-mono text-[9px] font-semibold ${pending ? "text-warn" : isDeletion ? "text-ink3" : "text-acc-text"}`}>{glyph}</sup>
         </span>
       </Popover.Trigger>{" "}
       <Popover.Portal>
@@ -1500,7 +1500,7 @@ function FlagWord({
                     ↶ Undo
                   </button>
                 )}
-                <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
+                <span className="ms-auto font-mono text-[11px] text-ink3">{position}</span>
               </div>
               {/* always present, one line: swapping its text never resizes the popover */}
               <p className="flex items-center gap-1 truncate text-[11px] text-ink3">

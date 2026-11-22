@@ -625,7 +625,7 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
           <Popover.Trigger asChild>
             <button
               type="button"
-              className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline"
+              className="min-w-0 truncate text-start font-semibold text-acc-text hover:underline"
               title="Where it’s used"
               aria-label={`Where ${a.name} is used`}
             >
@@ -679,7 +679,7 @@ export function AssetLightbox({
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/70" />
         <Dialog.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4"
+          className="fixed start-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4"
         >
           {a && (
             <>
@@ -767,7 +767,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
   const templates = q.data?.templates ?? [];
   return (
     <ScrollArea className={className}>
-      <div className="flex min-h-[3rem] flex-col gap-2.5 pr-2 text-xs">
+      <div className="flex min-h-[3rem] flex-col gap-2.5 pe-2 text-xs">
         {q.isPending && !q.error && (
           <SkeletonRegion label="Loading usage…" className="flex flex-col gap-2.5">
             {["w-2/3", "w-1/2", "w-3/5"].map((w, i) => (
@@ -799,7 +799,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
               {p.slots.length > 0 && <span className="shrink-0 text-ink3">{p.slots.join(" + ")} · project</span>}
             </div>
             {p.clips.map((c) => (
-              <div key={c.id} className="flex items-baseline gap-2 pl-3">
+              <div key={c.id} className="flex items-baseline gap-2 ps-3">
                 <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
                   <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled clip"}
                 </Link>
@@ -1084,7 +1084,7 @@ export function BulkBumpersPopover({
           </button>
         </Popover.Trigger>
       ) : (
-        <Popover.Anchor className="pointer-events-none absolute right-8 bottom-0 h-px w-px" />
+        <Popover.Anchor className="pointer-events-none absolute end-8 bottom-0 h-px w-px" />
       )}
       <Popover.Portal>
         <Popover.Content
