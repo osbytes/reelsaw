@@ -7,7 +7,7 @@
 import { i18n } from "@lingui/core";
 
 /** Locales a person can pick. `en-XA` is the pseudo-locale: available on request, never matched from the browser. */
-export const SHIPPED_LOCALES = ["en"] as const;
+const SHIPPED_LOCALES = ["en"] as const;
 const PSEUDO_LOCALE = "en-XA";
 const RTL = new Set(["ar", "fa", "he", "ur"]);
 const STORAGE_KEY = "reelsaw.locale";
@@ -26,7 +26,7 @@ function stored(): string | null {
 }
 
 /** The first match in the chain; a browser language matches on its primary subtag (`en-GB` → `en`). */
-export function resolveLocale(search: string = window.location.search, languages: readonly string[] = navigator.languages): Locale {
+function resolveLocale(search: string = window.location.search, languages: readonly string[] = navigator.languages): Locale {
   const asked = new URLSearchParams(search).get("locale");
   if (isLocale(asked)) {
     try {

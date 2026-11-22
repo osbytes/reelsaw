@@ -1,0 +1,60 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignore": [
+    "website/**",
+    "integrations/**",
+    "catalog/build.ts"
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.{mjs,ts}"
+      ]
+    },
+    "apps/server": {
+      "entry": [
+        "src/main.ts",
+        "src/cli.ts",
+        "src/eval/run.ts",
+        "src/eval/e2e.ts",
+        "src/eval/transcription.ts",
+        "src/eval/suites/*.ts",
+        "src/eval/tools/*.ts",
+        "scripts/*.{mjs,ts}",
+        "test/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.{mjs,ts}",
+        "test/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "pino-pretty",
+        "pino-roll",
+        "wordlist-english",
+        "@better-auth/oauth-provider"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "src/main.tsx"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ],
+      "ignoreDependencies": [
+        "tailwindcss"
+      ]
+    },
+    "packages/shared": {
+      "entry": [
+        "src/index.ts",
+        "scripts/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/*.mjs"
+      ]
+    }
+  }
+}
