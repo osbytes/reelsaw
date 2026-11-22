@@ -35,7 +35,7 @@ const STEPS = [
   {
     icon: ScanFace,
     title: "Reframe and render",
-    body: "A 1.2 MB face detector on the CPU picks a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, follow a moving subject when there is no face, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
+    body: "A tiny face detector and tracker on the CPU pick a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, follow a moving subject when there is no face, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
   },
 ];
 
@@ -43,7 +43,7 @@ const FEATURES = [
   {
     icon: Plug,
     title: "Fully local by default. Any vendor by choice.",
-    body: "The installer sets up Ollama and a local Whisper, so nothing leaves the machine and no key is needed. Language, transcription and alignment models are each a provider:model string you can point at OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime.",
+    body: "The installer sets up Ollama and a local Whisper, so nothing leaves the machine and no key is needed. Language, transcription and alignment models are each a provider:model string you can point at OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, OpenCode, or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime.",
   },
   {
     icon: ListChecks,

@@ -153,6 +153,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   test-model <language|transcription> <provider:model> [--json]
  *                                           one real call to check a model works here; transcription re-runs the
  *                                           word-timestamp test clip (same as Test under Settings → Models, test_model)
+ *   models <language|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json]
+ *                                           what each provider offers, a page per provider with the models in use first;
+ *                                           --q searches, --provider + --cursor pages on (the Settings → Models picker, list_models)
  *   hear <clipId> [start] [dur]             transcribe a range of the RENDERED clip (what viewers hear)
  *   flags <projectId> [from] [to]           transcript flags (entities / disfluencies / collapsed loops) with status
  *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes;
@@ -2178,6 +2181,33 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       );
     if (!r.ok) process.exitCode = 1;
   },
+
+  /** The Settings → Models picker's listing / list_models (ai/catalog.ts `page`), a page per provider. */
+  async models(svc) {
+    const [kind] = pos;
+    if (kind !== "language" && kind !== "transcription")
+      throw new Error("usage: reelsaw models <language|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json]");
+    const limit = flag("limit");
+    const r = await svc.catalog.page(kind, {
+      provider: flag("provider"),
+      q: flag("q"),
+      cursor: flag("cursor"),
+      limit: limit ? Number(limit) : undefined,
+      refresh: args.includes("--refresh"),
+      pin: Object.values(svc.models.state().current),
+    });
+    if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
+    for (const p of r.providers) {
+      const state = p.error ? `error: ${p.error}` : p.available ? `${p.total} ${r.q ? "matching" : "listed"}` : (p.reason ?? "unavailable");
+      console.log(`\n${p.title} (${p.provider}) · ${state}`);
+      if (p.models.length)
+        table(p.models.map((m) => ({ id: m.id, installed: m.installed === undefined ? "" : m.installed ? "yes" : "no", note: m.note ?? "" })));
+      if (p.nextCursor)
+        console.log(
+          `  showing ${p.models.length} of ${p.total}; next: reelsaw models ${kind} --provider ${p.provider}${r.q ? ` --q "${r.q}"` : ""} --cursor ${p.nextCursor}`,
+        );
+    }
+  },
   async align(svc) {
     const [projectId, a, b] = pos;
     const start = Number(a);
@@ -3059,7 +3089,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|languages|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|languages|fonts|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|extend-project|upgrade-work|start-upgrade-work|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|dismiss-failures|status|storage|events|clip|faces|import-report|scenario|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|models|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

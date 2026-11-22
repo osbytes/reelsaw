@@ -34,7 +34,7 @@
  *    tile's flat band) or the whole frame. Samples carry the per-frame tile probe. A shots case may
  *    give `tile` too: every stack piece must then frame it.
  * Face samples are committed (samples.json, derived from the video); when missing they are
- * regenerated from the materialised media with UltraFace.
+ * regenerated from the materialised media with the face detector (delete them after changing it).
  */
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";

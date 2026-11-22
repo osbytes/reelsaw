@@ -13,6 +13,7 @@ import type { Db } from "../db/index.js";
 import { schema } from "../db/index.js";
 import type { Logger } from "../log.js";
 import { createSecretBox } from "./crypto.js";
+import { aliasesOf, credentialOwner } from "./provider-ids.js";
 import { eventRow } from "../event-types.js";
 
 export interface ProviderCredentials {
@@ -30,6 +31,8 @@ export interface ProviderDescriptor {
   /** what the key looks like, for the UI placeholder */
   keyHint?: string;
   docsUrl?: string;
+  /** other model-id prefixes that use this provider's credentials (credentialOwner) */
+  aliases?: string[];
 }
 
 export interface ProviderState extends ProviderDescriptor {
@@ -91,13 +94,21 @@ export function providerDescriptors(config: Pick<Config, "OPENAI_COMPATIBLE_NAME
       keyHint: "vck_…",
       docsUrl: "https://vercel.com/ai-gateway",
     },
+    {
+      provider: "opencode",
+      title: "OpenCode (Zen + Go)",
+      keyEnv: ["OPENCODE_API_KEY"],
+      docsUrl: "https://opencode.ai/auth",
+      aliases: aliasesOf("opencode"),
+    },
     { provider: "deepgram", title: "Deepgram", keyEnv: ["DEEPGRAM_API_KEY"], docsUrl: "https://console.deepgram.com/" },
     { provider: "assemblyai", title: "AssemblyAI", keyEnv: ["ASSEMBLYAI_API_KEY"], docsUrl: "https://www.assemblyai.com/app" },
   ];
 }
 
 /** Environment-only credentials (the eval runner and tests use this; the app layers the database on top). */
-export function envCredentials(config: Config, provider: string): ProviderCredentials {
+export function envCredentials(config: Config, id: string): ProviderCredentials {
+  const provider = credentialOwner(id);
   const d = providerDescriptors(config).find((p) => p.provider === provider);
   if (!d) return {};
   const apiKey =
@@ -154,7 +165,8 @@ export function createProviderSettings(config: Config, log: Logger, opts: { poll
 
   return {
     describe: () => descriptors,
-    get(provider) {
+    get(id) {
+      const provider = credentialOwner(id);
       const env = envCredentials(config, provider);
       const row = rows.get(provider);
       return { ...env, ...(row?.apiKey ? { apiKey: row.apiKey } : {}), ...(row?.baseUrl ? { baseUrl: row.baseUrl } : {}) };

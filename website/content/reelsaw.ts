@@ -14,7 +14,7 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
     key: "providers",
     label: "Model providers",
     reelsaw:
-      "Any, for each of the three models separately: OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, Ollama, vLLM, LM Studio or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime",
+      "Any, for each of the three models separately: OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, OpenCode, Ollama, vLLM, LM Studio or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime",
   },
   {
     key: "entry",
@@ -35,7 +35,7 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
     key: "reframe",
     label: "Face-tracked 9:16 reframing",
     reelsaw:
-      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; shots without a face follow their moving subject; hand-set crops; one clip's framing for the whole project. 1.2 MB UltraFace on the CPU",
+      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; shots without a face follow their moving subject; hand-set crops; one clip's framing for the whole project. YuNet face detector with landmarks and face tracking, on the CPU",
   },
   {
     key: "captions",
@@ -65,6 +65,6 @@ export const REELSAW_COST = {
   paragraphs: [
     "The software is free under the AGPL-3.0. Self-hosted, what you pay for is the machine it runs on and, only if you choose cloud models, the per-call price of those models. If you would rather not run a machine, the hosted service at app.reelsaw.com runs the same code: a Free plan (first video free up to 60 minutes, then 20 minutes a month, with a watermark; a longer video gets its start clipped and the rest when you upgrade), then Starter ($12/mo, 100 minutes), Creator ($29/mo, 300 minutes) and Pro ($59/mo, 750 minutes), metered in minutes of source video and never per clip.",
     "Fully local: Ollama for the language model and Speaches (Whisper) for transcription. The installer picks a model by GPU memory or RAM (qwen2.5:14b with 24 GB of RAM or a 12 GB GPU, qwen2.5:7b from 12 GB, gemma3:4b below that), reuses one Ollama already has, and puts both on an NVIDIA GPU when there is one. Nothing leaves the box and there is no per-minute cost at all.",
-    "With cloud models: set OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI or any OpenAI-compatible endpoint as a provider:model string and you pay that vendor's metered price for transcription minutes and a few thousand tokens of selection per video. There is no Reelsaw margin on top.",
+    "With cloud models: set OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, OpenCode or any OpenAI-compatible endpoint as a provider:model string and you pay that vendor's metered price for transcription minutes and a few thousand tokens of selection per video. There is no Reelsaw margin on top.",
   ],
 };

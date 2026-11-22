@@ -1,10 +1,35 @@
 {
-  "updatedAt": "2026-11-22T02:07:26.942Z",
+  "updatedAt": "2026-11-22T17:10:01.790Z",
   "acceptedRegressions": [
     {
       "metric": "passRate",
       "reason": "passRate drops only because two new shots cases fail on real detector limits (pans boxed as faces in a face-free POV clip; an on-screen copy of the streamer's face read as a second speaker); all 9 existing cases still pass with identical metrics",
       "at": "2026-10-18T16:40:10.464Z"
+    },
+    {
+      "id": "shots-couch-multicam-guest-story",
+      "reason": "YuNet replaces UltraFace: the POV case now passes (faces in 2% of frames, was 38%). Two cases flip on thresholds the old detector met by a margin, not on worse boxes (YuNet and UltraFace boxes agree within 0.007): screencast-corner-webcam's last stack finds the webcam tile in 58% of frames (needs 60%, UltraFace gave 64%); guest-story's tweet card holds a real face in a phone video that YuNet sees in over 60% of frames (UltraFace 56%), so it becomes a corner stack instead of fit. Both recorded as findings in the case notes",
+      "at": "2026-11-22T02:28:21.692Z"
+    },
+    {
+      "id": "shots-screencast-corner-webcam",
+      "reason": "YuNet replaces UltraFace: the POV case now passes (faces in 2% of frames, was 38%). Two cases flip on thresholds the old detector met by a margin, not on worse boxes (YuNet and UltraFace boxes agree within 0.007): screencast-corner-webcam's last stack finds the webcam tile in 58% of frames (needs 60%, UltraFace gave 64%); guest-story's tweet card holds a real face in a phone video that YuNet sees in over 60% of frames (UltraFace 56%), so it becomes a corner stack instead of fit. Both recorded as findings in the case notes",
+      "at": "2026-11-22T02:28:21.692Z"
+    },
+    {
+      "metric": "worstShotAgreement",
+      "reason": "YuNet replaces UltraFace: the POV case now passes (faces in 2% of frames, was 38%). Two cases flip on thresholds the old detector met by a margin, not on worse boxes (YuNet and UltraFace boxes agree within 0.007): screencast-corner-webcam's last stack finds the webcam tile in 58% of frames (needs 60%, UltraFace gave 64%); guest-story's tweet card holds a real face in a phone video that YuNet sees in over 60% of frames (UltraFace 56%), so it becomes a corner stack instead of fit. Both recorded as findings in the case notes",
+      "at": "2026-11-22T02:28:21.692Z"
+    },
+    {
+      "metric": "passRate",
+      "reason": "YuNet replaces UltraFace: the POV case now passes (faces in 2% of frames, was 38%). Two cases flip on thresholds the old detector met by a margin, not on worse boxes (YuNet and UltraFace boxes agree within 0.007): screencast-corner-webcam's last stack finds the webcam tile in 58% of frames (needs 60%, UltraFace gave 64%); guest-story's tweet card holds a real face in a phone video that YuNet sees in over 60% of frames (UltraFace 56%), so it becomes a corner stack instead of fit. Both recorded as findings in the case notes",
+      "at": "2026-11-22T02:28:21.692Z"
+    },
+    {
+      "metric": "passRate",
+      "reason": "YuNet (merged from main) boxes the machine worker's profile face in every frame of shots-no-face-broll-subject 126-129.2 s, so that shot is no longer face-free and the small-face rule stacks it; recorded as a finding in the case note. Every other window of the case, the hands-product case and all other cases match main's baseline",
+      "at": "2026-11-22T17:10:01.790Z"
     }
   ],
   "cases": {
@@ -19,35 +44,35 @@
     "track-recentre-after-card": true,
     "shots-4x3-interview-cutaways": true,
     "shots-couch-multicam": true,
-    "shots-pov-hands-no-face": false,
-    "shots-screencast-corner-webcam": true,
+    "shots-pov-hands-no-face": true,
+    "shots-screencast-corner-webcam": false,
     "shots-vertical-source": true,
     "split-couch-two-shot": true,
     "track-4x3-interview": true,
     "tile-screencast-corner-webcam": true,
     "tile-webinar-black-band": true,
-    "shots-couch-multicam-guest-story": true,
+    "shots-couch-multicam-guest-story": false,
     "shots-phone-inset-blur-bars": true,
-    "shots-no-face-broll-subject": true,
+    "shots-no-face-broll-subject": false,
     "shots-no-face-hands-product": true
   },
   "metrics": {
     "worstSpeakerOffset": {
-      "value": 0.082,
+      "value": 0.045,
       "better": "lower",
       "tolerance": 0.03
     },
     "worstTrackErrPx": {
-      "value": 4.2,
+      "value": 3.6,
       "better": "lower",
       "tolerance": 6
     },
     "passRate": {
-      "value": 0.95,
+      "value": 0.86,
       "better": "higher"
     },
     "worstShotAgreement": {
-      "value": 0.777,
+      "value": 0.684,
       "better": "higher",
       "tolerance": 0.05
     },

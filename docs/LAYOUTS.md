@@ -99,8 +99,13 @@ them back.
 
 ## 2. How the decision is made
 
-**Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps, 320x240,
-for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame vertical-divider probe
+**Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps into two
+rasters per frame (`sampleFaces`, `layout.ts`): the source's own shape at about 640x360 pixels
+(`faceRaster`, 360x640 for a 9:16 source) for the YuNet face detector (`vision/faces.ts`, MIT, five
+landmarks per face), and 320x240 for the frame probes. A tracker (`vision/tracker.ts`) gives every
+box the id of the face it belongs to across frames: boxes are matched to each track's predicted box
+(constant velocity) by overlap, with a gate strict enough that a cut to another person, or a jump no
+face makes in a quarter second, starts a new track. The 320x240 frames feed a per-frame vertical-divider probe
 (`probeDivider`, `content-region.ts`) and the webcam-tile probe around the largest face
 (`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). The same frames give the motion probe (`motionProber`, `saliency.ts`: what changed since the previous sample with the camera's shift removed), read only by rule 1 for shots without a usable face. One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
@@ -111,7 +116,13 @@ detects them on the clip itself (`media.detectScenes` with the clip's range, one
 layout always has the edits. The `layout resolved` log line says how many and from
 where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
 correlated with the audio envelope) runs only on `split` segments of 3 s or more. Static "faces"
-(posters, photos) are dropped first (`dropStaticFaces`).
+(posters, photos) are dropped first (`dropStaticFaces`: face tracks that never move, clustered by
+place; a track that moves is a person and is kept even where it passes a poster).
+
+Track ids are used where identity matters: `assignPair` keeps each split speaker on the face it had
+last frame (a spurious box is a track of its own, and a box picked by position while the speaker's
+face blinks out fills that frame only), falling back to x continuity when that face is not seen; the
+tripod (`trackBreaks`) never treats a step within one track as a cut.
 
 **Order of rules in `decideLayout`** (first match wins):
 
@@ -172,10 +183,12 @@ decision is stored per clip (`layoutSegments`, with `content`) and shown in the 
 
 - Two faces close together or overlapping read as one wide face, or as a spurious second box; the
   second-face minimum of 8% height and the pair assignment keep most, not all, of it out.
-- Profile, turned-away or looking-down faces drop out of UltraFace; under 60% of frames becomes `fit`.
+- Profile, turned-away or looking-down faces drop out more often than frontal ones (YuNet keeps more
+  profiles than UltraFace did); under 60% of frames becomes `fit`.
 - Glasses glare, backlight and heavy compression lower detection; the 5-sample smoothing hides short
   gaps, not long ones.
-- Very small webcams are often missed by UltraFace at 320x240; the shot is still a `stack` when the webcam's tile is found around the few faces seen, else it becomes `fit`.
+- Faces under about 10 px tall in the 640x360 detector raster (a webcam tile under ~1/36 of a 1080p frame's height) are missed; the shot is still a `stack` when the webcam's tile is found around the few faces seen, else it becomes `fit`.
+- Two faces that cross each other within a quarter second can swap track ids; `assignPair` then follows the id, so a split may swap its two panes for that stretch.
 - A webcam tile needs straight edges on all four sides (or the frame edge) and a landscape shape: a circular or portrait webcam, a tile with a rounded or shadowed border, or one whose border is lost against a dark panel in part of its span (a dark room beside a dark editor still measures ~1.5x) gets the face-sized crop as before. A thin flat margin under ~3 px at 320 wide between the tile and a strong edge counts as part of the tile. The tile is one rectangle per clip segment: a webcam that moves or resizes mid-segment is not followed.
 - A presenter who switches sides mid-clip is handled by the tripod snap at scene cuts only; without a
   cut the crop pans at the capped speed.
@@ -235,8 +248,8 @@ committed samples (faces, plus text boxes and divider for `panel` cases), so it 
 | `stack` with a webcam tile in a flat band (Zoom webinar, face seen in 3% of frames) | `tile-webinar-black-band` |
 | `stack` with a corner webcam tile over a screencast, no band | `tile-screencast-corner-webcam`, `shots-screencast-corner-webcam` (the tile check; the case still fails on the split, see below) |
 | `fit` with an inset: a 9:16 and a square phone clip between blurred bars, cut with a full-frame presenter | `shots-phone-inset-blur-bars` (negatives: every other shots / tile case's source shows no inset; `apps/server/test/inset.test.ts`) |
-| `center` following the subject: no-face b-roll (a speedboat's wake, a worker on a lift, a worker at a machine) beside interviews, a chart animation and diffuse shots that stay `fit`; hands husking corn beside a recipe card that stays `fit` | `shots-no-face-broll-subject`, `shots-no-face-hands-product` |
-| `fit`: no face, nothing clearly moving (graphics, landscapes, crowds) | the `fit` windows of `shots-no-face-broll-subject`; `shots-pov-hands-no-face` (fit or centre); a tweet card with an embedded video (`shots-couch-multicam-guest-story`, 0-12 s: the post's text keeps it whole); unit tests (`apps/server/test/saliency.test.ts`) |
+| `center` following the subject: no-face b-roll (a speedboat's wake, a worker on a lift; a worker at a machine, which fails since YuNet boxes the profile face and the small-face rule stacks it) beside interviews, a chart animation and diffuse shots that stay `fit`; hands husking corn beside a recipe card that stays `fit` | `shots-no-face-broll-subject`, `shots-no-face-hands-product` |
+| `fit`: no face, nothing clearly moving (graphics, landscapes, crowds) | the `fit` windows of `shots-no-face-broll-subject`; `shots-pov-hands-no-face` (fit or centre); a tweet card with an embedded video (`shots-couch-multicam-guest-story`, 0-12 s: the post's text keeps it from a subject crop, though since YuNet the face in its video makes it a corner stack); unit tests (`apps/server/test/saliency.test.ts`) |
 | `fit`: text-heavy run over a speaker | no fixture yet |
 | negatives: lower-third text, text on both sides, room edges, narrow panel | unit tests only (`apps/server/test/side-panel.test.ts`); no real-footage fixture yet |
 | two faces close together, profile faces, glare, tiny webcam | no fixture yet |
