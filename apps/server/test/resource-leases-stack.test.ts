@@ -30,11 +30,13 @@ describe("resource leases (Postgres)", () => {
   const run = randomUUID().slice(0, 8);
   const volume = `test-volume-${run}`;
   const machine = `test-machine-${run}`;
-  const workers = [`test-a-${run}`, `test-b-${run}`, `test-gone-${run}`];
+  const workerA = `test-a-${run}`;
+  const workerB = `test-b-${run}`;
+  const workerGone = `test-gone-${run}`;
+  const workers = [workerA, workerB, workerGone];
   const leaser = (selfId: string, scope: { volume: string; machine: string } = { volume, machine }) =>
     createLeaser({ database: { db: orm }, log: quiet } as never, { ...scope, selfId, staleMs: LEASE_STALE_MS });
-  const live = (scope: { volume: string; machine: string } = { volume, machine }) =>
-    hostLeases(orm, { ...scope, selfId: workers[0]!, staleMs: LEASE_STALE_MS });
+  const live = (scope: { volume: string; machine: string } = { volume, machine }) => hostLeases(orm, { ...scope, selfId: workerA, staleMs: LEASE_STALE_MS });
 
   before(async () => {
     pool = db();
@@ -69,7 +71,7 @@ describe("resource leases (Postgres)", () => {
       mb: 1000,
       admit: (l: { mb: number }) => (leaseFits({ freeMB, leasedMB: l.mb, requiredMB: 1000 }) ? null : `leased ${l.mb}`),
     });
-    const results: LeaseResult[] = await Promise.all([leaser(workers[0]!)(disk(1500)), leaser(workers[1]!)(disk(1500))]);
+    const results: LeaseResult[] = await Promise.all([leaser(workerA)(disk(1500)), leaser(workerB)(disk(1500))]);
     const won = results.filter((r) => r.ok);
     assert.equal(won.length, 1, "the advisory lock serialises the check and the record");
     const lost = results.find((r) => !r.ok);
@@ -80,8 +82,8 @@ describe("resource leases (Postgres)", () => {
   });
 
   it("a scan in one process is granted what the other process's encode left", async () => {
-    const encode = await leaser(workers[0]!)({ kind: "render-encode", cpu: { min: 4, max: 4 }, capacity: 5 });
-    const scan = await leaser(workers[1]!)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
+    const encode = await leaser(workerA)({ kind: "render-encode", cpu: { min: 4, max: 4 }, capacity: 5 });
+    const scan = await leaser(workerB)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
     assert.ok(encode.ok && scan.ok);
     assert.equal(encode.ok && encode.cores, 4);
     assert.equal(scan.ok && scan.cores, 1);
@@ -94,8 +96,8 @@ describe("resource leases (Postgres)", () => {
 
   it("one network volume across two machines: disk is shared, cores are not", async () => {
     const other = { volume, machine: `${machine}-b` };
-    const here = await leaser(workers[0]!)({ kind: "render-encode", mb: 300, cpu: { min: 4, max: 4 }, capacity: 5 });
-    const there = await leaser(workers[1]!, other)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
+    const here = await leaser(workerA)({ kind: "render-encode", mb: 300, cpu: { min: 4, max: 4 }, capacity: 5 });
+    const there = await leaser(workerB, other)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
     assert.ok(here.ok && there.ok);
     assert.equal(there.ok && there.cores, 4, "the other machine's cores are its own");
     assert.equal((await live(other)).mb, 300, "the volume's disk claims are seen from both machines");
@@ -107,8 +109,8 @@ describe("resource leases (Postgres)", () => {
 
   it("two volumes on one machine: cores are shared, disk is not", async () => {
     const other = { volume: `${volume}-b`, machine };
-    const a = await leaser(workers[0]!)({ kind: "ingest", mb: 700, cpu: { min: 4, max: 4 }, capacity: 5 });
-    const b = await leaser(workers[1]!, other)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
+    const a = await leaser(workerA)({ kind: "ingest", mb: 700, cpu: { min: 4, max: 4 }, capacity: 5 });
+    const b = await leaser(workerB, other)({ kind: "scene-scan", cpu: { min: 1, max: 4 }, capacity: 5 });
     assert.ok(a.ok && b.ok);
     assert.equal(b.ok && b.cores, 1, "the same machine's cores are already leased");
     assert.equal((await live(other)).mb, 0, "another volume's disk is not this one's");
@@ -117,7 +119,7 @@ describe("resource leases (Postgres)", () => {
   });
 
   it("a worker that stopped beating holds nothing", async () => {
-    const gone = await leaser(workers[2]!)({ kind: "render", memMB: 1200 });
+    const gone = await leaser(workerGone)({ kind: "render", memMB: 1200 });
     assert.ok(gone.ok);
     assert.equal((await live()).memMB, 0, "its row is there, but its heartbeat is stale");
     if (gone.ok) await gone.release();

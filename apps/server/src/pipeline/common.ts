@@ -5,7 +5,7 @@ import { schema, type Db, type Project } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { FailureCause, PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
-import type { DiskLease } from "../resources.js";
+import type { DiskLease, LeaseIds } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import {
@@ -200,6 +200,12 @@ export class StageContext {
     return dir;
   }
 
+  /** Who this stage's resource leases are for, as the ledger records them (resources.ts LeaseIds). */
+  leaseIds(): LeaseIds {
+    const jobId = this.ids["jobId"];
+    return { jobId: jobId === undefined ? undefined : String(jobId), projectId: this.projectId };
+  }
+
   private leases: DiskLease[] = [];
   private lease(kind: string, needDiskMB: number, extra: Record<string, unknown>): Promise<DiskLease> {
     return this.svc.resources.acquire({
@@ -207,7 +213,7 @@ export class StageContext {
       needDiskMB,
       signal: this.signal,
       onWait: (r) => void this.progress(0, `Waiting for resources: ${r}`, extra).catch(() => {}),
-      ids: { jobId: this.ids["jobId"] === undefined ? undefined : String(this.ids["jobId"]), projectId: this.projectId },
+      ids: this.leaseIds(),
     });
   }
 

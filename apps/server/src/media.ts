@@ -170,7 +170,7 @@ export interface SceneScanOptions {
  * `-i` it would bind to the null output instead and the decoder would fall back to its own default. The filtergraph
  * stays at one thread, as everywhere (see `filterThreadArgs`).
  */
-export function sceneScanThreadArgs(threads: number): string[] {
+function sceneScanThreadArgs(threads: number): string[] {
   return ["-threads", String(Math.max(1, Math.floor(threads))), "-filter_threads", "1"];
 }
 

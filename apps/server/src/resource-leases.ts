@@ -81,7 +81,7 @@ export async function machineId(read: (file: string) => Promise<string> = (f) =>
 }
 
 /** Where a process leases: the volume its scratch disk is on, and the machine whose cores and memory it uses. */
-export interface LeaseScope {
+interface LeaseScope {
   volume: string;
   machine: string;
 }
@@ -154,12 +154,14 @@ export function createLeaser(svc: Pick<Services, "database" | "log">, p: LeaseSc
           expiresAt: new Date(Date.now() + LEASE_TTL_MS),
         })
         .returning({ id: schema.resourceLeases.id });
+      if (!row) throw new Error("lease insert returned no row");
+      const id = row.id;
       log.debug({ kind: req.kind, mb: claim.mb, cores: claim.cores, memMB: claim.memMB, live, ...req.ids }, "leased");
       return {
         ...claim,
-        id: row!.id,
+        id,
         release: async () => {
-          await svc.database.db.delete(schema.resourceLeases).where(eq(schema.resourceLeases.id, row!.id));
+          await svc.database.db.delete(schema.resourceLeases).where(eq(schema.resourceLeases.id, id));
         },
       };
     });
@@ -178,7 +180,7 @@ export async function pruneLeases(svc: Pick<Services, "database" | "log">): Prom
 }
 
 /** How old an own row must be before the heartbeat may call it leaked: a claim commits before its handle is registered. */
-export const LEAKED_LEASE_GRACE_MS = 60_000;
+const LEAKED_LEASE_GRACE_MS = 60_000;
 
 /**
  * This worker's rows that no lease it holds points at (`keep`, ResourceGovernor.ownLeaseIds): releases whose

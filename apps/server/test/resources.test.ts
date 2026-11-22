@@ -440,9 +440,12 @@ describe("disk leases in acquire", () => {
     const lease = await gov.acquire({ kind: "ingest", needDiskMB: 1000, ids: { jobId: "j1", projectId: "p1" } });
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.mb, 1000);
-    assert.deepEqual(seen[0]!.ids, { jobId: "j1", projectId: "p1" });
-    assert.equal(seen[0]!.admit!({ ...NO_LEASES }), null, "fits with nothing else leased");
-    assert.match(seen[0]!.admit!({ ...NO_LEASES, mb: 10_000_000, diskJobs: 3 }) ?? "", /leased to 3 jobs in flight/);
+    const req = seen[0];
+    const admit = req?.admit;
+    assert.ok(req && admit, "a disk claim carries its admit rule");
+    assert.deepEqual(req.ids, { jobId: "j1", projectId: "p1" });
+    assert.equal(admit({ ...NO_LEASES }), null, "fits with nothing else leased");
+    assert.match(admit({ ...NO_LEASES, mb: 10_000_000, diskJobs: 3 }) ?? "", /leased to 3 jobs in flight/);
     assert.equal(gov.leases().ownMB, 1000, "own leases are still counted for the heartbeat");
     await lease.release();
     assert.equal(released, 1);

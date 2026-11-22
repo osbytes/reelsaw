@@ -334,7 +334,7 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
       {
         kind: "scene-scan",
         cpu: sceneScanCpu(ctx.svc.config.SCENE_SCAN_THREADS),
-        ids: { jobId: ctx.ids.jobId === undefined ? undefined : String(ctx.ids.jobId), projectId: ctx.projectId },
+        ids: ctx.leaseIds(),
       },
       (threads) => ctx.svc.media.detectScenes(sourcePath, { signal, threads }),
     );

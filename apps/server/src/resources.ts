@@ -266,7 +266,7 @@ export interface LeaseRequest {
   admit?: ((live: HostLeases) => string | null) | undefined;
 }
 export type LeaseRefusal = { ok: false; reason: string; live: HostLeases };
-export type LeaseClaim = { ok: true; mb: number; cores: number; memMB: number } | LeaseRefusal;
+type LeaseClaim = { ok: true; mb: number; cores: number; memMB: number } | LeaseRefusal;
 /** `id` is the ledger row, so the heartbeat can drop a row whose release never reached the database (`ownLeaseIds`). */
 export type LeaseResult = { ok: true; id?: number; mb: number; cores: number; memMB: number; release: () => Promise<void> } | LeaseRefusal;
 /** Check a request against the host's live leases and record it, as one atomic step (resource-leases.ts). */
@@ -323,7 +323,7 @@ export function diskShortReason(diskFreeMB: number, minFreeMB: number, extraMB: 
 }
 
 /** A claim on cores: `min` is the guarantee, `max` how far it may burst into what is free (docs/specs/resource-leases.md). */
-export interface CpuRequest {
+interface CpuRequest {
   min: number;
   max: number;
 }
