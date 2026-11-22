@@ -178,7 +178,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       : {}),
   });
   if (base) log.warn({ base: base.origin }, "Stripe calls go to STRIPE_API_BASE, not api.stripe.com");
-  const entitlements = createEntitlements({ graceDays: () => config.BILLING_GRACE_DAYS, appUrl: config.APP_URL });
+  const entitlements = createEntitlements({
+    graceDays: () => config.BILLING_GRACE_DAYS,
+    appUrl: config.APP_URL,
+    freeReserveCores: () => config.FREE_RESERVE_CORES,
+  });
   const db = () => svc.database.db;
   const url = (p: string) => new URL(p, config.APP_URL).toString();
   /** lookup key -> Stripe price id, resolved at boot (check) and refreshed when a key is missing */

@@ -107,6 +107,7 @@ const EXPECTED = [
   "set_project_defaults",
   "set_project_source_text",
   "set_user_queue_priority",
+  "set_user_resources",
   "start_upgrade_work",
   "test_model",
   "test_webhook",

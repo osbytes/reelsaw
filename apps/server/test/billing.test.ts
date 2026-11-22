@@ -97,6 +97,12 @@ describe("grants and the quota chain", () => {
     const ranks = PLANS.map((p) => p.queuePriority);
     assert.equal(ranks[0], 0);
     for (let i = 1; i < ranks.length; i++) assert.ok(ranks[i]! > ranks[i - 1]!, `${PLANS[i]!.name} ranks above ${PLANS[i - 1]!.name}`);
+    // resource ceilings: Free 2 cores / 2400 MB, each higher plan more of both
+    assert.deepEqual(free.resources, { maxCores: 2, maxMemMB: 2400 });
+    PLANS.slice(1).forEach((p, i) => {
+      const below = PLANS[i]?.resources ?? { maxCores: Infinity, maxMemMB: Infinity };
+      assert.ok(p.resources.maxCores > below.maxCores && p.resources.maxMemMB > below.maxMemMB, `${p.name} holds more`);
+    });
   });
   it("a stale period (row not yet synced past its end) falls back to the calendar month instead of counting forever", () => {
     const g: Grants = {

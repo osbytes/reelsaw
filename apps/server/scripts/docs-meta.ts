@@ -160,6 +160,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "Development only: an origin that stands in for api.stripe.com (stripe-mock, or `test/stripe-mock.ts`). Never set in production.",
   ],
   BILLING_GRACE_DAYS: ["billing", "Days a past-due subscription keeps its plan after the first failed payment; then the account falls back to Free."],
+  FREE_RESERVE_CORES: [
+    "billing",
+    "Cores of each machine that Free accounts' jobs leave for paid ones: a Free scan is granted fewer threads and a Free render waits in the queue rather than take them. 0 = no reserve; hosted runs 2.",
+  ],
 
   AI_MODEL: [
     "models",

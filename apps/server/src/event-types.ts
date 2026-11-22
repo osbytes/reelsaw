@@ -25,6 +25,8 @@ export const ACCOUNT_EVENT_TYPES = [
   "user.limits_changed",
   "user.watermark_changed",
   "user.queue_priority_changed",
+  /** an admin set or cleared an account's resource ceiling (accounts.ts setUserResources) */
+  "user.resources_changed",
   "user.flagged",
   "user.banned",
   "user.unbanned",
@@ -77,6 +79,7 @@ const accountEventSchemas = {
   "user.limits_changed": loose,
   "user.watermark_changed": loose,
   "user.queue_priority_changed": account.extend({ queuePriority: z.number().int().nullable() }),
+  "user.resources_changed": account.extend({ resources: z.object({ maxCores: z.number().int(), maxMemMB: z.number().int() }).nullable() }),
   "user.flagged": loose,
   "user.banned": loose,
   "user.unbanned": loose,

@@ -40,3 +40,10 @@ export interface QuotaRefusal {
  */
 export const QUEUE_PRIORITY_MIN = -20;
 export const QUEUE_PRIORITY_MAX = 20;
+
+/**
+ * Bounds of an account's resource ceiling (hosted plans; docs/specs/resource-leases.md slice 3): the most cores and
+ * MB of memory its leases may hold at once. The plan grants it, an admin may override it per account.
+ */
+export const RESOURCE_CEILING_MAX_CORES = 512;
+export const RESOURCE_CEILING_MAX_MEM_MB = 4_194_304;

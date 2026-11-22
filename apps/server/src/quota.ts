@@ -48,6 +48,10 @@ export interface Grants {
   queuePriority?: number;
   /** a link's source is downloaded at most this tall, clips render from full-quality windows (null/absent = full download) */
   sourceHeight?: number | null;
+  /** the most cores and memory the account's leases may hold at once (resources.ts `claimOnLive`); absent = no account ceiling */
+  resources?: ResourceCeiling | null;
+  /** the account's leases may not take the last this many cores of a machine (hosted Free: FREE_RESERVE_CORES); absent = 0 */
+  reserveCores?: number;
   /** the billing period, when the account has one; monthly allowances count inside it */
   period: { start: Date; end: Date } | null;
   /** appended to a refusal: "Pro gives 1,200 minutes a month" and where to go; `plan`/`limits` drive the upgrade CTA */
@@ -63,6 +67,8 @@ export interface Grants {
     watermark?: boolean | null | undefined;
     /** that plan's source cap; null = it downloads links at full quality (the "full-quality video" offer) */
     sourceHeight?: number | null | undefined;
+    /** that plan's resource ceiling (the "faster renders" offer when a render waits for capacity) */
+    resources?: ResourceCeiling | null | undefined;
   };
 }
 export interface Entitlements {
@@ -128,6 +134,65 @@ export function queuePriorityOf(override: number | null, grants: Grants | null):
   const plan = grants?.queuePriority ?? 0;
   if (typeof override === "number") return { value: override, source: "override", plan, override };
   return { value: plan, source: plan ? "plan" : "instance", plan, override: null };
+}
+
+/** The most cores and MB of memory one account's leases may hold at once, across every machine (docs/specs/resource-leases.md). */
+export interface ResourceCeiling {
+  maxCores: number;
+  maxMemMB: number;
+}
+
+interface AccountResources {
+  /** the ceiling in force; null = none (self-hosted, or a plan that sets none) */
+  value: ResourceCeiling | null;
+  source: QueuePrioritySource;
+  /** what the plan grants (null without one), shown beside an override */
+  plan: ResourceCeiling | null;
+  /** the admin's override; null = follow the plan */
+  override: ResourceCeiling | null;
+  /** cores of a machine the account's leases leave free (hosted Free: FREE_RESERVE_CORES) */
+  reserveCores: number;
+}
+
+/**
+ * The account's resource ceiling: an admin's per-user override, else what the plan grants, else none. Read in the
+ * lease step (resource-leases.ts `createLeaser`), so a change applies to the next claim; leases already out keep theirs.
+ */
+export async function resourceCeilingFor(db: Db, userId: string, ent?: Entitlements | null): Promise<AccountResources> {
+  const [row, grants] = await Promise.all([
+    db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { resources: true } }),
+    ent ? ent.grantsFor(db, userId) : null,
+  ]);
+  return resourceCeilingOf(row?.resources ?? null, grants);
+}
+
+export function resourceCeilingOf(override: ResourceCeiling | null, grants: Grants | null): AccountResources {
+  const plan = grants?.resources ?? null;
+  const reserveCores = Math.max(0, grants?.reserveCores ?? 0);
+  if (override) return { value: override, source: "override", plan, override, reserveCores };
+  return { value: plan, source: plan ? "plan" : "instance", plan, override: null, reserveCores };
+}
+
+/**
+ * The plan to offer when this account's render waits for capacity (`clip.capacity_wait`): the next plan, when it holds
+ * more cores or skips the paid reserve. None for admins, instances without plans, or the top plan.
+ */
+export async function capacityOfferFor(
+  db: Db,
+  user: { id: string; role: UserRole },
+  ent?: Entitlements | null,
+): Promise<{ upgrade?: { label: string; href: string } }> {
+  if (!ent || user.role === "admin") return {};
+  const grants = await ent.grantsFor(db, user.id);
+  const u = grants?.upgrade;
+  const mine = grants?.resources;
+  if (!u?.resources) return {};
+  const more = !mine || u.resources.maxCores > mine.maxCores || (grants?.reserveCores ?? 0) > 0;
+  if (!more) return {};
+  const cores = plural(u.resources.maxCores, "core");
+  const what = (grants?.reserveCores ?? 0) > 0 ? `${cores} for renders, no busy-hours wait` : `${cores} for renders`;
+  const label = u.monthlyPrice ? `${u.planLabel}: ${what}, $${u.monthlyPrice.toLocaleString("en-US")} a month` : `${u.planLabel}: ${what}`;
+  return { upgrade: { label, href: u.url } };
 }
 
 /**

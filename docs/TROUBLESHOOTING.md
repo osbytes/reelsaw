@@ -144,7 +144,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw templates list [--q words] [--sort updated\|created\|name] [--dir asc\|desc] \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> [--layers '<json array>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative), plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it sets replaces the clip's either way); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
-| `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits); --priority sets the account's queue priority (-20..20, follow = the plan) |
+| `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow] [--cores N --mem-mb M \| --resources follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits); --priority sets the account's queue priority (-20..20, follow = the plan) |
 | `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
@@ -565,6 +565,21 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   and comes back with `restore_clip`. The delete toast always offers Undo, Delete forever, and See deletions.
   `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
   and settings (event `project.updated`): nothing re-runs until a re-analyze or re-render.
+- **Resource ceilings per account (hosted).** With plans (`REELSAW_EE`), each account's leases are bounded in the same
+  locked step as the host's (`claimOnLive` with the account's limits, `resource-leases.ts createLeaser`): the most
+  cores and memory its jobs hold at once across every machine, from an admin's per-user value (Users → Limits,
+  `reelsaw limits <email> --cores N --mem-mb M|--resources follow`, MCP `set_user_resources`) or the plan (Free 2
+  cores / 2400 MB up to Pro 8 / 9600). A CPU pass past it gets fewer threads, down to one, and never waits. A render
+  past its memory, or a Free render while paid work's leased cores reach into the last `FREE_RESERVE_CORES`, is
+  refused as the account's (`AccountCeilingError`, "Waiting for capacity: …"): the worker reschedules the job as if it
+  had never started (`deferForCapacity`, pg-boss API only: the attempt is deleted, fenced to it, and the job sent again under
+  the same id in one transaction; no attempt spent, back in 15, 30, then 60 s with jitter), counts the
+  deferral in its data and raises its priority by one point, at most `DEFERRAL_AGING_MAX` (1, below Starter's +2), so
+  the longest-waiting Free render goes first among Free work and never past a paying account's. After
+  `RESERVE_BYPASS_DEFERRALS` (3) the reserve lets it through: busy paid work delays a Free render by a few minutes,
+  never indefinitely (its own ceiling still holds, and that frees as its own renders end). The project shows
+  "waiting for render capacity" (event `clip.capacity_wait`, once per job) with the next plan's offer when there is
+  one. An account holding nothing may always start one render. Self-hosted there is no account ceiling.
 - **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
   owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
   nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The

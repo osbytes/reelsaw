@@ -205,7 +205,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --store saves them (renders then hide them)
  *   usage [--days 30]                       per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
- *   limits  <email> [--watermark always|never|follow] [--priority N|follow]
+ *   limits  <email> [--watermark always|never|follow] [--priority N|follow] [--cores N --mem-mb M | --resources follow]
  *                                           an account's quotas: instance value, plan, override, in force, in use now;
  *                                           --watermark sets the per-user override (same as Users → Limits);
  *                                           --priority sets the account's queue priority (-20..20, follow = the plan)
@@ -277,10 +277,10 @@ import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
-import { approveUser, bulkUsers, setUserPassword, setUserQueuePriority, setUserRole, setUserWatermark } from "./accounts.js";
+import { approveUser, bulkUsers, setUserPassword, setUserQueuePriority, setUserResources, setUserRole, setUserWatermark } from "./accounts.js";
 import { listUsers, userGroups } from "./accounts-list.js";
 import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
-import { LIMIT_KEYS, limitsFor, limitUsage, queuePriorityFor, usageByUser, watermarkFor } from "./quota.js";
+import { LIMIT_KEYS, limitsFor, limitUsage, queuePriorityFor, resourceCeilingFor, usageByUser, watermarkFor } from "./quota.js";
 import { testModel } from "./ai/model-test.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
@@ -1788,7 +1788,10 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     console.log(`${u.email}${svc.email.enabled ? "" : " (this instance sends no mail: EMAIL_DRIVER=none)"}`);
     for (const topic of EMAIL_TOPIC_NAMES) console.log(`  ${topic.padEnd(10)} ${p[topic] ? "on " : "off"}  ${EMAIL_TOPICS[topic].label}`);
   },
-  /** One account's quotas (0 = unlimited), watermark and queue priority. Change them in Users → Limits, or `--watermark always|never|follow`, `--priority N|follow`. */
+  /**
+   * One account's quotas (0 = unlimited), watermark, queue priority and (hosted) resource ceiling. Change them in
+   * Users → Limits, or `--watermark always|never|follow`, `--priority N|follow`, `--cores N --mem-mb M` / `--resources follow`.
+   */
   async limits(svc) {
     const u = await userByEmail(svc, pos[0]);
     const wmArg = flag("watermark");
@@ -1813,6 +1816,23 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
       await setUserQueuePriority(svc, null, u.id, follow ? null : n);
       console.log(`queue priority ${follow ? "follows the plan" : n} for ${u.email}; jobs queued from now use it`);
     }
+    const coresArg = flag("cores");
+    const memArg = flag("mem-mb");
+    const resArg = flag("resources");
+    if (coresArg !== undefined || memArg !== undefined || resArg !== undefined) {
+      const usage = "usage: reelsaw limits <email> --cores N --mem-mb M | --resources follow";
+      if (resArg !== undefined) {
+        if ((resArg !== "follow" && resArg !== "default") || coresArg !== undefined || memArg !== undefined) throw new Error(usage);
+        await setUserResources(svc, null, u.id, null);
+        console.log(`resource ceiling follows the plan for ${u.email}; the next lease uses it`);
+      } else {
+        const maxCores = Number(coresArg);
+        const maxMemMB = Number(memArg);
+        if (!coresArg || !memArg || !Number.isInteger(maxCores) || !Number.isInteger(maxMemMB)) throw new Error(usage);
+        await setUserResources(svc, null, u.id, { maxCores, maxMemMB });
+        console.log(`resource ceiling ${plural(maxCores, "core")} / ${maxMemMB} MB for ${u.email}; the next lease uses it`);
+      }
+    }
     const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true, watermark: true } });
     const [effective, used, wm] = await Promise.all([
       limitsFor(svc.database.db, svc.settings.get(), u.id, svc.entitlements),
@@ -1832,6 +1852,13 @@ ${rules.length} of at most ${max}; block beats allow beats hold, no match follow
     console.log(`watermark next render: ${wm.on ? "on" : "off"} (${override === "follow" ? wm.source : `override ${override}`})`);
     const pr = await queuePriorityFor(svc.database.db, u.id, svc.entitlements);
     console.log(`queue priority: ${formatPriority(pr.value)} (${pr.source === "override" ? `override; plan gives ${formatPriority(pr.plan)}` : pr.source})`);
+    if (svc.entitlements) {
+      const rc = await resourceCeilingFor(svc.database.db, u.id, svc.entitlements);
+      const fmt = (c: { maxCores: number; maxMemMB: number } | null) => (c ? `${plural(c.maxCores, "core")} / ${c.maxMemMB} MB` : "none");
+      console.log(
+        `resource ceiling: ${fmt(rc.value)} (${rc.source === "override" ? `override; plan gives ${fmt(rc.plan)}` : rc.source})${rc.reserveCores ? `; leaves the last ${plural(rc.reserveCores, "core")} of each machine for paid plans` : ""}`,
+      );
+    }
   },
   /**
    * Instance settings in force and where each comes from. `settings SIGNUP_MODE=approval MAX_UPLOAD_MB=2048`

@@ -10,7 +10,7 @@ import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from
 import { renderClip, markClipFailed } from "../pipeline/render.js";
 import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError, NonRetryableError } from "../pipeline/common.js";
 import { attemptOutcome } from "../pipeline/steps.js";
-import { ResourceExhaustedError } from "../resources.js";
+import { AccountCeilingError, ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
 import { inflightJobs, setListeningQueues, trackJob } from "./inflight.js";
@@ -61,6 +61,69 @@ async function jobRetryLimit(svc: Services, jobId: string, fallback: number): Pr
  */
 async function grantRetry(svc: Services, jobId: string): Promise<void> {
   await svc.database.pool.query("update pgboss.job set retry_limit = retry_limit + 1 where id = $1 and state = 'active'", [jobId]);
+}
+
+/**
+ * Most points a render gains in its queue from going back for capacity: one per deferral, up to this. Below the lowest
+ * paid plan's queue priority (Starter +2), so aging orders Free work among itself (the longest waiting first) and never
+ * lifts it past a paying account's job (Slurm's capped age factor; docs/specs/resource-leases.md).
+ */
+export const DEFERRAL_AGING_MAX = 1;
+
+/** Seconds before a deferred render is tried again: 15, 30, then 60 with ±20% jitter, so deferred renders do not return in step. */
+export function deferralDelaySeconds(deferrals: number, random = Math.random): number {
+  const base = Math.min(60, 15 * 2 ** Math.max(0, deferrals - 1));
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+
+/**
+ * A render refused by its account's ceiling or the paid reserve (resources.ts `AccountCeilingError`) goes back to the
+ * queue through pg-boss's own API, as one transaction: the running attempt is deleted (fenced to this attempt, so a
+ * worker that lost its claim changes nothing) and the job is sent again under the same id and singleton key, with one
+ * more deferral in its data (past RESERVE_BYPASS_DEFERRALS the reserve lets it through), up to DEFERRAL_AGING_MAX
+ * points of priority, `startAfter` the backoff, and the attempts it has left (a wait spends none). pg-boss's own
+ * completion of the handler then finds no active row and leaves it. Its slot takes the next job in fair-share order.
+ * False when the attempt was no longer this worker's to put back.
+ */
+export async function deferForCapacity(
+  svc: Pick<Services, "database" | "queue">,
+  queue: string,
+  job: { id: string; retryCount: number },
+  deferrals: number,
+): Promise<boolean> {
+  const { boss } = svc.queue;
+  const client = await svc.database.pool.connect();
+  const db = { executeSql: (text: string, values?: unknown[]) => client.query(text, values) };
+  try {
+    await client.query("begin");
+    const row = await boss.getJobById<Record<string, unknown>>(queue, job.id, { db });
+    const gone = row?.state === "active" ? await boss.deleteJob(queue, { id: job.id, retryCount: job.retryCount }, { db }) : null;
+    if (!row || !(gone as { affected?: number } | null)?.affected) {
+      await client.query("rollback");
+      return false;
+    }
+    // null: another job for this clip was queued meanwhile (a re-render); it renders the clip instead
+    await boss.send(
+      queue,
+      { ...row.data, deferrals },
+      {
+        id: job.id,
+        ...(row.singletonKey ? { singletonKey: row.singletonKey } : {}),
+        priority: row.priority + (deferrals <= DEFERRAL_AGING_MAX ? 1 : 0),
+        startAfter: deferralDelaySeconds(deferrals),
+        expireInSeconds: row.expireInSeconds,
+        retryLimit: Math.max(0, row.retryLimit - row.retryCount),
+        db,
+      },
+    );
+    await client.query("commit");
+    return true;
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Seconds of media a job worked on: the source's length, or the clip's for prepare and render. Null before ingest knows it. */
@@ -358,6 +421,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           signal: job.signal,
           onWait: (reason) => log.info({ reason }, "waiting for a render slot"),
           ids: { jobId: job.id, projectId },
+          deferrals: job.data.deferrals ?? 0,
         });
         try {
           await measured(svc, "render", { projectId, clipId }, () =>
@@ -375,6 +439,15 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         }
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
+        if (err instanceof AccountCeilingError) {
+          // never wait in this slot for the account's own work to end: back to the queue, the slot takes the next job
+          const deferrals = (job.data.deferrals ?? 0) + 1;
+          log.info({ reason: err.message, bound: err.bound, deferrals }, "render back to the queue until the account has capacity");
+          await deferForCapacity(svc, QUEUES.render, job, deferrals);
+          // once per job: the owner sees why the clip waits (and, on a plan with a next one, the upgrade offer)
+          if (deferrals === 1) await svc.events.emit("clip.capacity_wait", { projectId, clipId, bound: err.bound }).catch(() => {});
+          return;
+        }
         if (err instanceof NonRetryableError) {
           log.warn({ reason: err.message }, "render failed without retry");
           await markClipFailed(svc, projectId, clipId, err, gen);

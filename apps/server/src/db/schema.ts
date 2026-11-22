@@ -360,6 +360,8 @@ export const userSettings = pgTable("user_settings", {
   watermark: boolean("watermark"),
   /** admin's per-user queue priority (points on each job's fair-share priority); null = follow the plan (quota.ts `queuePriorityFor`) */
   queuePriority: integer("queue_priority"),
+  /** admin's per-user resource ceiling (the most cores and memory the account's leases hold at once); null = follow the plan (quota.ts `resourceCeilingFor`) */
+  resources: jsonb("resources").$type<{ maxCores: number; maxMemMB: number }>(),
   /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
   learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
   /**
@@ -1034,6 +1036,8 @@ export const resourceLeases = pgTable(
     mb: integer("mb").notNull().default(0),
     cores: integer("cores").notNull().default(0),
     memMB: integer("mem_mb").notNull().default(0),
+    /** the paid reserve applies to the account (hosted Free): its cores do not count as the reserve's (resources.ts `accountRefusal`) */
+    reserved: boolean("reserved").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
@@ -1041,6 +1045,8 @@ export const resourceLeases = pgTable(
     index("resource_leases_volume_idx").on(t.volume, t.expiresAt),
     index("resource_leases_machine_idx").on(t.machine, t.expiresAt),
     index("resource_leases_worker_idx").on(t.workerId),
+    /** an account's ceiling sums its live rows (resource-leases.ts `accountLeases`) */
+    index("resource_leases_user_idx").on(t.userId, t.expiresAt),
   ],
 );
 export type ResourceLeaseRow = typeof resourceLeases.$inferSelect;

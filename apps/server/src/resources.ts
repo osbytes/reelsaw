@@ -149,7 +149,7 @@ export interface ResourceGovernor {
   /**
    * Lease cores for one ffmpeg pass and run `fn` with the grant (`cpuGrant` against the host's live leases, so a
    * pass starting beside others sees their claims), releasing them however it ends. Never waits: the grant is at
-   * least the request's `min`.
+   * least the request's `min`, or with an account's ceiling or reserve (hosted plans) at least one thread.
    */
   withCpu<T>(req: { kind: string; cpu: CpuAsk; ids?: LeaseIds }, fn: (cores: number) => Promise<T>): Promise<T>;
   /** The cores of the pool `withCpu` grants from: every core of this host less one. */
@@ -164,7 +164,7 @@ export interface ResourceGovernor {
    * than the CPUs allow (~CPUS_PER_RENDER cores each) and memory would stay above MIN_FREE_MEM_MB
    * with one more (~RENDER_MEM_MB); one render may always run. A number pins the limit instead.
    */
-  renderSlot(opts: { signal?: AbortSignal; onWait?: (reason: string) => void; ids?: LeaseIds }): Promise<() => void>;
+  renderSlot(opts: { signal?: AbortSignal; onWait?: (reason: string) => void; ids?: LeaseIds; deferrals?: number }): Promise<() => void>;
   /** upper bound on concurrent renders in this process (worker slots to register) */
   maxRenders(): number;
   renders(): { running: number; limit: number; mode: "auto" | "fixed" };
@@ -240,6 +240,8 @@ export interface HostLeases {
   /** leases that hold disk */
   diskJobs: number;
   kinds: Record<string, number>;
+  /** cores on the machine held by leases the paid reserve applies to (hosted Free accounts'); absent = 0 */
+  reservedCores?: number;
 }
 export const NO_LEASES: HostLeases = { mb: 0, cores: 0, memMB: 0, jobs: 0, diskJobs: 0, kinds: {} };
 
@@ -264,21 +266,129 @@ export interface LeaseRequest {
   ids?: LeaseIds | undefined;
   /** why the claim does not fit what is out, or null when it does; checked in the same step as the record */
   admit?: ((live: HostLeases) => string | null) | undefined;
+  /** times this job already went back to the queue for its account's capacity (`AccountCeilingError`); past RESERVE_BYPASS_DEFERRALS the reserve no longer holds it */
+  deferrals?: number | undefined;
 }
-export type LeaseRefusal = { ok: false; reason: string; live: HostLeases };
+/** Which account bound refused a claim: its own plan ceiling, or the cores a machine keeps for paid plans. */
+type AccountBound = "ceiling" | "reserve";
+
+/**
+ * `account`: refused by the account's own ceiling or the paid reserve (`AccountLimits`), not by the host. Waiting in
+ * the worker slot would hold it while other accounts' jobs queue behind it, so the job goes back to the queue instead.
+ */
+export type LeaseRefusal = { ok: false; reason: string; live: HostLeases; account?: AccountBound };
 type LeaseClaim = { ok: true; mb: number; cores: number; memMB: number } | LeaseRefusal;
 /** `id` is the ledger row, so the heartbeat can drop a row whose release never reached the database (`ownLeaseIds`). */
 export type LeaseResult = { ok: true; id?: number; mb: number; cores: number; memMB: number; release: () => Promise<void> } | LeaseRefusal;
 /** Check a request against the host's live leases and record it, as one atomic step (resource-leases.ts). */
 export type Leaser = (req: LeaseRequest) => Promise<LeaseResult>;
 
-/** Pure: what a request is granted against `live`, or why it is refused. The ledger and the in-process pool both decide with this. */
-export function claimOnLive(req: LeaseRequest, live: HostLeases): LeaseClaim {
+/**
+ * One account's bounds in the lease step (hosted plans, EE: docs/specs/resource-leases.md slice 3) and what its live
+ * leases hold, summed over every machine. Absent (self-hosted, an admin, work that is no one account's): the host's
+ * capacity is the only limit.
+ */
+export interface AccountLimits {
+  /** the most cores / MB of memory its leases hold at once; null = no ceiling (only the reserve applies) */
+  ceiling: { maxCores: number; maxMemMB: number } | null;
+  /** its leases leave this many of the machine's cores free (hosted Free: FREE_RESERVE_CORES) */
+  reserveCores: number;
+  /** what its live leases hold now */
+  live: { cores: number; memMB: number };
+}
+
+/**
+ * Pure: what a request is granted against `live`, or why it is refused. The ledger and the in-process pool both decide
+ * with this. With `account` (EE), two more bounds, checked in the same step:
+ * - cores: the grant is kept within the account's ceiling and above the machine's reserve, down to 1 thread. Every
+ *   CPU pass is elastic here: thread count never changes the output, and a pass never waits for cores.
+ * - memory (a render's slot): fixed work. One that would take the account past its memory ceiling, or a reserved
+ *   account's that would start while paid leases' cores already reach into the reserve, is refused with
+ *   `account`, and the caller sends the job back to the queue (`AccountCeilingError`). An account holding nothing may
+ *   always take one, so a ceiling below one render's size never locks it out. The reserve is a soft bound: a job sent
+ *   back RESERVE_BYPASS_DEFERRALS times passes it (still within its ceiling), so busy paid work delays Free work but
+ *   never starves it.
+ */
+export function claimOnLive(req: LeaseRequest, live: HostLeases, account?: AccountLimits | null): LeaseClaim {
   const reason = req.admit?.(live) ?? null;
   if (reason) return { ok: false, reason, live };
+  const memMB = Math.max(0, Math.round(req.memMB ?? 0));
+  const capacity = req.capacity ?? 1;
+  if (account && memMB > 0) {
+    const refusal = accountRefusal({ memMB, capacity, hostCores: live.cores, reservedCores: live.reservedCores ?? 0, account, deferrals: req.deferrals ?? 0 });
+    if (refusal) return { ok: false, reason: refusal.reason, live, account: refusal.bound };
+  }
   const want = typeof req.cpu === "function" ? req.cpu(live) : req.cpu;
-  const cores = want ? cpuGrant({ capacity: req.capacity ?? 1, leased: live.cores, ...want }) : 0;
-  return { ok: true, mb: Math.max(0, Math.round(req.mb ?? 0)), cores, memMB: Math.max(0, Math.round(req.memMB ?? 0)) };
+  let cores = want ? cpuGrant({ capacity, leased: live.cores, ...want }) : 0;
+  if (want && account) cores = accountCores({ granted: cores, capacity, hostCores: live.cores, account });
+  return { ok: true, mb: Math.max(0, Math.round(req.mb ?? 0)), cores, memMB };
+}
+
+/** Pure: a CPU grant kept within the account's ceiling and above the machine's reserve, never below 1 thread or above `granted`. */
+function accountCores(p: { granted: number; capacity: number; hostCores: number; account: AccountLimits }): number {
+  const a = p.account;
+  const reserve = reserveOf(a, p.capacity);
+  const byCeiling = a.ceiling ? a.ceiling.maxCores - a.live.cores : Number.POSITIVE_INFINITY;
+  const byReserve = reserve > 0 ? p.capacity - reserve - p.hostCores : Number.POSITIVE_INFINITY;
+  return Math.max(1, Math.min(p.granted, byCeiling, byReserve));
+}
+
+/**
+ * How many times a job may be sent back by the paid reserve before it passes it: aging, so a Free render under
+ * sustained paid load is delayed a few minutes, never starved. Its own ceiling still holds (that frees as its own
+ * work ends).
+ */
+export const RESERVE_BYPASS_DEFERRALS = 3;
+
+/** Pure: why fixed-size work (`memMB`, a render's slot) may not start for this account now, and which bound, or null. */
+function accountRefusal(p: {
+  memMB: number;
+  capacity: number;
+  hostCores: number;
+  /** of `hostCores`, what reserved (Free) accounts' leases hold: elastic grants that shrink, so they never fill the reserve */
+  reservedCores: number;
+  account: AccountLimits;
+  deferrals: number;
+}): { reason: string; bound: AccountBound } | null {
+  const a = p.account;
+  const reserve = p.deferrals >= RESERVE_BYPASS_DEFERRALS ? 0 : reserveOf(a, p.capacity);
+  // the reserve is room for paid work: only what paid (unreserved) leases hold reaches into it. Free leases are
+  // burst grants (a lone encode takes the pool) that shrink for the next pass, so counting them would let one Free
+  // render shut every other Free render out of an otherwise idle machine
+  const paidCores = Math.max(0, p.hostCores - p.reservedCores);
+  if (reserve > 0 && paidCores >= p.capacity - reserve)
+    return {
+      reason: `paid plans hold ${paidCores} of this host's ${plural(p.capacity, "core")}; the last ${plural(reserve, "core")} are kept for them`,
+      bound: "reserve",
+    };
+  // an account holding nothing may always start one: a ceiling below one render's size must not lock it out
+  if (!a.ceiling || (a.live.memMB === 0 && a.live.cores === 0)) return null;
+  if (a.live.memMB + p.memMB > a.ceiling.maxMemMB)
+    return { reason: `the account's jobs hold ${a.live.memMB} MB of its ${a.ceiling.maxMemMB} MB memory, one more needs ${p.memMB} MB`, bound: "ceiling" };
+  if (a.live.cores >= a.ceiling.maxCores)
+    return { reason: `the account's jobs hold ${a.live.cores} of its ${plural(a.ceiling.maxCores, "core")}`, bound: "ceiling" };
+  return null;
+}
+
+/** The reserve on a machine with `capacity` cores: never all of them, so a reserved account can still start on an idle machine. */
+const reserveOf = (a: AccountLimits, capacity: number) => Math.max(0, Math.min(a.reserveCores, capacity - 1));
+
+/**
+ * A job refused by its own account's ceiling or the paid reserve (`claimOnLive` with `account`). Retryable: the worker
+ * reschedules it with a short backoff, without spending one of its attempts and one step higher in its queue each
+ * time up to a cap (queue/workers.ts `deferForCapacity`), so its slot goes to the next job in fair-share order instead
+ * of waiting on this account's own work.
+ */
+export class AccountCeilingError extends Error {
+  readonly code = "account_ceiling" as const;
+  constructor(
+    reason: string,
+    /** which bound: the account's own ceiling, or the paid reserve (the upgrade offer names the one that applies) */
+    readonly bound: AccountBound,
+  ) {
+    super(`Waiting for capacity: ${reason}`);
+    this.name = "AccountCeilingError";
+  }
 }
 
 /**
@@ -650,7 +760,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       return { running, limit: lastLimit, mode: fixed ? "fixed" : "auto" };
     },
 
-    async renderSlot({ signal, onWait, ids }) {
+    async renderSlot({ signal, onWait, ids, deferrals }) {
       const started = Date.now();
       let lastReason = "";
       for (;;) {
@@ -664,7 +774,9 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
             : await claim({
                 kind: RENDER_SLOT_KIND,
                 memMB: RENDER_MEM_MB,
+                capacity: cpuPool,
                 ids,
+                deferrals,
                 admit: fixed
                   ? undefined
                   : (live) => {
@@ -689,6 +801,11 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
             running--;
             void r.release();
           };
+        }
+        // the account's own ceiling: never wait for it in this slot (a paying account's render may be queued behind)
+        if (r.account) {
+          onWait?.(`Waiting for capacity: ${r.reason}`);
+          throw new AccountCeilingError(r.reason, r.account);
         }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000)
           throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot: ${r.reason}`);

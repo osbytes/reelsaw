@@ -18,6 +18,7 @@ import {
   setUserRole,
   setUserWatermark,
   setUserQueuePriority,
+  setUserResources,
   unbanUser,
 } from "../accounts.js";
 import {
@@ -75,7 +76,7 @@ import { recordUpgradeProject, startUpgradeWork, startUpgradeWorkInput, upgradeW
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
 import { flagCounts, listUsers, userGroups } from "../accounts-list.js";
-import { bulkUsersInput, userGroupsInput, userListInput } from "../accounts-schema.js";
+import { bulkUsersInput, resourceCeilingInput, userGroupsInput, userListInput } from "../accounts-schema.js";
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { addFontFromUpload, listFonts, removeFonts } from "../fonts.js";
@@ -150,7 +151,18 @@ import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../se
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { projectListInput, templateListInput } from "../list-schemas.js";
 import { LIST_LIMIT_DEFAULT, listPageInput, pageCursor, pageOf } from "../pagination.js";
-import { limitsDetail, LIMIT_KEYS, limitUsage, periodFor, queuePriorityOf, usageByUser, sourceQualityFor, watermarkFor } from "../quota.js";
+import {
+  capacityOfferFor,
+  limitsDetail,
+  LIMIT_KEYS,
+  limitUsage,
+  periodFor,
+  queuePriorityOf,
+  resourceCeilingOf,
+  usageByUser,
+  sourceQualityFor,
+  watermarkFor,
+} from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { CATALOG_PAGE_MAX } from "../ai/catalog.js";
@@ -504,6 +516,8 @@ const headRouter = router({
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
         /** how tall this account's links are downloaded (null = full quality) and the plan that lifts the cap */
         sourceQuality: ctx.who.blocked ? null : await sourceQualityFor(ctx.svc.database.db, ctx.user, ctx.svc.entitlements),
+        /** the plan that renders sooner when this account's render waits for capacity (hosted Free and lower plans) */
+        capacity: ctx.who.blocked ? null : await capacityOfferFor(ctx.svc.database.db, ctx.user, ctx.svc.entitlements),
         /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
         emailEnabled: ctx.svc.email.enabled,
         emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
@@ -1073,7 +1087,10 @@ const restRouter = router({
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
         const db = ctx.svc.database.db;
         const [row, user] = await Promise.all([
-          db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true, queuePriority: true } }),
+          db.query.userSettings.findFirst({
+            where: eq(schema.userSettings.userId, input.id),
+            columns: { limits: true, watermark: true, queuePriority: true, resources: true },
+          }),
           db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } }),
         ]);
         if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
@@ -1090,6 +1107,8 @@ const restRouter = router({
           period: periodOf(d.grants),
           watermark: { override: row?.watermark ?? null, effective: wm.on, source: wm.source },
           queuePriority: queuePriorityOf(row?.queuePriority ?? null, d.grants),
+          /** null self-hosted: no plans, so no account ceiling (the host's capacity is the only limit) */
+          resources: ctx.svc.entitlements ? resourceCeilingOf(row?.resources ?? null, d.grants) : null,
         };
       }),
       setLimits: adminProcedure
@@ -1103,6 +1122,10 @@ const restRouter = router({
       setQueuePriority: adminProcedure
         .input(z.object({ id: z.string(), priority: z.number().int().min(QUEUE_PRIORITY_MIN).max(QUEUE_PRIORITY_MAX).nullable() }))
         .mutation(({ ctx, input }) => setUserQueuePriority(ctx.svc, ctx.user.id, input.id, input.priority)),
+      /** the most cores and MB of memory the account's jobs hold at once (hosted plans); null = follow the plan */
+      setResources: adminProcedure
+        .input(z.object({ id: z.string(), resources: resourceCeilingInput.nullable() }))
+        .mutation(({ ctx, input }) => setUserResources(ctx.svc, ctx.user.id, input.id, input.resources)),
     }),
     /** Billing administration (ee): complimentary grants, and a re-read of Stripe for one account. */
     billing: router({

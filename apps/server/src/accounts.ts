@@ -8,7 +8,15 @@ import { and, asc, eq, gt, inArray, isNotNull, ne, sql, type SQL } from "drizzle
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
-import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN } from "@reelsaw/shared";
+import {
+  MUST_CHANGE_PASSWORD_REUSE,
+  passwordLengthError,
+  QUEUE_PRIORITY_MAX,
+  QUEUE_PRIORITY_MIN,
+  RESOURCE_CEILING_MAX_CORES,
+  RESOURCE_CEILING_MAX_MEM_MB,
+} from "@reelsaw/shared";
+import type { ResourceCeiling } from "./quota.js";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
@@ -149,6 +157,42 @@ export async function setUserQueuePriority(svc: Services, actorId: string | null
       .onConflictDoUpdate({ target: schema.userSettings.userId, set: { queuePriority: priority, updatedAt: new Date() } });
     await u.emit("user.queue_priority_changed", { userId, email: user.email, queuePriority: priority }, { actorId });
     return { ok: true, queuePriority: priority };
+  });
+}
+
+/**
+ * The admin's per-user resource ceiling (the most cores and MB of memory the account's jobs hold at once, across every
+ * machine), or null to follow the plan. Hosted plans only (EE): self-hosted, the host's capacity is the only limit.
+ * Applies to the next lease; leases already out keep theirs.
+ */
+export async function setUserResources(svc: Services, actorId: string | null, userId: string, resources: ResourceCeiling | null) {
+  if (!svc.entitlements)
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Resource ceilings come with hosted plans (REELSAW_EE); here the host's capacity is the only limit.",
+    });
+  if (
+    resources !== null &&
+    (!Number.isInteger(resources.maxCores) ||
+      !Number.isInteger(resources.maxMemMB) ||
+      resources.maxCores < 1 ||
+      resources.maxCores > RESOURCE_CEILING_MAX_CORES ||
+      resources.maxMemMB < 1 ||
+      resources.maxMemMB > RESOURCE_CEILING_MAX_MEM_MB)
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `A resource ceiling is 1 to ${RESOURCE_CEILING_MAX_CORES} cores and 1 to ${RESOURCE_CEILING_MAX_MEM_MB} MB of memory, in whole numbers.`,
+    });
+  const value = resources && { maxCores: resources.maxCores, maxMemMB: resources.maxMemMB };
+  return svc.tx(async (u) => {
+    const user = await lockedUser(u, userId);
+    await u.db
+      .insert(schema.userSettings)
+      .values({ userId, resources: value })
+      .onConflictDoUpdate({ target: schema.userSettings.userId, set: { resources: value, updatedAt: new Date() } });
+    await u.emit("user.resources_changed", { userId, email: user.email, resources: value }, { actorId });
+    return { ok: true, resources: value };
   });
 }
 

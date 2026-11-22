@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { upgradeFromProject, type PartialSource } from "@reelsaw/shared";
+import { plural, upgradeFromProject, type PartialSource } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { track } from "../lib/telemetry";
 import { Pending } from "./ui";
@@ -16,15 +16,19 @@ type Offer = { label: string; href: string };
  * (`upgradeFromProject`): upgrading from here finishes this video and re-renders its clips without the watermark by
  * itself, and the welcome dialog after checkout offers the other projects. `upgrade_offer_shown` / `upgrade_clicked` keep placement
  * "partial_project" (or "watermark" when that is the only reason), with `watermark` saying whether it was part of it.
+ * `capacity`: clips whose render went back to the queue for the account's plan ceiling or the busy-hours reserve
+ * (`clip.capacity_wait`); its offer names the next plan's cores, placement "capacity_wait" when it is the only reason.
  */
 export function UpgradeNotice({
   partial,
   watermark,
+  capacity = null,
   projectId,
   onExtended,
 }: {
   partial: PartialSource | null;
   watermark: { text: string; upgrade: Offer } | null;
+  capacity?: { waiting: number; upgrade: Offer | null } | null;
   projectId: string;
   onExtended: () => void;
 }) {
@@ -35,18 +39,23 @@ export function UpgradeNotice({
   const remaining = open ? m(open.remainingSec) : 0;
   const more = open?.extendableSec != null ? m(open.extendableSec) : null;
   // a plan that covers the rest of the video removes the watermark too; else the watermark's own offer
-  const upgrade = open?.upgrade ?? watermark?.upgrade ?? null;
-  const benefits = [open?.upgrade && `clip the other ${remaining} min`, watermark && "remove the watermark"].filter(Boolean).join(" and ");
-  const placement = open?.upgrade ? "partial_project" : "watermark";
-  const props = { placement, projectId, watermark: !!watermark, ...(open ? { remainingMinutes: remaining } : {}) };
+  const waiting = capacity && capacity.waiting > 0 ? capacity : null;
+  const upgrade = open?.upgrade ?? watermark?.upgrade ?? waiting?.upgrade ?? null;
+  const benefits = [open?.upgrade && `clip the other ${remaining} min`, watermark && "remove the watermark", waiting?.upgrade && "render sooner"]
+    .filter(Boolean)
+    .join(" and ");
+  const placement = open?.upgrade ? "partial_project" : watermark ? "watermark" : "capacity_wait";
+  const props = { placement, projectId, watermark: !!watermark, capacityWait: !!waiting, ...(open ? { remainingMinutes: remaining } : {}) };
   // keyed on primitives: refetches hand back new objects, which are not a new impression
   const shown = !!upgrade;
   const marked = !!watermark;
   const isPartial = !!open;
+  const isWaiting = !!waiting;
   useEffect(() => {
-    if (shown) track("upgrade_offer_shown", { placement, projectId, watermark: marked, ...(isPartial ? { remainingMinutes: remaining } : {}) });
-  }, [shown, placement, projectId, marked, isPartial, remaining]);
-  if (!partial && !watermark) return null;
+    if (shown)
+      track("upgrade_offer_shown", { placement, projectId, watermark: marked, capacityWait: isWaiting, ...(isPartial ? { remainingMinutes: remaining } : {}) });
+  }, [shown, placement, projectId, marked, isWaiting, isPartial, remaining]);
+  if (!partial && !watermark && !waiting) return null;
 
   const facts = [
     partial?.extending
@@ -55,6 +64,7 @@ export function UpgradeNotice({
         ? `Clipped the first ${m(open.processedSec)} of ${m(open.durationSec)} min`
         : open?.sentence,
     watermark && `${watermark.text ? `“${watermark.text}” ` : ""}watermark on`,
+    waiting && `${plural(waiting.waiting, "clip")} waiting for render capacity`,
   ].filter(Boolean);
   const quota = quotaFromError(extend.error);
   return (

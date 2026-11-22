@@ -78,13 +78,21 @@ service.
    (a retryable "waiting for capacity" outcome) instead of looping in `acquire`, so pg-boss's
    fair-share priority picks the next job and a paying account's job is not stuck behind a Free one.
    Host-capacity waits (everyone is short) keep today's bounded wait (`RESOURCE_WAIT_MAX_SECONDS`).
+   A requeue never spends an attempt and ages the job (a capped priority point, as Slurm's age factor),
+   and the paid reserve is soft: after a few requeues it lets the job through, so Free work under
+   sustained paid load is delayed, never starved. A ceiling cannot starve a job: it frees as the
+   account's own work ends.
 5. **Plan ceilings are a `Grants` field, EE only.** `resources: { maxCores, maxMemMB }` beside
    `queuePriority` and `sourceHeight`: the most one account may hold at once across all its leases,
    checked against that account's ledger rows in the same step. An admin's per-user override
-   replaces it, like `queuePriority`. No EE, no grants, no account ceiling.
+   replaces it, like `queuePriority`. No EE, no grants, no account ceiling. Under a ceiling every
+   CPU pass is elastic (down to one thread: thread count never changes the output); the fixed-size
+   work that requeues is the render slot (its memory, and its place once the account's cores are
+   all held). An account holding nothing may always start one render.
 6. **A paid reserve on hosted.** Free accounts' leases may not take the last `FREE_RESERVE_CORES`
-   cores (and a matching memory reserve) of a host, so a burst of Free work leaves room for paid
-   jobs. An EE setting; absent, 0.
+   cores (and, later, a matching memory reserve) of a host, so a burst of Free work leaves room for paid
+   jobs. An EE setting; absent, 0. Shipped: a Free pass is granted only what is above the reserve (one
+   thread at least), a Free render goes back to the queue while paid work's leased cores reach into it (Free leases are burst grants that shrink, so they never count as the reserve's).
 7. **Every heavy ffmpeg pass is leased.** Slice 2 makes the ffmpeg helper take the lease's grant and
    turn it into `-threads`, so a pass cannot skip the budget (the type is the guard). Light probes
    (`ffprobe`, single-frame grabs) stay unleased.

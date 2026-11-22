@@ -41,10 +41,27 @@ so for the minutes both run they do not see each other's disk claims. A single-h
 
 ## Slice 3 — Plan ceilings (EE)
 
-- [ ] 3.1 `Grants.resources { maxCores, maxMemMB }` per plan; admin per-user override.
-- [ ] 3.2 Account ceiling checked in the lease step; elastic work shrinks, fixed work requeues with backoff.
-- [ ] 3.3 `FREE_RESERVE_CORES` EE setting.
-- [ ] 3.4 Tests: Free burst leaves the reserve; paid job not behind a Free job waiting on its ceiling.
+- [x] 3.1 `Grants.resources { maxCores, maxMemMB }` per plan (`plans.ts`); admin per-user override
+      (`user_settings.resources`, `resourceCeilingFor`): Users → Limits, `set_user_resources`,
+      `reelsaw limits <email> --cores N --mem-mb M | --resources follow`. Refused without EE.
+- [x] 3.2 Account ceiling checked in the lease step: `createLeaser` reads the owner (the caller's `userId`, else the
+      project's), its grants and its live rows (summed over every machine, under a lock per account) and hands them to
+      `claimOnLive`. Every CPU pass shrinks within the ceiling, down to one thread (threads never change the output).
+      A render slot past the account's memory (or cores) is refused with `account`: `renderSlot` throws
+      `AccountCeilingError` at once and the render worker returns the job to the queue without spending an attempt,
+      backoff capped at 60 s. An account holding nothing may always start one render. Admins are not bounded.
+- [x] 3.3 `FREE_RESERVE_CORES` EE setting (`Grants.reserveCores` on Free): a Free pass gets only the cores above the
+      reserve (floor one thread), a Free render is requeued while paid leases' cores reach into it (rows carry `reserved`). Never the
+      whole machine (at most capacity − 1). The matching memory reserve is left for later.
+- [x] 3.5 No starvation: a deferral puts the job back through pg-boss's API (fenced `deleteJob` + `send` under the same id, one
+      transaction) with the attempts it had left, so a wait spends none; it
+      raises its priority one point per deferral up to `DEFERRAL_AGING_MAX` (1, below the lowest
+      paid plan's +2: Slurm's capped age factor), and after `RESERVE_BYPASS_DEFERRALS` (3) the reserve lets it through.
+      The owner sees "waiting for render capacity" (`clip.capacity_wait`) with the next plan's offer in the project's
+      upgrade line (`me.capacity`).
+- [x] 3.4 Tests: `claimOnLive` with account limits (`resources.test.ts`); Postgres (`resource-leases-stack.test.ts`):
+      a Free burst from two processes stays within its ceiling and leaves the reserve, a paid render is not held
+      behind a Free render refused by its own ceiling, self-hosted is unbounded.
 
 ## Done when
 - No ffmpeg pass that decodes or encodes a video runs without a lease.

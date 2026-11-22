@@ -265,6 +265,11 @@ export const envSchema = z.object({
   STRIPE_API_BASE: z.string().url().optional(),
   /** Days a past-due subscription keeps its plan after the first failed payment before the account falls back to Free. */
   BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  /**
+   * Cores of each machine that Free accounts' jobs leave for paid ones (docs/specs/resource-leases.md): a Free scan
+   * is granted fewer threads and a Free render waits in the queue rather than take them. 0 = no reserve.
+   */
+  FREE_RESERVE_CORES: z.coerce.number().int().min(0).max(512).default(0),
 
   // resource governor (see resources.ts)
   // a running job with no progress event for this long is reported (log + UI) as stalled

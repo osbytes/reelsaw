@@ -27,7 +27,10 @@ import {
   formatPriority,
   QUEUE_PRIORITY_MAX,
   QUEUE_PRIORITY_MIN,
+  RESOURCE_CEILING_MAX_CORES,
+  RESOURCE_CEILING_MAX_MEM_MB,
 } from "@reelsaw/shared";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import {
@@ -65,7 +68,6 @@ import {
 } from "../components/ListToolbar";
 import { pageTitle, useDocumentTitle } from "../lib/title";
 import { useDebounced } from "../lib/useDebounced";
-import { useLingui } from "@lingui/react/macro";
 
 type Usage = {
   projects: number;
@@ -1347,6 +1349,19 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const prio = prioDraft ?? prioCurrent;
   const prioValue = prio.trim() === "" ? null : Number(prio);
   const prioInvalid = prioValue !== null && (!Number.isInteger(prioValue) || prioValue < QUEUE_PRIORITY_MIN || prioValue > QUEUE_PRIORITY_MAX);
+  const { t } = useLingui();
+  // resource ceiling (hosted plans only; q.data.resources is null self-hosted): both fields, or both empty to follow the plan
+  const [resDraft, setResDraft] = useState<{ cores: string; mem: string } | null>(null);
+  const resOverride = q.data?.resources?.override ?? null;
+  const resCurrent = { cores: resOverride ? String(resOverride.maxCores) : "", mem: resOverride ? String(resOverride.maxMemMB) : "" };
+  const res = resDraft ?? resCurrent;
+  const resCores = res.cores.trim() === "" ? null : Number(res.cores);
+  const resMem = res.mem.trim() === "" ? null : Number(res.mem);
+  const resInvalid =
+    (resCores === null) !== (resMem === null) ||
+    (resCores !== null && (!Number.isInteger(resCores) || resCores < 1 || resCores > RESOURCE_CEILING_MAX_CORES)) ||
+    (resMem !== null && (!Number.isInteger(resMem) || resMem < 1 || resMem > RESOURCE_CEILING_MAX_MEM_MB));
+  const resChanged = resDraft !== null && (res.cores.trim() !== resCurrent.cores || res.mem.trim() !== resCurrent.mem);
   const values = draft ?? Object.fromEntries(Object.entries(q.data?.overrides ?? {}).map(([k, v]) => [k, String(v)]));
   const wmCurrent = q.data?.watermark.override === true ? "on" : q.data?.watermark.override === false ? "off" : "default";
   const wm = wmDraft ?? wmCurrent;
@@ -1362,7 +1377,14 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const saveWm = useMutation({ ...trpc.admin.users.setWatermark.mutationOptions(), onError: fail });
   const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
   const savePrio = useMutation({ ...trpc.admin.users.setQueuePriority.mutationOptions(), onError: fail });
-  const busy = save.isPending || saveWm.isPending || savePlan.isPending || savePrio.isPending;
+  const saveRes = useMutation({ ...trpc.admin.users.setResources.mutationOptions(), onError: fail });
+  const busy = save.isPending || saveWm.isPending || savePlan.isPending || savePrio.isPending || saveRes.isPending;
+  const resPlan = q.data?.resources?.plan;
+  const resHint = !q.data?.resources
+    ? ""
+    : resInvalid
+      ? `Both, in whole numbers: 1 to ${RESOURCE_CEILING_MAX_CORES} cores and 1 to ${RESOURCE_CEILING_MAX_MEM_MB} MB. Leave both empty to follow the plan.`
+      : `${resCores !== null ? `Override: ${plural(resCores, "core")} / ${resMem} MB.` : "Following the plan."} ${resPlan ? `The plan gives ${plural(resPlan.maxCores, "core")} / ${resPlan.maxMemMB} MB.` : ""} A scan past it gets fewer threads, a render waits in the queue.`;
   const prioHint = !q.data
     ? ""
     : prioInvalid
@@ -1399,6 +1421,8 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
             if (wmDraft !== null && wm !== wmCurrent) await saveWm.mutateAsync({ id: row.id, watermark: wm === "default" ? null : wm === "on" });
             if (hasPlans && planDraft !== null && plan !== planCurrent) await savePlan.mutateAsync({ id: row.id, plan: plan === "free" ? null : plan });
             if (prioDraft !== null && prio.trim() !== prioCurrent) await savePrio.mutateAsync({ id: row.id, priority: prioValue });
+            if (resChanged)
+              await saveRes.mutateAsync({ id: row.id, resources: resCores !== null && resMem !== null ? { maxCores: resCores, maxMemMB: resMem } : null });
           } catch {
             return; // the toast said why; keep the dialog open
           }
@@ -1478,6 +1502,41 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               )}
               <span className={`min-h-4 text-xs ${prioInvalid ? "text-err" : "text-ink3"}`}>{prioHint}</span>
             </div>
+            {q.data?.resources && (
+              <div className="flex flex-col gap-1.5">
+                <span className="flex items-baseline justify-between text-xs font-semibold text-ink2">
+                  <Trans>Resource ceiling</Trans>
+                  <span className="font-normal text-ink3">{resCores === null && resMem === null ? `${q.data.plan ?? "plan"} plan` : "override"}</span>
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className="input"
+                    type="number"
+                    step={1}
+                    min={1}
+                    max={RESOURCE_CEILING_MAX_CORES}
+                    aria-label={t`Most cores at once`}
+                    aria-invalid={resInvalid || undefined}
+                    value={res.cores}
+                    placeholder={resPlan ? `plan: ${plural(resPlan.maxCores, "core")}` : "cores"}
+                    onChange={(e) => setResDraft({ ...res, cores: e.target.value })}
+                  />
+                  <input
+                    className="input"
+                    type="number"
+                    step={1}
+                    min={1}
+                    max={RESOURCE_CEILING_MAX_MEM_MB}
+                    aria-label={t`Most memory at once, MB`}
+                    aria-invalid={resInvalid || undefined}
+                    value={res.mem}
+                    placeholder={resPlan ? `plan: ${resPlan.maxMemMB} MB` : "MB"}
+                    onChange={(e) => setResDraft({ ...res, mem: e.target.value })}
+                  />
+                </div>
+                <span className={`min-h-4 text-xs ${resInvalid ? "text-err" : "text-ink3"}`}>{resHint}</span>
+              </div>
+            )}
             {LIMITS.map(({ key, label, window, unit }) => {
               const used = q.data?.usage?.[key];
               const typed = values[key]?.trim();
@@ -1542,7 +1601,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           <button type="button" className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data || prioInvalid}>
+          <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data || prioInvalid || resInvalid}>
             {busy ? "…" : "Save"}
           </button>
         </div>

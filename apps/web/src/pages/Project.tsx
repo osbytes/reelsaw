@@ -112,6 +112,17 @@ export function ProjectPage() {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
+  // clips whose render went back to the queue for capacity (hosted plans) and has not started since
+  const capacityClips = useMemo(() => {
+    const waiting = new Set<string>();
+    for (const e of log) {
+      const id = (e.payload as { clipId?: unknown }).clipId;
+      if (typeof id !== "string") continue;
+      if (e.type === "clip.capacity_wait") waiting.add(id);
+      else if (e.type === "clip.rendering" || e.type === "clip.done" || e.type === "clip.failed") waiting.delete(id);
+    }
+    return waiting;
+  }, [log]);
   const [progress, setProgress] = useState<{ stage: string; value: number; message?: string | undefined; detail?: StageDetail | undefined } | null>(null);
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
@@ -204,6 +215,7 @@ export function ProjectPage() {
   const stageIdx = p ? (p.status === "failed" && p.stage ? (STAGE_REACHED[p.stage] ?? -1) : (STAGE_INDEX[p.status] ?? -1)) : -1;
   const active = !!p && ACTIVE.has(p.status);
   const sortedClips = useMemo(() => (p?.clips ?? []).slice().sort((a, b) => a.index - b.index), [p]);
+  const capacityWaiting = sortedClips.filter((c) => capacityClips.has(c.id) && c.status !== "done" && c.status !== "failed").length;
   // clips the owner deleted (or a re-pick replaced) and can still restore
   const deletedCount = p?.replacedClips?.length ?? 0;
   const readyCount = sortedClips.filter((c) => c.status === "done").length;
@@ -976,6 +988,7 @@ export function ProjectPage() {
               ? { text: me.data.watermark.text, upgrade: me.data.watermark.upgrade }
               : null
           }
+          capacity={capacityWaiting ? { waiting: capacityWaiting, upgrade: me.data?.capacity?.upgrade ?? null } : null}
           projectId={p.id}
           onExtended={() => void invalidate()}
         />
