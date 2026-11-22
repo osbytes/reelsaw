@@ -376,13 +376,13 @@ export function cannotUseApp(user: AuthUser, via: Requester["via"]): string | nu
  * the web app can: tRPC, MCP, uploads and media downloads. The user row is always read fresh, so
  * a ban or an approval applies to the next request, not the next sign-in.
  */
-export async function requester(auth: Auth, db: Db, headers: Headers, log?: Logger): Promise<Requester | null> {
+export async function requester(auth: Auth, db: Db, headers: Headers): Promise<Requester | null> {
   const token = bearerToken(headers);
   let userId: string | null = null;
   let via: Requester["via"] = "session";
   let keyAdmin = false;
   let session: Session | null = null;
-  if (token && token.startsWith(API_KEY_PREFIX)) {
+  if (token?.startsWith(API_KEY_PREFIX)) {
     const res = await auth.api.verifyApiKey({ body: { key: token } });
     if (!res.valid || !res.key) return null;
     userId = res.key.referenceId;

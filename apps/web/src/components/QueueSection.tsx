@@ -506,119 +506,117 @@ export function QueueSection() {
             ))}
           </SkeletonRegion>
         ) : items.length > 0 ? (
-          <>
-            <ScrollArea className={SECTION_LIST_MAX_H}>
-              <table className="w-full min-w-[34rem] table-fixed text-[13px]">
-                <caption className="sr-only">Failed projects and clips, newest first</caption>
-                <colgroup>
-                  <col className="w-[38%]" />
-                  <col className="w-[6rem]" />
-                  <col />
-                  <col className="w-[5.5rem]" />
-                  <col className="w-[5rem]" />
-                </colgroup>
-                <thead>
-                  <tr className="text-left text-xs text-ink3">
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Item
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Stage
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      Reason
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
-                      When
-                    </th>
-                    <th scope="col" className="sticky top-0 z-[1] bg-panel py-1">
-                      <span className="sr-only">Actions</span>
-                    </th>
+          <ScrollArea className={SECTION_LIST_MAX_H}>
+            <table className="w-full min-w-[34rem] table-fixed text-[13px]">
+              <caption className="sr-only">Failed projects and clips, newest first</caption>
+              <colgroup>
+                <col className="w-[38%]" />
+                <col className="w-[6rem]" />
+                <col />
+                <col className="w-[5.5rem]" />
+                <col className="w-[5rem]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-xs text-ink3">
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Item
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Stage
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    Reason
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1 font-medium">
+                    When
+                  </th>
+                  <th scope="col" className="sticky top-0 z-[1] bg-panel py-1">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((row) => (
+                  <tr key={`${row.kind}:${row.id}`} className="border-t border-line/60">
+                    <td className="truncate py-1.5">
+                      <button
+                        type="button"
+                        className="block w-full truncate text-left text-ink hover:underline"
+                        onClick={() => openFail({ kind: row.kind, id: row.id })}
+                      >
+                        {row.title}
+                      </button>
+                      <div className="truncate text-[11px] text-ink3" title={row.ownerEmail}>
+                        {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
+                      </div>
+                    </td>
+                    <td className="truncate py-1.5">
+                      {row.stage}
+                      <div className={`truncate text-[11px] ${CAUSE[row.cause].tone}`} title={CAUSE[row.cause].title}>
+                        <span className="font-mono">{CAUSE[row.cause].glyph}</span> {CAUSE[row.cause].word}
+                      </div>
+                    </td>
+                    <td className="truncate py-1.5 pr-2 text-xs text-ink2">
+                      <button
+                        type="button"
+                        className="block w-full truncate text-left hover:underline"
+                        title={row.error ?? undefined}
+                        onClick={() => openFail({ kind: row.kind, id: row.id })}
+                      >
+                        {row.snippet}
+                      </button>
+                    </td>
+                    <td className="truncate py-1.5 text-xs tabular-nums text-ink3" title={ago(row.failedAt)}>
+                      {ago(row.failedAt)}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {showDismissed ? (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                        >
+                          Restore
+                        </button>
+                      ) : row.retryable ? (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
+                        >
+                          Retry
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-quiet h-8 min-w-[4rem] px-2 text-xs"
+                          disabled={acting}
+                          title="Clear from this list; the owner's project is untouched"
+                          onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
+                        >
+                          Dismiss
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.map((row) => (
-                    <tr key={`${row.kind}:${row.id}`} className="border-t border-line/60">
-                      <td className="truncate py-1.5">
-                        <button
-                          type="button"
-                          className="block w-full truncate text-left text-ink hover:underline"
-                          onClick={() => openFail({ kind: row.kind, id: row.id })}
-                        >
-                          {row.title}
-                        </button>
-                        <div className="truncate text-[11px] text-ink3" title={row.ownerEmail}>
-                          {row.kind === "clip" ? (row.projectTitle ? `clip · ${row.projectTitle}` : "clip") : "project"} · {row.ownerEmail}
-                        </div>
-                      </td>
-                      <td className="truncate py-1.5">
-                        {row.stage}
-                        <div className={`truncate text-[11px] ${CAUSE[row.cause].tone}`} title={CAUSE[row.cause].title}>
-                          <span className="font-mono">{CAUSE[row.cause].glyph}</span> {CAUSE[row.cause].word}
-                        </div>
-                      </td>
-                      <td className="truncate py-1.5 pr-2 text-xs text-ink2">
-                        <button
-                          type="button"
-                          className="block w-full truncate text-left hover:underline"
-                          title={row.error ?? undefined}
-                          onClick={() => openFail({ kind: row.kind, id: row.id })}
-                        >
-                          {row.snippet}
-                        </button>
-                      </td>
-                      <td className="truncate py-1.5 text-xs tabular-nums text-ink3" title={ago(row.failedAt)}>
-                        {ago(row.failedAt)}
-                      </td>
-                      <td className="py-1.5 text-right">
-                        {showDismissed ? (
-                          <button
-                            type="button"
-                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
-                          >
-                            Restore
-                          </button>
-                        ) : row.retryable ? (
-                          <button
-                            type="button"
-                            className="btn-ghost h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            onClick={() => onRetry([{ kind: row.kind, id: row.id }])}
-                          >
-                            Retry
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-quiet h-8 min-w-[4rem] px-2 text-xs"
-                            disabled={acting}
-                            title="Clear from this list; the owner's project is untouched"
-                            onClick={() => void onDismiss([{ kind: row.kind, id: row.id }])}
-                          >
-                            Dismiss
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {(failures.hasNextPage || failures.isFetchingNextPage) && (
-                <div ref={more} className="flex h-10 items-center justify-center">
-                  <button
-                    type="button"
-                    className="btn-ghost h-8 min-w-[8rem] text-xs"
-                    disabled={failures.isFetchingNextPage}
-                    onClick={() => void failures.fetchNextPage()}
-                  >
-                    {failures.isFetchingNextPage ? "Loading…" : `Load ${Math.min(PAGE, Math.max(0, total - items.length))} more`}
-                  </button>
-                </div>
-              )}
-            </ScrollArea>
-          </>
+                ))}
+              </tbody>
+            </table>
+            {(failures.hasNextPage || failures.isFetchingNextPage) && (
+              <div ref={more} className="flex h-10 items-center justify-center">
+                <button
+                  type="button"
+                  className="btn-ghost h-8 min-w-[8rem] text-xs"
+                  disabled={failures.isFetchingNextPage}
+                  onClick={() => void failures.fetchNextPage()}
+                >
+                  {failures.isFetchingNextPage ? "Loading…" : `Load ${Math.min(PAGE, Math.max(0, total - items.length))} more`}
+                </button>
+              </div>
+            )}
+          </ScrollArea>
         ) : null}
       </div>
 

@@ -75,7 +75,7 @@ export default function BillingSection() {
     started.current = true;
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
     const p = q.data.plans.find((x) => x.name === wanted);
-    if (!p || !p.price) return;
+    if (!p?.price) return;
     if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
     setInterval_(wantedInterval);
     toast(`Taking you to Stripe for ${p.label}…`);

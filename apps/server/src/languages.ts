@@ -30,7 +30,7 @@ type Deps = Pick<Services, "models" | "providers" | "config" | "log" | "database
  */
 export async function languageFonts(svc: Pick<Services, "database" | "paths" | "storage" | "log">, only?: readonly string[]): Promise<FontEnv> {
   const system = await systemGlyphs();
-  if (!system || (only && only.every((l) => !missingGlyphs(system, languageProfile(l).letters).length))) return { system };
+  if (!system || only?.every((l) => !missingGlyphs(system, languageProfile(l).letters).length)) return { system };
   const state = await loadFontState(svc.database.db);
   return { system, uploaded: await uploadedGlyphs(svc, state.uploaded) };
 }

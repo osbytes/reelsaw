@@ -359,7 +359,6 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
   const box = createSecretBox(config.BETTER_AUTH_SECRET, "instance-settings");
   const env = envValues(config);
   let db: Db | undefined;
-  let stored: Override = {}; // every readable stored override
   let applied: Override = {}; // the ones in force
   let ignored: Partial<Record<RuntimeKey, string>> = {};
   let current: RuntimeSettings = { ...env };
@@ -413,7 +412,6 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
       delete use[bad];
     }
     const before = JSON.stringify(current);
-    stored = next;
     applied = use;
     ignored = ign;
     current = resolveSettings(config, use);

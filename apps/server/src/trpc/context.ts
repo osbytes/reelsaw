@@ -24,7 +24,7 @@ export type Context = {
 
 export function contextFactory(svc: Services) {
   return async ({ req }: FetchCreateContextFnOptions, c?: HonoContext<AppEnv>): Promise<Context> => {
-    const who = await requester(svc.auth, svc.database.db, req.headers, svc.log.child({ module: "auth" }));
+    const who = await requester(svc.auth, svc.database.db, req.headers);
     const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
     if (who) c?.set("userId", who.user.id);
     const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });

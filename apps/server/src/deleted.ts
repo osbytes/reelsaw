@@ -4,7 +4,6 @@
  * MCP `list_deleted` (restore/purge loop the per-kind tools) and `reelsaw deleted <email>` all call these.
  */
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { eachItem, uniqueBy } from "./lib/each.js";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DeletedKind } from "@reelsaw/shared";

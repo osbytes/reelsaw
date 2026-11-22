@@ -221,7 +221,7 @@ export function attachText<S extends { t: number }>(samples: S[], frames: Array<
   return samples.map((s) => {
     let best: (typeof frames)[number] | undefined;
     for (const f of frames) if (!best || Math.abs(f.t - s.t) < Math.abs(best.t - s.t)) best = f;
-    return best && best.all && Math.abs(best.t - s.t) <= maxGap ? { ...s, text: best.all } : s;
+    return best?.all && Math.abs(best.t - s.t) <= maxGap ? { ...s, text: best.all } : s;
   });
 }
 

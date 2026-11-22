@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { AudioLines, Ban, Equal, Film, Image as ImageIcon, Loader2, Pause, Pencil, Play, Plus, Star, Trash2, X } from "lucide-react";
+import { AudioLines, Ban, Equal, Loader2, Pencil, Star, Trash2, X } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { formatTag, licenseText } from "../lib/library";

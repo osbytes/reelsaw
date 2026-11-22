@@ -10,6 +10,8 @@
     "typecheck": "pnpm --filter @reelsaw/shared build && pnpm -r typecheck",
     "lint": "biome lint",
     "lint:fix": "biome lint --write",
+    "lint:ratchet": "node scripts/lint-ratchet.mjs",
+    "guards": "node scripts/check-agent-files.mjs && node scripts/dup-ledger.mjs --check && node scripts/lint-ratchet.mjs",
     "format": "biome format --write",
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
     "start": "pnpm --filter @reelsaw/server start",

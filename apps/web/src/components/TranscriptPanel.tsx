@@ -418,7 +418,6 @@ export function TranscriptPanel({
   }
 
   const pendingFlags = flags.filter((f) => f.status === "pending" && !decisions[f.id]);
-  const dirty = Object.keys(decisions).length > 0;
 
   async function submit() {
     await review.mutateAsync({

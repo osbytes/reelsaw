@@ -850,7 +850,7 @@ export function ProjectPage() {
 
   const transcriptSkeleton = (
     <SkeletonRegion label="Loading transcript…" className="flex min-h-0 flex-1 flex-col gap-2.5 border-t border-line px-5 py-6">
-      {[92, 78, 85, 60, 88, 70, 80, 66].map((w, i) => (
+      {[92, 78, 85, 60, 88, 70, 80, 66].map((_w, i) => (
         <div key={i} className="flex gap-2.5">
           <Skeleton className="h-3.5 w-10" />
           <Skeleton className="h-3.5" />

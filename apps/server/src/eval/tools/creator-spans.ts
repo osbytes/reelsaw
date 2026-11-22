@@ -154,7 +154,7 @@ export function alignSpans(short: CapWord[], episode: CapWord[], o: { n?: number
     const last = spans.at(-1);
     const continues = last && Math.abs(s.shortStart - last.shortEnd) <= 2;
     const apart = last ? s.start - last.end : Infinity;
-    const bothStrong = last && last.strong && s.strong;
+    const bothStrong = last?.strong && s.strong;
     if (last && (bothStrong ? apart <= merge : continues && apart <= 2 * merge)) {
       Object.assign(last, {
         end: Math.max(last.end, s.end),

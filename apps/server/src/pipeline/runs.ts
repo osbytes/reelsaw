@@ -100,7 +100,7 @@ export function runsOf(log: LogEvent[]): Run[] {
     if (e.type === "run.started") {
       const seq = num(p.seq) ?? runs.length + 1;
       const reason = (typeof p.reason === "string" ? p.reason : null) as RunReason | null;
-      if (cur && cur.implicit && cur.empty) {
+      if (cur?.implicit && cur.empty) {
         cur.run.seq = seq;
         cur.run.reason = reason;
         cur.implicit = false;

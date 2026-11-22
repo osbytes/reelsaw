@@ -195,7 +195,7 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
     const p = e.payload as Record<string, unknown>;
     const reason = typeof p.reason === "string" ? p.reason : null;
     if (e.type === "run.started") {
-      if (cur && cur.entries.every((x) => x.e.type === "project.created")) {
+      if (cur?.entries.every((x) => x.e.type === "project.created")) {
         cur.seq = Number(p.seq) || cur.seq;
         cur.reason = reason;
       } else groups.push((cur = fresh(Number(p.seq) || groups.length + 1, reason, t)));

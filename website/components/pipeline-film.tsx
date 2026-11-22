@@ -42,7 +42,7 @@ const easeOutCubic = (t: number) => --t * t * t + 1;
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1);
 const easeOutBack = (t: number) => {
   const c1 = 1.70158;
-  return 1 + (c1 + 1) * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  return 1 + (c1 + 1) * (t - 1) ** 3 + c1 * (t - 1) ** 2;
 };
 const k01 = (T: number, s: number, d: number) => clamp((T - s) / d, 0, 1);
 const enter = (T: number, s: number, d = 0.6) => easeOutCubic(k01(T, s, d));

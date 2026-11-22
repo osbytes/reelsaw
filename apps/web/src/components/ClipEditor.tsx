@@ -10,7 +10,6 @@ import {
   Loader2,
   X,
   Link2,
-  Plus,
   Trash2,
   Scissors,
   Eye,
@@ -62,7 +61,7 @@ import {
   type BumperSlot,
   type LayerBlock,
 } from "./Timeline";
-import { Segmented, Modal, Kbd, Select, ConfirmDialog } from "./ui";
+import { Segmented, Modal, Select, ConfirmDialog } from "./ui";
 import {
   BumperSelects,
   ProjectBumpersModal,
@@ -75,7 +74,7 @@ import {
 } from "./BumperField";
 import { ApplyTemplateDialog, SaveAsTemplateDialog, applyTemplateLocally, existingOnClip } from "./TemplatePicker";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
-import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
+import { Thumb, clockText } from "./BumperCombobox";
 import { fontOptions, useFonts } from "../lib/fonts";
 import { z } from "zod";
 import { ThemeToggle } from "../App";
