@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import { rgbFramesToPipe, CommandError } from "../media.js";
 import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
-import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
+import { FACE_INPUT_W, FACE_INPUT_H, faceRaster, type FaceDetector, type FaceBox } from "../vision/faces.js";
+import { createFaceTracker } from "../vision/tracker.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
 import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
 import { probeTiles, aggregateTile, tileContent, tileReason, TILE, type TileProbe } from "./webcam-tile.js";
@@ -110,11 +111,23 @@ export interface LayoutOptions {
   srcAspect?: number;
 }
 
-/** Sample frames at `sampleFps` through ffmpeg and run the detector on each. */
+/**
+ * Sample frames at `sampleFps` through ffmpeg and run the detector on each. One decode gives two rasters
+ * per frame, stacked (each padded to the wider one): the 320×240 probe raster on top, the detector's
+ * aspect-preserving `faceRaster` below.
+ */
 export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promise<FaceSample[]> {
   const fps = opts.sampleFps ?? 2;
-  const frameBytes = FACE_INPUT_W * FACE_INPUT_H * 3;
+  const dr = faceRaster(opts.srcAspect);
+  const stackW = Math.max(FACE_INPUT_W, dr.w);
+  const frameBytes = stackW * (FACE_INPUT_H + dr.h) * 3;
+  const cut = (frame: Buffer, y0: number, w: number, h: number) => {
+    const out = new Uint8Array(w * h * 3);
+    for (let y = 0; y < h; y++) out.set(frame.subarray((y0 + y) * stackW * 3, (y0 + y) * stackW * 3 + w * 3), y * w * 3);
+    return out;
+  };
   let lastBox: { box: FaceBox; t: number } | undefined;
+  const tracker = createFaceTracker(); // every box gets the id of the face it belongs to across frames
   // frames with no face yet, kept until a face appears so they can be probed around it (bounded: `backSec`)
   const pending: Array<{ px: Uint8Array; index: number }> = [];
   const probe = (px: Uint8Array, box: FaceBox) => {
@@ -135,7 +148,8 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       "-i",
       opts.source,
       "-vf",
-      `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`,
+      `fps=${fps},split[p][d];[p]scale=${FACE_INPUT_W}:${FACE_INPUT_H},format=rgb24,pad=${stackW}:${FACE_INPUT_H}[pp];` +
+        `[d]scale=${dr.w}:${dr.h},format=rgb24,pad=${stackW}:${dr.h}[dd];[pp][dd]vstack`,
       ...rgbFramesToPipe,
     ],
     { signal: opts.signal, stdio: ["ignore", "pipe", "pipe"] },
@@ -150,10 +164,11 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
     while (buf.length >= frameBytes) {
       const frame = buf.subarray(0, frameBytes);
       buf = buf.subarray(frameBytes);
-      const px = new Uint8Array(frame);
-      const boxes = await det.detect(px);
+      const px = cut(frame, 0, FACE_INPUT_W, FACE_INPUT_H);
+      const boxes = await det.detect(cut(frame, FACE_INPUT_H, dr.w, dr.h), dr);
       const sorted = boxes.sort((a, b) => (b.x2 - b.x1) * (b.y2 - b.y1) - (a.x2 - a.x1) * (a.y2 - a.y1));
       const t = i / fps;
+      tracker.update(t, sorted);
       const inset = probeInset(px, FACE_INPUT_W, FACE_INPUT_H);
       const sample: FaceSample = {
         t,
@@ -277,7 +292,9 @@ function pairSizes(pair: { a: FaceSample[]; b: FaceSample[] }): [number, number]
 export function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSample[] } {
   // Keep each speaker by continuity, not by "two largest boxes sorted left to right": a spurious box
   // (a second detection beside one face, a hand) would otherwise outrank the other speaker and swap
-  // that crop onto the wrong person for a few frames, then back (a "lazy eye" pan).
+  // that crop onto the wrong person for a few frames, then back (a "lazy eye" pan). The tracker's id
+  // comes first: a speaker keeps the box of the face it had last frame (a spurious box is a track of
+  // its own); x continuity picks the box when that face is not seen.
   const cx = (bx: FaceBox) => (bx.x1 + bx.x2) / 2;
   const seeds = samples.flatMap((s) => {
     const xs = s.boxes
@@ -290,22 +307,56 @@ export function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSam
   let lb = seeds.length ? median(seeds.map((x) => x[1])) : 0.67;
   const a: FaceSample[] = [];
   const b: FaceSample[] = [];
+  let ta: number | undefined;
+  let tb: number | undefined;
+  let seenA = Number.NEGATIVE_INFINITY;
+  let seenB = Number.NEGATIVE_INFINITY;
+  // only a face seen for a second or more holds a speaker: a spurious box lives a frame or two
+  const span = trackSpans(samples);
+  const held = (bx: FaceBox) => (bx.track !== undefined && (span.get(bx.track) ?? 0) >= 1 ? bx.track : undefined);
   for (const s of samples) {
-    // every box belongs to the speaker it's nearer to; each speaker keeps its nearest box
-    let pa: FaceBox | null = null;
-    let pb: FaceBox | null = null;
-    for (const bx of s.boxes) {
+    // the face each speaker had last frame, by track id; else every box belongs to the speaker it's
+    // nearer to, and each speaker keeps its nearest box
+    let pa: FaceBox | null = ta === undefined ? null : (s.boxes.find((bx) => bx.track === ta) ?? null);
+    let pb: FaceBox | null = tb === undefined ? null : (s.boxes.find((bx) => bx.track === tb) ?? null);
+    const free = s.boxes.filter((bx) => bx !== pa && bx !== pb);
+    const fa = !pa;
+    const fb = !pb;
+    for (const bx of free) {
       const x = cx(bx);
       if (Math.abs(x - la) <= Math.abs(x - lb)) {
-        if (!pa || Math.abs(x - la) < Math.abs(cx(pa) - la)) pa = bx;
-      } else if (!pb || Math.abs(x - lb) < Math.abs(cx(pb) - lb)) pb = bx;
+        if (fa && (!pa || Math.abs(x - la) < Math.abs(cx(pa) - la))) pa = bx;
+      } else if (fb && (!pb || Math.abs(x - lb) < Math.abs(cx(pb) - lb))) pb = bx;
     }
-    if (pa) la = cx(pa);
-    if (pb) lb = cx(pb);
+    // a box picked by x while the speaker's face blinks out fills that frame only; the speaker goes on
+    // waiting for its own face until that track has been gone a second
+    if (pa) {
+      la = cx(pa);
+      if (!fa) seenA = s.t;
+      else if (ta === undefined || s.t - seenA > 1) [ta, seenA] = [held(pa), s.t];
+    }
+    if (pb) {
+      lb = cx(pb);
+      if (!fb) seenB = s.t;
+      else if (tb === undefined || s.t - seenB > 1) [tb, seenB] = [held(pb), s.t];
+    }
     a.push({ t: s.t, box: pa, boxes: [] });
     b.push({ t: s.t, box: pb, boxes: [] });
   }
   return { a, b };
+}
+
+/** How long each face track lasts (seconds from its first to its last sighting), by track id. */
+export function trackSpans(samples: FaceSample[]): Map<number, number> {
+  const first = new Map<number, number>();
+  const out = new Map<number, number>();
+  for (const s of samples)
+    for (const b of s.boxes) {
+      if (b.track === undefined) continue;
+      if (!first.has(b.track)) first.set(b.track, s.t);
+      out.set(b.track, s.t - first.get(b.track)!);
+    }
+  return out;
 }
 
 /**
@@ -379,7 +430,11 @@ export function tripodTrack(
   return out;
 }
 
-/** Times where the tripod camera must cut instead of pan: scene cuts, and face jumps over `jump` of the width between consecutive samples. */
+/**
+ * Times where the tripod camera must cut instead of pan: scene cuts, and face jumps over `jump` of the
+ * width between consecutive samples. A step within one face track is the face moving, never a cut (the
+ * tracker's gate does not link a jump a face cannot make between two samples).
+ */
 export function trackBreaks(samples: FaceSample[], sceneCuts: number[], jump = 0.15): number[] {
   const out = new Set<number>();
   const t0 = samples[0]?.t ?? 0;
@@ -389,6 +444,7 @@ export function trackBreaks(samples: FaceSample[], sceneCuts: number[], jump = 0
     const a = samples[i - 1]!;
     const b = samples[i]!;
     if (!a.box || !b.box || b.t - a.t > 1) continue;
+    if (a.box.track !== undefined && a.box.track === b.box.track) continue;
     const cx = (f: FaceBox) => (f.x1 + f.x2) / 2;
     if (Math.abs(cx(a.box) - cx(b.box)) <= jump) continue;
     // a step counts when the face stays where it landed (a one-frame flip to another box is not a cut)
@@ -1058,10 +1114,12 @@ export function sparseTrack(track: LayoutDecision["track"], start: number, end: 
 }
 
 /**
- * Drop "faces" that never move: posters, photos, logos on the wall. UltraFace returns the same box,
+ * Drop "faces" that never move: posters, photos, logos on the wall. The detector returns the same box,
  * frame after frame, for a printed face, while a real person drifts and the detector jitters on them.
- * Boxes are clustered by centre across the clip; a cluster seen in enough frames whose centre and
- * size barely vary is treated as static and removed from every sample.
+ * Face tracks (boxes without a track id each count alone) are clustered by centre across the clip; a
+ * cluster seen in enough frames whose centre and size barely vary is treated as static and removed
+ * from every sample. A track that moves is a person and joins no cluster, so someone walking past a
+ * poster neither keeps the poster in nor gets dropped with it.
  */
 export function dropStaticFaces(
   samples: FaceSample[],
@@ -1076,31 +1134,39 @@ export function dropStaticFaces(
     .filter((d) => d > 0);
   const fps = dts.length ? 1 / median(dts) : 4;
   const minFrames = Math.max(2, Math.round((opts.minSeconds ?? 2) * fps));
-  type Cluster = { x: number; y: number; members: FaceBox[] };
-  const clusters: Cluster[] = [];
-  for (const s of samples)
-    for (const b of s.boxes) {
-      const cx = (b.x1 + b.x2) / 2;
-      const cy = (b.y1 + b.y2) / 2;
-      const c = clusters.find((k) => Math.abs(k.x - cx) < radius && Math.abs(k.y - cy) < radius);
-      if (c) {
-        c.members.push(b);
-        c.x += (cx - c.x) / c.members.length;
-        c.y += (cy - c.y) / c.members.length;
-      } else clusters.push({ x: cx, y: cy, members: [b] });
-    }
   const std = (xs: number[]) => {
     const m = xs.reduce((a, b) => a + b, 0) / xs.length;
     return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
   };
+  const still = (bs: FaceBox[]) =>
+    std(bs.map((b) => (b.x1 + b.x2) / 2)) < maxStd && std(bs.map((b) => (b.y1 + b.y2) / 2)) < maxStd && std(bs.map((b) => b.y2 - b.y1)) < maxStd;
+  const units = new Map<number | FaceBox, FaceBox[]>();
+  for (const s of samples)
+    for (const b of s.boxes) {
+      const key = b.track ?? b;
+      const u = units.get(key);
+      if (u) u.push(b);
+      else units.set(key, [b]);
+    }
+  type Cluster = { x: number; y: number; members: FaceBox[] };
+  const clusters: Cluster[] = [];
+  for (const members of units.values()) {
+    if (members.length >= 3 && !still(members)) continue;
+    const cx = members.reduce((a, b) => a + (b.x1 + b.x2) / 2, 0) / members.length;
+    const cy = members.reduce((a, b) => a + (b.y1 + b.y2) / 2, 0) / members.length;
+    const c = clusters.find((k) => Math.abs(k.x - cx) < radius && Math.abs(k.y - cy) < radius);
+    if (c) {
+      const n = c.members.length;
+      c.members.push(...members);
+      c.x += ((cx - c.x) * members.length) / (n + members.length);
+      c.y += ((cy - c.y) * members.length) / (n + members.length);
+    } else clusters.push({ x: cx, y: cy, members: [...members] });
+  }
   const isStatic = new Set<FaceBox>();
   const dropped: Array<{ x: number; y: number; frames: number }> = [];
   for (const c of clusters) {
     if (c.members.length < minFrames) continue;
-    const xs = c.members.map((b) => (b.x1 + b.x2) / 2);
-    const ys = c.members.map((b) => (b.y1 + b.y2) / 2);
-    const hs = c.members.map((b) => b.y2 - b.y1);
-    if (std(xs) < maxStd && std(ys) < maxStd && std(hs) < maxStd) {
+    if (still(c.members)) {
       for (const b of c.members) isStatic.add(b);
       dropped.push({ x: Number(c.x.toFixed(3)), y: Number(c.y.toFixed(3)), frames: c.members.length });
     }

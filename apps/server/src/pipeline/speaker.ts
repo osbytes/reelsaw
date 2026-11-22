@@ -20,7 +20,7 @@ import { FACE_INPUT_W, FACE_INPUT_H } from "../vision/faces.js";
 import { rgbFramesToPipe } from "../media.js";
 import { VAD_FRAME_SEC } from "../audio/vad.js";
 
-const W = FACE_INPUT_W * 2; // decode at 640×480: detector gets a 2× downscale, mouths keep detail
+const W = FACE_INPUT_W * 2; // decode at 640×480: the detector and the mouth-motion probe read the same frame
 const H = FACE_INPUT_H * 2;
 
 export interface SpeakerRun {
@@ -35,17 +35,6 @@ export interface SpeakerTimeline {
   /** fraction of speech frames where one mouth clearly out-moved the other */
   confidence: number;
   frames: number;
-}
-
-function downscale2x(rgb: Uint8Array): Uint8Array {
-  const out = new Uint8Array(FACE_INPUT_W * FACE_INPUT_H * 3);
-  for (let y = 0; y < FACE_INPUT_H; y++)
-    for (let x = 0; x < FACE_INPUT_W; x++)
-      for (let c = 0; c < 3; c++) {
-        const i = (2 * y * W + 2 * x) * 3 + c;
-        out[(y * FACE_INPUT_W + x) * 3 + c] = (rgb[i]! + rgb[i + 3]! + rgb[i + W * 3]! + rgb[i + W * 3 + 3]!) >> 2;
-      }
-  return out;
 }
 
 function gray(rgb: Uint8Array): Uint8Array {
@@ -134,7 +123,7 @@ export async function activeSpeakers(
       const rgb = new Uint8Array(buf.subarray(0, frameBytes));
       buf = buf.subarray(frameBytes);
       const g = gray(rgb);
-      const boxes = await deps.faces.detect(downscale2x(rgb));
+      const boxes = await deps.faces.detect(rgb, { w: W, h: H });
       const t = f / fps;
       times.push(t);
       const matched: FaceBox[] = [];

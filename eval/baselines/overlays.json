@@ -1,5 +1,17 @@
 {
-  "updatedAt": "2026-10-27T16:36:57.132Z",
+  "updatedAt": "2026-11-22T02:32:11.272Z",
+  "acceptedRegressions": [
+    {
+      "id": "aggregate-roblox-2640-2840",
+      "reason": "YuNet replaces UltraFace: UltraFace boxed the Roblox round timer as a face in 100% of frames, which kept the overlay aggregation from flagging it (faces are never blurred); YuNet sees a face there in 1% of frames, so the timer is now reported as a watermark. The overlay rule gap was there before, masked by a false face",
+      "at": "2026-11-22T02:32:11.272Z"
+    },
+    {
+      "metric": "aggregatePass",
+      "reason": "YuNet replaces UltraFace: UltraFace boxed the Roblox round timer as a face in 100% of frames, which kept the overlay aggregation from flagging it (faces are never blurred); YuNet sees a face there in 1% of frames, so the timer is now reported as a watermark. The overlay rule gap was there before, masked by a false face",
+      "at": "2026-11-22T02:32:11.272Z"
+    }
+  ],
   "cases": {
     "frame-30s": true,
     "frame-112s": true,
@@ -29,7 +41,7 @@
     "aggregate-bradford-0-120": false,
     "aggregate-rpodcast-900-960": false,
     "aggregate-voa-ships-0-150": false,
-    "aggregate-roblox-2640-2840": true
+    "aggregate-roblox-2640-2840": false
   },
   "metrics": {
     "captionCoverage": {
@@ -52,7 +64,7 @@
       "better": "higher"
     },
     "aggregatePass": {
-      "value": 6,
+      "value": 5,
       "better": "higher"
     },
     "overlayRecall": {
