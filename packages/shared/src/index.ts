@@ -1912,6 +1912,7 @@ export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
+export * from "./fuzzy.js";
 export * from "./attribution.js";
 export * from "./languages.js";
 export * from "./whisper-languages.js";

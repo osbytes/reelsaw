@@ -17,6 +17,7 @@ import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
 import { ConfirmDialog, Modal, Segmented, Select, Skeleton, SkeletonRegion } from "./ui";
 import { isPipelineQueue, LONG_WAIT_MS } from "./FleetSummary";
 import { type FailureCause, formatPriority, formatSeconds, plural } from "@reelsaw/shared";
+import { useDebounced } from "../lib/useDebounced";
 
 const PAGE = 50;
 /** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
@@ -51,15 +52,6 @@ const SINCE = [
   { value: "24h", label: "24h", title: "Last 24 hours" },
   { value: "7d", label: "7d", title: "Last 7 days" },
 ];
-
-function useDebounced<T>(value: T, ms: number) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 function sinceIso(v: string): string | undefined {
   if (v === "24h") return new Date(Date.now() - 24 * 3600_000).toISOString();
