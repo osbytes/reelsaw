@@ -19,6 +19,10 @@ msgstr ""
 msgid "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
 msgstr ""
 
+#: src/components/ListToolbar.tsx
+msgid "Ascending"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "By creating an account you accept the <0>privacy policy</0>."
 msgstr ""
@@ -29,6 +33,14 @@ msgstr ""
 
 #: src/pages/Login.tsx
 msgid "By creating an account you accept the <0>terms</0>."
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Clear all"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Clear search"
 msgstr ""
 
 #: src/pages/Login.tsx
@@ -47,6 +59,10 @@ msgstr ""
 msgid "Create account · Reelsaw"
 msgstr ""
 
+#: src/components/ListToolbar.tsx
+msgid "Descending"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Email"
 msgstr ""
@@ -55,12 +71,40 @@ msgstr ""
 msgid "Enter the email you signed up with."
 msgstr ""
 
+#: src/components/ListToolbar.tsx
+msgid "Filter"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Filter, {on} on"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Forgot password?"
 msgstr ""
 
+#: src/pages/AdminUsers.tsx
+msgid "Group"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Have an account? Sign in"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "List the accounts waiting for approval"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Load {n} more"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Load more"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Loading…"
 msgstr ""
 
 #: src/pages/Login.tsx
@@ -75,8 +119,48 @@ msgstr ""
 msgid "New accounts wait for an admin to approve them before they can start projects."
 msgstr ""
 
+#: src/components/ListToolbar.tsx
+msgid "Order"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Password"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Remove this filter"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "Search and filter accounts"
+msgstr ""
+
+#: src/pages/Projects.tsx
+msgid "Search and filter projects"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "Search name or email"
+msgstr ""
+
+#: src/pages/Projects.tsx
+msgid "Search project titles"
+msgstr ""
+
+#: src/pages/Projects.tsx
+msgid "Search projects"
+msgstr ""
+
+#: src/pages/Templates.tsx
+msgid "Search template names"
+msgstr ""
+
+#: src/pages/Templates.tsx
+msgid "Search templates"
+msgstr ""
+
+#: src/pages/AdminUsers.tsx
+msgid "Search users"
 msgstr ""
 
 #: src/pages/Login.tsx
@@ -101,6 +185,18 @@ msgstr ""
 
 #: src/pages/Login.tsx
 msgid "Something went wrong"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Sort by"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Sort:"
+msgstr ""
+
+#: src/components/ListToolbar.tsx
+msgid "Sort: {shown}"
 msgstr ""
 
 #: src/pages/Login.tsx

@@ -2,23 +2,35 @@ import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@t
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
+import { ChevronDown, Film, Images, Link2, Plus, Search, Upload } from "lucide-react";
 import { useCommandPalette } from "../components/CommandPalette";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
 import { PosterBumperCards } from "../components/PosterBumperCards";
 import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
-import { formatTime, plural } from "@reelsaw/shared";
+import { formatTime, isProjectSortKey, listSortFirstDir, plural, type ProjectSortKey } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { useMe } from "../lib/account";
 import { summarizeError } from "../lib/errors";
-import { useLoadMoreSentinel } from "../lib/useLoadMore";
-import { readHash, writeHash } from "../lib/hash";
+import { readHash, useHashParams, writeHash } from "../lib/hash";
+import { useDebounced } from "../lib/useDebounced";
+import { useLingui } from "@lingui/react/macro";
 import { useShortcut, useShortcuts } from "../lib/shortcuts";
 import { ProjectsBar } from "../components/ProjectsBar";
 import { pageTitle, useDocumentTitle } from "../lib/title";
-import { showingCount } from "../components/ListPage";
+import { ListEmpty, showingCount } from "../components/ListPage";
+import {
+  FilterMenu,
+  facetChips,
+  type ListFacet,
+  ListLoadMore,
+  ListSearch,
+  ListToolbar,
+  type SortChoice,
+  type SortOption,
+  SortMenu,
+} from "../components/ListToolbar";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
@@ -98,6 +110,30 @@ function NewProjectMenu() {
 
 const PAGE = 24;
 
+/** The Filter menu's one facet: what a project is doing. `processing` is any working status (the server's alias). */
+const STATE_OPTIONS = [
+  { value: "", label: "Any" },
+  { value: "processing", label: "Processing" },
+  { value: "done", label: "Ready" },
+  { value: "failed", label: "Failed" },
+];
+type State = "" | "processing" | "done" | "failed";
+const asState = (v: string | null): State => (v === "processing" || v === "done" || v === "failed" ? v : "");
+const SORT_OPTIONS: SortOption<ProjectSortKey>[] = [
+  { value: "created", label: "Date added", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
+  { value: "title", label: "Title", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
+  { value: "duration", label: "Video length", firstDir: "desc", asc: "Shortest first", desc: "Longest first" },
+  { value: "updated", label: "Last changed", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
+];
+const readSort = (h: URLSearchParams): SortChoice<ProjectSortKey> => {
+  const key = h.get("sort");
+  if (!isProjectSortKey(key)) return null;
+  const d = h.get("dir");
+  const dir = d === "asc" || d === "desc" ? d : listSortFirstDir(key);
+  // last change, newest first, is the default order: null, so the query and the hash carry nothing for it
+  return key === "updated" && dir === "desc" ? null : { key, dir };
+};
+
 /** The account's project count from the last visit (this browser only): sizes the loading skeleton. */
 const lastProjectCount = {
   read(): number | null {
@@ -136,11 +172,29 @@ function CardSkeleton({ i }: { i: number }) {
 
 export function ProjectsPage() {
   useDocumentTitle(pageTitle("Projects"));
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const isAdmin = useMe().data?.role === "admin";
+  // search, filter and sort run on the server and live in the hash (#q=…&state=failed&sort=title&dir=asc)
+  const [search, setSearch] = useState(() => readHash().get("q") ?? "");
+  const [state, setState] = useState<State>(() => asState(readHash().get("state")));
+  const [sort, setSort] = useState<SortChoice<ProjectSortKey>>(() => readSort(readHash()));
+  const hashKey = useHashParams().toString();
+  useEffect(() => {
+    const h = new URLSearchParams(hashKey);
+    setSearch(h.get("q") ?? "");
+    setState(asState(h.get("state")));
+    setSort(readSort(h));
+  }, [hashKey]);
+  const term = useDebounced(search.trim(), 200);
+  useEffect(() => writeHash({ q: term || null, state: state || null, sort: sort?.key ?? null, dir: sort?.dir ?? null }), [term, state, sort]);
+  const filtered = !!(term || state);
   const q = useInfiniteQuery(
-    trpc.projects.list.infiniteQueryOptions({ limit: PAGE }, { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData }),
+    trpc.projects.list.infiniteQueryOptions(
+      { limit: PAGE, q: term || undefined, status: state || undefined, ...(sort ? { sort: sort.key, dir: sort.dir } : {}) },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
+    ),
   );
   // header numbers cover all projects, not the loaded pages; fetched once, refreshed when something finishes
   const stats = useQuery({ ...trpc.projects.stats.queryOptions(), placeholderData: keepPreviousData });
@@ -175,24 +229,30 @@ export function ProjectsPage() {
     [loaded, activeById],
   );
   const running = active.data ? active.data.length : (stats.data?.running ?? 0);
-  const isEmpty = !q.isPending && !q.isPlaceholderData && !projects.length && !q.error;
+  // the account has no projects (the first-project card), or none match the search and filter
+  const noneYet = !q.isPending && !q.isPlaceholderData && !projects.length && !q.error;
+  const isEmpty = noneYet && !filtered;
+  const noMatch = noneYet && filtered;
+  const facets: ListFacet[] = [{ id: "state", label: "Status", value: state, options: STATE_OPTIONS, onChange: (v) => setState(asState(v)) }];
+  const activeFilters = facetChips(facets);
+  const noun = (n: number) => plural(n, term ? "match" : "project", term ? "matches" : "projects");
   // as many skeleton cards as the account had last time (up to a row's worth), so the grid does not collapse on load
   const skeletonCards = Math.min(6, Math.max(1, stats.data?.total ?? lastProjectCount.read() ?? 6));
   useEffect(() => {
     if (stats.data) lastProjectCount.write(stats.data.total);
   }, [stats.data]);
   const remaining = Math.max(0, total - loaded.length);
-  const more = useLoadMoreSentinel(() => void q.fetchNextPage(), !!q.hasNextPage && !q.isFetching);
 
   // multi-select for the selection bar, like the clips list: kept in the hash (#sel=id1,id2) so it survives a reload and
-  // can be shared. Ids not loaded (yet) stay selected but are not acted on; ones gone from a fully loaded list drop out.
+  // can be shared. Ids not loaded (yet), or hidden by the search or status filter, stay selected but are not acted on;
+  // ones gone from the fully loaded, unfiltered list drop out (a filtered list is not every project, so it prunes nothing).
   const [sel, setSel] = useState<string[]>(() => (readHash().get("sel") ?? "").split(",").filter(Boolean));
   const listLoaded = !!q.data;
   useEffect(() => {
-    if (!listLoaded || q.hasNextPage || q.isPlaceholderData) return;
+    if (!listLoaded || filtered || q.hasNextPage || q.isPlaceholderData) return;
     const live = new Set(loaded.map((p) => p.id));
     setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
-  }, [listLoaded, loaded, q.hasNextPage, q.isPlaceholderData]);
+  }, [listLoaded, filtered, loaded, q.hasNextPage, q.isPlaceholderData]);
   useEffect(() => {
     if (listLoaded) writeHash({ sel: sel.join(",") || null });
   }, [sel, listLoaded]);
@@ -229,7 +289,28 @@ export function ProjectsPage() {
           {!isEmpty && <NewProjectMenu />}
         </div>
 
+        {!isEmpty && (
+          <ListToolbar
+            label={t`Search and filter projects`}
+            search={<ListSearch value={search} onChange={setSearch} placeholder={t`Search project titles`} label={t`Search projects`} />}
+            controls={
+              <>
+                <FilterMenu facets={facets} />
+                <SortMenu options={SORT_OPTIONS} value={sort} onChange={setSort} defaultKey="updated" />
+              </>
+            }
+            count={q.isPending ? <Skeleton className="h-3 w-24" /> : noun(total)}
+            filters={activeFilters}
+          />
+        )}
+
         {q.error && <p className="text-err">{q.error.message}</p>}
+
+        {noMatch && (
+          <ListEmpty icon={Search} title={term ? `No projects match “${term}”` : "No projects match"}>
+            Try other words, or another status.
+          </ListEmpty>
+        )}
 
         {isEmpty && (
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
@@ -358,13 +439,15 @@ export function ProjectsPage() {
 
         {/* fixed-height footer: the button, or the count once everything is loaded, never moves the page */}
         {projects.length > 0 && (
-          <div ref={more} className="flex h-[5.5rem] flex-col items-center justify-center gap-1 text-xs text-ink3">
-            {q.hasNextPage ? (
-              <button type="button" className="btn-ghost h-9 min-w-[8rem]" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
-                {q.isFetchingNextPage ? "Loading…" : "Load more"}
-              </button>
-            ) : null}
-            <span className="tabular-nums">{showingCount(projects.length, total, "project")}</span>
+          <div className="flex h-[5.5rem] flex-col items-center justify-center gap-1 text-xs text-ink3">
+            <ListLoadMore
+              hasMore={!!q.hasNextPage}
+              loading={q.isFetchingNextPage}
+              busy={(q.isFetching && !q.isFetchingNextPage) || q.isPlaceholderData}
+              onMore={() => void q.fetchNextPage()}
+              left={Math.min(PAGE, remaining)}
+            />
+            <span className="tabular-nums">{showingCount(projects.length, total, term ? "match" : "project", term ? "matches" : "projects")}</span>
           </div>
         )}
       </main>

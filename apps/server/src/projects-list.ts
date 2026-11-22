@@ -4,11 +4,11 @@
  * light "what is running" query that keeps running cards live.
  */
 import { and, desc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
-import type { ProjectStatus } from "@reelsaw/shared";
+import { listSortFirstDir, type ProjectSortKey, type ProjectStatus, type SortDir } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import { projectBumperSummaries } from "./library/service.js";
-import { decodeCursor, pageOf } from "./pagination.js";
+import { pageOf, sortedKeyset, type SortColumn } from "./pagination.js";
+import { near, setSearchThreshold, words } from "./search.js";
 
 export const ACTIVE_STATUSES = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const satisfies readonly ProjectStatus[];
 
@@ -43,29 +43,55 @@ async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Fact
   return new Map(rows.map((r) => [r.projectId, r]));
 }
 
-/** `deleted: true` lists only deleted (still restorable) projects; otherwise deleted ones are left out. */
-export type ListInput = { cursor?: string | undefined; limit: number; status?: ProjectStatus | undefined; deleted?: boolean | undefined };
+/**
+ * Each sort of the Projects list as one non-null SQL value per project; `projects_user_updated_idx`,
+ * `projects_user_id_idx` (created), `projects_user_title_idx` and `projects_user_duration_idx` serve them per account.
+ */
+const P_SORT: Record<ProjectSortKey, SortColumn> = {
+  updated: { expr: sql`${schema.projects.updatedAt}`, type: "timestamptz" },
+  created: { expr: sql`${schema.projects.createdAt}`, type: "timestamptz" },
+  title: { expr: sql`lower(${schema.projects.title})`, type: "text" },
+  duration: { expr: sql`coalesce(${schema.projects.durationSec}, 0)`, type: "real" },
+};
+
+/**
+ * `deleted: true` lists only deleted (still restorable) projects; otherwise deleted ones are left out. `q` keeps the
+ * projects whose title has every word (literally, or close to it: search.ts `near`); it filters, the order stays the
+ * chosen sort (the ⌘K palette is where results are ranked by relevance). `total` counts every match.
+ */
+export type ListInput = {
+  cursor?: string | undefined;
+  limit: number;
+  /** one status, or `processing` for any working one (ACTIVE_STATUSES) */
+  status?: ProjectStatus | "processing" | undefined;
+  deleted?: boolean | undefined;
+  q?: string | undefined;
+  sort?: ProjectSortKey | undefined;
+  dir?: SortDir | undefined;
+};
 
 export async function listProjectsPage(db: Db, userId: string, input: ListInput) {
   const P = schema.projects;
-  const conds: SQL[] = [eq(P.userId, userId), input.deleted ? isNotNull(P.deletedAt) : isNull(P.deletedAt)];
-  if (input.status) conds.push(eq(P.status, input.status));
+  const ws = words(input.q ?? "");
+  const conds: SQL[] = [eq(P.userId, userId), input.deleted ? isNotNull(P.deletedAt) : isNull(P.deletedAt), ...ws.map((w) => near(P.title, w))];
+  if (input.status === "processing") conds.push(inArray(P.status, ACTIVE_STATUSES));
+  else if (input.status) conds.push(eq(P.status, input.status));
   const base = and(...conds);
-  if (input.cursor) {
-    const c = decodeCursor(input.cursor, 2);
-    if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
-    conds.push(sql`(${P.updatedAt}, ${P.id}) < (${String(c[0])}::timestamptz, ${String(c[1])})`);
-  }
-  const [fetched, [{ total } = { total: 0 }]] = await Promise.all([
-    db
-      .select({ row: P, ts: sql<string>`${P.updatedAt}::text` })
-      .from(P)
-      .where(and(...conds))
-      .orderBy(desc(P.updatedAt), desc(P.id))
-      .limit(input.limit + 1),
-    db.select({ total: sql<number>`count(*)::int` }).from(P).where(base),
-  ]);
-  const { items, nextCursor } = pageOf(fetched, input.limit, (r) => [r.ts, r.row.id]);
+  const key = input.sort ?? "updated";
+  const order = sortedKeyset(P_SORT[key], key, input.dir ?? listSortFirstDir(key), P.id, input.cursor);
+  const [fetched, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
+    if (ws.length) await setSearchThreshold(tx);
+    return Promise.all([
+      tx
+        .select({ row: P, sortValue: order.value })
+        .from(P)
+        .where(and(base, order.after))
+        .orderBy(...order.orderBy)
+        .limit(input.limit + 1),
+      tx.select({ total: sql<number>`count(*)::int` }).from(P).where(base),
+    ]);
+  });
+  const { items, nextCursor } = pageOf(fetched, input.limit, (r) => order.cursorOf(r.sortValue, r.row.id));
   const rows = items.map((r) => r.row);
   const facts = await clipFacts(
     db,

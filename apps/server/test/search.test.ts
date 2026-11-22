@@ -154,6 +154,17 @@ describe("users search", () => {
     assert.deepEqual(await find("ghopper-"), ["Grace Hopper"]);
     assert.deepEqual(await find(`@example.test ${tag}`).then((n) => n.length), 3);
   });
+  it("matches a whole address exactly, not every address at its domain", async () => {
+    // pg_trgm reads `rosalind.<tag>@example.test` as the words rosalind, <tag>, example, test: fuzzily it matched the others too
+    assert.deepEqual(await find(`rosalind.${tag}@example.test`), ["Rosalind Franklin"]);
+    assert.deepEqual(await find(`ghopper-${tag}@example.test`), ["Grace Hopper"]);
+    assert.deepEqual(await find(`nobody-${tag}@example.test`), []);
+  });
+  it("ignores punctuation at the edges of a word", async () => {
+    // pasted from a list: the comma is not part of the name, and a typo inside still matches
+    assert.deepEqual(await find("Hopper, Grace"), ["Grace Hopper"]);
+    assert.deepEqual(await find("(rosalnd)"), ["Rosalind Franklin"]);
+  });
   it("ANDs words across name and email", async () => {
     assert.deepEqual(await find(`grace ${tag}`), ["Grace Hopper"]);
     assert.deepEqual(await find("grace lovelace"), []);
