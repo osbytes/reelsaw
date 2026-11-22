@@ -163,7 +163,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   AI_MODEL: [
     "models",
-    "Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models.",
+    "Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `opencode:<model>`, `opencode-go:<model>`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models.",
   ],
   TRANSCRIPTION_MODEL: [
     "models",
@@ -190,6 +190,14 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports.",
   ],
   VERCEL_OIDC_TOKEN: ["providers", "Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform)."],
+  OPENCODE_API_KEY: [
+    "providers",
+    "OpenCode Console key (language models only). One key lists both plans: pay-per-token Zen models as `opencode:<model>` and, with a Go subscription, Go models as `opencode-go:<model>`. Go is meant for coding agents and has 5-hour, weekly and monthly caps.",
+  ],
+  OPENCODE_BASE_URL: [
+    "providers",
+    "OpenCode inference root: Zen chats at `<root>/openai/v1` and lists models at `<root>/v1/models`; Go chats at `<root>/go/openai/v1` and lists models at `<root>/go/v1/models`. Change it only for a proxy or a test server.",
+  ],
   OPENAI_COMPATIBLE_BASE_URL: [
     "providers",
     "Generic OpenAI-compatible server, addressed as `compat:<model>`, for language models and, through its `/audio/transcriptions`, transcription (Ollama: `http://host.docker.internal:11434/v1`, OpenRouter: `https://openrouter.ai/api/v1`).",
@@ -477,9 +485,16 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
  * source; deploy = a hosted install from the release zip (hosting knobs are visible).
  */
 const PROVIDER_KEYS = Object.fromEntries(
-  ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "DEEPGRAM_API_KEY", "ASSEMBLYAI_API_KEY", "AI_GATEWAY_API_KEY"].map(
-    (k) => [k, ""],
-  ),
+  [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_GENERATIVE_AI_API_KEY",
+    "GROQ_API_KEY",
+    "DEEPGRAM_API_KEY",
+    "ASSEMBLYAI_API_KEY",
+    "AI_GATEWAY_API_KEY",
+    "OPENCODE_API_KEY",
+  ].map((k) => [k, ""]),
 );
 export const ENV_ACTIVE: Record<"root" | "deploy", Record<string, string>> = {
   root: {

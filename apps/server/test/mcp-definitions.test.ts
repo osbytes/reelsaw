@@ -61,6 +61,7 @@ const EXPECTED = [
   "list_languages",
   "list_layer_templates",
   "list_media_links",
+  "list_models",
   "list_projects",
   "list_releases",
   "list_signup_rules",
