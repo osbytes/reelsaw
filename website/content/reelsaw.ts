@@ -35,7 +35,7 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
     key: "reframe",
     label: "Face-tracked 9:16 reframing",
     reelsaw:
-      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; hand-set crops; one clip's framing for the whole project. 1.2 MB UltraFace on the CPU",
+      "Yes: face, split, stack and fit per shot cut; webcam-tile stacks; crowds shown whole; phone clips between bars cropped to the picture; hand-set crops; one clip's framing for the whole project; renders 9:16, 4:5, 1:1 or 16:9. 1.2 MB UltraFace on the CPU",
   },
   {
     key: "captions",

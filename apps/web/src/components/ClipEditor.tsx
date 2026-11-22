@@ -141,6 +141,10 @@ import {
   plural,
   planPunchIns,
   punchInAnchor,
+  layoutForShape,
+  outputSize,
+  OUTPUT_SHAPES,
+  SHAPE_LABEL,
   punchInLevel,
 } from "@reelsaw/shared";
 import { FadePresets, fadeText } from "./FadeField";
@@ -1046,7 +1050,8 @@ export function ClipEditor(props: Props) {
           ] ?? sections[0]!;
         const det = clip.layoutSegments.find((d) => t >= d.start && t < d.end) ?? clip.layoutSegments.find((d) => !d.manual);
         const fallback: PreviewLayout = clip.layout && clip.layout !== "mixed" ? (clip.layout as PreviewLayout) : "fit";
-        const lay: PreviewLayout = sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode;
+        // a shape too wide for two stacked panes (16:9) shows a split or stack whole, as the renderer does (`layoutForShape`)
+        const lay: PreviewLayout = layoutForShape(sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode, style.shape);
         const clamp = (v: number) => Math.max(0, Math.min(1, v));
         const at = (tr: Array<[number, number]> | undefined): number | undefined => {
           if (!tr?.length) return undefined;
@@ -1086,6 +1091,7 @@ export function ClipEditor(props: Props) {
         const c2 = lay === "split" ? centre(1) : undefined;
         return {
           layout: lay,
+          out: outputSize(style.shape),
           cx: c1.x,
           cy: c1.y,
           ...(c2 ? { cx2: c2.x, cy2: c2.y } : {}),
@@ -1108,7 +1114,7 @@ export function ClipEditor(props: Props) {
           ...(lay === "split" && sec.crop2 ? { crop2: sec.crop2 } : {}),
         };
       },
-    [sections, clip.layoutSegments, clip.layout],
+    [sections, clip.layoutSegments, clip.layout, style.shape],
   );
   const framing = useMemo(() => framingAt(current), [framingAt, current]);
   // where each stretch's panes meet, on the clip's clock (the captions' clock): the preview puts caption lines there like the renderer
@@ -1117,7 +1123,7 @@ export function ClipEditor(props: Props) {
     const step = 0.1;
     for (let t = range[0]; t < range[1]; t += step) {
       const f = framingAt(t);
-      runs.push({ start: t - range[0], end: Math.min(range[1], t + step) - range[0], y: layoutSeamY(f.layout, f.content, srcW, srcH) });
+      runs.push({ start: t - range[0], end: Math.min(range[1], t + step) - range[0], y: layoutSeamY(f.layout, f.content, srcW, srcH, f.out) });
     }
     return mergeSeamRuns(runs);
   }, [framingAt, range, srcW, srcH]);
@@ -1583,7 +1589,8 @@ export function ClipEditor(props: Props) {
         breaks,
         anchorAt: (t) => {
           const f = framingAt(t + a);
-          return punchInAnchor({ layout: f.layout, crop: f.crop, inset: f.inset, cy: f.cy }, srcW, srcH);
+          const o = f.out ?? outputSize(style.shape);
+          return punchInAnchor({ layout: f.layout, crop: f.crop, inset: f.inset, cy: f.cy }, srcW, srcH, o.w / o.h);
         },
       },
     );
@@ -1886,7 +1893,8 @@ export function ClipEditor(props: Props) {
   // ----- inspector tabs -----
   const cropLayout = framing.layout !== "fit" && framing.layout !== "none";
   const curSec = sections[secIdx];
-  const capWarn = safe && style.captions !== "none" ? safeZoneWarning(platform, style.captionX, style.captionY) : "";
+  // the platform safe zones are the 9:16 apps' (TikTok, Shorts, Reels); other shapes have no buttons over the picture
+  const capWarn = safe && style.shape === "9:16" && style.captions !== "none" ? safeZoneWarning(platform, style.captionX, style.captionY) : "";
 
   // ----- fades: the video's own start and end, and how an intro / outro joins it (part of the style, so "Apply style to" covers it) -----
   const hasBumper = !!bumperBlocks.intro || !!bumperBlocks.outro;
@@ -1983,6 +1991,24 @@ export function ClipEditor(props: Props) {
             { value: "clip", label: "This clip" },
             { value: "all", label: `All ${clipCount} clips`, title: "Updates the project style and re-renders every clip" },
           ]}
+        />
+      </Field>
+      <Field label="Shape" hint={<span>{SHAPE_LABEL[style.shape]}</span>}>
+        <Segmented
+          size="sm"
+          ariaLabel="Shape of the video"
+          value={style.shape}
+          onChange={(v) => setStyle({ shape: v })}
+          options={OUTPUT_SHAPES.map((s) => ({
+            value: s,
+            label: s,
+            title:
+              s === "9:16"
+                ? "TikTok, Shorts, Reels"
+                : s === "16:9"
+                  ? "YouTube, websites: split and stack sections show the whole frame"
+                  : "Instagram and LinkedIn feeds",
+          }))}
         />
       </Field>
       <Field label="Look">

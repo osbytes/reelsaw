@@ -82,6 +82,26 @@ clips' own sections and re-renders them: the way to frame a slide deck with a we
 video. Editing the timeline of such a clip stores the clip's own sections again; "Use the project framing" takes
 them back.
 
+## Output shapes
+
+Style `shape` (`shape.ts` in `packages/shared`): `9:16` (default, 1080x1920), `4:5` (1080x1350), `1:1` (1080x1080) or
+`16:9` (1920x1080), on the project or the clip. Every automatic decision above is still made as for 9:16; the
+renderer (`layoutFilter` with `geo.out`) and the editor preview (`Framing.out`) draw it at the frame's size:
+
+| layout | 4:5 and 1:1 | 16:9 |
+|---|---|---|
+| `face` / `center` | a full-height window of the frame's shape (`frameCrop`) | the same; for a 16:9 source that window is the whole source |
+| `fit` (and an inset) | the whole frame over a blur; a 9:16 inset is fitted over a blur too, it no longer fills | the same; a 16:9 source fills it |
+| `split` | two panes stacked, each the frame's width by half its height (1080x675, 1080x540) | the whole frame (`layoutForShape`): a landscape frame has no room for two stacked panes, and a wide two-person shot already holds both people |
+| `stack` | the content (or whole frame) on top at the frame's width, the speaker below; the seam moves with it (`layoutSeamY` with the frame) | the whole frame, as split |
+| `none` | the source's own aspect, as before | the same |
+
+Captions, the hook and text layers keep their positions as fractions of the frame; font sizes, outlines and the
+watermark are pixels of the short side (`frameScale`), so text reads the same size on every shape. The platform
+safe zones (TikTok, Shorts, Reels) are 9:16 overlays and are hidden for other shapes. Intro and outro files are
+normalised once per frame size. A section forced to Split or Screen + speaker in a 16:9 clip shows the whole frame;
+its reason says so ("…; whole frame at 16:9").
+
 ## Punch-in zooms
 
 Style `punchIn` (off by default) with `punchInScale` (1.05-1.3x, default 1.12x), on the project or the clip like

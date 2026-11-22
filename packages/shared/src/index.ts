@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
+import { outputShapeSchema } from "./shape.js";
 
 /** Canonical source repository (app UI, emails, update checks). */
 export const REPO_URL = "https://github.com/osbytes/reelsaw";
@@ -147,6 +148,8 @@ export function bodyEdgeFades(
  * the text block as a fraction of the 9:16 frame, so the browser preview and the ASS renderer agree.
  */
 export const styleSchema = z.object({
+  /** The rendered video's shape (`shape.ts`); positions below are fractions of that frame. */
+  shape: outputShapeSchema.default("9:16"),
   captions: captionStyleSchema.default("karaoke"),
   /** Caption and hook typeface; unset or null = the instance caption font (CAPTION_FONT). */
   font: fontFamilySchema
@@ -1676,12 +1679,18 @@ export function isFullFrame(c: ContentRegion | undefined | null): boolean {
  * source letterboxed to the frame width over the speaker). Null for one-pane layouts, and for a seam
  * too close to an edge to carry captions (a portrait source in a stack).
  */
-export function layoutSeamY(layout: string, content: ContentRegion | undefined | null, srcW: number, srcH: number): number | null {
+export function layoutSeamY(
+  layout: string,
+  content: ContentRegion | undefined | null,
+  srcW: number,
+  srcH: number,
+  out: { w: number; h: number } = { w: 1080, h: 1920 },
+): number | null {
   if (layout === "split") return 0.5;
   if (layout !== "stack") return null;
   if (!isFullFrame(content)) return 0.5;
-  const topH = Math.min(Math.round((1080 * srcH) / srcW / 2) * 2, 1918);
-  const y = topH / 1920;
+  const topH = Math.min(Math.round((out.w * srcH) / srcW / 2) * 2, out.h - 2);
+  const y = topH / out.h;
   return y >= 0.15 && y <= 0.85 ? Number(y.toFixed(4)) : null;
 }
 
@@ -1930,6 +1939,7 @@ export * from "./decisions.js";
 export * from "./format.js";
 export * from "./partial.js";
 export * from "./punch-in.js";
+export * from "./shape.js";
 export * from "./attribution.js";
 export * from "./languages.js";
 export * from "./whisper-languages.js";
