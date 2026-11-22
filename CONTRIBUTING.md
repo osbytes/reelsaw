@@ -17,6 +17,8 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
   `exactOptionalPropertyTypes` (`foo?: T` means absent, not `undefined`: write `foo?: T | undefined`
   when a caller passes `undefined`, or leave the key out with `...(x ? { foo: x } : {})`).
 - Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
+- Questions and help go to Discussions ([SUPPORT.md](SUPPORT.md)); bugs and ideas through the
+  issue forms. Everyone follows the [code of conduct](CODE_OF_CONDUCT.md).
 - `pnpm install` sets up the Git hooks in `lefthook.yml` (via `scripts/hook.mjs`, so they run on
   Windows Git as well as macOS and Linux): a gitleaks scan and a Biome lint of staged changes before
   each commit, the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push.

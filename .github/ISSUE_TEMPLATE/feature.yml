@@ -1,0 +1,26 @@
+name: Feature request
+description: Something Reelsaw should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: What are you trying to get done?
+      description: The situation and the outcome you want, before any solution.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+      description: Another tool, a manual step, or nothing.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea, if you have one
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where would you use it?
+      multiple: true
+      options: [Web app, MCP (an agent or integration), CLI, Hosted (app.reelsaw.com)]

@@ -10,6 +10,7 @@
  *
  * stdout is the protocol channel, so nothing else may write to it; logs go to stderr.
  */
+import { objectEntries } from "ts-extras";
 import { McpServer, type CallToolResult, type ServerContext, type ToolAnnotations } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { Client, StreamableHTTPClientTransport, type Transport } from "@modelcontextprotocol/client";
@@ -90,7 +91,8 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
     }
   };
 
-  for (const [name, config] of Object.entries(TOOLS) as Array<[string, ToolConfig]>) {
+  for (const [name, tool] of objectEntries(TOOLS)) {
+    const config: ToolConfig = tool;
     // the SDK passes (args, extra) to a tool with an input schema and only (extra) to one without
     const { inputSchema, ...rest } = config;
     if (inputSchema)

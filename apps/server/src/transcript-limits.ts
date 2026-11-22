@@ -7,6 +7,7 @@
  * write only the window a flag touches) is Phase 2 of docs/specs/scale.md; until then edits lock the
  * row and write back just the columns that really changed.
  */
+import { objectKeys } from "ts-extras";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "./db/index.js";
 import type { ClipDiagnostics } from "@reelsaw/shared";
@@ -53,7 +54,7 @@ export async function takeArchivedFlag<T extends { id: string }>(db: Db, project
 /** The subset of `next` whose JSON differs from `current`: those are the only columns worth writing. */
 export function changedColumns<T extends Record<string, unknown>>(current: Partial<T>, next: T): Partial<T> {
   const out: Partial<T> = {};
-  for (const k of Object.keys(next) as Array<keyof T>) {
+  for (const k of objectKeys(next)) {
     if (JSON.stringify(current[k]) !== JSON.stringify(next[k])) out[k] = next[k];
   }
   return out;
