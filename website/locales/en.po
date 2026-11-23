@@ -80,6 +80,10 @@ msgstr "{\n"
 "  }\n"
 "}"
 
+#: components/replay-ranges.tsx
+msgid "{billed} of {total} min"
+msgstr "{billed} of {total} min"
+
 #: components/clip-strip.tsx
 msgid "{clips, plural, one {# clip} other {# clips}}"
 msgstr "{clips, plural, one {# clip} other {# clips}}"
@@ -117,6 +121,10 @@ msgstr "{from} – {to} {month} {year}"
 msgid "{from} {fromMonth} – {to} {toMonth} {year}"
 msgstr "{from} {fromMonth} – {to} {toMonth} {year}"
 
+#: components/hero-reel.tsx
+msgid "{kind}, pick #{rank}: {hook}"
+msgstr "{kind}, pick #{rank}: {hook}"
+
 #: lib/release-pages.ts
 msgid "{length} date ranges"
 msgstr "{length} date ranges"
@@ -144,6 +152,10 @@ msgstr "{name} plans"
 #: lib/og.tsx
 msgid "{name}: AI video clipper you self-host or run hosted"
 msgstr "{name}: AI video clipper you self-host or run hosted"
+
+#: components/replay-ranges.tsx
+msgid "{pct}% of the stream. The other {rest} minutes are never downloaded."
+msgstr "{pct}% of the stream. The other {rest} minutes are never downloaded."
 
 #: components/pipeline-film.tsx
 msgid "{position} of {total}"
@@ -188,6 +200,10 @@ msgstr "<0/> comparisons"
 #: app/alternatives/[slug]/page.tsx
 msgid "<0/> vs Reelsaw, feature by feature"
 msgstr "<0/> vs Reelsaw, feature by feature"
+
+#: components/hero-reel.tsx
+msgid "<0/>-minute <1/>"
+msgstr "<0/>-minute <1/>"
 
 #: components/shipping-chart.tsx
 msgid "<0/>Release"
@@ -533,21 +549,17 @@ msgstr "9:16 reframing"
 msgid "A {demo_minutes}-minute {kind} in. {clips} clips out."
 msgstr "A {demo_minutes}-minute {kind} in. {clips} clips out."
 
-#: components/hero-reel.tsx
-msgid "A <0/>-minute <1/>"
-msgstr "A <0/>-minute <1/>"
-
 #: components/feature-tabs.tsx
-msgid "A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Slides keep their webcam tile underneath. Override it per project, clip or section."
-msgstr "A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Slides keep their webcam tile underneath. Override it per project, clip or section."
+msgid "A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Gameplay goes on top with the facecam underneath, slides stay whole above the speaker it follows, and a shot with no face follows whatever moves. Override it per project, clip or section."
+msgstr "A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Gameplay goes on top with the facecam underneath, slides stay whole above the speaker it follows, and a shot with no face follows whatever moves. Override it per project, clip or section."
 
 #: content/competitors.ts
 msgid "A 30-minute per-video ceiling, even on the top plan, is too low."
 msgstr "A 30-minute per-video ceiling, even on the top plan, is too low."
 
 #: content/demo.ts
-msgid "A camera on each speaker"
-msgstr "A camera on each speaker"
+msgid "A camera each, then both"
+msgstr "A camera each, then both"
 
 #: content/guides.ts
 msgid "A clipping run costs the vendor real money: transcription minutes, a language-model call to pick moments, face detection and a video render. A free plan that produced clean clips would lose money on every user who never converts. So free plans do one or more of: watermark the output, cap the minutes, lower the resolution, or delete the clips after a few days."
@@ -596,6 +608,10 @@ msgstr "A layout for every shot, not one crop for the whole video"
 #: app/page.tsx
 msgid "A library of intros, outros, logos, stickers, b-roll and music. Layer templates save a look once and apply it to any clip. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip."
 msgstr "A library of intros, outros, logos, stickers, b-roll and music. Layer templates save a look once and apply it to any clip. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip."
+
+#: app/page.tsx
+msgid "A long stream in. Only the parts people rewatch get clipped."
+msgstr "A long stream in. Only the parts people rewatch get clipped."
 
 #: content/guides.ts
 msgid "A manifest and a CSV for the whole batch. The same through the MCP server, so an agent can run the loop end to end."
@@ -1007,6 +1023,10 @@ msgstr "Buy credits or spread it over months"
 #: app/page.tsx
 msgid "by {author}"
 msgstr "by {author}"
+
+#: components/replay-ranges.tsx
+msgid "by {author}, CC BY"
+msgstr "by {author}, CC BY"
 
 #: content/legal.ts
 msgid "By creating an account you accept these terms. If you use the Service for a company, you confirm you may bind it."
@@ -1450,6 +1470,10 @@ msgstr "Does Submagic clip long videos into shorts?"
 msgid "Does Vizard's free plan have a watermark?"
 msgstr "Does Vizard's free plan have a watermark?"
 
+#: components/replay-ranges.tsx
+msgid "Downloaded, transcribed and counted"
+msgstr "Downloaded, transcribed and counted"
+
 #: content/use-cases.ts
 msgid "Drag the captions and hook on a live 9:16 preview with the platform's safe zones shown, so nothing hides under the TikTok buttons."
 msgstr "Drag the captions and hook on a live 9:16 preview with the platform's safe zones shown, so nothing hides under the TikTok buttons."
@@ -1618,6 +1642,10 @@ msgstr "Face, split, stack, fit per shot cut; webcam-tile stacks; hand-set crops
 msgid "Face: the crop follows whoever is talking, chosen by an audio-visual model that checks each mouth against the speech (a listener who laughs or drinks is not the talker), with a minimum of 2.5 seconds per shot so it never flickers."
 msgstr "Face: the crop follows whoever is talking, chosen by an audio-visual model that checks each mouth against the speech (a listener who laughs or drinks is not the talker), with a minimum of 2.5 seconds per shot so it never flickers."
 
+#: content/demo.ts
+msgid "facecam → bottom"
+msgstr "facecam → bottom"
+
 #: content/use-cases.ts
 msgid "Facecam in an OBS scene: Reelsaw finds the webcam tile (a steady rectangle around your face) and stacks the clip: the gameplay on top at full width, your camera below at its own shape, enlarged. A flat band beside the tile is dropped from the top pane so the game fills it."
 msgstr "Facecam in an OBS scene: Reelsaw finds the webcam tile (a steady rectangle around your face) and stacks the clip: the gameplay on top at full width, your camera below at its own shape, enlarged. A flat band beside the tile is dropped from the top pane so the game fills it."
@@ -1689,7 +1717,11 @@ msgstr "Five queues, and each one saves its work."
 msgid "Fixes you can check"
 msgstr "Fixes you can check"
 
-#: components/hero-reel.tsx
+#: content/demo.ts
+msgid "following"
+msgstr "following"
+
+#: content/demo.ts
 msgid "follows whoever speaks"
 msgstr "follows whoever speaks"
 
@@ -1825,9 +1857,21 @@ msgstr "Fully local, no API keys"
 msgid "Fully local: Ollama for the language model and Speaches (Whisper) for transcription. The installer picks a model by GPU memory or RAM (qwen2.5:14b with 24 GB of RAM or a 12 GB GPU, qwen2.5:7b from 12 GB, gemma3:4b below that), reuses one Ollama already has, and puts both on an NVIDIA GPU when there is one. Nothing leaves the box and there is no per-minute cost at all."
 msgstr "Fully local: Ollama for the language model and Speaches (Whisper) for transcription. The installer picks a model by GPU memory or RAM (qwen2.5:14b with 24 GB of RAM or a 12 GB GPU, qwen2.5:7b from 12 GB, gemma3:4b below that), reuses one Ollama already has, and puts both on an NVIDIA GPU when there is one. Nothing leaves the box and there is no per-minute cost at all."
 
+#: content/demo.ts
+msgid "game → top"
+msgstr "game → top"
+
+#: content/demo.ts
+msgid "game on top, facecam below"
+msgstr "game on top, facecam below"
+
 #: content/use-cases.ts
 msgid "Game sound is content: when Reelsaw shortens pauses it only removes quiet gaps. A gap full of gunfire, music or engine noise stays, and a clip that is mostly action without speech keeps its timing."
 msgstr "Game sound is content: when Reelsaw shortens pauses it only removes quiet gaps. A gap full of gunfire, music or engine noise stays, and a clip that is mostly action without speech keeps its timing."
+
+#: content/demo.ts
+msgid "Gameplay with a facecam"
+msgstr "Gameplay with a facecam"
 
 #: content/competitors.ts
 msgid "Gemini by default for picking, layout, scripts and thumbnails; any OpenAI-compatible server for moment picking only. Transcription is faster-whisper (or Parakeet) in-process; dubbing needs ElevenLabs"
@@ -2234,6 +2278,10 @@ msgstr "Just Chatting and IRL streams"
 msgid "karaoke captions"
 msgstr "karaoke captions"
 
+#: content/demo.ts
+msgid "keynote"
+msgstr "keynote"
+
 #: content/use-cases.ts
 msgid "Kick clip generator: AI clips from Kick stream VODs"
 msgstr "Kick clip generator: AI clips from Kick stream VODs"
@@ -2326,6 +2374,10 @@ msgstr "Leave framing on auto. Reelsaw transcribes, chunks the stream at long pa
 #: components/shipping-chart.tsx
 msgid "Less<0/>More"
 msgstr "Less<0/>More"
+
+#: content/demo.ts
+msgid "let's play"
+msgstr "let's play"
 
 #: content/legal.ts
 msgid "Liability"
@@ -2495,6 +2547,10 @@ msgstr "Metered in plan credits; media and exports expire on Free and Starter"
 msgid "Metered per minute or per credit; some cap export length"
 msgstr "Metered per minute or per credit; some cap export length"
 
+#: components/replay-ranges.tsx
+msgid "Minutes counted"
+msgstr "Minutes counted"
+
 #: content/guides.ts
 msgid "MIT core; cloud/ directory under a commercial licence"
 msgstr "MIT core; cloud/ directory under a commercial licence"
@@ -2540,6 +2596,10 @@ msgstr "Most clips land between 20 and 60 seconds. Set the clip length per proje
 #: content/guides.ts
 msgid "Most free AI clippers watermark clips until you pay. Self-hosted Reelsaw is open source, so clips are free and never watermarked. How the tools compare."
 msgstr "Most free AI clippers watermark clips until you pay. Self-hosted Reelsaw is open source, so clips are free and never watermarked. How the tools compare."
+
+#: app/page.tsx
+msgid "Most replayed"
+msgstr "Most replayed"
 
 #: content/guides.ts
 msgid "Most Shorts automations stop at the hard part. Downloading a video and uploading a file is easy in n8n; picking the 30 seconds worth posting, reframing a landscape shot to 9:16 and timing captions to the words is not. Hosted clippers do that step, but their APIs usually sit on higher plans and charge by the minute."
@@ -2630,6 +2690,10 @@ msgstr "No free plan listed on the pricing page"
 #: content/competitors.ts
 msgid "No free plan listed; 'no credit card required' to sign up"
 msgstr "No free plan listed; 'no credit card required' to sign up"
+
+#: components/replay-ranges.tsx
+msgid "No heatmap, or you know the part you want? Drag your own ranges on the timeline, or send them: <0>--range 1:15:00-1:30:00</0>. A range can find clips inside it, or be the clip."
+msgstr "No heatmap, or you know the part you want? Drag your own ranges on the timeline, or send them: <0>--range 1:15:00-1:30:00</0>. A range can find clips inside it, or be the clip."
 
 #: content/guides.ts
 msgid "No limit beyond your disk"
@@ -2789,6 +2853,10 @@ msgstr "On the free plan ('720p with a quso.ai watermark'); not listed on paid p
 #: content/competitors.ts
 msgid "On the free plan; removed from Starter up"
 msgstr "On the free plan; removed from Starter up"
+
+#: components/replay-ranges.tsx
+msgid "On the New project page the peaks are chips over the video's timeline, one click each; an agent passes <0>rangesFrom</0> to <1>create_project</1>, and the CLI takes <2>--most-replayed</2>. Reelsaw then picks the moments inside each peak, so a clip starts where a sentence does, not where the graph does."
+msgstr "On the New project page the peaks are chips over the video's timeline, one click each; an agent passes <0>rangesFrom</0> to <1>create_project</1>, and the CLI takes <2>--most-replayed</2>. Reelsaw then picks the moments inside each peak, so a clip starts where a sentence does, not where the graph does."
 
 #: content/pricing.ts
 msgid "One clip of your own, on top of the ones Reelsaw finds"
@@ -2999,8 +3067,8 @@ msgid "Past broadcasts expire after a while on Twitch, so clip them or save them
 msgstr "Past broadcasts expire after a while on Twitch, so clip them or save them before they go."
 
 #: app/page.tsx
-msgid "Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is speaking, and burns in captions and a hook. Every pick comes with its reason."
-msgstr "Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is speaking, and burns in captions and a hook. Every pick comes with its reason."
+msgid "Paste a link to a podcast, stream, game or talk. Reelsaw finds the moments that stand on their own, frames every shot for 9:16 (whoever is speaking, the slides above the speaker, the gameplay above the facecam) and burns in captions and a hook. Every pick comes with its reason."
+msgstr "Paste a link to a podcast, stream, game or talk. Reelsaw finds the moments that stand on their own, frames every shot for 9:16 (whoever is speaking, the slides above the speaker, the gameplay above the facecam) and burns in captions and a hook. Every pick comes with its reason."
 
 #: components/hero-link-form.tsx
 msgid "Paste a YouTube link"
@@ -3030,6 +3098,10 @@ msgstr "Paste the VOD link, or upload the recording. A link works for anything y
 msgid "Pause"
 msgstr "Pause"
 
+#: components/replay-ranges.tsx
+msgid "Peaks taken"
+msgstr "Peaks taken"
+
 #: content/use-cases.ts
 msgid "Per-view pay rewards volume: many clips from many sources, posted fast. That is the job an AI clipper does well, and the one per-clip credit pricing punishes."
 msgstr "Per-view pay rewards volume: many clips from many sources, posted fast. That is the job an AI clipper does well, and the one per-clip credit pricing punishes."
@@ -3037,10 +3109,6 @@ msgstr "Per-view pay rewards volume: many clips from many sources, posted fast. 
 #: content/guides.ts
 msgid "Phone footage edited into the frame between blurred or black bars is cropped to the picture itself, so a vertical clip fills the vertical frame."
 msgstr "Phone footage edited into the frame between blurred or black bars is cropped to the picture itself, so a vertical clip fills the vertical frame."
-
-#: components/hero-reel.tsx
-msgid "Pick #{rank}: {hook}"
-msgstr "Pick #{rank}: {hook}"
 
 #: components/hero-reel.tsx
 msgid "Pick #<0/> of <1/>"
@@ -3612,6 +3680,10 @@ msgstr "Render builds each clip (layout, captions, hook, intro and outro) in a s
 msgid "Render: ffmpeg burns in karaoke captions and the hook, plus your intro and outro, in one encode. Clips stream into the workspace as they finish."
 msgstr "Render: ffmpeg burns in karaoke captions and the hook, plus your intro and outro, in one encode. Clips stream into the workspace as they finish."
 
+#: components/replay-ranges.tsx
+msgid "Replay heatmap of the {length} stream, with the {n} hottest stretches marked"
+msgstr "Replay heatmap of the {length} stream, with the {n} hottest stretches marked"
+
 #: app/page.tsx
 msgid "Research-backed clip selection"
 msgstr "Research-backed clip selection"
@@ -3785,8 +3857,8 @@ msgid "Signed webhooks on every plan, Free included"
 msgstr "Signed webhooks on every plan, Free included"
 
 #: content/demo.ts
-msgid "Slides with a webcam tile"
-msgstr "Slides with a webcam tile"
+msgid "slides on top, speaker below"
+msgstr "slides on top, speaker below"
 
 #: app/page.tsx
 msgid "Smart reframing, any shape"
@@ -3816,6 +3888,10 @@ msgstr "Source: <0/> by <1/>, CC BY. This run used cloud models; fully local wor
 #: app/alternatives/[slug]/page.tsx
 msgid "Sources"
 msgstr "Sources"
+
+#: content/demo.ts
+msgid "Speaker beside the slides"
+msgstr "Speaker beside the slides"
 
 #: components/feature-tabs.tsx
 msgid "speaking"
@@ -3877,6 +3953,14 @@ msgstr "Stays on your machine"
 #: content/legal.ts
 msgid "Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you delete them forever or they are purged. Your decisions (above) and the history of the project (what happened to it and when, including its title) are kept after a project is deleted forever, so the Service keeps learning from them, until you forget them, when deleting a project (\"Also forget what Reelsaw learned from it\") or all at once in Settings → Learning, or until you delete the account. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."
 msgstr "Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you delete them forever or they are purged. Your decisions (above) and the history of the project (what happened to it and when, including its title) are kept after a project is deleted forever, so the Service keeps learning from them, until you forget them, when deleting a project (\"Also forget what Reelsaw learned from it\") or all at once in Settings → Learning, or until you delete the account. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."
+
+#: content/demo.ts
+msgid "stream"
+msgstr "stream"
+
+#: components/replay-ranges.tsx
+msgid "Stream"
+msgstr "Stream"
 
 #: content/use-cases.ts
 msgid "Stream VODs: a Twitch, YouTube or Kick broadcast with your voice and usually a facecam. The best source: you were reacting out loud, and the link is all Reelsaw needs."
@@ -4202,13 +4286,13 @@ msgstr "Twitch to TikTok: AI clips from your stream VODs"
 msgid "Twitch to TikTok: turn a stream VOD into vertical clips"
 msgstr "Twitch to TikTok: turn a stream VOD into vertical clips"
 
+#: content/demo.ts
+msgid "Two hosts, one wide shot"
+msgstr "Two hosts, one wide shot"
+
 #: content/guides.ts
 msgid "Two people in frame"
 msgstr "Two people in frame"
-
-#: content/demo.ts
-msgid "Two people, one wide shot"
-msgstr "Two people, one wide shot"
 
 #: content/guides.ts
 msgid "TypeScript: Hono, tRPC, Drizzle, Postgres, pg-boss, React"
@@ -4972,6 +5056,10 @@ msgstr "Your volume fits a 100-clip tier and yearly billing is fine."
 msgid "Your workflow is plan, clip, schedule and measure in one tool."
 msgstr "Your workflow is plan, clip, schedule and measure in one tool."
 
+#: app/page.tsx
+msgid "YouTube knows which stretches viewers replay. Reelsaw reads that heatmap before downloading anything and clips only the peaks you choose, so a three-hour stream costs the minutes of its best moments, not three hours."
+msgstr "YouTube knows which stretches viewers replay. Reelsaw reads that heatmap before downloading anything and clips only the peaks you choose, so a three-hour stream costs the minutes of its best moments, not three hours."
+
 #: app/layout.tsx
 msgid "YouTube to Shorts"
 msgstr "YouTube to Shorts"
@@ -4987,6 +5075,10 @@ msgstr "YouTube to Shorts converter you can run on your own machine"
 #: content/guides.ts
 msgid "YouTube to Shorts converter you run on your own machine"
 msgstr "YouTube to Shorts converter you run on your own machine"
+
+#: components/replay-ranges.tsx
+msgid "YouTube's Most replayed, across the whole stream"
+msgstr "YouTube's Most replayed, across the whole stream"
 
 #: content/use-cases.ts
 msgid "yt-dlp supported sites"

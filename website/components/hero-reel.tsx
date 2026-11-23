@@ -4,23 +4,22 @@ import { msg } from "@lingui/core/runtime-macro";
 import { rich, t as tr } from "@/lib/i18n";
 // The hero's right column, built to say what happened at a glance: the long source on top with the stretch
 // the clip came from marked on its timeline, and the 9:16 clip Reelsaw made from it underneath, with what the
-// pipeline did pointed out beside it (hook, framing, captions). Plays through the run's picks on its own; a dot
-// picks one and stops the cycling. The source tile plays the same seconds as the clip, uncut.
+// pipeline did pointed out beside it (hook, framing, captions). Plays through picks from different kinds of video
+// (a game, a podcast, a talk) on its own, each framed its own way; a dot picks one and stops the cycling. The source
+// tile plays the same seconds as the clip, uncut.
 
 import { useCallback, useState } from "react";
-import { DEMO_RUN, HERO_ORDER, clipPoster, clipVideo, fmtTime } from "@/content/demo";
+import { HERO, clipPoster, clipVideo, fmtTime } from "@/content/demo";
 import { LoopVideo } from "./loop-video";
-
-const { source } = DEMO_RUN;
-const picks = HERO_ORDER.map((rank) => DEMO_RUN.picks.find((p) => p.rank === rank)!);
 
 /** How long the hook shows with default settings (hookSeconds). */
 const HOOK_SECONDS = 3.5;
 
-/** What the pipeline did, at the height (fraction of the 9:16 frame) where it shows with default settings. */
-const CALLOUTS: { y: number; title: string; body: string; until?: number }[] = [
+/** What the pipeline did, at the height (fraction of the 9:16 frame) where it shows with default settings; the framing
+ * callout says what this pick's layout did. */
+const callouts = (framing: string): { y: number; title: string; body: string; until?: number }[] => [
   { y: 0.16, title: tr(msg`Hook`), body: tr(msg`written by the model`), until: HOOK_SECONDS },
-  { y: 0.42, title: tr(msg`Framing`), body: tr(msg`follows whoever speaks`) },
+  { y: 0.42, title: tr(msg`Framing`), body: framing },
   { y: 0.72, title: tr(msg`Captions`), body: tr(msg`timed to every word`) },
 ];
 
@@ -30,7 +29,7 @@ export function HeroReel() {
   // the clip's playhead, in half seconds: the Hook callout dims once the hook has left the frame
   const [t, setT] = useState(0);
   const onTime = useCallback((v: number) => setT(Math.floor(v * 2) / 2), []);
-  const pick = picks[i]!;
+  const { source, clips, pick, framing } = HERO[i]!;
   const left = (pick.start / source.seconds) * 100;
   const width = Math.max(((pick.end - pick.start) / source.seconds) * 100, 3);
 
@@ -51,7 +50,7 @@ export function HeroReel() {
           <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-[10px] text-white">{source.length}</span>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <p className="truncate text-xs font-semibold text-ink">{rich(msg`A <0/>-minute <1/>`, { 0: Math.round(source.seconds / 60), 1: source.kind })}</p>
+          <p className="truncate text-xs font-semibold text-ink">{rich(msg`<0/>-minute <1/>`, { 0: Math.round(source.seconds / 60), 1: source.kind })}</p>
           <div className="relative h-2 rounded-full bg-sunk ring-1 ring-line" aria-hidden>
             <span className="absolute -inset-y-0.5 rounded-full bg-acc transition-[left,width] duration-500" style={{ left: `${left}%`, width: `${width}%` }} />
           </div>
@@ -76,7 +75,7 @@ export function HeroReel() {
       {/* What it became */}
       <div className="relative w-[70%] max-w-[270px] sm:ml-[150px] sm:w-[270px]">
         <ul className="absolute top-0 right-full hidden h-full w-[150px] sm:block" aria-label={tr(msg`What Reelsaw did`)}>
-          {CALLOUTS.map((c) => (
+          {callouts(framing).map((c) => (
             <li
               key={c.title}
               className={`absolute right-0 flex -translate-y-1/2 items-center gap-2 transition-opacity duration-500 ${c.until !== undefined && t >= c.until ? "opacity-35" : ""}`}
@@ -100,7 +99,7 @@ export function HeroReel() {
             eager={i === 0}
             loop={held}
             onEnded={() => {
-              setI((n) => (n + 1) % picks.length);
+              setI((n) => (n + 1) % HERO.length);
               setT(0);
             }}
             onTime={onTime}
@@ -108,7 +107,7 @@ export function HeroReel() {
             className="block h-full w-full object-cover"
           />
           <span className="absolute top-3 right-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm">
-            {rich(msg`Pick #<0/> of <1/>`, { 0: pick.rank, 1: DEMO_RUN.clips })}
+            {rich(msg`Pick #<0/> of <1/>`, { 0: pick.rank, 1: clips })}
           </span>
         </div>
       </div>
@@ -117,19 +116,18 @@ export function HeroReel() {
         {/* Every reason sits in the same cell, only the current one visible, so the box is always as tall as the
             longest and the page under it never moves when the pick changes. */}
         <div className="grid w-full">
-          {picks.map((p, k) => (
+          {HERO.map(({ pick: p }, k) => (
             <p
               key={p.file}
               aria-hidden={k !== i}
               className={`col-start-1 row-start-1 text-sm leading-snug text-ink2 text-pretty transition-opacity duration-300 ${k === i ? "" : "invisible opacity-0"}`}
             >
-              <span className="font-semibold text-ink">{tr(msg`Why this moment:`)}</span>
-              {p.why}
+              <span className="font-semibold text-ink">{tr(msg`Why this moment:`)}</span> {p.why}
             </p>
           ))}
         </div>
         <div className="flex gap-1.5" role="group" aria-label={tr(msg`Show a pick`)}>
-          {picks.map((p, k) => (
+          {HERO.map(({ pick: p, source: src }, k) => (
             <button
               key={p.file}
               type="button"
@@ -138,7 +136,7 @@ export function HeroReel() {
                 setHeld(true);
                 setT(0);
               }}
-              aria-label={tr(msg`Pick #${{ rank: p.rank }}: ${{ hook: p.hook }}`)}
+              aria-label={tr(msg`${{ kind: src.kind }}, pick #${{ rank: p.rank }}: ${{ hook: p.hook }}`)}
               aria-pressed={k === i}
               className="grid h-6 place-items-center px-0.5"
             >
