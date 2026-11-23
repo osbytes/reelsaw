@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo, clearPendingFile, uploadSizeProblem, useLeaveWarning } from "../lib/uploads";
 import { Ban, ChevronRight, Star } from "lucide-react";
@@ -220,15 +220,27 @@ export function NewProjectPage() {
   // video the plan cannot cover is said up front with the upgrade offer instead of failing after the click (or the upload).
   // with ranges the length is looked up whatever the plan (the timeline is drawn from it) and the ranges are priced
   const rangesInput = scope === "ranges" && debouncedRanges.length ? { ranges: debouncedRanges } : {};
-  const sourceInput = mode === "url" ? (validUrl ? { sourceUrl: debouncedUrl } : null) : fileSec ? { durationSec: Math.ceil(fileSec) } : null;
+  const sourceInput: { sourceUrl?: string; durationSec?: number } | null =
+    mode === "url" ? (validUrl ? { sourceUrl: debouncedUrl } : null) : fileSec ? { durationSec: Math.ceil(fileSec) } : null;
+  // ranges are drawn on one video: another link or file starts with none
+  const sourceKey = mode === "url" ? `url:${debouncedUrl}` : `file:${file?.name ?? ""}:${file?.size ?? 0}`;
+  const [rangesFor, setRangesFor] = useState(sourceKey);
+  if (rangesFor !== sourceKey) {
+    setRangesFor(sourceKey);
+    setRanges([]);
+  }
   const checkInput = sourceInput ? { ...sourceInput, ...(scope === "ranges" ? { lookupLength: true } : {}), ...rangesInput } : null;
   const check = useQuery({
     ...trpc.projects.checkSource.queryOptions(checkInput ?? { durationSec: 1 }),
     enabled: !!checkInput,
     staleTime: 60_000,
     retry: false,
-    // a range moved is priced again: keep the last answer meanwhile, so nothing under the timeline jumps
-    placeholderData: keepPreviousData,
+    // a range moved is priced again: keep the last answer meanwhile, so nothing under the timeline jumps; never the
+    // answer about another video (a new link or file starts from nothing)
+    placeholderData: (prev, prevQuery) => {
+      const was = (prevQuery?.queryKey[1] as { input?: { sourceUrl?: string; durationSec?: number } } | undefined)?.input;
+      return was && was.sourceUrl === sourceInput?.sourceUrl && was.durationSec === sourceInput?.durationSec ? prev : undefined;
+    },
   });
   /** the video's length, for the timeline: the file's own, or what the link's site says */
   const lengthSec = mode === "upload" ? fileSec : (check.data?.durationSec ?? null);

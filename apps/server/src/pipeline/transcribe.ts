@@ -361,8 +361,10 @@ export async function transcribe(ctx: StageContext) {
       r.segments.map((x) => ({ text: x.text, startSecond: x.start, endSecond: x.end })),
       r.offsetSec,
     );
-    // only the words of the stretch this run transcribes: a chunk row cut elsewhere may reach past it
-    const heard = toWords(segs, { collapseLoops: false, language: spoken ?? languageCode(r.language) }).filter((w) => w.start >= from - 0.05 && w.start < to);
+    // only the words of the stretch this run transcribes: a chunk row cut elsewhere may reach past it. Where the stretch
+    // starts at the end of time already covered, a word starting just before belongs to the words already there
+    const lo = coveredBefore.some(([, end]) => Math.abs(end - from) < 0.01) ? from : from - 0.05;
+    const heard = toWords(segs, { collapseLoops: false, language: spoken ?? languageCode(r.language) }).filter((w) => w.start >= lo && w.start < to);
     const collapsed = collapseDecoderLoopsWithStats(heard);
     const offset = rawWords.length;
     rawWords.push(...heard);

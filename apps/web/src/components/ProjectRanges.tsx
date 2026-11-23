@@ -74,7 +74,7 @@ export function ProjectRanges({
           </button>
         )}
       </div>
-      <RangeTimeline durationSec={durationSec} ranges={adding ? drafts : []} onChange={adding ? setDrafts : () => {}} fixed={fixed} marks={clips} />
+      <RangeTimeline durationSec={durationSec} ranges={drafts} onChange={setDrafts} fixed={fixed} marks={clips} readOnly={!adding} />
       {adding && (
         <>
           <RangeList durationSec={durationSec} ranges={drafts} onChange={setDrafts} />

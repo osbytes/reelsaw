@@ -34,6 +34,7 @@ import {
   spansCover,
   transcriptSpans,
   replayPeaks,
+  type HeatBin,
   type ReplayPeak,
   type RangeChange,
   type SourceRangeInput,
@@ -1021,7 +1022,7 @@ export async function createProject(
     ]);
     announcedSec = announced;
     if (input.rangesFrom?.mostReplayed) {
-      const heat = await announcedHeatmap(svc.media, input.sourceUrl, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS)).catch(() => []);
+      const heat = await announcedHeatmapFor(svc, input.sourceUrl);
       const peaks = replayPeaks(heat, { top: input.rangesFrom.mostReplayed });
       if (!peaks.length)
         throw new AppError(
@@ -1115,6 +1116,19 @@ async function announcedMinutesFor(svc: Services, userId: string, url: string, l
 }
 
 /** The length a link announces, looked up whatever the account's limits (ranges are planned against it); as above. */
+/**
+ * A link's replay heatmap (Most replayed), behind the same public-address check as its length: an internal or
+ * private address is never looked up, and anything that fails reads as no heatmap.
+ */
+async function announcedHeatmapFor(svc: Services, url: string): Promise<HeatBin[]> {
+  try {
+    await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
+    return await announcedHeatmap(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
+  } catch {
+    return [];
+  }
+}
+
 async function announcedLengthFor(svc: Services, url: string, log: Services["log"]): Promise<number | null> {
   try {
     await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
@@ -1219,10 +1233,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
   const lengthSec = durationSec || null;
   // the peaks come with the length lookup (the same yt-dlp answer, remembered): only when it ran for ranges
-  const mostReplayed =
-    input.sourceUrl && (input.ranges || input.lookupLength)
-      ? replayPeaks(await announcedHeatmap(svc.media, input.sourceUrl, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS)).catch(() => []))
-      : [];
+  const mostReplayed = input.sourceUrl && (input.ranges || input.lookupLength) ? replayPeaks(await announcedHeatmapFor(svc, input.sourceUrl)) : [];
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
     return {

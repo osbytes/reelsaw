@@ -45,6 +45,7 @@ export function RangeTimeline({
   fixed = [],
   marks = [],
   peaks = [],
+  readOnly = false,
 }: {
   durationSec: number;
   ranges: DraftRange[];
@@ -57,6 +58,8 @@ export function RangeTimeline({
   marks?: ReadonlyArray<{ startSec: number; endSec: number }>;
   /** the video's Most replayed peaks, drawn under everything else as bars as tall as they are hot */
   peaks?: readonly ReplayPeak[];
+  /** drawn only: no range is added or moved (the project page until "Add a range") */
+  readOnly?: boolean;
 }) {
   const { t } = useLingui();
   const track = useRef<HTMLDivElement>(null);
@@ -67,7 +70,7 @@ export function RangeTimeline({
     if (!r || r.width <= 0) return 0;
     return Math.max(0, Math.min(durationSec, ((clientX - r.left) / r.width) * durationSec));
   };
-  const whole = coverSec !== undefined;
+  const whole = coverSec !== undefined || readOnly;
   const sorted = [...ranges].sort((a, b) => a.startSec - b.startSec);
 
   /** move one end of a range to `to`, keeping it at least RANGE_MIN_SEC long and inside the video */
@@ -120,7 +123,7 @@ export function RangeTimeline({
             style={{ insetInlineStart: pct(c.startSec), width: pct(c.endSec - c.startSec), minWidth: 3 }}
           />
         ))}
-        {whole && coverSec !== null && (
+        {coverSec !== undefined && coverSec !== null && (
           <div className="pointer-events-none absolute inset-y-0 start-0 rounded-[8px] border-2 border-acc bg-acc-soft/60" style={{ width: pct(coverSec) }}>
             <span className="absolute -top-6 start-0 whitespace-nowrap text-xs font-semibold text-acc-text">
               {coverSec >= durationSec - 0.5 ? <Trans>The whole video</Trans> : <Trans>Clipped now: 0:00–{formatTime(coverSec)}</Trans>}

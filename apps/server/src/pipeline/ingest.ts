@@ -14,8 +14,8 @@ import {
 } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { RANGE_FETCH_GAP_SEC, mergeSpans, planRanges, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
+import { eq, inArray, sql } from "drizzle-orm";
+import { RANGE_FETCH_GAP_SEC, RANGE_MIN_SEC, mergeSpans, planRanges, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
 import { buildSparseSource, type SourcePiece } from "./sparse.js";
 import { rangeProblemsText } from "../projects/ranges.js";
 import type { Project, ProjectRange } from "../db/schema.js";
@@ -128,16 +128,19 @@ export async function ingest(ctx: StageContext) {
   const dir = await ctx.dir();
   await ctx.start("ingesting");
 
-  // ranges of a link (not "whole"): a sparse source holds only what they need, so one added since is fetched again
-  const chosenRanges =
+  // a link's ranges: when a person or a caller chose some, only the time every range needs is downloaded (a sparse
+  // source), its "whole" ranges included (a partly processed start, parts added by Clip the rest); a range added since
+  // that the sparse source does not hold has it fetched again
+  const linkRanges =
     project.sourceType === "url"
       ? await ctx.db
           .select({ startSec: schema.projectRanges.startSec, endSec: schema.projectRanges.endSec, origin: schema.projectRanges.origin })
           .from(schema.projectRanges)
-          .where(and(eq(schema.projectRanges.projectId, projectId), ne(schema.projectRanges.origin, "whole")))
+          .where(eq(schema.projectRanges.projectId, projectId))
       : [];
+  const chosenRanges = linkRanges.filter((r) => r.origin !== "whole");
   const sparseHeld = (project.sourceMeta?.["sparse"] as { spans?: [number, number][] } | undefined)?.spans;
-  const sparseShort = !!sparseHeld && project.durationSec !== null && !spansCover(sparseHeld, transcriptSpans(chosenRanges, project.durationSec));
+  const sparseShort = !!sparseHeld && project.durationSec !== null && !spansCover(sparseHeld, transcriptSpans(linkRanges, project.durationSec));
   const stored = !sparseShort && project.sourceKey && (await svc.storage.exists(project.sourceKey));
   const upload =
     !stored && project.sourceType === "upload"
@@ -171,8 +174,20 @@ export async function ingest(ctx: StageContext) {
       if (announced && (await recordedSourceSec(ctx.db, projectId)) === null) {
         const over = await svc.tx(async (u) => {
           await takeTxLock(u.db, txLock.quota(project.userId));
-          // a long video is not refused while its start fits: only less than one chunk of room refuses before downloading
-          return admitSource(u.db, svc.settings.get(), project.userId, projectId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).then(
+          // ranges count only their own time (admitted whole or refused, as at the end of ingest); a whole video is not
+          // refused while its start fits: only less than one chunk of room refuses before downloading
+          const planned = chosenRanges.length
+            ? planRanges(
+                chosenRanges.map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
+                { durationSec: announced, maxClipSec: Number.POSITIVE_INFINITY },
+              )
+            : null;
+          const admit: Promise<unknown> = planned
+            ? planned.ok
+              ? admitRanges(u.db, svc.settings.get(), project.userId, projectId, planned.billedSec, svc.entitlements)
+              : Promise.resolve() // ranges that cannot be ranges are refused, with their reasons, once the file's length is known
+            : admitSource(u.db, svc.settings.get(), project.userId, projectId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
+          return admit.then(
             () => null,
             (err: unknown) => {
               if (err instanceof QuotaExceededError) return err;
@@ -251,7 +266,7 @@ export async function ingest(ctx: StageContext) {
           });
       // a link with ranges (docs/specs/range-clipping.md): only its padded ranges are downloaded, close ones together,
       // and joined on the source clock into a sparse source (pipeline/sparse.ts); needs the length the site announced
-      const sparseSpans = chosenRanges.length && announced ? mergeSpans(transcriptSpans(chosenRanges, announced), RANGE_FETCH_GAP_SEC) : null;
+      const sparseSpans = chosenRanges.length && announced ? mergeSpans(transcriptSpans(linkRanges, announced), RANGE_FETCH_GAP_SEC) : null;
       const t0 = performance.now();
       let proxyId = "";
       const pieces: SourcePiece[] = [];
@@ -469,15 +484,25 @@ export async function ingest(ctx: StageContext) {
  * minutes (refused with the upgrade offer when they do not fit). Returns the billed seconds. In the ingest's unit,
  * under the quota lock and with the ranges locked.
  */
-async function settleRanges(svc: Services, u: UnitOfWork, project: Project, chosen: ProjectRange[], durationSec: number): Promise<number> {
+async function settleRanges(svc: Services, u: UnitOfWork, project: Project, all: ProjectRange[], durationSec: number): Promise<number> {
+  // a file's length is known only now: a range that starts past its end (or keeps less than RANGE_MIN_SEC of it) is
+  // dropped, and the others are clipped; only when none is left does the project fail, with every reason
+  const fits = (r: ProjectRange) => r.startSec < durationSec && Math.min(r.endSec, durationSec) - r.startSec >= RANGE_MIN_SEC;
+  const chosen = all.filter(fits);
+  const outside = all.filter((r) => !fits(r));
+  const asInput = (r: ProjectRange) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode });
   // modes were settled when the ranges were chosen; here only the length can change them
-  const plan = planRanges(
-    chosen.map((r) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode })),
-    { durationSec, maxClipSec: Number.POSITIVE_INFINITY },
-  );
-  // stored as the owner reads it: the job runs in their locale
-  if (!plan.ok) throw new NonRetryableError(rangeProblemsText(plan.problems).join(" "));
-  const dropped: string[] = [];
+  const plan = planRanges(chosen.map(asInput), { durationSec, maxClipSec: Number.POSITIVE_INFINITY });
+  if (!plan.ok) {
+    const refused = planRanges(all.map(asInput), { durationSec, maxClipSec: Number.POSITIVE_INFINITY });
+    // stored as the owner reads it: the job runs in their locale
+    throw new NonRetryableError(rangeProblemsText(refused.ok ? [] : refused.problems).join(" "));
+  }
+  if (outside.length)
+    svc.log
+      .child({ module: "ingest", projectId: project.id })
+      .warn({ durationSec, dropped: outside.map((r) => [r.startSec, r.endSec]) }, "ranges past the end of the file dropped");
+  const dropped: string[] = outside.map((r) => r.id);
   for (const r of plan.ranges) {
     const [keep, ...rest] = r.inputs.map((i) => chosen[i]).filter((x): x is ProjectRange => x !== undefined);
     if (!keep) continue;
