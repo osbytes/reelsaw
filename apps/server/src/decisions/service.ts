@@ -413,6 +413,35 @@ export async function rejectedCutRows(db: Db, userId: string, exceptProjectId: s
     .limit(max);
 }
 
+/**
+ * Name fixes the user rejected in their other projects, as what was heard and what was proposed: the entity pass never
+ * proposes the same pair again (a re-run of the same project keeps its own decisions through carryDecisions). Only rejections that still stand (a later decision on the same fix retracts one).
+ */
+export async function rejectedEntityPairs(db: Db, userId: string, exceptProjectId: string, max = 500) {
+  const rows = await db
+    .select({ before: schema.userDecisions.before })
+    .from(schema.userDecisions)
+    .where(
+      and(
+        eq(schema.userDecisions.userId, userId),
+        eq(schema.userDecisions.kind, "fix.reject"),
+        notBeingForgotten,
+        sql`${schema.userDecisions.projectId} <> ${exceptProjectId}`,
+        sql`${schema.userDecisions.context}->>'flagKind' = 'entity'`,
+        sql`coalesce(${schema.userDecisions.context}->>'subkind', '') <> 'manual'`,
+        sql`not exists (select 1 from user_decisions later where later.project_id = ${schema.userDecisions.projectId} and later.id > ${schema.userDecisions.id} and later.context->>'flagId' = ${schema.userDecisions.context}->>'flagId')`,
+      ),
+    )
+    .orderBy(desc(schema.userDecisions.id))
+    .limit(max);
+  const out: Array<{ heard: string; suggested: string }> = [];
+  for (const r of rows) {
+    const b = r.before as { heard?: unknown; suggested?: unknown } | null;
+    if (typeof b?.heard === "string" && typeof b.suggested === "string") out.push({ heard: b.heard, suggested: b.suggested });
+  }
+  return out;
+}
+
 // ── export ─────────────────────────────────────────────────────────────────
 
 export const EXPORT_MAX = 1000;

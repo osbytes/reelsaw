@@ -72,7 +72,8 @@ Surfaces: `decisions.*` (tRPC), `list_decisions` / `export_decisions` / `forget_
 *Measure:* none (plumbing); tests that each action writes one row in its transaction.
 
 ### 1. Name fixes remember verdicts (small, high value)
-- A rejected heard → suggested pair is not proposed again for that user (or channel).
+- A rejected heard → suggested pair is not proposed again for that user (shipped 2026-11:
+  `rejectedEntityPairs`, read from the decision log of the user's other projects).
 - Accepted names join a per-channel vocabulary passed to the transcriber (`TRANSCRIPT_BIAS`), so
   the next video spells them right before any fix is needed.
 *Measure:* new `names` eval from decisions: repeat-suggestion rate after rejection (target 0), entity

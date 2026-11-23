@@ -165,6 +165,25 @@ From the literature:
 Next: grow the eval from every review (it is built from accepted/rejected flags), add timing cues
 (pause/fragment at the interruption point) once the eval has enough cases to tune a threshold.
 
+## Name fix precision (Nov 2026)
+
+Name fixes were mostly rejected in review, and some wrong ones auto-applied ("Rachel" → "Michelle",
+"Texas" → "Texan", "3D" → "b3d", "blender.org" → "Blender"). Causes: the look-alike score matched
+everyday words to names ("stop" → "Steam", over and over in one video), entities
+from tags were everyday words or handles, and the local model rated almost every candidate 0.6-0.9.
+
+From the literature: LLM post-correction over-corrects without hard constraints, so the model may only
+choose among candidates from a list (RECOVER, arXiv 2603.16411; LOGIC, 2506.10779); candidates are
+filtered on phoneme similarity and confidence before the model sees them (PARCO, 2509.04357; Trinh et
+al.); edit distance alone cannot tell a name from a similar real word (2508.20700).
+
+What we do (`pipeline/entities.ts`): `isCorrectable` keeps entities that are not everyday words,
+handles or spelled-out letters; a span of real words (or a name the transcriber capitalized, or text
+that contains the name) must have the name's Metaphone key; real-word fixes need confidence 0.8 and
+never auto-apply; addresses and possessives are skipped; rejected pairs from other projects are not
+proposed again. On the 37 rejected pairs in `test/entities.test.ts` no candidate remains; the
+misheard names (Zorvacks, Brindel, Monica → Monicah, Totonax) still are.
+
 ## Top 10 next moves (prioritised)
 
 > **Status (2026-10-15):** #1 (map → pool → rank), #2 (rubric sub-scores + focus + length buckets + maxClips) and #3 (emphasis captions + readability rules + safe-zone overlay) are implemented. Per-scene reframe overrides (#10, manual part) and drag-to-recentre are implemented too. #4 (Silero VAD pause trimming) and #5 (CTC forced alignment for cut seams, wav2vec2-base-960h, Apache-2.0) followed.
