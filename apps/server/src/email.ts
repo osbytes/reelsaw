@@ -181,8 +181,8 @@ function linkFallback(href: string): string {
  * (`<0>projects page</0>`) turned into the markup `tags` gives, so a link stays inside its sentence for translators.
  */
 export function htmlMessage(descriptor: MessageDescriptor, tags: Record<number, (inner: string) => string> = {}): string {
-  const values = Object.fromEntries(Object.entries(descriptor.values ?? {}).map(([k, v]) => [k, typeof v === "string" ? escapeHtml(v) : v]));
-  return t({ ...descriptor, values }).replace(/<(\d+)>(.*?)<\/\1>/gs, (_, n: string, inner: string) => tags[Number(n)]?.(inner) ?? inner);
+  // the whole sentence is escaped (a translation's own "&" or "<" is text), then only the numbered tags become markup
+  return escapeHtml(t(descriptor)).replace(/&lt;(\d+)&gt;(.*?)&lt;\/\1&gt;/gs, (_, n: string, inner: string) => tags[Number(n)]?.(inner) ?? inner);
 }
 
 /** The same message as plain text: its numbered tags dropped, their words kept. */

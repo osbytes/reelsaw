@@ -300,17 +300,13 @@ export class QuotaError extends AppError {
   readonly limit: string;
   readonly props: RefusalProps;
   constructor(message: MessageDescriptor | string, quota?: QuotaRefusal, limit?: string, props: RefusalProps = {}, offer?: string) {
-    super("TOO_MANY_REQUESTS", typeof message === "string" ? REFUSED : message);
-    if (typeof message === "string") this.message = message;
+    super("TOO_MANY_REQUESTS", message);
     if (offer) this.message = `${this.message}${offer}`;
     this.quota = quota;
     this.limit = limit ?? quota?.key ?? "unknown";
     this.props = props;
   }
 }
-
-/** The code a refusal built from an already rendered string carries. */
-const REFUSED = msg({ id: "quota.refused", message: "This account has reached a limit." });
 
 /**
  * A refusal as a product event (`quota.refused`): which limit, the surface (web, api, mcp, cli, or ingest when the length
@@ -414,8 +410,6 @@ const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "
 const hhmm = (ms: number) => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
 /** A reset day: billing periods are UTC, so the same day for every reader, in their language. */
 const resetDay = (d: Date) => formatDay(d, { year: false, utc: true });
-/** Whole minutes as people read them ("1,200"). */
-const mins = (m: number) => formatNumber(Math.round(m));
 
 /** The window a monthly allowance counts in: the billing period when the account has one, else the UTC calendar month. */
 export function periodFor(grants: Grants | null, now = new Date()): { start: Date; end: Date; source: "billing" | "calendar" } {
@@ -446,13 +440,13 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
       .from(schema.projects)
       .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
     if (n >= l.MAX_PROJECTS_PER_USER) {
-      const [count, max] = [formatNumber(n), formatNumber(l.MAX_PROJECTS_PER_USER)];
+      const [count, max] = [n, l.MAX_PROJECTS_PER_USER];
       refuse(
         d,
         "MAX_PROJECTS_PER_USER",
         msg({
           id: "quota.projects_full",
-          message: msg`You have ${{ count }} projects, the most this account may keep (${{ max }}). Delete one to start another.`,
+          message: msg`You have ${plural({ count }, { other: "#" })} projects, the most this account may keep (${plural({ max }, { other: "#" })}). Delete one to start another.`,
         }),
       );
     }
@@ -464,13 +458,13 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
       .from(schema.sourceUsage)
       .where(and(eq(schema.sourceUsage.userId, userId), ownRow, gte(schema.sourceUsage.createdAt, since)));
     if (n >= l.MAX_NEW_PROJECTS_PER_HOUR) {
-      const [count, max] = [formatNumber(n), formatNumber(l.MAX_NEW_PROJECTS_PER_HOUR)];
+      const [count, max] = [n, l.MAX_NEW_PROJECTS_PER_HOUR];
       refuse(
         d,
         "MAX_NEW_PROJECTS_PER_HOUR",
         msg({
           id: "quota.projects_per_hour",
-          message: msg`${{ count }} projects started in the last hour, the most allowed (${{ max }}). Try again in a while.`,
+          message: msg`${plural({ count }, { other: "#" })} projects started in the last hour, the most allowed (${plural({ max }, { other: "#" })}). Try again in a while.`,
         }),
       );
     }
@@ -478,11 +472,14 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
     const used = await minutesToday(db, userId);
     if (used >= l.MAX_SOURCE_MINUTES_PER_DAY) {
-      const [max, usedMin, at] = [mins(l.MAX_SOURCE_MINUTES_PER_DAY), mins(used), hhmm(nextMidnightUtc())];
+      const [max, usedMin, at] = [Math.round(l.MAX_SOURCE_MINUTES_PER_DAY), Math.round(used), hhmm(nextMidnightUtc())];
       refuse(
         d,
         "MAX_SOURCE_MINUTES_PER_DAY",
-        msg({ id: "quota.minutes_day", message: msg`Daily limit of ${{ max }} minutes of video reached (${{ usedMin }} used); resets at ${{ at }}.` }),
+        msg({
+          id: "quota.minutes_day",
+          message: msg`Daily limit of ${plural({ max }, { other: "#" })} minutes of video reached (${plural({ usedMin }, { other: "#" })} used); resets at ${{ at }}.`,
+        }),
       );
     }
   }
@@ -491,11 +488,14 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
     const m = await monthlyMinutes(db, userId, period.start, d.grants);
     // a first video on the house is checked for real once its length is known (sourceMinutesExceeded)
     if (m.used >= l.MAX_SOURCE_MINUTES_PER_MONTH && !m.firstPending) {
-      const [max, usedMin, on] = [mins(l.MAX_SOURCE_MINUTES_PER_MONTH), mins(m.used), resetDay(period.end)];
+      const [max, usedMin, on] = [Math.round(l.MAX_SOURCE_MINUTES_PER_MONTH), Math.round(m.used), resetDay(period.end)];
       refuseOffering(
         d,
         "MAX_SOURCE_MINUTES_PER_MONTH",
-        msg({ id: "quota.minutes_month", message: msg`Monthly limit of ${{ max }} minutes of video reached (${{ usedMin }} used); resets on ${{ on }}.` }),
+        msg({
+          id: "quota.minutes_month",
+          message: msg`Monthly limit of ${plural({ max }, { other: "#" })} minutes of video reached (${plural({ usedMin }, { other: "#" })} used); resets on ${{ on }}.`,
+        }),
       );
     }
   }
@@ -522,7 +522,7 @@ export async function checkManualClipQuota(db: Db, instance: InstanceLimits, use
   if (max <= 0) return;
   const made = await manualClipsMade(db, userId);
   if (made >= max) {
-    const [count, most] = [formatNumber(made), formatNumber(max)];
+    const [count, most] = [made, max];
     refuseOffering(
       d,
       "MAX_MANUAL_CLIPS_PER_USER",
@@ -530,7 +530,7 @@ export async function checkManualClipQuota(db: Db, instance: InstanceLimits, use
         ? msg({ id: "quota.manual_clip_used", message: "Your free clip of your own is used. The clips Reelsaw found stay yours to edit." })
         : msg({
             id: "quota.manual_clips_full",
-            message: msg`You have made ${{ count }} clips of your own, the most this account may (${{ most }}). The clips Reelsaw found stay yours to edit.`,
+            message: msg`You have made ${plural({ count }, { other: "#" })} clips of your own, the most this account may (${plural({ most }, { other: "#" })}). The clips Reelsaw found stay yours to edit.`,
           }),
     );
   }
@@ -549,13 +549,13 @@ export async function checkRestoreQuota(db: Db, instance: InstanceLimits, userId
     .from(schema.projects)
     .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
   if (n >= d.limits.MAX_PROJECTS_PER_USER) {
-    const [count, max] = [formatNumber(n), formatNumber(d.limits.MAX_PROJECTS_PER_USER)];
+    const [count, max] = [n, d.limits.MAX_PROJECTS_PER_USER];
     refuse(
       d,
       "MAX_PROJECTS_PER_USER",
       msg({
         id: "quota.projects_full_restore",
-        message: msg`You have ${{ count }} projects, the most this account may keep (${{ max }}). Delete one to restore another.`,
+        message: msg`You have ${plural({ count }, { other: "#" })} projects, the most this account may keep (${plural({ max }, { other: "#" })}). Delete one to restore another.`,
       }),
     );
   }
@@ -605,22 +605,22 @@ export async function monthlyMinutes(
  */
 export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
   if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.userLive >= l.MAX_LIVE_JOBS_PER_USER) {
-    const [count, max] = [formatNumber(a.userLive), formatNumber(l.MAX_LIVE_JOBS_PER_USER)];
+    const [count, max] = [a.userLive, l.MAX_LIVE_JOBS_PER_USER];
     throw new QuotaError(
       msg({
         id: "quota.live_jobs",
-        message: msg`You have ${{ count }} requests queued or running, the most this account may have at once (${{ max }}). Try again when some have finished.`,
+        message: msg`You have ${plural({ count }, { other: "#" })} requests queued or running, the most this account may have at once (${plural({ max }, { other: "#" })}). Try again when some have finished.`,
       }),
       undefined,
       "MAX_LIVE_JOBS_PER_USER",
     );
   }
   if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR) {
-    const [count, max] = [formatNumber(a.userRendersLastHour), formatNumber(l.MAX_RERENDERS_PER_HOUR)];
+    const [count, max] = [a.userRendersLastHour, l.MAX_RERENDERS_PER_HOUR];
     throw new QuotaError(
       msg({
         id: "quota.rerenders_per_hour",
-        message: msg`${{ count }} re-renders and re-runs requested in the last hour, the most allowed (${{ max }}). Try again in a while.`,
+        message: msg`${plural({ count }, { other: "#" })} re-renders and re-runs requested in the last hour, the most allowed (${plural({ max }, { other: "#" })}). Try again in a while.`,
       }),
       undefined,
       "MAX_RERENDERS_PER_HOUR",
@@ -654,13 +654,13 @@ function checkStorage(d: LimitsDetail, bytes: number) {
   if (l.MAX_STORAGE_MB <= 0) return;
   const mb = Math.round(bytes / 1_048_576);
   if (mb >= l.MAX_STORAGE_MB) {
-    const [stored, max] = [formatNumber(mb), formatNumber(l.MAX_STORAGE_MB)];
+    const [stored, max] = [mb, l.MAX_STORAGE_MB];
     refuseOffering(
       d,
       "MAX_STORAGE_MB",
       msg({
         id: "quota.storage_full",
-        message: msg`This account stores ${{ stored }} MB, the most allowed is ${{ max }} MB. Removed projects still count until you delete them forever.`,
+        message: msg`This account stores ${plural({ stored }, { other: "#" })} MB, the most allowed is ${plural({ max }, { other: "#" })} MB. Removed projects still count until you delete them forever.`,
       }),
     );
   }
@@ -864,15 +864,15 @@ async function minutesOver(
 ): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; descriptor: MessageDescriptor; offer: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
-  const length = mins(durationSec / 60);
+  const length = Math.round(durationSec / 60);
   const except = projectId ?? undefined;
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
     const used = await minutesToday(db, userId, except);
     if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY) {
-      const [rest, max, at] = [formatNumber(left(l.MAX_SOURCE_MINUTES_PER_DAY, used)), mins(l.MAX_SOURCE_MINUTES_PER_DAY), hhmm(nextMidnightUtc())];
+      const [rest, max, at] = [left(l.MAX_SOURCE_MINUTES_PER_DAY, used), Math.round(l.MAX_SOURCE_MINUTES_PER_DAY), hhmm(nextMidnightUtc())];
       const descriptor = msg({
         id: "quota.video_over_day",
-        message: msg`This video is ${{ length }} minutes and you have ${{ rest }} of your ${{ max }} minutes a day left. Resets at ${{ at }}.`,
+        message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes a day left. Resets at ${{ at }}.`,
       });
       const sentence = t(descriptor);
       return { d, key: "MAX_SOURCE_MINUTES_PER_DAY", message: sentence, sentence, descriptor, offer: "", firstVideo: false };
@@ -885,20 +885,20 @@ async function minutesOver(
     if (m.firstPending && durationSec / 60 <= m.firstFree) return null;
     if (m.used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_MONTH) {
       const offer = hint(d, "MAX_SOURCE_MINUTES_PER_MONTH");
-      const max = mins(l.MAX_SOURCE_MINUTES_PER_MONTH);
+      const max = Math.round(l.MAX_SOURCE_MINUTES_PER_MONTH);
       // a new account has used nothing: "0 already used passes the limit" read like a fault, so say what does fit
-      const fits = formatNumber(Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)));
-      const free = formatNumber(m.firstFree);
-      const rest = formatNumber(left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
+      const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
+      const free = m.firstFree;
+      const rest = left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used);
       const on = resetDay(period.end);
       const descriptor = m.firstPending
         ? msg({
             id: "quota.video_over_first",
-            message: msg`This video is ${{ length }} minutes. Your first video is free up to ${{ free }} minutes, and after that your plan covers ${{ max }} minutes a month. Try a video under ${{ fits }} minutes.`,
+            message: msg`This video is ${plural({ length }, { other: "#" })} minutes. Your first video is free up to ${plural({ free }, { other: "#" })} minutes, and after that your plan covers ${plural({ max }, { other: "#" })} minutes a month. Try a video under ${plural({ fits }, { other: "#" })} minutes.`,
           })
         : msg({
             id: "quota.video_over_month",
-            message: msg`This video is ${{ length }} minutes and you have ${{ rest }} of your ${{ max }} minutes left this period. Resets on ${{ on }}.`,
+            message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes left this period. Resets on ${{ on }}.`,
           });
       const sentence = t(descriptor);
       return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${offer}`, sentence, descriptor, offer, firstVideo: m.firstPending };

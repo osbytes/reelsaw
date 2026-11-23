@@ -3203,11 +3203,6 @@ msgstr "This account does not need a new password."
 msgid "billing.complimentary_plan"
 msgstr "This account has {plan} as a courtesy; ask an admin before paying for a plan."
 
-#. js-lingui-explicit-id
-#: src/quota.ts
-msgid "quota.refused"
-msgstr "This account has reached a limit."
-
 #: src/email.ts
 msgid "This account is over Free's limits:"
 msgstr "This account is over Free's limits:"

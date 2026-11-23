@@ -102,6 +102,7 @@ export function labelsOf<K extends string>(messages: Record<K, MessageDescriptor
 /** A framing mode's name in the active locale. */
 export const MODE_LABEL: Record<string, string> = labelsOf(MODE_MESSAGES);
 
+// dup-of: packages/shared/src/index.ts#contentLabel
 /** "Stack" for the whole frame, "Stack · content left 50%" for a region (the web copy of `contentLabel` in @reelsaw/shared). */
 function stackLabel(c: ContentRegion | undefined | null, tile?: ContentRegion | null): string {
   const cam = tile ? i18n._(msg` · webcam`) : "";

@@ -18,12 +18,15 @@ function localeName(code: string): string {
   }
 }
 
-function timeZones(): string[] {
+/** The runtime's zones plus UTC (Chrome lists only region zones) and a saved alias it does not list ("Asia/Calcutta"). */
+function timeZones(saved: string | null | undefined): string[] {
+  let zones: string[] = [];
   try {
-    return Intl.supportedValuesOf("timeZone");
+    zones = Intl.supportedValuesOf("timeZone");
   } catch {
-    return ["UTC"];
+    // an older runtime: UTC and the saved one only
   }
+  return [...new Set(["UTC", ...(saved ? [saved] : []), ...zones])];
 }
 
 /** Applies the account's saved language once it is known (lib/i18n.ts chain). Mounted once, in App. */
@@ -58,9 +61,9 @@ export function LocaleSection() {
   const zoneOptions = useMemo(
     () => [
       { value: FOLLOW, label: t`This browser's (${browserZone}); UTC in email` },
-      ...timeZones().map((z) => ({ value: z, label: z.replaceAll("_", " ") })),
+      ...timeZones(q.data?.timeZone).map((z) => ({ value: z, label: z.replaceAll("_", " ") })),
     ],
-    [t, browserZone],
+    [t, browserZone, q.data?.timeZone],
   );
   const languageOptions = [
     { value: FOLLOW, label: t`Follow the browser` },

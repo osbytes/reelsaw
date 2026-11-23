@@ -151,12 +151,17 @@ type Param = string | number | boolean | null;
  *   throw new AppError("NOT_FOUND", msg({ id: "project.not_found", message: "Project not found" }))
  */
 export class AppError extends TRPCError {
-  readonly messageId: string;
+  /** the message's explicit id; undefined for an error built from text already rendered (no code is better than a wrong one) */
+  readonly messageId: string | undefined;
   readonly params: Record<string, Param>;
-  constructor(code: TRPCError["code"], descriptor: MessageDescriptor, opts: { cause?: unknown } = {}) {
-    super({ code, message: t(descriptor), ...(opts.cause === undefined ? {} : { cause: opts.cause }) });
-    this.messageId = descriptor.id;
+  constructor(code: TRPCError["code"], descriptor: MessageDescriptor | string, opts: { cause?: unknown } = {}) {
+    super({ code, message: typeof descriptor === "string" ? descriptor : t(descriptor), ...(opts.cause === undefined ? {} : { cause: opts.cause }) });
     this.params = {};
+    if (typeof descriptor === "string") {
+      this.messageId = undefined;
+      return;
+    }
+    this.messageId = descriptor.id;
     for (const [k, v] of Object.entries(descriptor.values ?? {})) {
       if (v === null || ["string", "number", "boolean"].includes(typeof v)) this.params[k] = v as Param;
     }
@@ -166,5 +171,5 @@ export class AppError extends TRPCError {
 /** The code and parameters a tRPC error carries to the client (errorFormatter), when it has them. */
 export function errorMessageData(err: unknown): { messageId?: string; params?: Record<string, Param> } {
   const e = err instanceof AppError ? err : err instanceof TRPCError && err.cause instanceof AppError ? err.cause : null;
-  return e ? { messageId: e.messageId, ...(Object.keys(e.params).length ? { params: e.params } : {}) } : {};
+  return e?.messageId ? { messageId: e.messageId, ...(Object.keys(e.params).length ? { params: e.params } : {}) } : {};
 }

@@ -296,6 +296,7 @@ const MODE_EXPLAIN: Record<string, string> = labelsOf({
   fit: msg`Whole frame over a blurred background. For slides, b-roll and wide shots.`,
   center: msg`Static centre crop.`,
 });
+// dup-of: packages/shared/src/index.ts#SHAPE_LABEL
 /** the output shapes by name (the web copy of SHAPE_LABEL in @reelsaw/shared) */
 const SHAPE_NAME = labelsOf({
   "9:16": msg`Vertical 9:16`,
@@ -303,6 +304,7 @@ const SHAPE_NAME = labelsOf({
   "1:1": msg`Square 1:1`,
   "16:9": msg`Landscape 16:9`,
 });
+// dup-of: packages/shared/src/index.ts#BUMPER_TRANSITION_LABEL
 /** how the intro and outro join the clip (the web copy of BUMPER_TRANSITION_LABEL in @reelsaw/shared) */
 const TRANSITION_NAME = labelsOf({ cut: msg`Cut`, dip: msg`Dip to black`, crossfade: msg`Crossfade` });
 

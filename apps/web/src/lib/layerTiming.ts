@@ -1,3 +1,4 @@
+// dup-of: packages/shared/src/index.ts#timingText
 /**
  * A layer's timing as a label in the active locale: "First 3 s", "Last 4 s", "Whole clip", "20–40% of the clip".
  * The web app's form of `timingText` in @reelsaw/shared, which stays English for the CLI's operator tables.
@@ -22,7 +23,7 @@ export function timingLabel(timing: LayerTiming): string {
       return timing.end === 0 ? t`Last ${start} s` : t`${start}–${end} s before the end`;
     }
     case "relative": {
-      const from = formatPercent(timing.start);
+      const from = formatNumber(Math.round(timing.start * 100));
       const to = formatPercent(timing.end);
       const min = timing.minSec !== undefined ? sec(timing.minSec) : undefined;
       const max = timing.maxSec !== undefined ? sec(timing.maxSec) : undefined;

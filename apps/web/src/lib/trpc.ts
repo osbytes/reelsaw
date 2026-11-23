@@ -19,7 +19,7 @@ export function makeTrpcClient() {
           url: "/api/trpc",
           // fetch, not EventSource, so the request carries traceparent (see lib/sse.ts)
           EventSource: FetchEventSource,
-          eventSourceOptions: { withCredentials: true },
+          eventSourceOptions: () => ({ withCredentials: true, headers: localeHeaders() }),
         }),
         false: httpBatchLink({
           url: "/api/trpc",

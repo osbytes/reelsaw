@@ -3203,11 +3203,6 @@ msgstr ""
 msgid "billing.complimentary_plan"
 msgstr ""
 
-#. js-lingui-explicit-id
-#: src/quota.ts
-msgid "quota.refused"
-msgstr ""
-
 #: src/email.ts
 msgid "This account is over Free's limits:"
 msgstr ""
