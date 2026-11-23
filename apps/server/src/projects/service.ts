@@ -73,7 +73,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { projectNeededSpans } from "../pipeline/transcribe.js";
+import { coverageOf, projectNeededSpans } from "../pipeline/transcribe.js";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -172,7 +172,7 @@ export async function retryProject(
     .for("no key update");
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
-  const covers = !transcript || spansCover(transcript.covered, await projectNeededSpans(u.db, p));
+  const covers = !transcript || spansCover(coverageOf(transcript.covered), await projectNeededSpans(u.db, p));
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
   const queue = retryQueueFor({
     clips,
@@ -526,7 +526,7 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
     // picking again before the rest of the video's words are in would pick from the old part only, and its picks
     // would be replaced again by the extension's
-    if (!spansCover(transcript.covered, await projectNeededSpans(u.db, p)))
+    if (!spansCover(coverageOf(transcript.covered), await projectNeededSpans(u.db, p)))
       throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
@@ -1281,7 +1281,7 @@ export async function partialSourceOf(
   const [t] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   const extending =
     (WORKING as readonly string[]).includes(p.status) &&
-    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !spansCover(t.covered, await projectNeededSpans(db, p))));
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !spansCover(coverageOf(t.covered), await projectNeededSpans(db, p))));
   const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
   const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
   const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;

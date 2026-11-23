@@ -505,6 +505,13 @@
       "when": 1795387969846,
       "tag": "0071_transcript_covered_spans",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795401169175,
+      "tag": "0072_transcript_covered_nullable",
+      "breakpoints": true
     }
   ]
 }

@@ -51,6 +51,17 @@ export function neededSpans(
   return end ? [[0, end]] : [];
 }
 
+/** Everything: what a transcript with no `covered` spans covers (written whole). */
+const ALL_TIME: Span[] = [[0, Number.MAX_SAFE_INTEGER]];
+
+/**
+ * The source time a transcript covers: its spans, or all of it when it has none (a transcript written whole, by an
+ * SRT / VTT import, a seeded scenario or a row from before spans). The one reader of `transcripts.covered`.
+ */
+export function coverageOf(covered: Span[] | null | undefined): Span[] {
+  return covered ?? ALL_TIME;
+}
+
 /**
  * What the previous version reads from the deprecated `covered_sec`: the covered end of a transcript of the video's
  * start, null for the whole video (or for ranges, which that version never clips past).
@@ -149,7 +160,7 @@ export async function transcribe(ctx: StageContext) {
     where: eq(schema.transcripts.projectId, projectId),
     columns: { projectId: true, covered: true },
   });
-  const coveredBefore = existing?.covered ?? [];
+  const coveredBefore = existing ? coverageOf(existing.covered) : [];
   const needed = await projectNeededSpans(ctx.db, project);
   /** what this run transcribes: each stretch the ranges need that the transcript does not cover */
   const targets = subtractSpans(needed, coveredBefore).filter(([s, e]) => e - s >= MIN_CHUNK_SEC);
@@ -432,10 +443,10 @@ async function mergeRest(
     if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq);
     const durationSec = await stageElapsed(u.db, projectId, "transcribe");
     // only onto the transcript these words were heard for: one whose coverage moved meanwhile was grown by that run
-    if (JSON.stringify(t.covered) === JSON.stringify(r.coveredBefore)) {
+    if (JSON.stringify(coverageOf(t.covered)) === JSON.stringify(r.coveredBefore)) {
       const merged = mergeTranscript(t, { rawWords: r.rawWords, flags: r.flags });
       const segments = toSentences(merged.words, undefined, t.language);
-      const covered = mergeSpans([...t.covered, ...r.targets]);
+      const covered = mergeSpans([...coverageOf(t.covered), ...r.targets]);
       added = r.rawWords.length;
       await u.db
         .update(schema.transcripts)

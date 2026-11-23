@@ -28,7 +28,7 @@ import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { RenderManyMissing, requestPrepare, requestRender, requestRenders } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
-import { projectNeededSpans } from "../pipeline/transcribe.js";
+import { coverageOf, projectNeededSpans } from "../pipeline/transcribe.js";
 import { cleanLayers } from "../library/layers.js";
 import { syncClipRefs, syncClipsRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
@@ -52,7 +52,7 @@ async function assertWithinProcessed(
   const [t] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   if (spanWithin(span, needed)) {
     // no transcript at all is the caller's to refuse (it says the video must be transcribed first)
-    if (!t || spanWithin(span, t.covered)) return;
+    if (!t || spanWithin(span, coverageOf(t.covered))) return;
     throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing this part of the video. Use it once it is done." });
   }
   const [first, ...more] = needed;

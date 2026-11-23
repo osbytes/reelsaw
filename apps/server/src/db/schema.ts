@@ -691,9 +691,10 @@ export const transcripts = pgTable("transcripts", {
   /**
    * The source time the words cover, as sorted, disjoint `[start, end]` spans: the whole video, the start a partly
    * processed one covers, or its ranges with their padding (docs/specs/range-clipping.md). Transcribe adds the words
-   * of whatever a project's ranges need past it (`transcriptSpans`), merged in time order.
+   * of whatever a project's ranges need past it (`transcriptSpans`), merged in time order. Null = all of it (a transcript
+   * written whole: an imported SRT / VTT, a seeded scenario, a row from before spans); read it through `coverageOf`.
    */
-  covered: jsonb("covered").$type<[number, number][]>().notNull().default([]),
+  covered: jsonb("covered").$type<[number, number][]>(),
   /**
    * Deprecated: the covered end before spans (null = all of it). Still written for one release (`legacyCoveredSec`) so
    * a process of the previous version mid-rollout reads what it expects; dropped with source_limit_sec (range-clipping
