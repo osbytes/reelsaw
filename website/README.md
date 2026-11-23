@@ -34,25 +34,34 @@ pnpm i18n:extract   # after changing copy; CI runs pnpm i18n:check
 
 ## The demo clips
 
-The home page shows real runs of hosted Reelsaw on Creative Commons BY videos with default settings: the hero
-(`components/hero-reel.tsx`) plays a pick next to the same seconds of its source, with where it came from on the
-source's timeline; "One real run" lays the source next to its clips (`components/clip-strip.tsx`); "See it" is a
-set of deep-linkable tabs (`#see-reframe`, `components/feature-tabs.tsx`) whose Reframe tab shows a two-shot
-followed speaker to speaker, a camera per speaker, and slides stacked over a webcam. All of them read `content/demo.ts` (sources, ranks, reasons, start and end times) and play
-`public/clips/*.mp4` through `components/loop-video.tsx`: muted, fetched when near, paused off screen, posters
-only under `prefers-reduced-motion`.
+The home page shows real runs of hosted Reelsaw on Creative Commons BY videos with default settings, picked to
+show the range of framing: a let's play with a facecam, a podcast shot both wide and close, and a keynote with
+slides beside the speaker. The hero (`components/hero-reel.tsx`) plays one pick from each next to the same seconds
+of its source, with where it came from on the source's timeline; "One real run" lays the podcast next to its
+clips (`components/clip-strip.tsx`); "Most replayed" (`components/replay-ranges.tsx`) draws a long stream's replay
+heatmap with the peaks Reelsaw took from it and the minutes that cost; "See it" is a set of deep-linkable tabs
+(`#see-reframe`, `components/feature-tabs.tsx`) whose Reframe tab overlays what the detector found (the speaker it
+follows, the webcam tile and the content region) on the source. All of them read `content/demo.ts` (sources,
+ranks, reasons, start and end times, tracks and regions from `get_clip`'s layout segments, the heatmap and peaks)
+and play `public/clips/*.mp4` through `components/loop-video.tsx`: muted, fetched when near, paused off screen,
+posters only under `prefers-reduced-motion`.
 
-Swapping in a newer run: update `content/demo.ts` from `get_project` (MCP) and cut the files from the rendered
-clip and the downloaded source (`yt-dlp -f "137+140"`), 8 s each:
+Swapping in a newer run: update `content/demo.ts` from `get_project` and `get_clip` (MCP) and cut the files from the
+rendered clip and the downloaded source (`yt-dlp -f "137+140"`), 8 s each (longer where the framing changes later,
+like the 16 s speaker switch in `podcast-6`):
 
 ```bash
-ffmpeg -i clip.mp4 -t 8 -vf scale=540:960 -c:v libx264 -crf 24 -preset slow -an -movflags +faststart pick-1.mp4
-ffmpeg -ss <clip start> -i source.mp4 -t 8 -vf scale=720:-2 -c:v libx264 -crf 25 -preset slow -an -movflags +faststart pick-1-before.mp4
-ffmpeg -ss 2.3 -i pick-1.mp4 -frames:v 1 -q:v 4 pick-1.jpg      # and the same for pick-1-before
+ffmpeg -i clip.mp4 -t 8 -vf scale=540:960 -c:v libx264 -crf 24 -preset slow -an -movflags +faststart game.mp4
+ffmpeg -ss <clip start> -i source.mp4 -t 8 -vf scale=720:-2 -c:v libx264 -crf 25 -preset slow -an -movflags +faststart game-before.mp4
+ffmpeg -ss 2.3 -i game.mp4 -frames:v 1 -q:v 4 game.jpg      # and the same for game-before
 ```
 
+The Most replayed numbers come from `check_source` with any `ranges` (it lists the peaks) and the `billedSec` of a
+`create_project` with `rangesFrom: { mostReplayed: 5 }`; the heatmap bins are yt-dlp's `heatmap` for the video.
+
 The app screenshots in the Moments, Fixes and Editor tabs (`public/workspace.png`, `transcript-fixes.png`,
-`editor.png`, copied to `docs/assets/` for the README) are the same sources run through a local build: 1459×729,
+`editor.png`, copied to `docs/assets/` for the README) are an earlier podcast and webinar (credited with the others in
+`content/demo.ts`) run through a local build: 1459×729,
 dark theme, device scale 1. Workspace is the podcast seeked into its talk (`/p/<id>#t=44`), fixes is the webinar
 with the fixes list open and its name fix selected (`#fix=<id>`), editor is the podcast's clip #2 with the playhead
 mid-clip. Retake them whenever those screens change.

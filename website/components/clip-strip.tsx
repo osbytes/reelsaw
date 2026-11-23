@@ -39,7 +39,7 @@ export function ClipStrip() {
       <figure className="mx-auto flex w-full max-w-[340px] flex-col gap-2 lg:max-w-none">
         <div className="relative aspect-video overflow-hidden rounded-[14px] border border-line bg-film">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/clips/source.jpg" alt="" className="block h-full w-full object-cover" />
+          <img src="/clips/podcast-source.jpg" alt="" className="block h-full w-full object-cover" />
           <span className="absolute right-2 bottom-2 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-xs text-white">{source.length}</span>
         </div>
         <figcaption className="text-xs leading-snug text-ink3">

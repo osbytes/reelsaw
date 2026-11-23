@@ -51,12 +51,27 @@ function Reframe({ on }: { on: boolean }) {
             className="block h-full w-full object-cover"
           />
           <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white">{tr(msg`16:9 source`)}</span>
+          {/* What the detector found, where it found it: the regions a stack puts on top and underneath */}
+          {r.regions?.map((g) => (
+            <span
+              key={g.label}
+              className="absolute rounded-[4px] border-2 border-acc bg-acc/10"
+              style={{
+                left: `${g.box[0] * 100}%`,
+                top: `${g.box[1] * 100}%`,
+                width: `${(g.box[2] - g.box[0]) * 100}%`,
+                height: `${(g.box[3] - g.box[1]) * 100}%`,
+              }}
+            >
+              <span className="absolute bottom-1 left-1 rounded bg-acc px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-acc-ink">{g.label}</span>
+            </span>
+          ))}
           {x !== null && (
             <span
-              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-acc-ink shadow-pop transition-[left] duration-300"
+              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-acc-ink shadow-pop transition-[left] duration-500"
               style={{ left: `${x * 100}%`, top: `${(r.y ?? 0.35) * 100}%` }}
             >
-              {tr(msg`speaking`)}
+              {r.marker ?? tr(msg`speaking`)}
             </span>
           )}
         </div>
@@ -106,7 +121,7 @@ const TABS: Tab[] = [
     label: tr(msg`Reframes any shot`),
     title: tr(msg`A layout for every shot, not one crop for the whole video`),
     body: tr(
-      msg`A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Slides keep their webcam tile underneath. Override it per project, clip or section.`,
+      msg`A 1.2 MB face detector on the CPU picks a layout at every cut and keeps the crop on whoever is talking, even when two people share one wide shot. Gameplay goes on top with the facecam underneath, slides stay whole above the speaker it follows, and a shot with no face follows whatever moves. Override it per project, clip or section.`,
     ),
     media: (on) => <Reframe on={on} />,
   },

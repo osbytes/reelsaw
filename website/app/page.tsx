@@ -11,6 +11,7 @@ import { GitHubMark } from "@/components/logo";
 import { HeroLinkForm } from "@/components/hero-link-form";
 import { HeroReel } from "@/components/hero-reel";
 import { ClipStrip } from "@/components/clip-strip";
+import { ReplayRanges } from "@/components/replay-ranges";
 import { FeatureTabs } from "@/components/feature-tabs";
 import { ALTERNATIVE_LINKS, GUIDE_NAV, USE_CASE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
@@ -217,7 +218,7 @@ export default async function HomePage() {
               </h1>
               <p className="max-w-[54ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[18px]">
                 {t(
-                  msg`Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is speaking, and burns in captions and a hook. Every pick comes with its reason.`,
+                  msg`Paste a link to a podcast, stream, game or talk. Reelsaw finds the moments that stand on their own, frames every shot for 9:16 (whoever is speaking, the slides above the speaker, the gameplay above the facecam) and burns in captions and a hook. Every pick comes with its reason.`,
                 )}
               </p>
               <div className="flex w-full flex-col items-center gap-4 lg:items-start">
@@ -263,8 +264,23 @@ export default async function HomePage() {
           </div>
         </section>
 
+        {/* Most replayed */}
+        <section id="most-replayed" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="replayed-title">
+          <div className="container-page flex flex-col gap-12">
+            <SectionHeading
+              id="replayed-title"
+              eyebrow={t(msg`Most replayed`)}
+              title={t(msg`A long stream in. Only the parts people rewatch get clipped.`)}
+              body={t(
+                msg`YouTube knows which stretches viewers replay. Reelsaw reads that heatmap before downloading anything and clips only the peaks you choose, so a three-hour stream costs the minutes of its best moments, not three hours.`,
+              )}
+            />
+            <ReplayRanges />
+          </div>
+        </section>
+
         {/* See it */}
-        <section id="see" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="see-title">
+        <section id="see" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="see-title">
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="see-title"
@@ -290,7 +306,7 @@ export default async function HomePage() {
         </section>
 
         {/* How it works */}
-        <section id="how-it-works" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="how-title">
+        <section id="how-it-works" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="how-title">
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="how-title"
@@ -325,7 +341,7 @@ export default async function HomePage() {
         </section>
 
         {/* Features */}
-        <section id="features" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="features-title">
+        <section id="features" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="features-title">
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="features-title"
@@ -348,7 +364,7 @@ export default async function HomePage() {
         </section>
 
         {/* Agents */}
-        <section id="agents" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="agents-title">
+        <section id="agents" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="agents-title">
           <div className="container-page grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-5">
               <p className="eyebrow">{t(msg`Agents and automation`)}</p>
@@ -401,7 +417,7 @@ export default async function HomePage() {
         </section>
 
         {/* Compare */}
-        <section id="compare" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="compare-title">
+        <section id="compare" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="compare-title">
           <div className="container-page flex flex-col gap-10">
             <SectionHeading
               id="compare-title"
