@@ -129,7 +129,14 @@ function Avatar() {
               <span className="block truncate text-[13px] font-semibold text-ink">{u.name || u.email}</span>
               <span className="block truncate text-xs text-ink3">
                 {u.email}
-                {isAdmin ? <Trans> · admin</Trans> : ""}
+                {isAdmin ? (
+                  <>
+                    {" · "}
+                    <Trans>admin</Trans>
+                  </>
+                ) : (
+                  ""
+                )}
               </span>
             </span>
           </DropdownMenu.Label>

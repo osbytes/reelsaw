@@ -152,8 +152,9 @@ export function t(descriptor: MessageDescriptor): string {
   return i18nFor(locale)._(descriptor);
 }
 
+const ACCENTS = [..."àƀçđéƒĝĥíĵķĺɱñóþǫŕšţúṽŵẋýžÀßÇĐÉƑĜĤÍĴĶĹṀÑÓÞǪŔŠŢÚṼŴẊÝŽ"];
 const ACCENTED: Record<string, string> = Object.fromEntries(
-  [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((c, i) => [c, [..."àƀçđéƒĝĥíĵķĺɱñóþǫŕšţúṽŵẋýžÀßÇĐÉƑĜĤÍĴĶĹṀÑÓÞǪŔŠŢÚṼŴẊÝŽ"][i]!]),
+  [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"].flatMap((c, i) => (ACCENTS[i] ? [[c, ACCENTS[i]]] : [])),
 );
 
 /**

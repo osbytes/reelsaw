@@ -267,16 +267,22 @@ function runDoneText(p: Record<string, unknown>, renderedThisRun: number, fallba
   const total = Number(p["clips"]);
   if (p["runReason"] === "created" || !renderedThisRun || renderedThisRun >= total) return fallback;
   const took = sec(p["runSec"]);
+  const time = took !== null ? formatTime(took) : null;
   const why = reasonLabel(p["runReason"]);
-  const tail = [
-    took !== null ? t` in ${formatTime(took)}` : "",
-    t` · ${total} ready`,
-    p["failed"] ? t`, ${String(p["failed"])} failed` : "",
-    why && p["runReason"] !== "rerender" ? ` · ${why}` : "",
-  ].join("");
-  return p["runReason"] === "rerender"
-    ? plural(renderedThisRun, { one: `Re-rendered # clip${tail}`, other: `Re-rendered # clips${tail}` })
-    : plural(renderedThisRun, { one: `Rendered # clip${tail}`, other: `Rendered # clips${tail}` });
+  const n = renderedThisRun;
+  const head =
+    p["runReason"] === "rerender"
+      ? time !== null
+        ? plural(n, { one: `Re-rendered # clip in ${time}`, other: `Re-rendered # clips in ${time}` })
+        : plural(n, { one: "Re-rendered # clip", other: "Re-rendered # clips" })
+      : time !== null
+        ? plural(n, { one: `Rendered # clip in ${time}`, other: `Rendered # clips in ${time}` })
+        : plural(n, { one: "Rendered # clip", other: "Rendered # clips" });
+  const failed = Number(p["failed"]) || 0;
+  // separate facts after the sentence, each a message of its own
+  const ready = plural(total, { one: "# ready", other: "# ready" });
+  const failedText = failed ? `, ${plural(failed, { one: "# failed", other: "# failed" })}` : "";
+  return `${head} · ${ready}${failedText}${why && p["runReason"] !== "rerender" ? ` · ${why}` : ""}`;
 }
 
 export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null, olderExist = false): RunGroup[] {

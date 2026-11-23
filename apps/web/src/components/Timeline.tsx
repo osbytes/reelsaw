@@ -105,13 +105,14 @@ export const MODE_LABEL: Record<string, string> = labelsOf(MODE_MESSAGES);
 // dup-of: packages/shared/src/index.ts#contentLabel
 /** "Stack" for the whole frame, "Stack · content left 50%" for a region (the web copy of `contentLabel` in @reelsaw/shared). */
 function stackLabel(c: ContentRegion | undefined | null, tile?: ContentRegion | null): string {
-  const cam = tile ? i18n._(msg` · webcam`) : "";
-  if (!c || isFullFrame(c)) return i18n._(msg`Stack${cam}`);
+  // each fact is a label of its own; " · " separates them outside the messages
+  const cam = tile ? ` · ${i18n._(msg`webcam`)}` : "";
+  if (!c || isFullFrame(c)) return `${i18n._(msg`Stack`)}${cam}`;
   const side = contentSide(c);
   const pct = Math.round((c.x2 - c.x1) * 100);
-  if (side === "left") return i18n._(msg`Stack · content left ${pct}%${cam}`);
-  if (side === "right") return i18n._(msg`Stack · content right ${pct}%${cam}`);
-  return i18n._(msg`Stack · content inset ${pct}%${cam}`);
+  const region =
+    side === "left" ? i18n._(msg`content left ${pct}%`) : side === "right" ? i18n._(msg`content right ${pct}%`) : i18n._(msg`content inset ${pct}%`);
+  return `${i18n._(msg`Stack`)} · ${region}${cam}`;
 }
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"), a fit whether it showed an inset picture. */
 export const layoutLabel = (d: {
@@ -500,7 +501,7 @@ export function Timeline({
             </span>
             <span className="block truncate text-[10px] text-ink3">
               {b.name}
-              {b.source === "project" ? t` · project` : ""}
+              {b.source === "project" ? ` · ${t`project`}` : ""}
             </span>
           </span>
         )}

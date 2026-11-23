@@ -7,34 +7,6 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
 
-#: src/pages/Projects.tsx
-msgid " · {running} processing"
-msgstr " · {running} processing"
-
-#: src/lib/activity.ts
-msgid " · {total} ready"
-msgstr " · {total} ready"
-
-#: src/App.tsx
-msgid " · admin"
-msgstr " · admin"
-
-#: src/components/ClipEditor.tsx
-msgid " · needs re-render"
-msgstr " · needs re-render"
-
-#: src/ee/billing/BillingSection.tsx
-msgid " · over"
-msgstr " · over"
-
-#: src/components/Timeline.tsx
-msgid " · project"
-msgstr " · project"
-
-#: src/components/Timeline.tsx
-msgid " · webcam"
-msgstr " · webcam"
-
 #: src/pages/Deleted.tsx
 msgid " ({size} freed)"
 msgstr " ({size} freed)"
@@ -84,30 +56,6 @@ msgstr "… Run"
 #: src/pages/Project.tsx
 msgid "… Run {seq}"
 msgstr "… Run {seq}"
-
-#: src/components/SignupRules.tsx
-msgid "· also matches {alsoMatches}"
-msgstr "· also matches {alsoMatches}"
-
-#: src/components/SignupRules.tsx
-msgid "· flags {verdictFlags}"
-msgstr "· flags {verdictFlags}"
-
-#: src/components/ClipEditor.tsx
-msgid "· track from"
-msgstr "· track from"
-
-#: src/components/QueueSection.tsx
-msgid "· try {attempt}"
-msgstr "· try {attempt}"
-
-#: src/components/BumperField.tsx
-msgid "· used by {used}"
-msgstr "· used by {used}"
-
-#: src/components/BumperField.tsx
-msgid "· used by {used}, re-render to apply"
-msgstr "· used by {used}, re-render to apply"
 
 #. placeholder {0}: pending[0].title
 #. placeholder {1}: freed(pending[0].storedBytes)
@@ -551,11 +499,6 @@ msgstr "{0, plural, one {Transcript updated, re-rendering # clip} other {Transcr
 msgid "{0, plural, one {Used by # project; they keep rendering with it} other {Used by # projects; they keep rendering with it}}"
 msgstr "{0, plural, one {Used by # project; they keep rendering with it} other {Used by # projects; they keep rendering with it}}"
 
-#. placeholder {0}: p.slots.map(slotWord).join(" + ")
-#: src/components/BumperField.tsx
-msgid "{0} · project"
-msgstr "{0} · project"
-
 #. placeholder {0}: pickedAsset.name
 #: src/components/BumperCombobox.tsx
 msgid "{0} (deleted)"
@@ -874,6 +817,10 @@ msgstr "{facet}: {chosen}"
 msgid "{facts} · silent"
 msgstr "{facts} · silent"
 
+#: src/lib/activity.ts
+msgid "{failed, plural, one {# failed} other {# failed}}"
+msgstr "{failed, plural, one {# failed} other {# failed}}"
+
 #: src/lib/pendingToast.ts
 msgid "{failed}: {why}"
 msgstr "{failed}: {why}"
@@ -1170,6 +1117,14 @@ msgstr "{n, plural, one {match} other {matches}}"
 msgid "{n, plural, one {project} other {projects}}"
 msgstr "{n, plural, one {project} other {projects}}"
 
+#: src/lib/activity.ts
+msgid "{n, plural, one {Re-rendered # clip in {time}} other {Re-rendered # clips in {time}}}"
+msgstr "{n, plural, one {Re-rendered # clip in {time}} other {Re-rendered # clips in {time}}}"
+
+#: src/lib/activity.ts
+msgid "{n, plural, one {Re-rendered # clip} other {Re-rendered # clips}}"
+msgstr "{n, plural, one {Re-rendered # clip} other {Re-rendered # clips}}"
+
 #: src/components/TranscriptPanel.tsx
 msgid "{n, plural, one {re-rendering # clip} other {re-rendering # clips}}"
 msgstr "{n, plural, one {re-rendering # clip} other {re-rendering # clips}}"
@@ -1177,6 +1132,14 @@ msgstr "{n, plural, one {re-rendering # clip} other {re-rendering # clips}}"
 #: src/pages/AdminUsers.tsx
 msgid "{n, plural, one {Reinstated # account} other {Reinstated # accounts}}"
 msgstr "{n, plural, one {Reinstated # account} other {Reinstated # accounts}}"
+
+#: src/lib/activity.ts
+msgid "{n, plural, one {Rendered # clip in {time}} other {Rendered # clips in {time}}}"
+msgstr "{n, plural, one {Rendered # clip in {time}} other {Rendered # clips in {time}}}"
+
+#: src/lib/activity.ts
+msgid "{n, plural, one {Rendered # clip} other {Rendered # clips}}"
+msgstr "{n, plural, one {Rendered # clip} other {Rendered # clips}}"
 
 #: src/pages/AdminUsers.tsx
 msgid "{n, plural, one {Sent back to approval: # account} other {Sent back to approval: # accounts}}"
@@ -1320,17 +1283,13 @@ msgstr "{readyCount, plural, one {Export # clip} other {Export # clips}}"
 msgid "{readyCount} of {clipTotal} clips ready"
 msgstr "{readyCount} of {clipTotal} clips ready"
 
-#: src/lib/activity.ts
-msgid "{renderedThisRun, plural, one {Re-rendered # clip{tail}} other {Re-rendered # clips{tail}}}"
-msgstr "{renderedThisRun, plural, one {Re-rendered # clip{tail}} other {Re-rendered # clips{tail}}}"
-
-#: src/lib/activity.ts
-msgid "{renderedThisRun, plural, one {Rendered # clip{tail}} other {Rendered # clips{tail}}}"
-msgstr "{renderedThisRun, plural, one {Rendered # clip{tail}} other {Rendered # clips{tail}}}"
-
 #: src/components/QueueSection.tsx
 msgid "{retrying} retrying"
 msgstr "{retrying} retrying"
+
+#: src/pages/Projects.tsx
+msgid "{running, plural, one {# processing} other {# processing}}"
+msgstr "{running, plural, one {# processing} other {# processing}}"
 
 #: src/components/FleetSummary.tsx
 #: src/components/QueueSection.tsx
@@ -1517,6 +1476,10 @@ msgstr "{total, plural, one {# decision} other {# decisions}}"
 #: src/components/Webhooks.tsx
 msgid "{total, plural, one {# delivery} other {# deliveries}}"
 msgstr "{total, plural, one {# delivery} other {# deliveries}}"
+
+#: src/lib/activity.ts
+msgid "{total, plural, one {# ready} other {# ready}}"
+msgstr "{total, plural, one {# ready} other {# ready}}"
 
 #: src/components/ShareLinks.tsx
 msgid "{total, plural, one {# share link} other {# share links}}"
@@ -2225,6 +2188,7 @@ msgstr "Address {ip}"
 msgid "Address or range"
 msgstr "Address or range"
 
+#: src/App.tsx
 #: src/components/AccountSection.tsx
 #: src/pages/AdminUsers.tsx
 msgid "admin"
@@ -2391,6 +2355,10 @@ msgstr "Already off"
 #: src/components/ForgetDecisionsOption.tsx
 msgid "Also forget what Reelsaw learned from it"
 msgstr "Also forget what Reelsaw learned from it"
+
+#: src/components/SignupRules.tsx
+msgid "also matches {alsoMatches}"
+msgstr "also matches {alsoMatches}"
 
 #: src/pages/NewProject.tsx
 msgid "Also pulled from the video title, description and tags."
@@ -3558,6 +3526,18 @@ msgstr "Connect by signing in"
 #: src/pages/Settings.tsx
 msgid "Connected apps"
 msgstr "Connected apps"
+
+#: src/components/Timeline.tsx
+msgid "content inset {pct}%"
+msgstr "content inset {pct}%"
+
+#: src/components/Timeline.tsx
+msgid "content left {pct}%"
+msgstr "content left {pct}%"
+
+#: src/components/Timeline.tsx
+msgid "content right {pct}%"
+msgstr "content right {pct}%"
 
 #: src/components/ClipEditor.tsx
 msgid "Copied “{text}” · ⌘V pastes it at the playhead"
@@ -5190,6 +5170,10 @@ msgstr "flag"
 #: src/pages/AdminUsers.tsx
 msgid "Flag"
 msgstr "Flag"
+
+#: src/components/SignupRules.tsx
+msgid "flags {verdictFlags}"
+msgstr "flags {verdictFlags}"
 
 #: src/components/ClipCard.tsx
 msgid "Flow"
@@ -7069,6 +7053,10 @@ msgid "Needs approval; they are not told why"
 msgstr "Needs approval; they are not told why"
 
 #: src/components/ClipEditor.tsx
+msgid "needs re-render"
+msgstr "needs re-render"
+
+#: src/components/ClipEditor.tsx
 #: src/components/TranscriptPanel.tsx
 msgid "Needs review"
 msgstr "Needs review"
@@ -7970,6 +7958,10 @@ msgstr "Outro skipped: {reason}"
 msgid "clipmeta.outroLine"
 msgstr "Outro: {text}"
 
+#: src/ee/billing/BillingSection.tsx
+msgid "over"
+msgstr "over"
+
 #: src/pages/AdminUsers.tsx
 msgid "Over the limit"
 msgstr "Over the limit"
@@ -8420,7 +8412,9 @@ msgstr "Processing time"
 msgid "Profile"
 msgstr "Profile"
 
+#: src/components/BumperField.tsx
 #: src/components/QueueSection.tsx
+#: src/components/Timeline.tsx
 msgid "project"
 msgstr "project"
 
@@ -10606,20 +10600,8 @@ msgid "Square 1:1"
 msgstr "Square 1:1"
 
 #: src/components/Timeline.tsx
-msgid "Stack · content inset {pct}%{cam}"
-msgstr "Stack · content inset {pct}%{cam}"
-
-#: src/components/Timeline.tsx
-msgid "Stack · content left {pct}%{cam}"
-msgstr "Stack · content left {pct}%{cam}"
-
-#: src/components/Timeline.tsx
-msgid "Stack · content right {pct}%{cam}"
-msgstr "Stack · content right {pct}%{cam}"
-
-#: src/components/Timeline.tsx
-msgid "Stack{cam}"
-msgstr "Stack{cam}"
+msgid "Stack"
+msgstr "Stack"
 
 #: src/components/ProcessingTimes.tsx
 #: src/components/QueueSection.tsx
@@ -11484,6 +11466,10 @@ msgstr "top at {top}"
 msgid "Top of the processing queue"
 msgstr "Top of the processing queue"
 
+#: src/components/ClipEditor.tsx
+msgid "track from"
+msgstr "track from"
+
 #: src/components/TemplateEditor.tsx
 msgid "Track from"
 msgstr "Track from"
@@ -11540,6 +11526,10 @@ msgstr "Trial until {periodEnds}."
 #: src/components/SignupRules.tsx
 msgid "Try"
 msgstr "Try"
+
+#: src/components/QueueSection.tsx
+msgid "try {attempt}"
+msgstr "try {attempt}"
 
 #: src/components/SignupRules.tsx
 msgid "Try a sign-up"
@@ -11939,8 +11929,16 @@ msgid "Use this style for all {clipCount} clips?"
 msgstr "Use this style for all {clipCount} clips?"
 
 #: src/components/BumperField.tsx
+msgid "used by {used}"
+msgstr "used by {used}"
+
+#: src/components/BumperField.tsx
 msgid "Used by {used}"
 msgstr "Used by {used}"
+
+#: src/components/BumperField.tsx
+msgid "used by {used}, re-render to apply"
+msgstr "used by {used}, re-render to apply"
 
 #: src/components/BumperField.tsx
 msgid "Used by {used}, re-render to apply"
@@ -12108,6 +12106,10 @@ msgstr "We'll email a link if this address has an account."
 #: src/pages/NewProject.tsx
 msgid "Weak moments are dropped, so you might get 3 clips or 30."
 msgstr "Weak moments are dropped, so you might get 3 clips or 30."
+
+#: src/components/Timeline.tsx
+msgid "webcam"
+msgstr "webcam"
 
 #: src/components/ShareLinks.tsx
 msgid "webhook"

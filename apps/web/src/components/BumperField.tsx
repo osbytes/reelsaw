@@ -676,8 +676,8 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
     .join(" · ");
   const usedText = defaults
     ? applied
-      ? t`· used by ${used}, re-render to apply`
-      : t`· used by ${used}`
+      ? `· ${t`used by ${used}, re-render to apply`}`
+      : `· ${t`used by ${used}`}`
     : applied
       ? t`Used by ${used}, re-render to apply`
       : t`Used by ${used}`;
@@ -883,7 +883,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
               <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
                 {p.title}
               </Link>
-              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{t`${p.slots.map(slotWord).join(" + ")} · project`}</span>}
+              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{`${p.slots.map(slotWord).join(" + ")} · ${t`project`}`}</span>}
             </div>
             {p.clips.map((c) => (
               <div key={c.id} className="flex items-baseline gap-2 ps-3">

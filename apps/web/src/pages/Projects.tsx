@@ -284,7 +284,15 @@ export function ProjectsPage() {
             ) : stats.data && stats.data.total > 0 ? (
               <p className="mt-1 min-h-5 text-sm text-ink2">
                 <Plural value={stats.data.total} one="# project" other="# projects" />
-                {running ? t` · ${running} processing` : ""} · <Plural value={stats.data.clipsDone} one="# clip ready" other="# clips ready" />
+                {running ? (
+                  <>
+                    {" · "}
+                    <Plural value={running} one="# processing" other="# processing" />
+                  </>
+                ) : (
+                  ""
+                )}{" "}
+                · <Plural value={stats.data.clipsDone} one="# clip ready" other="# clips ready" />
               </p>
             ) : (
               <p className="mt-1 min-h-5" />

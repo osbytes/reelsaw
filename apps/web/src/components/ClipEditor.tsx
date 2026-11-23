@@ -682,7 +682,8 @@ function LayerCard({
         {l.kind === "audio" && (
           <>
             <span className="text-ink3">
-              <Trans>· track from</Trans>
+              {"· "}
+              <Trans>track from</Trans>
             </span>
             <TimeField label={t`Seconds into the track`} value={l.offset ?? 0} onCommit={(t) => onPatch({ offset: Math.max(0, t) })} />
           </>
@@ -2564,7 +2565,7 @@ export function ClipEditor(props: Props) {
         label={t`On-screen hook`}
         hint={
           <span className={hookChanged ? "text-warn" : ""}>
-            {hook.length}/80{hookChanged ? t` · needs re-render` : ""}
+            {hook.length}/80{hookChanged ? ` · ${t`needs re-render`}` : ""}
           </span>
         }
       >

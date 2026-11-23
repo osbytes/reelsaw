@@ -465,7 +465,8 @@ export function QueueSection() {
                         {j.attempt > 1 ? (
                           <span className="text-ink3">
                             {" "}
-                            <Trans>· try {attempt}</Trans>
+                            {"· "}
+                            <Trans>try {attempt}</Trans>
                           </span>
                         ) : null}
                         {j.lastError ? <span className="text-ink2"> · {j.lastError}</span> : null}

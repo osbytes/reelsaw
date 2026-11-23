@@ -257,7 +257,7 @@ export default function BillingSection() {
                         <dt className="text-xs font-semibold text-ink2">{label}</dt>
                         <dd className={`tabular-nums ${over ? "font-semibold text-warn" : "text-ink"}`}>
                           {cap(d.limits[key])} → {cap(d.afterCancel!.limits[key])}
-                          {over && t` · over`}
+                          {over && ` · ${t`over`}`}
                         </dd>
                       </div>
                     );

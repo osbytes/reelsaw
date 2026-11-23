@@ -334,13 +334,15 @@ export function SignupRulesSection() {
                 {verdict.matched.length > 1 && (
                   <span className="text-ink3">
                     {" "}
-                    <Trans>· also matches {alsoMatches}</Trans>
+                    {"· "}
+                    <Trans>also matches {alsoMatches}</Trans>
                   </span>
                 )}
                 {verdict.flags.length > 0 && (
                   <span className="text-ink3">
                     {" "}
-                    <Trans>· flags {verdictFlags}</Trans>
+                    {"· "}
+                    <Trans>flags {verdictFlags}</Trans>
                   </span>
                 )}
               </>
