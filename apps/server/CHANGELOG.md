@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.51.0
+
+### Minor Changes
+
+- [#365](https://github.com/osbytes/reelsaw/pull/365) [`36910ab`](https://github.com/osbytes/reelsaw/commit/36910abfbd292abfcb66bf5d3363aaea79e98bca) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Reelsaw is ready for other languages. Every string a person reads now comes from a message catalogue: the web app, the server's errors (each with a stable code and its parameters beside the sentence), notices, emails, MCP results, CLI lines and reelsaw.com. Numbers, sizes, amounts and dates are formatted for the reader's locale. Each account can choose its language and time zone under Settings → Account → Language and region, with `get_locale_preferences` / `set_locale_preferences` over MCP, or with `reelsaw locale-prefs <email>`; emails are written in the recipient's language, with dates in their time zone. English is the only language that ships today, and a translation is a pull request to the catalogues (docs/I18N.md).
+
+- [#366](https://github.com/osbytes/reelsaw/pull/366) [`ea41f38`](https://github.com/osbytes/reelsaw/commit/ea41f385297c950d3e61eefaa41b5ab0d1b73923) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Clip only the parts of a long video that matter. New project draws the video's length as a timeline before anything downloads: pick ranges on it (click, drag or type), take YouTube's Most replayed peaks as suggestions, and set each range to find clips inside it or to be the clip. Pipelines send the same ranges with `create_project { ranges, rangesFrom }`, `check_source` prices them, and `reelsaw create-project --range … --most-replayed n` does it from the CLI. Only the ranges are downloaded, transcribed, picked from and counted against minutes; each range's `ref` comes back on its clips, `get_project` and the `clip.done` / `clip.failed` webhooks. The project page shows the ranges with their clips and adds more (`extend_project { ranges }`), counting only new time.
+
+### Patch Changes
+
+- [#368](https://github.com/osbytes/reelsaw/pull/368) [`ab155fc`](https://github.com/osbytes/reelsaw/commit/ab155fc4a557208cb9b6d1935b0c50dbd6427869) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Fixes from a project audit. A link that streams with no announced size can no longer fill the disk: every yt-dlp download now stops once its file passes `MAX_SOURCE_FILE_MB`. Ranges added to a partly processed project past its processed start now give clips inside those ranges, not clips that end before they start, and a later "Clip the rest" counts only minutes not already counted for those ranges. Re-picking a project no longer makes a second clip for an exact range whose clip you edited. Error reports to Sentry leave out the visitor's address, request headers, cookies and bodies. Clips and zips taken through share links now count as downloads in product analytics. The hourly new-project count no longer counts an extension as a new project. Retrying plan refusals after an upgrade waits until a whole transcription chunk fits. A forged page link gets a clear error instead of a server error. The README, CLI reference, research notes and website now cover range clipping, output shapes, OpenCode and non-English videos.
+
 ## 0.50.0
 
 ### Minor Changes
