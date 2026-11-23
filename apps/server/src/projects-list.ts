@@ -7,6 +7,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzl
 import { listSortFirstDir, type ProjectSortKey, type ProjectStatus, type SortDir } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import { projectBumperSummaries } from "./library/service.js";
+import { coverageOf } from "./projects/ranges.js";
 import { pageOf, sortedKeyset, type SortColumn } from "./pagination.js";
 import { near, setSearchThreshold, words } from "./search.js";
 
@@ -97,6 +98,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
     db,
     rows.map((r) => r.id),
   );
+  const coverage = await coverageOf(db, rows);
   const stored = await storedBytesByProject(
     db,
     rows.map((r) => r.id),
@@ -128,6 +130,8 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
         thumbnailUrl: f?.firstThumbId ? `/media/clips/${p.id}/${f.firstThumbId}.jpg` : sourceThumb,
         deletedAt: p.deletedAt?.toISOString() ?? null,
         storedBytes: stored.get(p.id) ?? 0,
+        /** non-null: only part of the video is processed (ranges, or the start of a long one) */
+        coverage: coverage.get(p.id) ?? null,
       };
     }),
     nextCursor,

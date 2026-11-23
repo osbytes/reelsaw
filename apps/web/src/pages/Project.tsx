@@ -244,9 +244,10 @@ export function ProjectPage() {
     const chosen = (p?.ranges ?? []).filter((r) => r.origin !== "whole").sort((a, b) => a.startSec - b.startSec);
     if (!chosen.length) return [{ range: null, index: 0, clips: sortedClips }];
     const ids = new Set(chosen.map((r) => r.id));
-    const groups = chosen.map((range, index) => ({ range, index, clips: sortedClips.filter((c) => c.rangeId === range.id) }));
+    const groups = chosen.map((range, i) => ({ range, index: (range.number ?? i + 1) - 1, clips: sortedClips.filter((c) => c.rangeId === range.id) }));
     const rest = sortedClips.filter((c) => !c.rangeId || !ids.has(c.rangeId));
-    return [...groups.filter((g) => g.clips.length), ...(rest.length ? [{ range: null, index: 0, clips: rest }] : [])];
+    // a range picked with nothing in it keeps its heading, so it does not look like it was never clipped
+    return [...groups.filter((g) => g.clips.length || g.range.picked), ...(rest.length ? [{ range: null, index: 0, clips: rest }] : [])];
   }, [p, sortedClips]);
   // #range=<id> opens the page at that range's clips
   const rangeHash = typeof window !== "undefined" ? /^#range=([\w-]+)$/.exec(window.location.hash)?.[1] : undefined;
@@ -1144,6 +1145,11 @@ export function ProjectPage() {
         {clipGroups.map((g) => (
           <div key={g.range?.id ?? "rest"} className="flex flex-col gap-3">
             {g.range && <RangeHeading index={g.index} range={g.range} />}
+            {g.range && !g.clips.length && (
+              <p className="rounded-[10px] bg-sunk p-3 text-[13px] text-ink2">
+                <Trans>No moment in this range stood on its own. Select text in the transcript to make a clip from it.</Trans>
+              </p>
+            )}
             {g.clips.map((c) => (
               <ClipCard
                 key={c.id}

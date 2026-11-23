@@ -3,10 +3,10 @@
  * with the ranges to clip on it. Click or tap empty time to add a range, drag a range's ends (or focus one and use the
  * arrow keys) to change it. The list under it types exact times and picks each range's mode.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { RANGE_MIN_SEC, formatTime, parseClock, type RangeMode, type ReplayPeak } from "@reelsaw/shared";
+import { RANGE_MIN_SEC, formatTime, parseClock, peakMode, type RangeMode, type ReplayPeak } from "@reelsaw/shared";
 import { Segmented } from "./ui";
 
 /** A range being drawn on New project, before the project exists. */
@@ -29,11 +29,17 @@ function rangeAround(at: number, durationSec: number, len = NEW_RANGE_SEC): Draf
   return { key: newKey(), startSec: Math.round(startSec), endSec: Math.round(startSec + width), mode: "find" };
 }
 
-/** Tick marks every 1, 5, 10, 15 or 30 minutes, or every hour: whichever gives at most seven. */
-function ticks(durationSec: number): number[] {
-  const step = [60, 300, 600, 900, 1800, 3600, 7200].find((s) => durationSec / s <= 7) ?? 7200;
+/**
+ * Tick marks every 1, 5, 10, 15 or 30 minutes, or every hour: whichever gives at most `most` (one per ~70 px of track,
+ * so the narrow side panel on the project page gets fewer than New project).
+ */
+function ticks(durationSec: number, trackPx: number): number[] {
+  const most = trackPx ? Math.max(2, Math.min(7, Math.floor(trackPx / 70))) : 7;
+  // the length label at the end is ~64 px wide: no tick under it
+  const endGap = trackPx ? (durationSec * 64) / trackPx : durationSec / 8;
+  const step = [60, 300, 600, 900, 1800, 3600, 7200].find((s) => durationSec / s <= most) ?? 7200;
   const out: number[] = [];
-  for (let t = 0; t < durationSec - step / 3; t += step) out.push(t);
+  for (let t = 0; t < durationSec - Math.max(step / 3, endGap); t += step) out.push(t);
   return out;
 }
 
@@ -46,6 +52,7 @@ export function RangeTimeline({
   marks = [],
   peaks = [],
   readOnly = false,
+  numberFrom = 1,
 }: {
   durationSec: number;
   ranges: DraftRange[];
@@ -60,9 +67,19 @@ export function RangeTimeline({
   peaks?: readonly ReplayPeak[];
   /** drawn only: no range is added or moved (the project page until "Add a range") */
   readOnly?: boolean;
+  /** the number of the first new range: after the ones a project already has, so theirs never change */
+  numberFrom?: number;
 }) {
   const { t } = useLingui();
   const track = useRef<HTMLDivElement>(null);
+  const [trackPx, setTrackPx] = useState(0);
+  useEffect(() => {
+    const el = track.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTrackPx(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [drag, setDrag] = useState<{ key: string; end: "start" | "end" } | null>(null);
   const pct = (s: number) => `${Math.max(0, Math.min(100, (s / durationSec) * 100))}%`;
   const at = (clientX: number) => {
@@ -132,7 +149,7 @@ export function RangeTimeline({
         )}
         {!whole &&
           sorted.map((r, i) => {
-            const n = i + 1;
+            const n = i + numberFrom;
             return (
               <div
                 key={r.key}
@@ -154,8 +171,9 @@ export function RangeTimeline({
                       aria-valuemax={Math.round(durationSec)}
                       aria-valuenow={Math.round(value)}
                       aria-valuetext={formatTime(value)}
-                      // 44 px to grab on a phone, a thin bar to see
-                      className={`absolute inset-y-0 z-[1] flex w-11 cursor-ew-resize touch-none items-center justify-center ${end === "start" ? "-start-[22px]" : "-end-[22px]"}`}
+                      // 44 px to grab on a phone, a thin bar to see; each reaches mostly outward, so a range a few
+                      // pixels wide (minutes of a long video on a phone) still has a start and an end to take
+                      className={`absolute inset-y-0 z-[1] flex w-11 cursor-ew-resize touch-none items-center ${end === "start" ? "-start-[33px] justify-end pe-[8px]" : "-end-[33px] justify-start ps-[8px]"}`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         track.current?.setPointerCapture(e.pointerId);
@@ -178,7 +196,7 @@ export function RangeTimeline({
           })}
       </div>
       <div aria-hidden="true" className="relative h-4 font-mono text-[11px] text-ink3">
-        {ticks(durationSec).map((s) => (
+        {ticks(durationSec, trackPx).map((s) => (
           <span key={s} className="absolute top-0" style={{ insetInlineStart: pct(s) }}>
             {formatTime(s)}
           </span>
@@ -215,7 +233,18 @@ function ClockField({ value, onCommit, label }: { value: number; onCommit: (sec:
 }
 
 /** The ranges as rows: their times (typed), length, mode and remove; then a row that adds one by its times. */
-export function RangeList({ durationSec, ranges, onChange }: { durationSec: number; ranges: DraftRange[]; onChange: (next: DraftRange[]) => void }) {
+export function RangeList({
+  durationSec,
+  ranges,
+  onChange,
+  numberFrom = 1,
+}: {
+  durationSec: number;
+  ranges: DraftRange[];
+  onChange: (next: DraftRange[]) => void;
+  /** the number of the first range listed (RangeTimeline's `numberFrom`) */
+  numberFrom?: number;
+}) {
   const { t } = useLingui();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -244,7 +273,7 @@ export function RangeList({ durationSec, ranges, onChange }: { durationSec: numb
         </p>
       )}
       {sorted.map((r, i) => {
-        const n = i + 1;
+        const n = i + numberFrom;
         return (
           <div key={r.key} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-line border-b py-2.5">
             <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-acc px-1.5 text-xs font-bold text-acc-ink">{n}</span>
@@ -261,7 +290,7 @@ export function RangeList({ durationSec, ranges, onChange }: { durationSec: numb
                 onCommit={(s) => set(r.key, { endSec: Math.min(durationSec, Math.max(s, r.startSec + RANGE_MIN_SEC)) })}
               />
             </div>
-            <span className="min-w-16 text-[13px] text-ink3">{formatTime(r.endSec - r.startSec)}</span>
+            <span className="text-[13px] text-ink3 tabular-nums">{formatTime(r.endSec - r.startSec)}</span>
             <Segmented
               size="sm"
               className="ms-auto"
@@ -317,16 +346,28 @@ export function RangeList({ durationSec, ranges, onChange }: { durationSec: numb
 }
 
 /**
- * The video's Most replayed peaks as chips, hottest first: each adds that stretch as an exact clip, or takes it away
+ * The video's Most replayed peaks as chips, hottest first: each adds that stretch (as the clip when it fits, `peakMode`), or takes it away
  * again. Nothing when the site has no heatmap.
  */
-export function PeakChips({ peaks, ranges, onChange }: { peaks: readonly ReplayPeak[]; ranges: DraftRange[]; onChange: (next: DraftRange[]) => void }) {
+export function PeakChips({
+  peaks,
+  ranges,
+  onChange,
+  maxClipSec,
+}: {
+  peaks: readonly ReplayPeak[];
+  ranges: DraftRange[];
+  onChange: (next: DraftRange[]) => void;
+  /** the project's longest clip: a peak that fits is added as the clip, a longer one as a range to find moments in */
+  maxClipSec: number;
+}) {
   const { t } = useLingui();
   if (!peaks.length) return null;
   const isOn = (p: ReplayPeak) => ranges.some((r) => r.startSec === p.startSec && r.endSec === p.endSec);
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="me-1 text-xs font-semibold text-ink3">
+    // one row that scrolls sideways on a phone (ten chips would take four rows above the timeline); wraps when wider
+    <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
+      <span className="me-1 shrink-0 text-xs font-semibold text-ink3">
         <Trans>Most replayed</Trans>
       </span>
       {peaks.map((p, i) => {
@@ -338,12 +379,12 @@ export function PeakChips({ peaks, ranges, onChange }: { peaks: readonly ReplayP
             type="button"
             aria-pressed={on}
             aria-label={t`Most replayed #${n}`}
-            className={`flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink"}`}
+            className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink"}`}
             onClick={() =>
               onChange(
                 on
                   ? ranges.filter((r) => !(r.startSec === p.startSec && r.endSec === p.endSec))
-                  : [...ranges, { key: newKey(), startSec: p.startSec, endSec: p.endSec, mode: "clip" }],
+                  : [...ranges, { key: newKey(), startSec: p.startSec, endSec: p.endSec, mode: peakMode(p, maxClipSec) }],
               )
             }
           >

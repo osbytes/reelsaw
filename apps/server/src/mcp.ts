@@ -131,6 +131,8 @@ export function createMcpServer(
     sourceUrl: p.sourceUrl,
     durationSec: p.durationSec,
     clips: `${p.clipsDone}/${p.clipCount} rendered`,
+    // only part of the video is processed: how much, and how many ranges were chosen (get_project has them)
+    ...(p.coverage ? { processed: { seconds: Math.round(p.coverage.sec), ranges: p.coverage.ranges } } : {}),
     createdAt: p.createdAt,
     ...(p.deletedAt ? { deletedAt: p.deletedAt, storedBytes: p.storedBytes, purgeAt: p.purgeAt } : {}),
     url: abs(`/p/${p.id}`),

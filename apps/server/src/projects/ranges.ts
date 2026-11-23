@@ -2,10 +2,10 @@
  * A project's ranges (docs/specs/range-clipping.md) as every surface shows them: get_project, the project page, the
  * CLI, and the range a clip and its webhooks name.
  */
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { msg } from "@lingui/core/runtime-macro";
 import type { MessageDescriptor } from "@lingui/core";
-import { formatTime, type RangeProblem } from "@reelsaw/shared";
+import { formatTime, rangeCoverage, spansSec, transcriptSpans, type RangeCoverage, type RangeProblem } from "@reelsaw/shared";
 import { AppError, t } from "../i18n.js";
 import { type Db, schema } from "../db/index.js";
 import type { ProjectRange } from "../db/schema.js";
@@ -15,10 +15,61 @@ export function projectRangesOf(db: Db, projectId: string): Promise<ProjectRange
   return db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, projectId)).orderBy(asc(schema.projectRanges.startSec));
 }
 
+/**
+ * How much of its video each of these projects processes, for list rows (Projects page, ⌘K, list_projects): one query
+ * over the page's ids. A project missing from the map processes all of its video (`rangeCoverage`).
+ */
+export async function coverageOf(db: Db, projects: ReadonlyArray<{ id: string; durationSec: number | null }>): Promise<Map<string, RangeCoverage>> {
+  const ids = projects.filter((p) => p.durationSec).map((p) => p.id);
+  if (!ids.length) return new Map();
+  const R = schema.projectRanges;
+  const rows = await db.select({ projectId: R.projectId, startSec: R.startSec, endSec: R.endSec, origin: R.origin }).from(R).where(inArray(R.projectId, ids));
+  const byProject = new Map<string, typeof rows>();
+  for (const r of rows) byProject.set(r.projectId, [...(byProject.get(r.projectId) ?? []), r]);
+  const out = new Map<string, RangeCoverage>();
+  for (const p of projects) {
+    const c = rangeCoverage(byProject.get(p.id) ?? [], p.durationSec);
+    if (c) out.set(p.id, c);
+  }
+  return out;
+}
+
+/**
+ * Seconds of source each project actually transcribes and analyzes: its ranges with their context padding, or the
+ * whole length when it has no ranges. What the stage time estimates scale by (pipeline/estimates.ts), so a project of
+ * three short ranges of a long video is neither expected to take as long as the video nor teaches the estimates that
+ * stages are that fast per second of video.
+ */
+export async function processedSecOf(db: Db, projects: ReadonlyArray<{ id: string; durationSec: number | null }>): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = projects.filter((p) => p.durationSec).map((p) => p.id);
+  if (!ids.length) return out;
+  const R = schema.projectRanges;
+  const rows = await db.select({ projectId: R.projectId, startSec: R.startSec, endSec: R.endSec, origin: R.origin }).from(R).where(inArray(R.projectId, ids));
+  for (const p of projects) {
+    if (!p.durationSec) continue;
+    const mine = rows.filter((r) => r.projectId === p.id);
+    out.set(p.id, mine.length ? Math.min(p.durationSec, spansSec(transcriptSpans(mine, p.durationSec))) : p.durationSec);
+  }
+  return out;
+}
+
+/**
+ * A project's ranges as get_project returns them, in source order. `number` is the range's number on every surface (1,
+ * 2, … in the order they were added, then by time), so a range added later never renumbers the ones before it;
+ * null for a `whole` part.
+ */
+export function publicRanges(rows: readonly ProjectRange[]) {
+  const numbered = rows.filter((r) => r.origin !== "whole").sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.startSec - b.startSec);
+  const number = new Map(numbered.map((r, i) => [r.id, i + 1]));
+  return rows.map((r) => publicRange(r, number.get(r.id) ?? null));
+}
+
 /** One range as get_project returns it. `picked`: moments were picked in it (or its exact clip made). */
-export function publicRange(r: ProjectRange) {
+function publicRange(r: ProjectRange, number: number | null) {
   return {
     id: r.id,
+    number,
     startSec: r.startSec,
     endSec: r.endSec,
     mode: r.mode,

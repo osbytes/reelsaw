@@ -118,7 +118,7 @@ export const TOOLS = {
   list_projects: {
     title: "List projects",
     description:
-      'Your projects, most recently updated first (the Projects page). q, status, sort and dir narrow and order every match. Returns { projects: [{ id, title, status, stage, clips: "n/m rendered", url }], total, nextCursor }; pass nextCursor as cursor (same q, status, sort) for more. deleted: true lists restorable deletes; list_deleted has every kind. get_project has a project’s clips, search_clips finds clips by words.',
+      'Your projects, most recently updated first (the Projects page). q, status, sort and dir narrow and order every match. Returns { projects: [{ id, title, status, stage, clips: "n/m rendered", processed?, url }], total, nextCursor } (processed { seconds, ranges }: only part of the video was clipped); pass nextCursor as cursor (same q, status, sort) for more. deleted: true lists restorable deletes; list_deleted has every kind. get_project has a project’s clips, search_clips finds clips by words.',
     inputSchema: projectListShape,
     annotations: { readOnlyHint: true },
   },

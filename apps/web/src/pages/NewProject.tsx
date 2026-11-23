@@ -28,6 +28,7 @@ import {
   type ReplayPeak,
   type Style,
   formatTime,
+  RANGE_PAD_SEC,
 } from "@reelsaw/shared";
 import { PeakChips, RangeList, RangeTimeline, type DraftRange } from "../components/RangeTimeline";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
@@ -448,7 +449,9 @@ export function NewProjectPage() {
                 </div>
                 {lengthSec ? (
                   <>
-                    {scope === "ranges" && <PeakChips peaks={check.data?.mostReplayed ?? []} ranges={ranges} onChange={setRanges} />}
+                    {scope === "ranges" && (
+                      <PeakChips peaks={check.data?.mostReplayed ?? []} ranges={ranges} onChange={setRanges} maxClipSec={s.maxClipSeconds} />
+                    )}
                     <RangeTimeline
                       durationSec={lengthSec}
                       ranges={ranges}
@@ -810,18 +813,19 @@ export function NewProjectPage() {
 
       <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
-          <span className="min-w-0 flex-1 text-[13px] text-ink2">
+          {/* a phone gives the summary its own line above the buttons; wider screens keep one row */}
+          <div className="min-w-0 basis-full text-[13px] text-ink2 sm:basis-0 sm:flex-1">
             {create.error ? (
               <QuotaNotice message={create.error.message} quota={quotaFromError(create.error)} />
             ) : uploadPct !== null ? (
               t`Uploading… ${uploadPctText}%`
             ) : (
-              <span className="truncate">{summary}</span>
+              <span className="block truncate">{summary}</span>
             )}
-          </span>
+          </div>
           <button
             type="button"
-            className="btn-quiet text-xs"
+            className="btn-quiet ms-auto text-xs sm:ms-0"
             title={t`Keep these settings for every new project`}
             disabled={busy || saveDefaults.isPending}
             onClick={() =>
@@ -938,14 +942,15 @@ function RangesFit({ fit, lengthSec, pending }: { fit: SourceCheck | undefined; 
   const counted = formatTime(r?.seconds ?? 0);
   const total = formatTime(lengthSec);
   const skipped = Math.max(0, Math.round(100 - ((r?.seconds ?? 0) / lengthSec) * 100));
+  const pad = RANGE_PAD_SEC;
   return (
     <div className="flex min-h-[44px] flex-col gap-1.5 rounded-[12px] bg-sunk p-3 text-[13px]" aria-live="polite">
       {r ? (
         <>
           <div className={pending ? "text-ink3" : "text-ink"}>
             <Trans>
-              <b>{counted}</b> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not
-              counted.
+              <b>{counted}</b> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with {pad} s of context on both sides,
+              not counted.
             </Trans>
           </div>
           {r.changes.map((c) => (
