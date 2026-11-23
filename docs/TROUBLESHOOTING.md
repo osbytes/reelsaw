@@ -429,15 +429,20 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   Each download already has its own IP, so a modest `concurrency` (2–4) is safe; `concurrency=1`
   is only required on a single home Pi.
 
-  **Clip windows need an HTTP proxy.** On a plan with a source cap (hosted Free: `sourceHeight` 240 in
+  **Clip windows and ranges need an HTTP(S) proxy.** On a plan with a source cap (hosted Free: `sourceHeight` 240 in
   `ee/billing/plans.ts`) a link is downloaded as a small preview, and each clip renders from a 1080p window of the
   link (`--download-sections`, `pipeline/windows.ts`), stored and reused by later rerenders. Windows are fetched
   one at a time per project (a session lock), so parallel renders reuse each other's download. The first fetch
   covers every not-yet-covered clip within 15 s of the one rendering (up to 10 minutes), and a clip that later
   reaches past its window fetches only the missing stretch, joined to the stored part locally (a short re-encode,
   no proxy bytes). yt-dlp
-  hands those windows to ffmpeg, which cannot use SOCKS, so the pool skips `socks` candidates for them and they
-  go through the next HTTP candidate (often the paid gateway). Give the Pi an HTTP proxy as well
+  hands those windows, and a project's ranges (`ranges`, `rangesFrom: { mostReplayed }`), to ffmpeg, which honours
+  only `http://` proxies. An `https://` candidate is reached through a localhost bridge (`src/proxy-bridge.ts`),
+  so ffmpeg leaves through the same exit yt-dlp resolved the media URL on; without it ffmpeg went straight out from
+  the server's IP and the site refused the signed URL ("ffmpeg exited with code 1", `Server returned 403
+  Forbidden`). SOCKS cannot be bridged, so the pool skips `socks` candidates for them and they go through the next
+  HTTP(S) candidate (often the paid gateway); with only SOCKS candidates a ranges project fails with "this server
+  cannot fetch only parts of a video". Give the Pi an HTTP proxy as well
   (`tinyproxy`, or `gost -L http://100.x.x.x:8888`) and list it next to the SOCKS one, e.g.
   `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,pi-http=http://100.64.1.10:8888;priority=19;concurrency=1,...`.
   The `source.section_fetched` event (with `downloadedSec`, `clips` and `stitched`) and the

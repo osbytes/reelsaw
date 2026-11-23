@@ -378,7 +378,6 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
       ],
       {
         signal: ctx.signal,
-        sections: true,
         download: { dir, maxFileBytes: svc.settings.get().MAX_SOURCE_FILE_MB * 1024 * 1024 },
         onStderr: (line) => {
           stderrTail = `${stderrTail}\n${line}`.slice(-4000);
@@ -387,7 +386,7 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
     )
     .catch((err: Error) => {
       if (err instanceof NoEligibleProxyError)
-        throw new WindowUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP proxy or direct)");
+        throw new WindowUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP or HTTPS proxy, or direct)");
       const message = describeDownloadFailure(err, stderrTail);
       const text = `${err.message}\n${stderrTail}`;
       // gone for good, or the site is turning us away (every exit already tried): render from the preview copy now
