@@ -30,7 +30,8 @@ import { type StageContext, DownloadFailedError, NonRetryableError, SourceUnavai
 import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 import { CommandError, DownloadTooLargeError } from "../media.js";
-import { BOT_CHECK, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
+import { BOT_CHECK, FFMPEG_REFUSED, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
+import { NoEligibleProxyError } from "../ytdlp-proxy.js";
 import { ENCODE_PASS_CPU } from "../resources.js";
 
 export { isPermanentDownloadFailure } from "../ytdlp-errors.js";
@@ -263,6 +264,8 @@ export async function ingest(ctx: StageContext) {
           .catch((err: Error) => {
             ctx.signal.throwIfAborted();
             if (oversize.signal.aborted || err instanceof DownloadTooLargeError) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
+            // this server's download route cannot fetch parts of a video: say so, not "the site blocked it"
+            if (err instanceof NoEligibleProxyError) throw new DownloadFailedError(NO_SECTION_ROUTE_MESSAGE);
             const message = describeDownloadFailure(err, stderrTail);
             // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
             if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
@@ -607,6 +610,10 @@ function sizeBytes(s: string): number | null {
   return m ? Number(m[1]) * SIZE_UNITS[m[2]!]! : null;
 }
 
+/** A project with ranges on a server whose download route cannot fetch parts of a video (SOCKS-only YTDLP_PROXY). */
+const NO_SECTION_ROUTE_MESSAGE =
+  "Could not download: this server cannot fetch only parts of a video, so the ranges could not be downloaded. Clip the whole video instead, or upload the file (New project → Upload).";
+
 /**
  * yt-dlp failures in plain words for every user. No env keys or ops advice here — those are
  * admin-only in the UI (`summarizeError({ admin: true })`). Datacentre IPs are often refused by
@@ -617,7 +624,7 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
   if (/Tunnel connection failed|ProxyError|407\s*NO_USER|Unable to connect to proxy/i.test(text)) {
     return "Could not download: a network proxy blocked the connection. Try uploading the file instead (New project → Upload).";
   }
-  if (BOT_CHECK.test(text) || /HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
+  if (BOT_CHECK.test(text) || FFMPEG_REFUSED.test(text) || /HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
     const why = /private/i.test(text)
       ? "the video is private"
       : /unavailable/i.test(text)

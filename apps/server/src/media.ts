@@ -7,7 +7,7 @@ import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
 import type { Logger } from "./log.js";
 import { parseSceneScores, pickSceneCuts } from "./pipeline/scenes.js";
-import { createYtdlpProxyPool, ffmpegCanUse, parseYtdlpProxies, type ProxySnapshot } from "./ytdlp-proxy.js";
+import { createYtdlpProxyPool, ffmpegCanUse, parseYtdlpProxies, withFfmpegProxy, type ProxySnapshot } from "./ytdlp-proxy.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,7 +46,6 @@ export class DownloadTooLargeError extends Error {
 }
 
 export type YtdlpOptions = RunOptions & {
-  sections?: boolean;
   download: { dir: string; maxFileBytes: number } | "none";
 };
 
@@ -268,7 +267,10 @@ export interface MediaTools {
   videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
   /** `proxyId`: the YTDLP_PROXY candidate that served it, "direct" with no pool, "explicit" when `args` carry `--proxy` */
-  /** `sections`: the download uses `--download-sections` (ffmpeg fetches it), so only HTTP proxies or direct can serve it */
+  /**
+   * `--download-sections` in `args` makes ffmpeg fetch the media, so the proxy is chosen for ffmpeg (`withFfmpegProxy`:
+   * an https:// proxy through a localhost bridge, SOCKS never); read from the arguments so no caller can forget it.
+   */
   /**
    * `download`: where the files land and the most one file may grow to, or "none" for a lookup (`--no-download`).
    * Required because `--max-filesize` only refuses a size the server announces: a link that streams with no length
@@ -479,7 +481,8 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
     encoder: () => encoder,
     videoEncodeArgs: (enc = encoder.name) => videoEncodeArgs(enc),
     ytdlpProxies: () => ytdlpPool.snapshot(),
-    async ytdlp(args, { download, sections, ...opts }) {
+    async ytdlp(args, { download, ...opts }) {
+      const sections = args.includes("--download-sections");
       const cookies = config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : [];
       // YouTube n-sig / PO tokens: eval already passes this; ingest and issue-report must too
       const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
@@ -505,7 +508,12 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
           return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], { ...opts, signal })), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
         }
         const { value, id } = await ytdlpPool.run(
-          (choice, s) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal: s }),
+          (choice, s) =>
+            sections
+              ? withFfmpegProxy(choice.url, (proxy) =>
+                  run(config.YTDLP_PATH, [...(proxy === null ? [] : ["--proxy", proxy]), ...prefix, ...args], { ...opts, signal: s }),
+                )
+              : run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal: s }),
           signal,
           sections ? { accept: ffmpegCanUse } : undefined,
         );
