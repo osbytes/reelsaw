@@ -64,8 +64,11 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       range shorter than the shortest clip holds a clip that runs into its padding). A whole-range project keeps the
       extension path; ranges added to a project picked from before converge like an extension (end-to-end with 2.1,
       which is what adds them).
-- [ ] 1.6 `assertWithinProcessed` (clips/service.ts) checks the clip lies inside a processed range, not before
-      `processedEndSec`. `processedEndSec` and the `PartialSource` sentence read the ranges.
+- [x] 1.6 Clip bounds (`assertWithinProcessed`, clips/service.ts) check the ranges and covered spans since 1.4: a clip
+      outside them is refused ("outside this project's ranges"), one in a range still transcribing waits. A ranges
+      project never gets `source_limit_sec` (ingest sets it only for a whole video), so `processedEndSec`,
+      `partialSourceOf`, the "Clip the rest" sentence and the after-upgrade follow-up treat it as not partial, which
+      it is not. Left for 2.1: `extend_project` on a ranges project still answers "already covers the whole video".
 - [ ] 1.7 Surfaces, one service call each:
       tRPC `projects.create` / MCP `create_project` / `reelsaw create-project --range a-b[:clip]` take `ranges`;
       MCP `check_source` and `projects.checkSource` return the plan (`ranges`, `changes`); `get_project` returns
@@ -83,7 +86,8 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
 
 Goal: a finished project grows by ranges; today's "Clip the rest" is one of them.
 
-- [ ] 2.1 `extendProject(svc, actor, id, { ranges? })`: plans the new ranges against the processed ones (only
+- [ ] 2.1 `extendProject(svc, actor, id, { ranges? })` (replacing its "already covers the whole video" answer for a
+      ranges project): plans the new ranges against the processed ones (only
       new time is billed, `recordSourceExtension` with that), inserts them with the new `run_id`, and starts the run
       from transcribe (or ingest when the source expired). No ranges: today's next-part range from `partialUntil`.
       `after-upgrade.ts` `finishPartialWork` unchanged in behaviour.
