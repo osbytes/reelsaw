@@ -12,7 +12,8 @@ import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { QuotaError, trackQuotaRefusal } from "./quota.js";
 import { and, inArray } from "drizzle-orm";
-import { defaultStyle, resolveFraming, resolveStyle, plural } from "@reelsaw/shared";
+import { defaultStyle, resolveFraming, resolveStyle } from "@reelsaw/shared";
+import { msg, plural } from "@lingui/core/runtime-macro";
 import { exportPlan } from "./export.js";
 import { readClip } from "./clips/service.js";
 import type { Services } from "./services.js";
@@ -25,6 +26,7 @@ import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from 
 import { assetVisibleTo } from "./library/visible.js";
 import type { TranscriptFlag } from "@reelsaw/shared";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
+import { AppError, scopeAccount, t as tr } from "./i18n.js";
 
 import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
@@ -46,10 +48,18 @@ function mmss(s: number) {
 /** The follow-up for a settings change that re-renders: `skipped` clips were still preparing or rendering and finish with the old settings. */
 function rerenderHint(rerendered: number, skipped: number): string {
   const base = rerendered
-    ? `Re-rendering ${plural(rerendered, "clip")}; follow with wait_for_project.`
-    : "No finished clips to re-render; the next render uses it.";
+    ? tr(msg`Re-rendering ${plural({ rerendered }, { one: "# clip", other: "# clips" })}; follow with wait_for_project.`)
+    : tr(msg`No finished clips to re-render; the next render uses it.`);
   return skipped
-    ? `${base} ${plural(skipped, "clip")} were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.`.trim()
+    ? `${base} ${tr(
+        msg`${plural(
+          { skipped },
+          {
+            one: "# clip were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.",
+            other: "# clips were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.",
+          },
+        )}`,
+      )}`.trim()
     : base;
 }
 
@@ -245,7 +255,7 @@ export function createMcpServer(
             stageDetail: p.stageDetail,
             error: p.error,
             clips: p.clips.map((c) => ({ id: c.id, title: c.title, status: c.status })),
-            ...(finished ? {} : { hint: "Still running. Call wait_for_project again." }),
+            ...(finished ? {} : { hint: tr(msg`Still running. Call wait_for_project again.`) }),
           };
         }
         await new Promise((r) => setTimeout(r, 2000));
@@ -285,7 +295,7 @@ export function createMcpServer(
   server.registerTool("import_transcript", TOOLS.import_transcript, ({ id, text: body, uploadId, url, format, language }) =>
     run(async () => {
       if ([body, uploadId, url].filter((v) => v !== undefined).length !== 1)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Give exactly one of text, uploadId or url" });
+        throw new AppError("BAD_REQUEST", msg({ id: "mcp.import_transcript.one_source", message: "Give exactly one of text, uploadId or url" }));
       // a link is fetched here (public addresses only) and passed on as text, so the procedure has one input path
       return api.projects.importTranscript({ id, text: url ? await fetchSubtitleText(url) : body, uploadId, format, language });
     }),
@@ -316,7 +326,7 @@ export function createMcpServer(
           videoUrl: abs(c.videoUrl),
           editorUrl: abs(`/p/${c.projectId}/clips/${c.id}`),
         })),
-        ...(r.truncated ? { truncated: true, hint: "More matched than shown; use a more specific query." } : {}),
+        ...(r.truncated ? { truncated: true, hint: tr(msg`More matched than shown; use a more specific query.`) } : {}),
       };
     }),
   );
@@ -336,10 +346,13 @@ export function createMcpServer(
       const p = await api.projects.get({ id: found.projectId });
       const clip = p.clips.find((x) => x.id === id);
       if (!clip)
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `This clip was deleted or replaced by a re-analyze. restore_clip brings it back (possible ${restorableFor(svc)} after that).`,
-        });
+        throw new AppError(
+          "NOT_FOUND",
+          msg({
+            id: "mcp.get_clip.gone",
+            message: msg`This clip was deleted or replaced by a re-analyze. restore_clip brings it back (possible ${{ window: restorableFor(svc) }} after that).`,
+          }),
+        );
       const ownStyle = clip.style && Object.keys(clip.style).length ? clip.style : null;
       const effectiveStyle = resolveStyle(p.settings, clip.style);
       const projectStyle = resolveStyle(p.settings);
@@ -398,7 +411,7 @@ export function createMcpServer(
       return {
         ...clipSummary(clip),
         queued,
-        hint: "Created. It gets its title and renders in the background (about a minute); poll get_clip until status is done.",
+        hint: tr(msg`Created. It gets its title and renders in the background (about a minute); poll get_clip until status is done.`),
       };
     }),
   );
@@ -424,8 +437,8 @@ export function createMcpServer(
         ...r,
         hint:
           r.step === "prepare"
-            ? "This clip never got its AI title, so it is prepared first and renders after. Poll get_clip."
-            : "Queued. The new video replaces the old when done; poll get_clip.",
+            ? tr(msg`This clip never got its AI title, so it is prepared first and renders after. Poll get_clip.`)
+            : tr(msg`Queued. The new video replaces the old when done; poll get_clip.`),
       };
     }),
   );
@@ -437,7 +450,15 @@ export function createMcpServer(
         ...r,
         ...(r.skipped
           ? {
-              hint: `${plural(r.skipped, "clip")} were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).`,
+              hint: tr(
+                msg`${plural(
+                  { skipped: r.skipped },
+                  {
+                    one: "# clip were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).",
+                    other: "# clips were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).",
+                  },
+                )}`,
+              ),
             }
           : {}),
       };
@@ -450,7 +471,11 @@ export function createMcpServer(
       const want = clipIds?.length ? new Set(clipIds) : null;
       const picked = project.clips.filter((c) => !want || want.has(c.id));
       const unknown = clipIds?.filter((x) => !project.clips.some((c) => c.id === x)) ?? [];
-      if (unknown.length) throw new TRPCError({ code: "NOT_FOUND", message: `Not clips of this project: ${unknown.join(", ")}. get_project lists its clips.` });
+      if (unknown.length)
+        throw new AppError(
+          "NOT_FOUND",
+          msg({ id: "mcp.clips.not_of_project", message: msg`Not clips of this project: ${{ ids: unknown.join(", ") }}. get_project lists its clips.` }),
+        );
       const clips = [];
       for (const c of picked) {
         if (c.status !== "done") {
@@ -472,7 +497,7 @@ export function createMcpServer(
       return {
         clips,
         ...(exportLink ? { export: { linkId: exportLink.id, url: exportLink.url, expiresAt: exportLink.expiresAt } } : {}),
-        hint: "Anyone with a link can download the file until it expires; revoke_media_link turns it off.",
+        hint: tr(msg`Anyone with a link can download the file until it expires; revoke_media_link turns it off.`),
       };
     }),
   );
@@ -487,7 +512,11 @@ export function createMcpServer(
   server.registerTool("revoke_media_link", TOOLS.revoke_media_link, ({ linkId, clipId, projectId, all }) =>
     run(async () => {
       const given = [linkId, clipId, projectId, all].filter((v) => v !== undefined).length;
-      if (given !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Give exactly one of linkId, clipId, projectId or all: true" });
+      if (given !== 1)
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({ id: "mcp.revoke_media_link.one_target", message: "Give exactly one of linkId, clipId, projectId or all: true" }),
+        );
       return api.mediaLinks.revoke(linkId ? { linkId } : clipId ? { clipId } : projectId ? { projectId } : { all: true });
     }),
   );
@@ -502,7 +531,11 @@ export function createMcpServer(
   server.registerTool("create_webhook", TOOLS.create_webhook, (input) =>
     run(async () => {
       const r = await api.webhooks.create(input);
-      return { endpoint: endpointSummary(r.endpoint), secret: r.secret, hint: "Keep the secret: it is not shown again. test_webhook sends a test delivery." };
+      return {
+        endpoint: endpointSummary(r.endpoint),
+        secret: r.secret,
+        hint: tr(msg`Keep the secret: it is not shown again. test_webhook sends a test delivery.`),
+      };
     }),
   );
   server.registerTool("update_webhook", TOOLS.update_webhook, (input) =>
@@ -539,7 +572,7 @@ export function createMcpServer(
           linkId: l.id,
           expiresAt: l.expiresAt,
           ...summary,
-          hint: "Anyone with the link can download the zip until it expires; revoke_media_link turns it off.",
+          hint: tr(msg`Anyone with the link can download the zip until it expires; revoke_media_link turns it off.`),
         };
       }
       return { url: abs(`/api/projects/${plan.project.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`), shared: false, ...summary };
@@ -549,9 +582,13 @@ export function createMcpServer(
   server.registerTool("report_issue", TOOLS.report_issue, ({ description, projectId, clipIds, instance, logs, system, previews, allClips, source }) =>
     run(async () => {
       const caps = reportCapabilities(svc, user);
-      if (!caps.zip) throw new TRPCError({ code: "FORBIDDEN", message: "Send feedback from the app instead of downloading a report on this instance." });
+      if (!caps.zip)
+        throw new AppError(
+          "FORBIDDEN",
+          msg({ id: "mcp.report_issue.no_zip", message: "Send feedback from the app instead of downloading a report on this instance." }),
+        );
       if (instance && !(caps.instance && access.canAdminister))
-        throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
+        throw new AppError("FORBIDDEN", msg({ id: "mcp.report_issue.admins_only", message: "Instance-wide diagnostics are for admins." }));
       if (projectId) await api.projects.get({ id: projectId });
       const q = new URLSearchParams({ description });
       if (instance) q.set("instance", "1");
@@ -591,12 +628,25 @@ export function createMcpServer(
     if ((clipId === undefined) === (layers === undefined))
       return Promise.resolve(
         fail(
-          "Pass exactly one of clipId (save that clip's layers, intro and outro) or layers (the template's layers with timings; [] for an intro / outro only template).",
+          tr(
+            msg({
+              id: "mcp.save_layer_template.one_source",
+              message:
+                "Pass exactly one of clipId (save that clip's layers, intro and outro) or layers (the template's layers with timings; [] for an intro / outro only template).",
+            }),
+          ),
         ),
       );
     if (clipId !== undefined && bumpers !== undefined)
       return Promise.resolve(
-        fail("bumpers goes with layers; with clipId the clip's own intro and outro are saved (update_layer_template changes them after)."),
+        fail(
+          tr(
+            msg({
+              id: "mcp.save_layer_template.bumpers_with_layers",
+              message: "bumpers goes with layers; with clipId the clip's own intro and outro are saved (update_layer_template changes them after).",
+            }),
+          ),
+        ),
       );
     return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers!, bumpers })));
   });
@@ -700,7 +750,9 @@ export function createMcpServer(
   server.registerTool("set_learning", TOOLS.set_learning, ({ enabled }) =>
     run(async () => ({
       ...(await api.decisions.setLearning({ enabled })),
-      hint: enabled ? "Your decisions are recorded from now on." : "New decisions are no longer recorded; what is kept stays until forget_decisions.",
+      hint: enabled
+        ? tr(msg`Your decisions are recorded from now on.`)
+        : tr(msg`New decisions are no longer recorded; what is kept stays until forget_decisions.`),
     })),
   );
 
@@ -717,12 +769,12 @@ export function createMcpServer(
   server.registerTool("list_transcript_flags", TOOLS.list_transcript_flags, ({ id, status, limit }) =>
     run(async () => {
       const t = await api.transcripts.get({ projectId: id });
-      if (!t) return { total: 0, flags: [], hint: "No transcript yet." };
+      if (!t) return { total: 0, flags: [], hint: tr(msg`No transcript yet.`) };
       const rows = t.flags.filter((f) => !status || f.status === status);
       return {
         total: rows.length,
         flags: rows.slice(0, limit).map(flagView),
-        ...(rows.length > limit ? { hint: `Showing the first ${limit} of ${rows.length}; pass status to narrow the list.` } : {}),
+        ...(rows.length > limit ? { hint: tr(msg`Showing the first ${{ limit }} of ${{ total: rows.length }}; pass status to narrow the list.`) } : {}),
       };
     }),
   );
@@ -739,9 +791,17 @@ export function createMcpServer(
       // a rejected manual fix is deleted, so it is no longer among the live flags
       const flags = (t?.flags ?? []).filter((f) => asked.has(f.id)).map(flagView);
       const needsRerender = !rerender && done.changed > 0;
-      const hint = done.changed
-        ? `${plural(done.changed, "fix", "fixes")} changed the transcript; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it in the captions"}.`
-        : "Nothing changed: those fixes already had that decision.";
+      const changed = done.changed;
+      const rerendered = done.rerendered;
+      const hint = !changed
+        ? tr(msg`Nothing changed: those fixes already had that decision.`)
+        : rerender
+          ? tr(
+              msg`${plural({ changed }, { one: "# fix", other: "# fixes" })} changed the transcript; ${plural({ rerendered }, { one: "# clip", other: "# clips" })} re-rendering.`,
+            )
+          : tr(
+              msg`${plural({ changed }, { one: "# fix", other: "# fixes" })} changed the transcript; re-render the clips with rerender_clips to show it in the captions.`,
+            );
       return { changed: done.changed, rerendered: done.rerendered, needsRerender, flags, hint };
     }),
   );
@@ -751,7 +811,9 @@ export function createMcpServer(
       const done = await api.transcripts.addCorrection({ projectId: id, start: startSec, end: endSec, text, rerender });
       return {
         ...done,
-        hint: `Captions now say "${text}" for that span; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
+        hint: rerender
+          ? tr(msg`Captions now say "${{ text }}" for that span; ${plural({ rerendered: done.rerendered }, { one: "# clip", other: "# clips" })} re-rendering.`)
+          : tr(msg`Captions now say "${{ text }}" for that span; re-render the clips with rerender_clips to show it.`),
       };
     }),
   );
@@ -761,7 +823,9 @@ export function createMcpServer(
       const done = await api.transcripts.addCut({ projectId: id, start: startSec, end: endSec, rerender });
       return {
         ...done,
-        hint: `Those words are cut from the transcript; ${rerender ? `${plural(done.rerendered, "clip")} re-rendering` : "re-render the clips with rerender_clips to show it"}.`,
+        hint: rerender
+          ? tr(msg`Those words are cut from the transcript; ${plural({ rerendered: done.rerendered }, { one: "# clip", other: "# clips" })} re-rendering.`)
+          : tr(msg`Those words are cut from the transcript; re-render the clips with rerender_clips to show it.`),
       };
     }),
   );
@@ -774,7 +838,10 @@ export function createMcpServer(
   );
 
   server.registerTool("set_project_defaults", TOOLS.set_project_defaults, ({ defaults }) =>
-    run(async () => ({ ...(await api.me.updateProjectDefaults(defaults)), hint: "New projects start with these settings; existing projects are unchanged." })),
+    run(async () => ({
+      ...(await api.me.updateProjectDefaults(defaults)),
+      hint: tr(msg`New projects start with these settings; existing projects are unchanged.`),
+    })),
   );
 
   server.registerTool("set_project_source_text", TOOLS.set_project_source_text, ({ id, sourceText }) =>
@@ -798,7 +865,7 @@ export function createMcpServer(
         needsRerender: !rerender || r.skipped > 0,
         rerendered: r.rerendered,
         skipped: r.skipped,
-        hint: rerender ? rerenderHint(r.rerendered, r.skipped) : "Saved; call rerender_clips to apply it to finished clips.",
+        hint: rerender ? rerenderHint(r.rerendered, r.skipped) : tr(msg`Saved; call rerender_clips to apply it to finished clips.`),
       };
     }),
   );
@@ -806,6 +873,8 @@ export function createMcpServer(
   server.registerTool("billing_portal_url", TOOLS.billing_portal_url, () => run(() => api.billing.portal()));
 
   server.registerTool("get_email_preferences", TOOLS.get_email_preferences, () => run(() => api.me.emailPreferences()));
+  server.registerTool("get_locale_preferences", TOOLS.get_locale_preferences, () => run(() => api.me.localePrefs()));
+  server.registerTool("set_locale_preferences", TOOLS.set_locale_preferences, (input) => run(() => api.me.updateLocalePrefs(input)));
   server.registerTool("set_email_preferences", TOOLS.set_email_preferences, (input) => run(() => api.me.updateEmailPreferences(input)));
 
   return server;
@@ -814,6 +883,8 @@ export function createMcpServer(
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
   touchLastActive(svc.database.db, svc.log, user.id);
+  // result sentences and errors in the account's language (an agent sends no locale header)
+  scopeAccount(user);
   const requestId = (c as HonoContext<AppEnv>).get("requestId");
   return serveMcpRequest(
     c.req.raw,

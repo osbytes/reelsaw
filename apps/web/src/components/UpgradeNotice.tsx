@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { plural, upgradeFromProject, type PartialSource } from "@reelsaw/shared";
+import { formatList, upgradeFromProject, type PartialSource } from "@reelsaw/shared";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useTRPC } from "../lib/trpc";
 import { track } from "../lib/telemetry";
 import { Pending } from "./ui";
@@ -32,6 +34,7 @@ export function UpgradeNotice({
   projectId: string;
   onExtended: () => void;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const extend = useMutation(trpc.projects.extend.mutationOptions({ onSuccess: onExtended }));
   const m = (sec: number) => Math.round(sec / 60);
@@ -41,9 +44,11 @@ export function UpgradeNotice({
   // a plan that covers the rest of the video removes the watermark too; else the watermark's own offer
   const waiting = capacity && capacity.waiting > 0 ? capacity : null;
   const upgrade = open?.upgrade ?? watermark?.upgrade ?? waiting?.upgrade ?? null;
-  const benefits = [open?.upgrade && `clip the other ${remaining} min`, watermark && "remove the watermark", waiting?.upgrade && "render sooner"]
-    .filter(Boolean)
-    .join(" and ");
+  const benefits = formatList(
+    [open?.upgrade ? t`clip the other ${remaining} min` : "", watermark ? t`remove the watermark` : "", waiting?.upgrade ? t`render sooner` : ""].filter(
+      Boolean,
+    ),
+  );
   const placement = open?.upgrade ? "partial_project" : watermark ? "watermark" : "capacity_wait";
   const props = { placement, projectId, watermark: !!watermark, capacityWait: !!waiting, ...(open ? { remainingMinutes: remaining } : {}) };
   // keyed on primitives: refetches hand back new objects, which are not a new impression
@@ -61,10 +66,10 @@ export function UpgradeNotice({
     partial?.extending
       ? partial.sentence
       : open && (open.upgrade || more !== null)
-        ? `Clipped the first ${m(open.processedSec)} of ${m(open.durationSec)} min`
+        ? t`Clipped the first ${m(open.processedSec)} of ${m(open.durationSec)} min`
         : open?.sentence,
-    watermark && `${watermark.text ? `“${watermark.text}” ` : ""}watermark on`,
-    waiting && `${plural(waiting.waiting, "clip")} waiting for render capacity`,
+    watermark && (watermark.text ? t`“${watermark.text}” watermark on` : t`watermark on`),
+    waiting && plural(waiting.waiting, { one: "# clip waiting for render capacity", other: "# clips waiting for render capacity" }),
   ].filter(Boolean);
   const quota = quotaFromError(extend.error);
   return (
@@ -80,7 +85,7 @@ export function UpgradeNotice({
                 className="font-semibold text-acc-text no-underline"
                 onClick={() => track("upgrade_clicked", props)}
               >
-                Upgrade to {benefits} →
+                <Trans>Upgrade to {benefits} →</Trans>
               </a>{" "}
               <span className="text-ink3">{upgrade.label}</span>
             </>
@@ -97,7 +102,7 @@ export function UpgradeNotice({
               extend.mutate({ id: projectId });
             }}
           >
-            <Pending busy={extend.isPending}>{more >= remaining ? `Clip the remaining ${remaining} min` : `Clip ${more} more min`}</Pending>
+            <Pending busy={extend.isPending}>{more >= remaining ? t`Clip the remaining ${remaining} min` : t`Clip ${more} more min`}</Pending>
           </button>
         )}
       </div>

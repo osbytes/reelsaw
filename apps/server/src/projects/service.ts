@@ -30,7 +30,6 @@ import {
   type SectionMode,
   type PartialSource,
   formatDay,
-  plural,
   processedEndSec,
   spansCover,
   transcriptSpans,
@@ -40,7 +39,6 @@ import {
   type SourceRangeInput,
   MAX_RANGES,
   planRanges,
-  rangeProblemMessage,
   rangeSchema,
 } from "@reelsaw/shared";
 import {
@@ -74,6 +72,7 @@ import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
 import { coverageOf, projectNeededSpans } from "../pipeline/transcribe.js";
+import { rangeProblemsText, rangesRefused } from "./ranges.js";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -85,6 +84,8 @@ import { failedRow, runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
 import { clipDecisions, forgetDecisions, recordDecisions } from "../decisions/service.js";
+import { msg, plural as icuPlural, select as icuSelect } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 export const WORKING = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const;
@@ -100,7 +101,14 @@ export function byOwner(actor: Actor, p: { userId: string }): boolean {
 
 const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 /** "for 7 days" / "until you purge it", for messages and tool results. */
-export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${plural(days(svc), "day")}` : "until it is purged");
+/** "for 30 days" / "until it is purged": how long a deleted item can come back, for the sentences and the `restorable` field. */
+export const restorableFor = (svc: Services) =>
+  t(
+    msg({
+      id: "deleted.restorable_for",
+      message: icuPlural({ days: Math.max(0, days(svc)) }, { 0: "until it is purged", one: "for # day", other: "for # days" }),
+    }),
+  );
 
 /**
  * Where a retry resumes, from what the project already has. Live clips mean render, except when the project failed in
@@ -262,16 +270,17 @@ export async function deleteOwnedProject(svc: Services, actor: Actor, projectId:
     await findProject(u.db, actor, projectId, { deleted: false });
     const stored = await projectStoredBytes(u.db, projectId);
     const changed = await deleteProject(svc, u, projectId, opts);
+    const restorable = restorableFor(svc);
     const base = stored
-      ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.`
-      : `Deleted. It can be restored ${restorableFor(svc)}.`;
+      ? t(msg`Deleted. It can be restored ${{ restorable }}. It still uses ${{ size: formatBytes(stored) }} until you delete it forever.`)
+      : t(msg`Deleted. It can be restored ${{ restorable }}.`);
     return {
       ok: true,
       changed,
       restorable: restorableFor(svc),
       storedBytes: stored,
       forgetDecisions: !!opts.forgetDecisions,
-      message: opts.forgetDecisions ? `${base} What Reelsaw learned from it is forgotten when it is deleted forever.` : base,
+      message: opts.forgetDecisions ? `${base} ${t(msg`What Reelsaw learned from it is forgotten when it is deleted forever.`)}` : base,
     };
   });
 }
@@ -296,7 +305,11 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
 export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: string, opts: { forgetDecisions?: boolean } = {}) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: true });
-    if (!p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only projects already in Deleted can be deleted forever." });
+    if (!p.deletedAt)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "project.purge_needs_delete", message: "Delete it first. Only projects already in Deleted can be deleted forever." }),
+      );
     // re-check under the row lock (clips first, then the project, like deleteProject): a restore that committed since
     // the read above wins, instead of this deleting a project that is live again for good
     await lockProjectClips(u, projectId);
@@ -305,12 +318,17 @@ export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: 
       .from(schema.projects)
       .where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)))
       .for("update");
-    if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was deleted." });
+    if (!still) throw new AppError("CONFLICT", msg({ id: "project.restored_meanwhile", message: "It was restored meanwhile, so nothing was deleted." }));
     const stored = await projectStoredBytes(u.db, projectId);
     const forget = opts.forgetDecisions || p.forgetDecisionsOnPurge;
     const { forgottenDecisions } = await purgeProject(svc, u, projectId, { forgetDecisions: forget });
-    const freed = stored ? `Deleted forever. ${formatBytes(stored)} is free now.` : "Deleted forever.";
-    return { ok: true, storedBytes: stored, forgottenDecisions, message: forget ? `${freed} What Reelsaw learned from it is forgotten too.` : freed };
+    const freed = deletedForever(stored);
+    return {
+      ok: true,
+      storedBytes: stored,
+      forgottenDecisions,
+      message: forget ? `${freed} ${t(msg`What Reelsaw learned from it is forgotten too.`)}` : freed,
+    };
   });
 }
 
@@ -350,12 +368,16 @@ export async function purgeClip(
 export async function purgeOwnedClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
-    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
+    if (!c) throw new AppError("NOT_FOUND", clipGone(svc));
     await findProject(u.db, actor, c.projectId, { deleted: false });
-    if (!c.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only clips already in Deleted can be deleted forever." });
+    if (!c.deletedAt)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "clip.purge_needs_delete", message: "Delete it first. Only clips already in Deleted can be deleted forever." }),
+      );
     const stored = c.outputKey && c.outputBytes ? c.outputBytes : 0;
     await purgeClip(svc, u, clipId);
-    return { ok: true as const, storedBytes: stored, message: stored ? `Deleted forever. ${formatBytes(stored)} is free now.` : "Deleted forever." };
+    return { ok: true as const, storedBytes: stored, message: deletedForever(stored) };
   });
 }
 
@@ -391,7 +413,7 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     // clip first, the project row last (finalize): the same order as a render completion
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
-    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
+    if (!c) throw new AppError("NOT_FOUND", clipGone(svc));
     const p = await findProject(u.db, actor, c.projectId, { deleted: false });
     const changed = await markClipDeleted(svc, u, c);
     if (changed) await finalizeProjectIfDone(svc, u, c.projectId);
@@ -405,7 +427,7 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
       stoppedRender: changed && c.status !== "done" && c.status !== "failed",
       restorable: restorableFor(svc),
       storedBytes: stored,
-      message: `Deleted. restore_clip brings it back ${restorableFor(svc)}.`,
+      message: t(msg`Deleted. restore_clip brings it back ${{ restorable: restorableFor(svc) }}.`),
     };
   });
 }
@@ -416,7 +438,7 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
  */
 export async function deleteClips(svc: Services, actor: Actor, projectId: string, clipIds: string[]) {
   const ids = [...new Set(clipIds)].slice(0, 200);
-  if (!ids.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one clip" });
+  if (!ids.length) throw new AppError("BAD_REQUEST", msg({ id: "clip.pick_at_least_one", message: "Pick at least one clip" }));
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     await lockProjectClips(u, projectId);
@@ -424,7 +446,8 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
       .select()
       .from(schema.clips)
       .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)));
-    if (rows.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "A selected clip is not on this project" });
+    if (rows.length !== ids.length)
+      throw new AppError("NOT_FOUND", msg({ id: "clip.selected_not_on_project", message: "A selected clip is not on this project" }));
     let deleted = 0;
     let skipped = 0;
     let stoppedRenders = 0;
@@ -452,10 +475,13 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
 export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
-    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
+    if (!c) throw new AppError("NOT_FOUND", clipGone(svc));
     const p = await findProject(u.db, actor, c.projectId, { deleted: true });
     if (p.deletedAt)
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "clip.restore_project_deleted", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." }),
+      );
     if (!c.deletedAt) return { ok: true, changed: false, clipId, status: c.status };
     const [{ next, taken } = { next: 0, taken: false }] = await u.db
       .select({
@@ -523,11 +549,14 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
       where: eq(schema.transcripts.projectId, p.id),
       columns: { projectId: true, covered: true },
     });
-    if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+    if (!transcript) throw new AppError("BAD_REQUEST", msg({ id: "project.no_transcript_yet", message: "Project has no transcript yet" }));
     // picking again before the rest of the video's words are in would pick from the old part only, and its picks
     // would be replaced again by the extension's
     if (!spansCover(coverageOf(transcript.covered), await projectNeededSpans(u.db, p)))
-      throw new TRPCError({ code: "CONFLICT", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." });
+      throw new AppError(
+        "CONFLICT",
+        msg({ id: "project.still_transcribing_rest", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." }),
+      );
     // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
     // meanwhile by another request is not overwritten with this read of the whole object
     const given = withSpokenLanguage(patch ?? {});
@@ -635,7 +664,11 @@ export async function updateProject(
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const patch = withSpokenLanguage(Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch);
     const bumperKeys = Object.keys(patch).filter((k) => BUMPER_KEYS.has(k));
-    if (bumperKeys.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${bumperKeys.join(", ")}: set the intro/outro with set_project_bumpers` });
+    if (bumperKeys.length)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "project.bumpers_elsewhere", message: msg`${{ keys: bumperKeys.join(", ") }}: set the intro/outro with set_project_bumpers` }),
+      );
     // the template new clips get must be one of the owner's live templates (null = none)
     if (typeof patch.layerTemplateId === "string") await getLayerTemplate(u.db, p.userId, patch.layerTemplateId);
     const clear = [...new Set(input.clear ?? [])].filter((k) => !(k in patch));
@@ -644,7 +677,8 @@ export async function updateProject(
     const parsed = projectSettingsSchema.safeParse(next);
     if (!parsed.success) throw new TRPCError({ code: "BAD_REQUEST", message: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
     const merged: ProjectSettings = parsed.data;
-    if (merged.minClipSeconds >= merged.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+    if (merged.minClipSeconds >= merged.maxClipSeconds)
+      throw new AppError("BAD_REQUEST", msg({ id: "project.min_below_max", message: "minClipSeconds must be below maxClipSeconds" }));
     const before = p.settings as Record<string, unknown>;
     const changed = [
       ...Object.keys(patch).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(merged[k as keyof ProjectSettings])),
@@ -768,22 +802,34 @@ export async function findProject(db: Db, actor: Actor, projectId: string, o: { 
     where: and(eq(schema.projects.id, projectId), mine, o.deleted ? undefined : isNull(schema.projects.deletedAt)),
   });
   if (p) return p;
-  if (o.deleted) throw new TRPCError({ code: "NOT_FOUND", message: `${NO_PROJECT} A deleted project is gone for good once its restore window has passed.` });
+  if (o.deleted)
+    throw new AppError(
+      "NOT_FOUND",
+      msg({
+        id: "project.not_found_gone",
+        message: "No project with that id in your account. A deleted project is gone for good once its restore window has passed.",
+      }),
+    );
   // only on the failure path: tell "deleted" from "never yours / never existed"
   const inDeleted = await db.query.projects.findFirst({
     where: and(eq(schema.projects.id, projectId), mine, isNotNull(schema.projects.deletedAt)),
     columns: { id: true },
   });
-  throw new TRPCError({
-    code: "NOT_FOUND",
-    message: inDeleted ? "That project is deleted; restore_project (or Deleted in the app) brings it back." : NO_PROJECT,
-  });
+  throw new AppError(
+    "NOT_FOUND",
+    inDeleted ? msg({ id: "project.in_deleted", message: "That project is deleted; restore_project (or Deleted in the app) brings it back." }) : noProject(),
+  );
 }
 /** The sentence for a project id that is not the caller's or never existed. */
-export const NO_PROJECT = "No project with that id in your account.";
+export const noProject = () => msg({ id: "project.not_found", message: "No project with that id in your account." });
 /** The same for a clip; deleted clips are listed under Deleted. */
-export const NO_CLIP = "No clip with that id in your account (deleted clips are under Deleted; restore_clip brings one back).";
-export const gone = (svc: Services, what: string) => `No such ${what}. Deleted items can be restored ${restorableFor(svc)}; after that they are gone for good.`;
+export const noClip = () =>
+  msg({ id: "clip.not_found", message: "No clip with that id in your account (deleted clips are under Deleted; restore_clip brings one back)." });
+const clipGone = (svc: Services) =>
+  msg({ id: "clip.gone", message: msg`No such clip. Deleted items can be restored ${{ restorable: restorableFor(svc) }}; after that they are gone for good.` });
+
+/** "Deleted forever." with the space it freed, when it held any. */
+const deletedForever = (stored: number) => (stored ? t(msg`Deleted forever. ${{ size: formatBytes(stored) }} is free now.`) : t(msg`Deleted forever.`));
 
 // ── purge ──────────────────────────────────────────────────────────────────
 
@@ -941,7 +987,8 @@ export async function createProject(
 ): Promise<typeof schema.projects.$inferSelect & { ranges?: CreatedRanges }> {
   const db = svc.database.db;
   const log = svc.log.child({ module: "projects", userId });
-  if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a sourceUrl (a link to the video) or an uploadId." });
+  if (!input.sourceUrl && !input.uploadId)
+    throw new AppError("BAD_REQUEST", msg({ id: "project.source_required", message: "Give a sourceUrl (a link to the video) or an uploadId." }));
   const quotaReached = (err: unknown): never => {
     log.warn({ reason: err instanceof Error ? err.message : String(err) }, "project quota reached");
     throw err;
@@ -954,10 +1001,11 @@ export async function createProject(
   let announcedSec: number | null = null;
   /** ranges from the video's Most replayed peaks (`rangesFrom`), added to the caller's */
   let peakRanges: SourceRangeInput[] = [];
-  if (input.rangesFrom && !input.sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "Most replayed needs a link to the video, not an upload." });
+  if (input.rangesFrom && !input.sourceUrl)
+    throw new AppError("BAD_REQUEST", msg({ id: "ranges.most_replayed_upload", message: "Most replayed needs a link to the video, not an upload." }));
   if (input.uploadId) {
     const up = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, userId)) });
-    if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "No upload with that id in your account." });
+    if (!up) throw new AppError("NOT_FOUND", msg({ id: "upload.not_in_account", message: "No upload with that id in your account." }));
     sourceMeta = { uploadId: up.id, filename: up.filename };
     title ||= up.filename.replace(/\.[^.]+$/, "");
   } else if (input.sourceUrl) {
@@ -976,10 +1024,13 @@ export async function createProject(
       const heat = await announcedHeatmap(svc.media, input.sourceUrl, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS)).catch(() => []);
       const peaks = replayPeaks(heat, { top: input.rangesFrom.mostReplayed });
       if (!peaks.length)
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This video has no Most replayed heatmap (new or small videos, and most sites other than YouTube, have none). Give ranges instead.",
-        });
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({
+            id: "ranges.no_heatmap",
+            message: "This video has no Most replayed heatmap (new or small videos, and most sites other than YouTube, have none). Give ranges instead.",
+          }),
+        );
       peakRanges = peaks.map((p, i) => ({ startSec: p.startSec, endSec: p.endSec, mode: "clip" as const, label: `Most replayed #${i + 1}` }));
     }
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
@@ -997,11 +1048,11 @@ export async function createProject(
     // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
     const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
-      throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+      throw new AppError("BAD_REQUEST", msg({ id: "project.min_below_max", message: "minClipSeconds must be below maxClipSeconds" }));
     const given = input.ranges ?? [];
     const asked = [...given, ...peakRanges];
     const plan = asked.length ? planRanges(asked, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
-    if (plan && !plan.ok) throw new TRPCError({ code: "BAD_REQUEST", message: plan.problems.map(rangeProblemMessage).join(" ") });
+    if (plan && !plan.ok) throw rangesRefused(plan.problems);
     // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock
     if (plan) await admitRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
     const [row] = await u.db
@@ -1197,7 +1248,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     const settings = await resolveProjectSettings(db, userId, undefined, undefined);
     const plan = planRanges(input.ranges, { durationSec: durationSec || null, maxClipSec: settings.maxClipSeconds });
     if (!plan.ok) {
-      const problems = plan.problems.map(rangeProblemMessage);
+      const problems = rangeProblemsText(plan.problems);
       return {
         minutes,
         durationSec: lengthSec,
@@ -1256,9 +1307,13 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
 export function partialPrecheckSentence(untilSec: number, durationSec: number, why: "first_video" | "day" | "month", canUpgrade: boolean): string {
   const now = Math.round(untilSec / 60);
   const total = Math.round(durationSec / 60);
-  const reason = why === "first_video" ? "free as your first video" : why === "day" ? "as far as today's minutes go" : "as far as this period's minutes go";
-  const rest = canUpgrade ? "Upgrade any time to clip the rest; Reelsaw picks up where it stopped." : "Reelsaw clips the rest when your minutes reset.";
-  return `This video is ${plural(total, "minute")}. Reelsaw clips the first ${plural(now, "minute")} now, ${reason}. ${rest}`;
+  const first = t(
+    msg`This video is ${icuPlural({ total }, { one: "# minute", other: "# minutes" })}. Reelsaw clips the first ${icuPlural({ now }, { one: "# minute", other: "# minutes" })} now, ${icuSelect({ why }, { first_video: "free as your first video", day: "as far as today's minutes go", other: "as far as this period's minutes go" })}.`,
+  );
+  const rest = canUpgrade
+    ? t(msg`Upgrade any time to clip the rest; Reelsaw picks up where it stopped.`)
+    : t(msg`Reelsaw clips the rest when your minutes reset.`);
+  return `${first} ${rest}`;
 }
 
 /**
@@ -1278,10 +1333,10 @@ export async function partialSourceOf(
   const s = svc.settings.get();
   // from the state, not the run's reason (a retry or re-pick of an extension has another): the rest's words are not in
   // yet, or its picks are not made yet, while the project works
-  const [t] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  const [tr] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   const extending =
     (WORKING as readonly string[]).includes(p.status) &&
-    (p.runReason === "extend" || p.extendFromSec !== null || (!!t && !spansCover(coverageOf(t.covered), await projectNeededSpans(db, p))));
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!tr && !spansCover(coverageOf(tr.covered), await projectNeededSpans(db, p))));
   const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
   const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
   const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;
@@ -1290,20 +1345,28 @@ export async function partialSourceOf(
   const primary = offer?.refusal.primary;
   const upgrade = primary?.kind === "upgrade" ? { label: primary.label, href: primary.href } : null;
   const m = (sec: number) => Math.round(sec / 60);
-  const head = `Reelsaw clipped the first ${m(processedSec)} of ${plural(m(p.durationSec), "minute")}.`;
-  const sentence = extending
-    ? `Clipping more of the video, up to minute ${m(processedSec)} of ${m(p.durationSec)}.`
-    : covered
-      ? `${head} Clip the remaining ${plural(m(remainingSec), "minute")} now.`
-      : extendableSec !== null
-        ? `${head} Your minutes cover ${m(extendableSec)} more now${upgrade ? `; upgrade to clip all ${m(remainingSec)}` : ""}.`
-        : upgrade
-          ? `${head} Upgrade to clip the remaining ${plural(m(remainingSec), "minute")}.`
-          : `${head} The remaining ${plural(m(remainingSec), "minute")} can be clipped when your minutes reset ${
-              offer!.key === "MAX_SOURCE_MINUTES_PER_DAY"
-                ? `at ${offer!.resetsOn.toISOString().slice(11, 16)} UTC`
-                : `on ${formatDay(offer!.resetsOn, { year: false, utc: true })}`
-            }.`;
+  const processed = m(processedSec);
+  const total = m(p.durationSec);
+  const remaining = m(remainingSec);
+  const head = t(msg`Reelsaw clipped the first ${{ processed }} of ${icuPlural({ total }, { one: "# minute", other: "# minutes" })}.`);
+  const tail = (): string => {
+    if (covered) return t(msg`Clip the remaining ${icuPlural({ remaining }, { one: "# minute", other: "# minutes" })} now.`);
+    if (extendableSec !== null) {
+      const more = m(extendableSec);
+      return upgrade
+        ? t(msg`Your minutes cover ${{ more }} more now; upgrade to clip all ${{ remaining }}.`)
+        : t(msg`Your minutes cover ${{ more }} more now.`);
+    }
+    if (upgrade) return t(msg`Upgrade to clip the remaining ${icuPlural({ remaining }, { one: "# minute", other: "# minutes" })}.`);
+    if (offer!.key === "MAX_SOURCE_MINUTES_PER_DAY")
+      return t(
+        msg`The remaining ${icuPlural({ remaining }, { one: "# minute", other: "# minutes" })} can be clipped when your minutes reset at ${{ time: offer!.resetsOn.toISOString().slice(11, 16) }} UTC.`,
+      );
+    return t(
+      msg`The remaining ${icuPlural({ remaining }, { one: "# minute", other: "# minutes" })} can be clipped when your minutes reset on ${{ day: formatDay(offer!.resetsOn, { year: false, utc: true }) }}.`,
+    );
+  };
+  const sentence = extending ? t(msg`Clipping more of the video, up to minute ${{ processed }} of ${{ total }}.`) : `${head} ${tail()}`;
   return { processedSec, durationSec: p.durationSec, remainingSec, extending, extendableSec, upgrade, sentence };
 }
 
@@ -1349,17 +1412,19 @@ export async function extendProject(
       .from(schema.projects)
       .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
       .for("no key update");
-    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+    if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.missing", message: "Project not found" }));
     if (p.sourceLimitSec === null || p.durationSec === null) {
       const [chosen] = await u.db
         .select({ id: schema.projectRanges.id })
         .from(schema.projectRanges)
         .where(and(eq(schema.projectRanges.projectId, p.id), ne(schema.projectRanges.origin, "whole")))
         .limit(1);
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: chosen ? "This project clips ranges of its video: give the ranges to clip next." : "This project already covers the whole video.",
-      });
+      throw new AppError(
+        "BAD_REQUEST",
+        chosen
+          ? msg({ id: "project.clips_ranges", message: "This project clips ranges of its video: give the ranges to clip next." })
+          : msg({ id: "project.already_whole", message: "This project already covers the whole video." }),
+      );
     }
     const fromSec = Math.min(p.durationSec, p.sourceLimitSec);
     const room = await minutesRoomSec(u.db, svc.settings.get(), p.userId, { extension: true, ent: svc.entitlements });
@@ -1428,17 +1493,20 @@ async function addRanges(svc: Services, actor: Actor, projectId: string, input: 
       .from(schema.projects)
       .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
       .for("no key update");
-    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+    if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.missing", message: "Project not found" }));
     if (p.durationSec === null)
-      throw new TRPCError({ code: "CONFLICT", message: "Reelsaw does not know this video's length yet. Add ranges once it is downloaded." });
+      throw new AppError(
+        "CONFLICT",
+        msg({ id: "ranges.length_unknown", message: "Reelsaw does not know this video's length yet. Add ranges once it is downloaded." }),
+      );
     const existing = await u.db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, p.id)).for("update");
     const plan = planRanges(input, {
       durationSec: p.durationSec,
       maxClipSec: p.settings.maxClipSeconds,
       processed: existing.map((r): [number, number] => [r.startSec, r.endSec]),
     });
-    if (!plan.ok) throw new TRPCError({ code: "BAD_REQUEST", message: plan.problems.map(rangeProblemMessage).join(" ") });
-    if (plan.billedSec <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Those ranges were clipped already." });
+    if (!plan.ok) throw rangesRefused(plan.problems);
+    if (plan.billedSec <= 0) throw new AppError("BAD_REQUEST", msg({ id: "ranges.already_clipped", message: "Those ranges were clipped already." }));
     // counted against every project's minutes, this one's too: only the new time is billed
     await admitRanges(u.db, svc.settings.get(), p.userId, null, plan.billedSec, svc.entitlements);
     await recordSourceExtension(u.db, p.userId, p.id, plan.billedSec);
@@ -1495,7 +1563,11 @@ export async function retryOwnedProject(svc: Services, actor: Actor, projectId: 
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const r = await retryProject(svc, u, p.id);
-    if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "That project was deleted while it was being retried; restore_project brings it back." });
+    if (!r)
+      throw new AppError(
+        "NOT_FOUND",
+        msg({ id: "project.deleted_during_retry", message: "That project was deleted while it was being retried; restore_project brings it back." }),
+      );
     return r;
   });
 }
@@ -1517,11 +1589,14 @@ export async function refineProject(
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     // transcript first, then the project row (vocabulary, startRun)
     const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
-    if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+    if (!cur) throw new AppError("BAD_REQUEST", msg({ id: "project.no_transcript_yet", message: "Project has no transcript yet" }));
     // a refine already running restarts; anything else running (renders, picking) would have its status
     // overwritten and never finalize, so wait for it
     if (!["done", "failed", "refining"].includes(p.status))
-      throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
+      throw new AppError(
+        "CONFLICT",
+        msg({ id: "project.busy_refine_later", message: msg`The project is busy (${{ status: p.status }}); refine it when that finishes` }),
+      );
     if (input.vocabulary !== undefined) {
       const vocabulary = input.vocabulary || undefined;
       const check = projectSettingsSchema.safeParse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
@@ -1540,7 +1615,7 @@ export async function refineProject(
     for (const s of steps) delete refine[s];
     await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
     const started = await enqueueRefine(svc, p.id, await stageSeqOf(u.db, p.id), rerun, u, { onlyIfIdle: true });
-    if (!started) throw new TRPCError({ code: "CONFLICT", message: "The project is busy; wait for it to finish before refining." });
+    if (!started) throw new AppError("CONFLICT", msg({ id: "project.busy_refine", message: "The project is busy; wait for it to finish before refining." }));
   });
   return { ok: true as const, steps };
 }
@@ -1598,7 +1673,12 @@ export async function setProjectBumpers(svc: Services, actor: Actor, projectId: 
           .from(schema.assets)
           .where(and(eq(schema.assets.id, choice), assetVisibleTo(p.userId)));
         if (!asset || (asset.deletedAt && p.settings[key] !== choice))
-          throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
+          throw new AppError(
+            "NOT_FOUND",
+            slot === "intro"
+              ? msg({ id: "library.intro_not_found", message: "That intro is not in your library" })
+              : msg({ id: "library.outro_not_found", message: "That outro is not in your library" }),
+          );
         patch[key] = choice;
       }
     }

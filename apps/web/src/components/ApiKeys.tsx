@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { t as tg } from "@lingui/core/macro";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { useTRPC } from "../lib/trpc";
@@ -18,14 +20,12 @@ type Key = {
 };
 
 /** What a key may do beyond a normal account. A key with no record (never an administrator) shows nothing; older keys were granted admin by migration. */
-function adminLabel(k: Key): string | null {
-  return k.permissions?.["admin"]?.includes("write") ? "can administer" : null;
+function canAdminister(k: Key): boolean {
+  return k.permissions?.["admin"]?.includes("write") ?? false;
 }
 
-const when = (d: Date | string | null | undefined) => (d ? formatDay(d, { month: "short" }) : "never");
-
 const copy = (s: string, what: string) => {
-  void navigator.clipboard.writeText(s).then(() => toast(`${what} copied`));
+  void navigator.clipboard.writeText(s).then(() => toast(tg`${what} copied`));
 };
 
 /** A labelled, copyable command or config in one scrolling block. */
@@ -35,7 +35,7 @@ function Snippet({ label, what, value, className = "bg-panel" }: { label: string
       <div className="flex items-center justify-between gap-2 text-xs text-ink2">
         <span>{label}</span>
         <button className="btn-quiet text-xs" onClick={() => copy(value, what)}>
-          Copy
+          <Trans>Copy</Trans>
         </button>
       </div>
       <ScrollArea className={`rounded-[8px] ${className}`}>
@@ -51,6 +51,7 @@ function Snippet({ label, what, value, className = "bg-panel" }: { label: string
  * clients that can sign in through the browser need no key, so that route comes first.
  */
 export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
+  const { t } = useLingui();
   const qc = useQueryClient();
   const trpc = useTRPC();
   const me = useMe();
@@ -65,7 +66,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
     queryKey: ["apiKeys"],
     queryFn: async () => {
       const r = await authClient.apiKey.list();
-      if (r.error) throw new Error(r.error.message ?? "Could not load keys");
+      if (r.error) throw new Error(r.error.message ?? t`Could not load keys`);
       return r.data.apiKeys as Key[];
     },
   });
@@ -84,10 +85,10 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const remove = useMutation({
     mutationFn: async (id: string) => {
       const r = await authClient.apiKey.delete({ keyId: id });
-      if (r.error) throw new Error(r.error.message ?? "Could not revoke the key");
+      if (r.error) throw new Error(r.error.message ?? t`Could not revoke the key`);
     },
     onSuccess: () => {
-      toast("Key revoked");
+      toast(t`Key revoked`);
       void qc.invalidateQueries({ queryKey: ["apiKeys"] });
     },
     onError: (e) => toast.error(e.message),
@@ -112,32 +113,55 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[15px] font-bold">API keys and MCP</h2>
+        <h2 className="text-[15px] font-bold">
+          <Trans>API keys and MCP</Trans>
+        </h2>
         <span className="font-mono text-xs text-ink3">{mcpUrl}</span>
       </div>
       {oauth && (
         <div className="flex flex-col gap-2 border-b border-line pb-4">
-          <h3 className="text-[13px] font-semibold">Connect by signing in</h3>
+          <h3 className="text-[13px] font-semibold">
+            <Trans>Connect by signing in</Trans>
+          </h3>
           <p className="text-[13px] text-ink2">
-            No key to copy: add this address to your agent, then sign in and approve it in the browser. It acts as you
-            {me.data?.role === "admin" ? ", without the instance administration tools" : ""}. Remove it any time under Connected apps.
+            {me.data?.role === "admin" ? (
+              <Trans>
+                No key to copy: add this address to your agent, then sign in and approve it in the browser. It acts as you, without the instance administration
+                tools. Remove it any time under Connected apps.
+              </Trans>
+            ) : (
+              <Trans>
+                No key to copy: add this address to your agent, then sign in and approve it in the browser. It acts as you. Remove it any time under Connected
+                apps.
+              </Trans>
+            )}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <Snippet
-              label="Claude Code, then run /mcp to sign in"
-              what="Command"
+              label={t`Claude Code, then run /mcp to sign in`}
+              what={t`Command`}
               value={`claude mcp add --transport http reelsaw ${mcpUrl}`}
               className="bg-sunk"
             />
-            <Snippet label="claude.ai / Claude Desktop custom connector" what="Address" value={mcpUrl} className="bg-sunk" />
+            <Snippet label={t`claude.ai / Claude Desktop custom connector`} what={t`Address`} value={mcpUrl} className="bg-sunk" />
           </div>
         </div>
       )}
-      {oauth && <h3 className="text-[13px] font-semibold">Or use an API key</h3>}
+      {oauth && (
+        <h3 className="text-[13px] font-semibold">
+          <Trans>Or use an API key</Trans>
+        </h3>
+      )}
       <p className="text-[13px] text-ink2">
-        {oauth && "For scripts and clients that cannot sign in. "}A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you:
-        create projects, read transcripts, edit and download clips. Send it as <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are
-        shown once.
+        {oauth && (
+          <>
+            <Trans>For scripts and clients that cannot sign in.</Trans>{" "}
+          </>
+        )}
+        <Trans>
+          A key lets an agent (Claude Code, Claude Desktop, Cursor…) or a script use Reelsaw as you: create projects, read transcripts, edit and download clips.
+          Send it as <span className="font-mono text-xs">Authorization: Bearer …</span>. Keys are shown once.
+        </Trans>
       </p>
 
       <form
@@ -151,20 +175,22 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       >
         <input
           className="input max-w-xs flex-1"
-          placeholder="Key name, e.g. claude-code on my laptop"
+          placeholder={t`Key name, e.g. claude-code on my laptop`}
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={32}
-          aria-label="Key name"
+          aria-label={t`Key name`}
         />
         <button className="btn-ink min-w-[7.5rem]" type="submit" disabled={!name.trim() || create.isPending}>
-          {create.isPending ? "Creating…" : "Create key"}
+          {create.isPending ? <Trans>Creating…</Trans> : <Trans>Create key</Trans>}
         </button>
         {me.data?.role === "admin" && (
           <label className="flex basis-full items-start gap-2 text-[13px] text-ink2">
             <input type="checkbox" className="mt-0.5" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
             <span>
-              Allow instance administration (admin tools over MCP): change instance settings, retry failed work. Leave off for agents that only edit videos.
+              <Trans>
+                Allow instance administration (admin tools over MCP): change instance settings, retry failed work. Leave off for agents that only edit videos.
+              </Trans>
             </span>
           </label>
         )}
@@ -173,28 +199,32 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       {fresh && (
         <div className="flex flex-col gap-2 rounded-[12px] border border-acc/40 bg-acc-soft p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <b className="text-[13px]">Key “{fresh.name}” created. Copy it now; it will not be shown again.</b>
-            <button className="btn-quiet text-xs" onClick={() => setFresh(null)} aria-label="Dismiss">
-              Done
+            <b className="text-[13px]">
+              <Trans>Key “{fresh.name}” created. Copy it now; it will not be shown again.</Trans>
+            </b>
+            <button className="btn-quiet text-xs" onClick={() => setFresh(null)} aria-label={t`Dismiss`}>
+              <Trans>Done</Trans>
             </button>
           </div>
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-[8px] bg-panel px-2 py-1 font-mono text-xs">{fresh.key}</code>
-            <button className="btn-ghost text-xs" onClick={() => copy(fresh.key, "Key")}>
-              Copy
+            <button className="btn-ghost text-xs" onClick={() => copy(fresh.key, t`Key`)}>
+              <Trans>Copy</Trans>
             </button>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Snippet label="Claude Code" what="Command" value={claudeCmd} />
-            <Snippet label="Cursor / Claude Desktop / mcp.json" what="Config" value={json} />
+            <Snippet label={t`Claude Code`} what={t`Command`} value={claudeCmd} />
+            <Snippet label={t`Cursor / Claude Desktop / mcp.json`} what={t`Config`} value={json} />
             <div className="flex flex-col gap-1 sm:col-span-2">
               <div className="flex items-center justify-between text-xs text-ink2">
                 <span>
-                  Command (stdio), for clients that launch a program instead of calling a URL. <span className="font-mono">reelsaw-app-1</span> is the app
-                  container (<span className="font-mono">docker ps</span>).
+                  <Trans>
+                    Command (stdio), for clients that launch a program instead of calling a URL. <span className="font-mono">reelsaw-app-1</span> is the app
+                    container (<span className="font-mono">docker ps</span>).
+                  </Trans>
                 </span>
-                <button className="btn-quiet text-xs" onClick={() => copy(stdio, "Config")}>
-                  Copy
+                <button className="btn-quiet text-xs" onClick={() => copy(stdio, t`Config`)}>
+                  <Trans>Copy</Trans>
                 </button>
               </div>
               <pre className="overflow-x-auto rounded-[8px] bg-panel p-2 font-mono text-[11px] leading-4">{stdio}</pre>
@@ -205,7 +235,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
 
       <div className="min-h-6 text-[13px]">
         {list.isPending && !list.error && (
-          <SkeletonRegion label="Loading keys…" className="divide-y divide-line">
+          <SkeletonRegion label={t`Loading keys…`} className="divide-y divide-line">
             {["w-1/3", "w-1/4"].map((w, i) => (
               <div key={i} className="flex items-center gap-3 py-2">
                 <Skeleton className={`h-4 ${w}`} />
@@ -216,7 +246,11 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
           </SkeletonRegion>
         )}
         {list.error && <span className="text-err">✕ {list.error.message}</span>}
-        {list.data && keys.length === 0 && <span className="text-ink3">No keys yet.</span>}
+        {list.data && keys.length === 0 && (
+          <span className="text-ink3">
+            <Trans>No keys yet.</Trans>
+          </span>
+        )}
         {keys.length > 0 && (
           <ScrollArea className={SECTION_LIST_MAX_H}>
             <ul className="divide-y divide-line">
@@ -224,36 +258,57 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
                 aria-hidden
                 className="sticky top-0 z-[1] hidden grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem] items-center gap-x-3 bg-panel pb-1 text-xs text-ink3 sm:grid"
               >
-                <span>Name</span>
-                <span>Key</span>
-                <span>Created</span>
-                <span>Last used</span>
+                <span>
+                  <Trans>Name</Trans>
+                </span>
+                <span>
+                  <Trans>Key</Trans>
+                </span>
+                <span>
+                  <Trans>Created</Trans>
+                </span>
+                <span>
+                  <Trans>Last used</Trans>
+                </span>
                 <span />
               </li>
-              {keys.map((k) => (
-                <li
-                  key={k.id}
-                  className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]"
-                >
-                  <span className="truncate font-semibold">
-                    {k.name ?? "unnamed"}
-                    {adminLabel(k) && me.data?.role === "admin" ? (
-                      <span className="ms-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">{adminLabel(k)}</span>
-                    ) : null}
-                  </span>
-                  <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
-                    <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
-                      Revoke
-                    </button>
-                  </span>
-                  <span className="hidden font-mono text-xs text-ink2 sm:block">{k.start ?? "rs_"}…</span>
-                  <span className="col-span-1 truncate text-xs text-ink3 sm:hidden">
-                    {k.start ?? "rs_"}… · created {when(k.createdAt)} · used {when(k.lastRequest)}
-                  </span>
-                  <span className="hidden text-xs text-ink3 sm:block">created {when(k.createdAt)}</span>
-                  <span className="hidden text-xs text-ink3 sm:block">last used {when(k.lastRequest)}</span>
-                </li>
-              ))}
+              {keys.map((k) => {
+                const created = formatDay(k.createdAt, { month: "short" });
+                const used = k.lastRequest ? formatDay(k.lastRequest, { month: "short" }) : t`never`;
+                const prefix = k.start ?? "rs_";
+                return (
+                  <li
+                    key={k.id}
+                    className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]"
+                  >
+                    <span className="truncate font-semibold">
+                      {k.name ?? t`unnamed`}
+                      {canAdminister(k) && me.data?.role === "admin" ? (
+                        <span className="ms-2 rounded-[6px] bg-acc-soft px-1.5 py-0.5 align-middle text-[11px] font-normal text-ink2">
+                          <Trans>can administer</Trans>
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
+                      <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
+                        <Trans>Revoke</Trans>
+                      </button>
+                    </span>
+                    <span className="hidden font-mono text-xs text-ink2 sm:block">{prefix}…</span>
+                    <span className="col-span-1 truncate text-xs text-ink3 sm:hidden">
+                      <Trans>
+                        {prefix}… · created {created} · used {used}
+                      </Trans>
+                    </span>
+                    <span className="hidden text-xs text-ink3 sm:block">
+                      <Trans>created {created}</Trans>
+                    </span>
+                    <span className="hidden text-xs text-ink3 sm:block">
+                      <Trans>last used {used}</Trans>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </ScrollArea>
         )}
@@ -262,22 +317,28 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       <ConfirmDialog
         open={confirmAdmin}
         onOpenChange={setConfirmAdmin}
-        title="Create a key that can administer this instance?"
+        title={t`Create a key that can administer this instance?`}
         body={
-          <>
+          <Trans>
             Whoever holds “{name.trim()}” can change instance settings and retry failed work over MCP, as you. Leave this off for agents that only edit videos.
-          </>
+          </Trans>
         }
-        confirm="Create admin key"
+        confirm={t`Create admin key`}
         danger
         onConfirm={() => create.mutateAsync({ name: name.trim(), admin: true })}
       />
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title="Revoke this key?"
-        body={<>Anything using “{confirm?.name ?? "this key"}” stops working immediately.</>}
-        confirm="Revoke"
+        title={t`Revoke this key?`}
+        body={
+          confirm?.name ? (
+            <Trans>Anything using “{confirm.name}” stops working immediately.</Trans>
+          ) : (
+            <Trans>Anything using this key stops working immediately.</Trans>
+          )
+        }
+        confirm={t`Revoke`}
         danger
         onConfirm={() => (confirm ? remove.mutateAsync(confirm.id) : Promise.resolve())}
       />

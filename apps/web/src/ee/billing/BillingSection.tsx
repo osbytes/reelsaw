@@ -9,13 +9,28 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
-import { CHECKOUT_PARAM, deletedProjectsPath, FROM_PROJECT_PARAM, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM, formatDay, formatMb } from "@reelsaw/shared";
+import {
+  CHECKOUT_PARAM,
+  deletedProjectsPath,
+  FROM_PROJECT_PARAM,
+  INTERVAL_PARAM,
+  isCheckoutOutcome,
+  PLAN_PARAM,
+  formatDay,
+  formatMb,
+  formatMoney,
+  formatNumber,
+} from "@reelsaw/shared";
 import { Pending, Skeleton, SkeletonRegion } from "../../components/ui";
 import { UpgradeWelcome, UpgradeWorkPicker } from "./UpgradeWelcome";
 
-const num = new Intl.NumberFormat();
+const num = { format: (n: number) => formatNumber(n) };
+/** Plan prices come in whole US dollars; money is shown from minor units with its currency. */
+const usd = (dollars: number) => formatMoney(Math.round(dollars * 100), "USD");
 
 type Interval = "month" | "year";
 
@@ -38,6 +53,7 @@ const storeBefore = (plan: string | null) => {
 };
 
 export default function BillingSection() {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const loc = useLocation();
@@ -76,12 +92,13 @@ export default function BillingSection() {
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
     const p = q.data.plans.find((x) => x.name === wanted);
     if (!p?.price) return;
-    if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
+    const label = p.label;
+    if (q.data.plan.name === wanted) return void toast(t`You are on ${label} already`);
     setInterval_(wantedInterval);
-    toast(`Taking you to Stripe for ${p.label}…`);
+    toast(t`Taking you to Stripe for ${label}…`);
     checkout.mutate({ plan: wanted, interval: wantedInterval, fromProjectId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wanted, !!q.data]);
+  }, [wanted, !!q.data, t]);
 
   // back from Stripe: say so once, then poll a few times until the sync has landed (the webhook races the redirect)
   const raw = new URLSearchParams(loc.search).get(CHECKOUT_PARAM);
@@ -92,23 +109,23 @@ export default function BillingSection() {
   const [welcome, setWelcome] = useState<{ before: string } | null>(null);
   useEffect(() => {
     if (!outcome) return;
-    if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment");
-    else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment");
-    else if (outcome === "canceled") toast("Checkout canceled; nothing changed");
+    if (outcome === "success") toast(t`Thanks! Your plan updates as soon as Stripe confirms the payment`);
+    else if (outcome === "changed") toast(t`Plan change confirmed; it shows here in a moment`);
+    else if (outcome === "canceled") toast(t`Checkout canceled; nothing changed`);
     const planBefore = storedBefore() ?? q.data?.plan.name;
     storeBefore(null);
     if (outcome !== "canceled" && planBefore) setWaitingFrom(planBefore);
-    const t = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       polled.current += 1;
       void qc.invalidateQueries({ queryKey: trpc.billing.get.queryKey() });
       void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
       const now = qc.getQueryData(trpc.billing.get.queryKey())?.plan.name;
-      if (polled.current >= 15 || (outcome !== "canceled" && now && now !== planBefore)) window.clearInterval(t);
+      if (polled.current >= 15 || (outcome !== "canceled" && now && now !== planBefore)) window.clearInterval(timer);
     }, 2000);
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
-    return () => window.clearInterval(t);
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcome]);
+  }, [outcome, t]);
 
   const d = q.data;
   const planNow = d?.plan.name;
@@ -131,21 +148,30 @@ export default function BillingSection() {
   const storageCap = d?.limits.MAX_STORAGE_MB ?? 0;
   const projectsCap = d?.limits.MAX_PROJECTS_PER_USER ?? 0;
 
+  const graceEnds = sub?.graceEndsAt ? formatDay(sub.graceEndsAt) : "";
+  const periodEnds = sub?.periodEnd ? formatDay(sub.periodEnd) : "";
+  const cancelsOn = sub?.cancelAt ? formatDay(sub.cancelAt) : "";
   const statusLine = !d
     ? ""
     : d.reason === "complimentary"
-      ? "Granted by an admin."
+      ? t`Granted by an admin.`
       : d.reason === "grace"
-        ? `Payment failed; the plan stays until ${sub?.graceEndsAt ? formatDay(sub?.graceEndsAt) : ""}. Update your card to keep it.`
+        ? t`Payment failed; the plan stays until ${graceEnds}. Update your card to keep it.`
         : d.reason === "lapsed"
-          ? "Payment failed and the grace period ended: the account is on Free until the card is updated."
+          ? t`Payment failed and the grace period ended: the account is on Free until the card is updated.`
           : d.reason === "trialing"
-            ? `Trial until ${sub?.periodEnd ? formatDay(sub?.periodEnd) : ""}.`
+            ? t`Trial until ${periodEnds}.`
             : sub?.cancelAt
-              ? `Canceled: the plan stays until ${formatDay(sub.cancelAt)}, then the account moves to Free.`
+              ? t`Canceled: the plan stays until ${cancelsOn}, then the account moves to Free.`
               : sub?.periodEnd && d.reason === "active"
-                ? `Renews on ${formatDay(sub.periodEnd)}${sub.interval ? ` (${sub.interval === "year" ? "yearly" : "monthly"})` : ""}.`
-                : "No subscription: the Free plan. Pick a plan below to lift the limits.";
+                ? sub.interval === "year"
+                  ? t`Renews on ${periodEnds} (yearly).`
+                  : sub.interval
+                    ? t`Renews on ${periodEnds} (monthly).`
+                    : t`Renews on ${periodEnds}.`
+                : t`No subscription: the Free plan. Pick a plan below to lift the limits.`;
+  const periodStart = period ? formatDay(period.start) : "";
+  const periodEnd = period ? formatDay(period.end) : "";
 
   const bar = (used: number, cap: number) => {
     const ratio = cap > 0 ? Math.min(1, used / cap) : 0;
@@ -164,8 +190,10 @@ export default function BillingSection() {
       )}
       <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[15px] font-bold">Plan</h2>
-          <span className="min-h-4 font-mono text-xs text-ink3">{period ? `Period ${formatDay(period.start)} to ${formatDay(period.end)}` : ""}</span>
+          <h2 className="text-[15px] font-bold">
+            <Trans>Plan</Trans>
+          </h2>
+          <span className="min-h-4 font-mono text-xs text-ink3">{period ? t`Period ${periodStart} to ${periodEnd}` : ""}</span>
         </div>
         {q.isPending ? (
           <SkeletonRegion className="flex flex-col gap-3">
@@ -188,38 +216,48 @@ export default function BillingSection() {
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-[22px] font-bold tracking-tight">{d.plan.label}</span>
               {d.plan.price && (
-                <span className="font-mono text-sm text-ink2">{sub?.interval === "year" ? `$${d.plan.price.year}/yr` : `$${d.plan.price.month}/mo`}</span>
+                <span className="font-mono text-sm text-ink2">
+                  {sub?.interval === "year" ? t`${usd(d.plan.price.year)}/yr` : t`${usd(d.plan.price.month)}/mo`}
+                </span>
               )}
               <span className={`chip ${d.watermark.on ? "bg-warn-soft text-warn" : "bg-acc-soft text-acc-text"}`}>
-                {d.watermark.on ? "◇ watermark on" : "◆ no watermark"}
+                {d.watermark.on ? t`◇ watermark on` : t`◆ no watermark`}
               </span>
-              {d.afterCancel && <span className="chip bg-warn-soft text-warn">◷ Cancels {formatDay(d.afterCancel.at, { month: "short", year: false })}</span>}
+              {d.afterCancel && (
+                <span className="chip bg-warn-soft text-warn">
+                  <Trans>◷ Cancels {formatDay(d.afterCancel.at, { month: "short", year: false })}</Trans>
+                </span>
+              )}
             </div>
             <p className="min-h-5 text-sm text-ink2">{statusLine}</p>
             {d.afterCancel && (
               <div className="flex flex-col gap-3 rounded-[12px] border border-warn/40 bg-warn-soft px-4 py-3.5 text-sm">
                 <div className="flex flex-col gap-0.5">
                   <span className="font-semibold text-warn">
-                    {d.plan.label} ends on {formatDay(d.afterCancel.at)}, then this account is on {d.afterCancel.planLabel}
+                    <Trans>
+                      {d.plan.label} ends on {formatDay(d.afterCancel.at)}, then this account is on {d.afterCancel.planLabel}
+                    </Trans>
                   </span>
-                  <span className="text-ink2">Until then nothing changes. From that day:</span>
+                  <span className="text-ink2">
+                    <Trans>Until then nothing changes. From that day:</Trans>
+                  </span>
                 </div>
                 <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
                   {(
                     [
-                      ["MAX_SOURCE_MINUTES_PER_MONTH", "Minutes a month", (n: number) => num.format(n)],
-                      ["MAX_STORAGE_MB", "Storage", formatMb],
-                      ["MAX_PROJECTS_PER_USER", "Projects kept", (n: number) => num.format(n)],
+                      ["MAX_SOURCE_MINUTES_PER_MONTH", t`Minutes a month`, (n: number) => num.format(n)],
+                      ["MAX_STORAGE_MB", t`Storage`, formatMb],
+                      ["MAX_PROJECTS_PER_USER", t`Projects kept`, (n: number) => num.format(n)],
                     ] as const
                   ).map(([key, label, fmt]) => {
                     const over = d.afterCancel!.over.find((o) => o.key === key);
-                    const cap = (n: number) => (n > 0 ? fmt(n) : "no cap");
+                    const cap = (n: number) => (n > 0 ? fmt(n) : t`no cap`);
                     return (
                       <div key={key} className="flex flex-col gap-0.5">
                         <dt className="text-xs font-semibold text-ink2">{label}</dt>
                         <dd className={`tabular-nums ${over ? "font-semibold text-warn" : "text-ink"}`}>
                           {cap(d.limits[key])} → {cap(d.afterCancel!.limits[key])}
-                          {over && " · over"}
+                          {over && ` · ${t`over`}`}
                         </dd>
                       </div>
                     );
@@ -239,43 +277,55 @@ export default function BillingSection() {
                 </ul>
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" className="btn-primary min-w-[9rem]" disabled={portal.isPending} onClick={() => portal.mutate()}>
-                    <Pending busy={portal.isPending}>Keep {d.plan.label}</Pending>
+                    <Pending busy={portal.isPending}>
+                      <Trans>Keep {d.plan.label}</Trans>
+                    </Pending>
                   </button>
-                  <span className="text-xs text-ink3">Opens Stripe's portal: choose "Don't cancel subscription".</span>
+                  <span className="text-xs text-ink3">
+                    <Trans>Opens Stripe's portal: choose "Don't cancel subscription".</Trans>
+                  </span>
                 </div>
               </div>
             )}
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold text-ink2">Minutes this period</span>
+                <span className="text-xs font-semibold text-ink2">
+                  <Trans>Minutes this period</Trans>
+                </span>
                 {bar(d.usage.MAX_SOURCE_MINUTES_PER_MONTH, minutesCap)}
                 <span className="text-xs tabular-nums text-ink3">
                   {minutesCap
-                    ? `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} of ${num.format(minutesCap)} min`
-                    : `${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} min, no cap`}
+                    ? t`${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} of ${num.format(minutesCap)} min`
+                    : t`${num.format(d.usage.MAX_SOURCE_MINUTES_PER_MONTH)} min, no cap`}
                 </span>
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold text-ink2">Storage</span>
+                <span className="text-xs font-semibold text-ink2">
+                  <Trans>Storage</Trans>
+                </span>
                 {bar(d.usage.MAX_STORAGE_MB, storageCap)}
                 <span className="text-xs tabular-nums text-ink3">
-                  {storageCap ? `${formatMb(d.usage.MAX_STORAGE_MB)} of ${formatMb(storageCap)}` : `${formatMb(d.usage.MAX_STORAGE_MB)}, no cap`}
+                  {storageCap ? t`${formatMb(d.usage.MAX_STORAGE_MB)} of ${formatMb(storageCap)}` : t`${formatMb(d.usage.MAX_STORAGE_MB)}, no cap`}
                 </span>
                 <span className="text-xs text-ink3">
-                  Deleted projects still count until you{" "}
-                  <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
-                    delete them forever
-                  </Link>
-                  .
+                  <Trans>
+                    Deleted projects still count until you{" "}
+                    <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
+                      delete them forever
+                    </Link>
+                    .
+                  </Trans>
                 </span>
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold text-ink2">Projects</span>
+                <span className="text-xs font-semibold text-ink2">
+                  <Trans>Projects</Trans>
+                </span>
                 {bar(d.usage.MAX_PROJECTS_PER_USER, projectsCap)}
                 <span className="text-xs tabular-nums text-ink3">
                   {projectsCap
-                    ? `${num.format(d.usage.MAX_PROJECTS_PER_USER)} of ${num.format(projectsCap)}`
-                    : `${num.format(d.usage.MAX_PROJECTS_PER_USER)}, no cap`}
+                    ? t`${num.format(d.usage.MAX_PROJECTS_PER_USER)} of ${num.format(projectsCap)}`
+                    : t`${num.format(d.usage.MAX_PROJECTS_PER_USER)}, no cap`}
                 </span>
               </div>
             </div>
@@ -283,12 +333,14 @@ export default function BillingSection() {
               <button
                 className="btn-ghost min-w-[9rem]"
                 disabled={!d.canManage || portal.isPending}
-                title={d.canManage ? "Invoices, card, cancel" : "Appears once you have picked a plan"}
+                title={d.canManage ? t`Invoices, card, cancel` : t`Appears once you have picked a plan`}
                 onClick={() => portal.mutate()}
               >
-                {portal.isPending ? "…" : "Manage billing"}
+                {portal.isPending ? "…" : t`Manage billing`}
               </button>
-              <span className="text-xs text-ink3">Invoices, payment method and cancellation are on Stripe's portal.</span>
+              <span className="text-xs text-ink3">
+                <Trans>Invoices, payment method and cancellation are on Stripe's portal.</Trans>
+              </span>
             </div>
           </>
         ) : null}
@@ -298,8 +350,10 @@ export default function BillingSection() {
 
       <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-[15px] font-bold">Plans</h2>
-          <div className="flex rounded-[9px] bg-sunk p-0.5" role="group" aria-label="Billing interval">
+          <h2 className="text-[15px] font-bold">
+            <Trans>Plans</Trans>
+          </h2>
+          <div className="flex rounded-[9px] bg-sunk p-0.5" role="group" aria-label={t`Billing interval`}>
             {(["month", "year"] as const).map((i) => (
               <button
                 key={i}
@@ -308,7 +362,7 @@ export default function BillingSection() {
                 aria-pressed={intervalShown === i}
                 onClick={() => setInterval_(i)}
               >
-                {i === "month" ? "Monthly" : "Yearly"}
+                {i === "month" ? t`Monthly` : t`Yearly`}
               </button>
             ))}
           </div>
@@ -327,24 +381,34 @@ export default function BillingSection() {
               <div key={p.name} className={`flex flex-col gap-2 rounded-[12px] border p-4 ${d?.plan.name === p.name ? "border-acc" : "border-line"}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-bold">{p.label}</span>
-                  {d?.plan.name === p.name && <span className="chip bg-acc-soft text-acc-text">current</span>}
+                  {d?.plan.name === p.name && (
+                    <span className="chip bg-acc-soft text-acc-text">
+                      <Trans>current</Trans>
+                    </span>
+                  )}
                 </div>
                 <div className="font-mono text-[22px] font-bold tracking-tight">
-                  {p.price ? (intervalShown === "year" ? `$${p.price.year}` : `$${p.price.month}`) : "$0"}
-                  <span className="text-xs font-normal text-ink3">{p.price ? (intervalShown === "year" ? " / year" : " / month") : ""}</span>
+                  {p.price ? (intervalShown === "year" ? usd(p.price.year) : usd(p.price.month)) : usd(0)}
+                  <span className="text-xs font-normal text-ink3">{p.price ? (intervalShown === "year" ? t` / year` : t` / month`) : ""}</span>
                 </div>
                 <p className="min-h-10 text-xs text-ink2">{p.blurb}</p>
                 <ul className="flex flex-col gap-1 text-xs text-ink2">
-                  {p.firstVideoFreeMinutes > 0 && <li>First video free up to {p.firstVideoFreeMinutes} minutes</li>}
+                  {p.firstVideoFreeMinutes > 0 && (
+                    <li>
+                      <Trans>First video free up to {p.firstVideoFreeMinutes} minutes</Trans>
+                    </li>
+                  )}
                   <li>
                     {p.limits.MAX_SOURCE_MINUTES_PER_MONTH
-                      ? `${num.format(p.limits.MAX_SOURCE_MINUTES_PER_MONTH)} minutes of video a month`
-                      : "Unlimited minutes"}
+                      ? t`${num.format(p.limits.MAX_SOURCE_MINUTES_PER_MONTH)} minutes of video a month`
+                      : t`Unlimited minutes`}
                   </li>
-                  <li>{p.limits.MAX_STORAGE_MB ? `${formatMb(p.limits.MAX_STORAGE_MB)} of storage` : "Unlimited storage"}</li>
-                  <li>{p.limits.MAX_PROJECTS_PER_USER ? `${num.format(p.limits.MAX_PROJECTS_PER_USER)} projects` : "Unlimited projects"}</li>
-                  <li>{p.watermark ? "Small watermark" : "No watermark"}</li>
-                  {p.queuePriority > 0 && <li>{p.queuePriority >= topPriority ? "Top of the processing queue" : "Jobs start ahead of lower plans"}</li>}
+                  <li>{p.limits.MAX_STORAGE_MB ? t`${formatMb(p.limits.MAX_STORAGE_MB)} of storage` : t`Unlimited storage`}</li>
+                  <li>
+                    {p.limits.MAX_PROJECTS_PER_USER ? plural(p.limits.MAX_PROJECTS_PER_USER, { one: "# project", other: "# projects" }) : t`Unlimited projects`}
+                  </li>
+                  <li>{p.watermark ? t`Small watermark` : t`No watermark`}</li>
+                  {p.queuePriority > 0 && <li>{p.queuePriority >= topPriority ? t`Top of the processing queue` : t`Jobs start ahead of lower plans`}</li>}
                 </ul>
                 <div className="mt-auto pt-2">
                   {p.price ? (
@@ -357,19 +421,21 @@ export default function BillingSection() {
                         ? "…"
                         : d?.plan.name === p.name
                           ? (d.subscription?.interval ?? "month") === intervalShown
-                            ? "Current plan"
-                            : `Switch to ${intervalShown === "year" ? "yearly" : "monthly"}`
+                            ? t`Current plan`
+                            : intervalShown === "year"
+                              ? t`Switch to yearly`
+                              : t`Switch to monthly`
                           : d?.plan.price && d.plan.price.month > p.price.month
-                            ? "Downgrade"
-                            : "Upgrade"}
+                            ? t`Downgrade`
+                            : t`Upgrade`}
                     </button>
                   ) : (
                     <button
                       className="btn-ghost h-9 w-full"
                       disabled
-                      title={d?.plan.name === "free" ? "You are on Free" : "Cancel from Manage billing; Free applies when the period ends"}
+                      title={d?.plan.name === "free" ? t`You are on Free` : t`Cancel from Manage billing; Free applies when the period ends`}
                     >
-                      {d?.plan.name === "free" ? "Current plan" : "Cancel to return here"}
+                      {d?.plan.name === "free" ? t`Current plan` : t`Cancel to return here`}
                     </button>
                   )}
                 </div>
@@ -378,7 +444,7 @@ export default function BillingSection() {
           )}
         </div>
         <p className="text-xs text-ink3">
-          Prices in USD; tax is added at checkout where it applies. Yearly is ten months for twelve. Changing plans is prorated by Stripe.
+          <Trans>Prices in USD; tax is added at checkout where it applies. Yearly is ten months for twelve. Changing plans is prorated by Stripe.</Trans>
         </p>
       </section>
     </>
@@ -393,7 +459,9 @@ function OtherProjects() {
   if (!w || (!w.rerender.projects.length && !w.finish.projects.length)) return null;
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
-      <h2 className="text-[15px] font-bold">Your other projects</h2>
+      <h2 className="text-[15px] font-bold">
+        <Trans>Your other projects</Trans>
+      </h2>
       <UpgradeWorkPicker placement="billing" />
     </section>
   );

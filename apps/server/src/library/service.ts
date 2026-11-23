@@ -45,6 +45,8 @@ import { templateAssetUses } from "./template-assets.js";
 import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
 import { bumperCoverage, type BumperCoverage, type SlotCoverage } from "./summary.js";
+import { msg, select } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 export const FETCH_MAX_BYTES = BUMPER_MAX_BYTES;
 export const FETCH_TIMEOUT_MS = 60_000;
@@ -131,16 +133,17 @@ export async function updateBumperAsset(
   patch: { name?: string | undefined; imageSeconds?: number | undefined; tags?: string[] | undefined },
 ) {
   if (patch.name === undefined && patch.imageSeconds === undefined && patch.tags === undefined)
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds or tags" });
+    throw new AppError("BAD_REQUEST", msg({ id: "library.give_name_imageseconds_tags", message: "Give a name, imageSeconds or tags" }));
   return svc.tx(async (u) => {
     const [a] = await u.db
       .select()
       .from(schema.assets)
       .where(and(eq(schema.assets.id, id), assetVisibleTo(userId)))
       .for("update");
-    if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-    if (!a.userId) throw new TRPCError({ code: "FORBIDDEN", message: "Shared items keep the name they came with." });
-    if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
+    if (!a) throw new AppError("NOT_FOUND", msg({ id: "library.item_not_library", message: "That item is not in your library" }));
+    if (!a.userId) throw new AppError("FORBIDDEN", msg({ id: "library.shared_items_keep_name_they", message: "Shared items keep the name they came with." }));
+    if (patch.imageSeconds !== undefined && a.kind !== "image")
+      throw new AppError("BAD_REQUEST", msg({ id: "library.videos_keep_their_own_length", message: "Videos keep their own length" }));
     const name = patch.name?.trim();
     // tags are lowercase words, each once; the same list is stored and returned
     const tags = patch.tags === undefined ? undefined : [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))];
@@ -167,7 +170,7 @@ export async function setBumperDefault(db: Db, userId: string, slot: "intro" | "
     .select({ id: schema.assets.id })
     .from(schema.assets)
     .where(and(eq(schema.assets.id, assetId), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
-  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+  if (!asset) throw new AppError("NOT_FOUND", msg({ id: "library.intro_outro_not_found", message: "Intro or outro not found" }));
   const patch = { [key]: assetId };
   await db
     .insert(schema.userSettings)
@@ -221,9 +224,9 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
   const { userId, actorId } = input;
   const shared = userId === null;
   const sourceKey = shared ? sharedSourceKey(input.provenance) : null;
-  if (shared && !sourceKey) throw new TRPCError({ code: "BAD_REQUEST", message: "A shared item needs its source" });
+  if (shared && !sourceKey) throw new AppError("BAD_REQUEST", msg({ id: "library.shared_item_needs_source", message: "A shared item needs its source" }));
   const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, actorId)) });
-  if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+  if (!up) throw new AppError("NOT_FOUND", msg({ id: "library.upload_not_found", message: "Upload not found" }));
   const ext = path.extname(up.filename).toLowerCase();
   // the extension's guess; a GIF or WebP is re-decided from the probe below (animated = video)
   let kind = bumperKind(ext) ?? "video";
@@ -239,7 +242,10 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     // ffprobe cannot size an SVG reliably (and not every ffmpeg build reads one): resvg gives its size
     const svgText = ext === ".svg" ? await fs.readFile(local) : null;
     if (svgText && svgHasExternalRefs(svgText))
-      throw new TRPCError({ code: "BAD_REQUEST", message: "This SVG links to other files. Embed its images, or export it as a PNG." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "library.svg_links_other_files_embed", message: "This SVG links to other files. Embed its images, or export it as a PNG." }),
+      );
     const svgDims = svgText ? svgSize(svgText) : null;
     const probe =
       ext === ".svg"
@@ -248,10 +254,20 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           : null
         : await svc.media.ffprobe(local).catch(() => null);
     if (!probe)
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.`,
-      });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({
+          id: "library.file_unreadable",
+          message: select(
+            { kind },
+            {
+              image: "This file could not be read as an image.",
+              audio: "This file could not be read as audio.",
+              other: "This file could not be read as a video.",
+            },
+          ),
+        }),
+      );
     kind = assetKind(ext, probe) ?? kind;
     const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
     if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
@@ -299,7 +315,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           .select({ id: schema.uploads.id })
           .from(schema.uploads)
           .where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, actorId)));
-        if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+        if (!still) throw new AppError("NOT_FOUND", msg({ id: "library.upload_not_found", message: "Upload not found" }));
         const [asset] = await u.db
           .insert(schema.assets)
           .values({
@@ -422,19 +438,43 @@ export async function downloadAsUpload(
   }).catch((err) => {
     // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
     if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message))
-      throw new Error("That address is not reachable from the server (private or unresolvable)");
+      throw new Error(
+        t(
+          msg({
+            id: "library_fetch.address_reachable_server_private_unresolvable",
+            message: "That address is not reachable from the server (private or unresolvable)",
+          }),
+        ),
+      );
     throw err;
   });
   const { res, url: target } = fetched;
-  if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status})`);
+  if (!res.ok || !res.body)
+    throw new Error(t(msg({ id: "library_fetch.download_failed_http", message: msg`Download failed (HTTP ${{ status: res.status }})` })));
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(declared / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
+  if (declared > FETCH_MAX_BYTES)
+    throw new Error(
+      t(
+        msg({
+          id: "library_fetch.file_mb_limit_mb",
+          message: msg`The file is ${{ sizeMb: Math.ceil(declared / 1024 / 1024) }} MB; the limit is ${{ maxMb: FETCH_MAX_BYTES / 1024 / 1024 }} MB`,
+        }),
+      ),
+    );
   const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   const urlExt = path.extname(target.pathname).toLowerCase();
   // an import that knows what it is fetching (a provider's resolve) can force the extension
   const forced = deps.ext ? (deps.ext.startsWith(".") ? deps.ext : `.${deps.ext}`).toLowerCase() : undefined;
   const ext = forced ?? (ALLOWED_EXTS.includes(urlExt) ? urlExt : TYPE_EXT[type]);
-  if (!ext) throw new Error("Use a video (MP4, MOV, WebM), an image (PNG, JPG, WebP, GIF, SVG) or a sound (MP3, M4A, AAC, WAV, OGG, FLAC).");
+  if (!ext)
+    throw new Error(
+      t(
+        msg({
+          id: "library_fetch.use_video_mp4_mov_webm",
+          message: "Use a video (MP4, MOV, WebM), an image (PNG, JPG, WebP, GIF, SVG) or a sound (MP3, M4A, AAC, WAV, OGG, FLAC).",
+        }),
+      ),
+    );
   const id = randomUUID();
   const dest = path.join(svc.paths.uploads, `${id}${ext}`);
   try {
@@ -442,12 +482,15 @@ export async function downloadAsUpload(
     let seen = 0;
     const capped = Readable.from(bodyChunks(res)).map((chunk: Buffer) => {
       seen += chunk.length;
-      if (seen > FETCH_MAX_BYTES) throw new Error(`The file is larger than ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
+      if (seen > FETCH_MAX_BYTES)
+        throw new Error(
+          t(msg({ id: "library_fetch.file_larger_than_mb", message: msg`The file is larger than ${{ maxMb: FETCH_MAX_BYTES / 1024 / 1024 }} MB` })),
+        );
       return chunk;
     });
     await pipeline(capped, createWriteStream(dest), { signal });
     const size = (await fs.stat(dest)).size;
-    if (size === 0) throw new Error("The download was empty");
+    if (size === 0) throw new Error(t(msg({ id: "library_fetch.download_was_empty", message: "The download was empty" })));
     // `bumpers.create` names the asset after the upload's filename, so a requested name goes there
     const base = deps.name ? `${deps.name.replace(/[\\/]/g, "_")}${ext}` : decodeURIComponent(path.basename(target.pathname)).replace(/[\\/]/g, "_");
     const filename = (base && path.extname(base).toLowerCase() === ext ? base : `${base || "bumper"}${ext}`).slice(0, 200);
@@ -464,11 +507,27 @@ export async function downloadAsUpload(
 /** A file on this machine as an uploads row (what POST /api/upload makes), for `reelsaw library add <file>`. */
 export async function uploadLocalFile(svc: Services, userId: string, file: string): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
   const st = await fs.stat(file).catch(() => null);
-  if (!st?.isFile()) throw new Error(`${file} is not a file`);
-  if (st.size === 0) throw new Error("The file is empty");
-  if (st.size > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(st.size / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
+  if (!st?.isFile()) throw new Error(t(msg({ id: "library_fetch.not_a_file", message: msg`${{ file }} is not a file` })));
+  if (st.size === 0) throw new Error(t(msg({ id: "library_fetch.file_empty", message: "The file is empty" })));
+  if (st.size > FETCH_MAX_BYTES)
+    throw new Error(
+      t(
+        msg({
+          id: "library_fetch.file_mb_limit_mb",
+          message: msg`The file is ${{ sizeMb: Math.ceil(st.size / 1024 / 1024) }} MB; the limit is ${{ maxMb: FETCH_MAX_BYTES / 1024 / 1024 }} MB`,
+        }),
+      ),
+    );
   const ext = path.extname(file).toLowerCase();
-  if (!ALLOWED_EXTS.includes(ext)) throw new Error(`${ext || "That file type"} is not a library format (video, image or sound)`);
+  if (!ALLOWED_EXTS.includes(ext))
+    throw new Error(
+      t(
+        msg({
+          id: "library_fetch.library_format_video_image_sound",
+          message: msg`${{ ext: ext || "That file type" }} is not a library format (video, image or sound)`,
+        }),
+      ),
+    );
   const id = randomUUID();
   const filename = path.basename(file).slice(0, 200);
   const storageKey = keys.upload(id, ext);
@@ -767,7 +826,7 @@ export async function restoreOwnedAsset(svc: Services, userId: string, assetId: 
       .set({ deletedAt: null })
       .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
       .returning({ id: schema.assets.id });
-    if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    if (!r.length) throw new AppError("NOT_FOUND", msg({ id: "library.item_not_library", message: "That item is not in your library" }));
     return { ok: true as const };
   });
 }
@@ -789,11 +848,21 @@ export async function purgeOwnedAsset(svc: Services, userId: string, assetId: st
       .from(schema.assets)
       .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
       .for("update");
-    if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-    if (!a.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only library items already in Deleted can be deleted forever." });
+    if (!a) throw new AppError("NOT_FOUND", msg({ id: "library.item_not_library", message: "That item is not in your library" }));
+    if (!a.deletedAt)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "library.remove_first_only_library_items", message: "Remove it first. Only library items already in Deleted can be deleted forever." }),
+      );
     // "still named" is read from asset_refs, which may miss old projects until its backfill is done (the sweep waits too)
     if (!(await assetRefsReady(u.db)))
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The library is still indexing which projects use what. Try again in a few minutes." });
+      throw new AppError(
+        "PRECONDITION_FAILED",
+        msg({
+          id: "library.library_still_indexing_which_projects",
+          message: "The library is still indexing which projects use what. Try again in a few minutes.",
+        }),
+      );
     const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${assetId}) as used`);
     const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
     const tpl = await u.db.execute(
@@ -801,12 +870,15 @@ export async function purgeOwnedAsset(svc: Services, userId: string, assetId: st
     );
     const inTemplate = !!(tpl.rows[0] as { used: boolean } | undefined)?.used;
     if (used || inTemplate) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: used
-          ? "A project or clip still names this item. Restore or purge those first; the file stays so they keep rendering."
-          : "A layer template still names this item. Remove it from the template first.",
-      });
+      throw new AppError(
+        "PRECONDITION_FAILED",
+        used
+          ? msg({
+              id: "library.purge_still_used",
+              message: "A project or clip still names this item. Restore or purge those first; the file stays so they keep rendering.",
+            })
+          : msg({ id: "library.purge_in_template", message: "A layer template still names this item. Remove it from the template first." }),
+      );
     }
     await u.db.delete(schema.assets).where(eq(schema.assets.id, assetId));
     u.afterCommit(async () => {

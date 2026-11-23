@@ -1,6 +1,6 @@
 {
-  "id": "6d1e99c6-b717-4c4c-af80-1217fd73a7da",
-  "prevId": "2a65687c-4473-4fb0-8599-ef8eee043003",
+  "id": "69c87d2d-ea7b-413a-828e-9578a1f755e7",
+  "prevId": "cffbb35e-4f6e-4c3f-967a-94235d38b273",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3703,8 +3703,7 @@
           "name": "covered",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
+          "notNull": false
         },
         "covered_sec": {
           "name": "covered_sec",
@@ -3966,6 +3965,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "last_active_at": {
           "name": "last_active_at",

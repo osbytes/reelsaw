@@ -13,6 +13,7 @@ CREATE TABLE "project_ranges" (
 );
 --> statement-breakpoint
 ALTER TABLE "clips" ADD COLUMN "range_id" text;--> statement-breakpoint
+ALTER TABLE "transcripts" ADD COLUMN "covered" jsonb;--> statement-breakpoint
 ALTER TABLE "project_ranges" ADD CONSTRAINT "project_ranges_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "project_ranges_project_idx" ON "project_ranges" USING btree ("project_id","start_sec");--> statement-breakpoint
 ALTER TABLE "clips" ADD CONSTRAINT "clips_range_id_project_ranges_id_fk" FOREIGN KEY ("range_id") REFERENCES "public"."project_ranges"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -27,3 +28,6 @@ WHERE p."duration_sec" > 0;--> statement-breakpoint
 UPDATE "clips" c SET "range_id" = r."id"
 FROM "project_ranges" r
 WHERE r."project_id" = c."project_id" AND c."start_sec" >= r."start_sec" AND c."start_sec" < r."end_sec";
+--> statement-breakpoint
+-- a partly processed video's transcript covers [0, covered_sec); null (every other transcript) is the whole video
+UPDATE "transcripts" SET "covered" = jsonb_build_array(jsonb_build_array(0, "covered_sec")) WHERE "covered_sec" IS NOT NULL;

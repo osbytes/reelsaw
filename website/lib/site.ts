@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 /**
  * Public site constants. Hosted Reelsaw is a product fact (app.reelsaw.com): pricing, terms and
  * privacy are always on the site. NEXT_PUBLIC_HOSTED_URL only overrides the app URL (staging).
@@ -5,9 +7,10 @@
 export const SITE = {
   name: "Reelsaw",
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "https://reelsaw.com").replace(/\/+$/, ""),
-  title: "Reelsaw: AI video clipper, hosted or self-hosted",
-  description:
-    "Turn long videos into vertical 9:16 clips. Start free at app.reelsaw.com, first video free up to 60 minutes, or self-host the open-source (AGPL-3.0) build with no meter and no API keys. MCP included.",
+  title: t(msg`Reelsaw: AI video clipper, hosted or self-hosted`),
+  description: t(
+    msg`Turn long videos into vertical 9:16 clips. Start free at app.reelsaw.com, first video free up to 60 minutes, or self-host the open-source (AGPL-3.0) build with no meter and no API keys. MCP included.`,
+  ),
   /** the hosted service (docs/specs/ee.md) */
   app: (process.env.NEXT_PUBLIC_HOSTED_URL ?? "https://app.reelsaw.com").replace(/\/+$/, ""),
   github: "https://github.com/osbytes/reelsaw",

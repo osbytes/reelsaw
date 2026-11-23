@@ -1,8 +1,9 @@
 /** Keyset pagination helpers: opaque cursors, sorted keysets and LIKE escaping. Pure, no database. */
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { asc, desc, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SortDir } from "@reelsaw/shared";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "./i18n.js";
 
 /** Opaque cursor: the sort-key tuple of the last row on a page, as base64url JSON. */
 export function encodeCursor(parts: readonly (string | number)[]): string {
@@ -41,7 +42,7 @@ export const listPageInput = z
 export function pageCursor(cursor: string | undefined, arity: number): (string | number)[] | null {
   if (!cursor) return null;
   const c = decodeCursor(cursor, arity);
-  if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "That page link is not valid. Start again from the first page." });
+  if (!c) throw new AppError("BAD_REQUEST", msg({ id: "list.invalid_page_link", message: "That page link is not valid. Start again from the first page." }));
   return c;
 }
 
@@ -69,7 +70,10 @@ export type SortColumn = { expr: SQL; type: "text" | "numeric" | "real" | "times
 export function sortedKeyset(col: SortColumn, key: string, dir: SortDir, id: AnyColumn, cursor: string | undefined) {
   const c = pageCursor(cursor, 4);
   if (c && (c[0] !== key || c[1] !== dir))
-    throw new TRPCError({ code: "BAD_REQUEST", message: "That page link is for another order. Start again from the first page." });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "list.page_link_other_order", message: "That page link is for another order. Start again from the first page." }),
+    );
   const at = c ? sql`(${String(c[2])}::${sql.raw(col.type)}, ${String(c[3])})` : null;
   return {
     after: at ? (dir === "asc" ? sql`(${col.expr}, ${id}) > ${at}` : sql`(${col.expr}, ${id}) < ${at}`) : undefined,

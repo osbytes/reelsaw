@@ -1,10 +1,27 @@
 import type { AssetProvenance } from "@reelsaw/shared";
+import { t } from "@lingui/core/macro";
 
 export type LibraryKind = "video" | "image" | "audio";
-export const KIND_FILTERS: Array<{ id: LibraryKind; label: string }> = [
-  { id: "video", label: "Video" },
-  { id: "image", label: "Image" },
-  { id: "audio", label: "Audio" },
+/** The kind chips; `label` is read in the active locale each time it is shown. */
+export const KIND_FILTERS: Array<{ readonly id: LibraryKind; readonly label: string }> = [
+  {
+    id: "video",
+    get label() {
+      return t`Video`;
+    },
+  },
+  {
+    id: "image",
+    get label() {
+      return t`Image`;
+    },
+  },
+  {
+    id: "audio",
+    get label() {
+      return t`Audio`;
+    },
+  },
 ];
 
 const FORMATS: Record<string, string> = {
@@ -53,6 +70,6 @@ export const SEARCH_KEYS = [
 
 /** "CC0 · Freesound · author" */
 export function licenseText(p: AssetProvenance): string {
-  const provider = p.provider === "reelsaw" ? "Catalog" : p.provider.charAt(0).toUpperCase() + p.provider.slice(1);
+  const provider = p.provider === "reelsaw" ? t`Catalog` : p.provider.charAt(0).toUpperCase() + p.provider.slice(1);
   return [p.license?.name, provider, p.attribution].filter(Boolean).join(" · ");
 }

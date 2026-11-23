@@ -17,6 +17,7 @@ import { pixabay } from "./pixabay.js";
 import { reelsawCatalog } from "./reelsaw-catalog.js";
 import type { Provider, ProviderDeps, Resolved, SearchOptions, SearchResult } from "./types.js";
 import type { RuntimeSettings } from "../../instance-settings.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 export * from "./types.js";
 export { ProviderError, ProviderUnavailable, createProviderHttp, type ProviderHttp } from "./http.js";
@@ -62,7 +63,10 @@ export function createProviderRegistry(deps: { settings: () => RuntimeSettings; 
     const p = active().find((x) => x.id === id);
     if (!p)
       throw new ProviderError(
-        `Unknown or disabled provider "${id}". Providers with a key are hidden until an admin sets it under Settings → System → Library.`,
+        msg({
+          id: "library_provider.unknown_disabled_provider_providers_key",
+          message: msg`Unknown or disabled provider "${{ id }}". Providers with a key are hidden until an admin sets it under Settings → System → Library.`,
+        }),
       );
     return p;
   };

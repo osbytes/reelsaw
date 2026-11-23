@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { upgradeFromProject } from "@reelsaw/shared";
 import { track } from "../lib/telemetry";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 /**
  * On a video shown from its small preview (a plan's source cap): what it is, and the plan that downloads links at full
@@ -18,21 +19,24 @@ export function SourceQualityOffer({
   projectId: string;
   variant: "overlay" | "chip";
 }) {
+  const { t } = useLingui();
   const placement = variant === "overlay" ? "source_preview" : "editor_source_preview";
   // keyed on primitives: `me` refetches hand back a new offer object, which is not a new impression
   const shown = !!offer;
   useEffect(() => {
     if (shown) track("upgrade_offer_shown", { placement, projectId });
   }, [shown, placement, projectId]);
-  const what = `A ${height}p preview, for editing. Your clips still render in full quality.`;
+  const what = t`A ${height}p preview, for editing. Your clips still render in full quality.`;
   const click = () => track("upgrade_clicked", { placement, projectId });
   if (variant === "chip")
     return (
       <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 text-xs text-ink" title={what}>
-        <span className="font-mono text-ink3">{height}p preview</span>
+        <span className="font-mono text-ink3">
+          <Trans>{height}p preview</Trans>
+        </span>
         {offer && (
           <a href={upgradeFromProject(offer.href, projectId)} className="font-semibold text-acc-text no-underline" title={offer.label} onClick={click}>
-            Upgrade for HD
+            <Trans>Upgrade for HD</Trans>
           </a>
         )}
       </span>
@@ -40,7 +44,7 @@ export function SourceQualityOffer({
   return (
     <div className="pointer-events-none absolute inset-x-1.5 top-1.5 z-10 flex items-start justify-between gap-2">
       <span className="rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white" title={what}>
-        {height}p preview · clips in HD
+        <Trans>{height}p preview · clips in HD</Trans>
       </span>
       {offer && (
         <a
@@ -49,7 +53,7 @@ export function SourceQualityOffer({
           title={offer.label}
           onClick={click}
         >
-          Upgrade for HD
+          <Trans>Upgrade for HD</Trans>
         </a>
       )}
     </div>

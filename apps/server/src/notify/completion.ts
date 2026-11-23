@@ -29,6 +29,7 @@ import type { EventHandler } from "../event-handlers.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { templates } from "../email.js";
+import { inLocaleOf } from "../i18n.js";
 import { unsubscribeUrl, wantsEmail } from "./preferences.js";
 
 /** Round numbers worth a line in the note. 1 is "your first", announced ahead of any higher one crossed in the same batch. */
@@ -102,7 +103,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
   const db = svc.database.db;
   const user = await db.query.user.findFirst({
     where: eq(schema.user.id, userId),
-    columns: { id: true, email: true, name: true, banned: true, approvedAt: true },
+    columns: { id: true, email: true, name: true, banned: true, approvedAt: true, locale: true, timeZone: true },
   });
   if (!user || user.banned || !user.approvedAt || !user.email) {
     log.debug({ reason: !user ? "gone" : user.banned ? "suspended" : !user.approvedAt ? "pending" : "no email" }, "completion notice skipped");
@@ -213,13 +214,16 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     await svc.email.send(
       {
         to: user.email,
-        ...templates.clipsReady(svc.config.APP_URL, {
-          greeting: firstName(user),
-          projects: mailProjects,
-          hidden: projects.length - shown.length,
-          milestone,
-          unsubscribeUrl: unsubscribeUrl(svc.config.APP_URL, svc.config.BETTER_AUTH_SECRET, userId, "ready"),
-        }),
+        // in the recipient's language and time zone (i18n.ts)
+        ...inLocaleOf(user, () =>
+          templates.clipsReady(svc.config.APP_URL, {
+            greeting: firstName(user),
+            projects: mailProjects,
+            hidden: projects.length - shown.length,
+            milestone,
+            unsubscribeUrl: unsubscribeUrl(svc.config.APP_URL, svc.config.BETTER_AUTH_SECRET, userId, "ready"),
+          }),
+        ),
       },
       { strict: true, idempotencyKey: completionIdempotencyKey(userId, sent) },
     );

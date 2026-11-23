@@ -23,6 +23,8 @@ import { schema, type Db } from "./db/index.js";
 import type { Logger } from "./log.js";
 import { createSecretBox } from "./ai/crypto.js";
 import { eventRow } from "./event-types.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "./i18n.js";
 
 export const SETTING_GROUPS = [
   ["access", "Access"],
@@ -347,9 +349,11 @@ export function resolveSettings(config: Config, override: Override): RuntimeSett
 export function problemsOf(s: RuntimeSettings, deps: { emailEnabled: boolean }): Partial<Record<RuntimeKey, string>> {
   const out: Partial<Record<RuntimeKey, string>> = {};
   if (s.REQUIRE_EMAIL_VERIFICATION && !deps.emailEnabled)
-    out.REQUIRE_EMAIL_VERIFICATION = "Email verification needs an email driver: set EMAIL_DRIVER in .env first.";
+    out.REQUIRE_EMAIL_VERIFICATION = t(
+      msg({ id: "settings.verification_needs_email", message: "Email verification needs an email driver: set EMAIL_DRIVER in .env first." }),
+    );
   if (s.CAPTCHA_PROVIDER && (!s.CAPTCHA_SITE_KEY || !s.CAPTCHA_SECRET_KEY))
-    out.CAPTCHA_PROVIDER = "A captcha provider needs both the site key and the secret key.";
+    out.CAPTCHA_PROVIDER = t(msg({ id: "settings.captcha_needs_keys", message: "A captcha provider needs both the site key and the secret key." }));
   return out;
 }
 
@@ -402,7 +406,8 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
 
   function apply(next: Override, unreadable: RuntimeKey[], row: { updatedAt: Date; updatedBy: string | null } | undefined) {
     const ign: Partial<Record<RuntimeKey, string>> = {};
-    for (const k of unreadable) ign[k] = "The stored value cannot be decrypted (BETTER_AUTH_SECRET changed?). Enter it again.";
+    for (const k of unreadable)
+      ign[k] = t(msg({ id: "settings.value_undecryptable", message: "The stored value cannot be decrypted (BETTER_AUTH_SECRET changed?). Enter it again." }));
     // drop overrides whose precondition fails, one at a time, until the result is consistent
     const use: Override = { ...next };
     for (let i = 0; i < RUNTIME_KEYS.length; i++) {
@@ -485,7 +490,7 @@ export function createInstanceSettings(config: Config, log: Logger, deps: { emai
         const to = k in next ? next[k] : env[k];
         changed[k] = isSecret(k) ? { from: from ? "set" : "unset", to: to ? "set" : "unset" } : { from: from ?? null, to: to ?? null };
       }
-      if (!Object.keys(changed).length) throw new SettingsError("Nothing to change");
+      if (!Object.keys(changed).length) throw new SettingsError(t(msg({ id: "settings.nothing_to_change", message: "Nothing to change" })));
       const problems = problemsOf(resolveSettings(config, next), deps);
       const messages = Object.values(problems);
       if (messages.length) throw new SettingsError(messages.join(" "));

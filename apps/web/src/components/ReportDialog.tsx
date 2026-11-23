@@ -14,7 +14,9 @@ import { toast } from "sonner";
 import { clientContext } from "../lib/diagnostics";
 import { closeReport, openReportHere, REPORT_SHORTCUT, useReportTarget } from "../lib/report";
 import { sendIssueFeedback } from "../lib/telemetry";
-import { plural } from "@reelsaw/shared";
+import { formatNumber } from "@reelsaw/shared";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 const previewSchema = z.object({
   sourceType: z.enum(["url", "upload"]),
@@ -26,13 +28,15 @@ const previewSchema = z.object({
 });
 type Preview = z.infer<typeof previewSchema>;
 
-const mb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(0.1, n / 1e6).toFixed(1)} MB`);
+const oneDecimal = (n: number) => formatNumber(n, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const mb = (n: number) => (n >= 1e9 ? `${oneDecimal(n / 1e9)} GB` : `${oneDecimal(Math.max(0.1, n / 1e6))} MB`);
 
 /**
  * "Report an issue": on self-host (and admins everywhere) a zip for local reproduction; on hosted
  * with Sentry/PostHog, feedback goes through those channels instead (me.report from the server).
  */
 export function ReportDialog() {
+  const { t } = useLingui();
   const target = useReportTarget();
   const open = !!target;
   const projectId = target?.projectId;
@@ -77,7 +81,7 @@ export function ReportDialog() {
             via: "feedback",
           },
         });
-        if (!sent.sentry && !sent.posthog) throw new Error("Feedback channels are not available right now.");
+        if (!sent.sentry && !sent.posthog) throw new Error(t`Feedback channels are not available right now.`);
         return { kind: "feedback" as const };
       }
       const include = { ...inc, system: caps.system && inc.system, instance: !!caps.instance && inc.instance };
@@ -89,9 +93,10 @@ export function ReportDialog() {
       });
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => null);
-        const msg =
-          body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn’t build the report (${res.status})`;
-        throw new Error(msg);
+        const status = res.status;
+        const why =
+          body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : t`Couldn’t build the report (${status})`;
+        throw new Error(why);
       }
       const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "reelsaw-report.zip";
       const url = URL.createObjectURL(await res.blob());
@@ -123,7 +128,11 @@ export function ReportDialog() {
     },
     onSuccess: (r) => {
       closeReport();
-      toast(r.kind === "feedback" ? "Thanks — we got your report" : `Saved “${r.name}” to your downloads · send it to the Reelsaw team`);
+      if (r.kind === "feedback") toast(t`Thanks — we got your report`);
+      else {
+        const name = r.name;
+        toast(t`Saved “${name}” to your downloads · send it to the Reelsaw team`);
+      }
     },
   });
 
@@ -155,7 +164,7 @@ export function ReportDialog() {
   const submit = () => {
     if (text.trim().length < 3) {
       submitM.reset();
-      setHint("Describe what went wrong (a sentence is enough).");
+      setHint(t`Describe what went wrong (a sentence is enough).`);
       return;
     }
     setHint(null);
@@ -187,29 +196,35 @@ export function ReportDialog() {
     </label>
   );
 
+  const sourceSize = preview ? mb(preview.sourceBytes) : "";
+  const projectTitle = project.data?.title ?? target?.projectTitle ?? t`this project`;
   const uploadWithoutSource = !feedbackOnly && preview?.sourceType === "upload" && !inc.source;
   return (
-    <Modal open={open} onOpenChange={(o) => !o && !busy && closeReport()} title="Report an issue" width={520}>
+    <Modal open={open} onOpenChange={(o) => !o && !busy && closeReport()} title={t`Report an issue`} width={520}>
       <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-3 pe-3">
           <Dialog.Description className="-mt-1 text-sm text-ink2">
             {projectId ? (
               <>
-                About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>.{" "}
+                <Trans>
+                  About <b className="text-ink">{projectTitle}</b>.
+                </Trans>{" "}
               </>
             ) : null}
             {feedbackOnly
-              ? "Sends your description to the Reelsaw team. API keys and passwords are never included."
-              : "Saves a zip you can send to the Reelsaw team. API keys and passwords are never included."}
+              ? t`Sends your description to the Reelsaw team. API keys and passwords are never included.`
+              : t`Saves a zip you can send to the Reelsaw team. API keys and passwords are never included.`}
           </Dialog.Description>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-semibold">What went wrong?</span>
+            <span className="text-sm font-semibold">
+              <Trans>What went wrong?</Trans>
+            </span>
             <textarea
               className="input min-h-[96px] resize-y"
               autoFocus
               maxLength={10000}
-              placeholder="What you did, what you expected, and what happened instead. Timestamps help (e.g. “clip 3 at 0:42”)."
+              placeholder={t`What you did, what you expected, and what happened instead. Timestamps help (e.g. “clip 3 at 0:42”).`}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -220,27 +235,38 @@ export function ReportDialog() {
 
           {projectId && project.isPending && (
             <div className="flex flex-col gap-1.5" role="status">
-              <span className="sr-only">Loading clips…</span>
-              <span className="text-sm font-semibold">Clips</span>
+              <span className="sr-only">
+                <Trans>Loading clips…</Trans>
+              </span>
+              <span className="text-sm font-semibold">
+                <Trans>Clips</Trans>
+              </span>
               <Skeleton className="h-[38px] w-full rounded-[10px]" />
             </div>
           )}
           {projectId && clips.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-semibold">Clips</span>
+              <span className="text-sm font-semibold">
+                <Trans>Clips</Trans>
+              </span>
               <MultiCombobox
-                label="Clips the problem shows up in"
-                placeholder="None in particular"
-                searchPlaceholder="Search clips by number or title…"
-                empty="No clips match"
-                footerHint="Pick any that show the problem"
+                label={t`Clips the problem shows up in`}
+                placeholder={t`None in particular`}
+                searchPlaceholder={t`Search clips by number or title…`}
+                empty={t`No clips match`}
+                footerHint={t`Pick any that show the problem`}
                 value={clipIds}
                 onChange={setClipIds}
                 options={clips.map((c) => ({
                   value: c.id,
                   prefix: String(c.index + 1),
                   label: c.title,
-                  hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined,
+                  hint:
+                    c.status === "failed" ? (
+                      <span className="text-err">
+                        <Trans>failed</Trans>
+                      </span>
+                    ) : undefined,
                 }))}
               />
             </div>
@@ -248,55 +274,64 @@ export function ReportDialog() {
 
           {!feedbackOnly && (
             <fieldset className="flex flex-col gap-2 rounded-[12px] border border-line p-3">
-              <legend className="px-1 text-xs font-semibold text-ink2">Included</legend>
+              <legend className="px-1 text-xs font-semibold text-ink2">
+                <Trans>Included</Trans>
+              </legend>
               <span className="text-xs text-ink2">
                 {projectId
-                  ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history"
+                  ? t`Project settings, transcript, fixes, clips, pipeline decisions and the event history, the app’s settings (secrets shown only as set/unset), and your description.`
                   : inc.instance
-                    ? "This instance’s unfinished work, job queue, usage and recent failures"
-                    : "Your projects' status and recent failures"}
-                , the app’s settings (secrets shown only as set/unset), and your description.
+                    ? t`This instance’s unfinished work, job queue, usage and recent failures, the app’s settings (secrets shown only as set/unset), and your description.`
+                    : t`Your projects' status and recent failures, the app’s settings (secrets shown only as set/unset), and your description.`}
               </span>
               {caps.instance &&
                 row(
                   "instance",
-                  "Instance-wide diagnostics",
-                  "Unfinished work, failed jobs, usage and error logs across every account — for queue, disk or machine problems, not only your projects. Other accounts’ project titles and ids are included.",
+                  t`Instance-wide diagnostics`,
+                  t`Unfinished work, failed jobs, usage and error logs across every account — for queue, disk or machine problems, not only your projects. Other accounts’ project titles and ids are included.`,
                 )}
               {caps.system &&
                 row(
                   "system",
-                  "System info and recent errors",
+                  t`System info and recent errors`,
                   inc.instance
-                    ? "Included with instance-wide diagnostics"
-                    : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren’t tied to another account",
+                    ? t`Included with instance-wide diagnostics`
+                    : t`Versions, CPU/memory/disk, job counts, your usage, and error lines that aren’t tied to another account`,
                   inc.instance,
                 )}
               {projectId &&
                 row(
                   "logs",
-                  "Logs for this project",
-                  preview && !preview.logs ? "This instance doesn’t keep a log file" : "Pipeline log lines, including model calls when they’re recorded",
+                  t`Logs for this project`,
+                  preview && !preview.logs ? t`This instance doesn’t keep a log file` : t`Pipeline log lines, including model calls when they’re recorded`,
                   !!preview && !preview.logs,
                 )}
               {projectId &&
                 row(
                   "previews",
-                  "Thumbnails and the selected clips' videos",
-                  clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips",
+                  t`Thumbnails and the selected clips' videos`,
+                  clipIds.length ? t`So we can see what you saw` : t`Thumbnails only until you pick clips`,
                 )}
               {projectId &&
                 row(
                   "allClips",
-                  "All rendered clips",
-                  preview ? `${plural(preview.clips, "clip")} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />,
+                  t`All rendered clips`,
+                  preview ? (
+                    `${plural(preview.clips, { one: "# clip", other: "# clips" })} · ${mb(preview.clipsBytes)}`
+                  ) : (
+                    <Skeleton className="mt-0.5 inline-block h-3 w-28" />
+                  ),
                 )}
               {projectId &&
                 row(
                   "source",
-                  "Source video",
+                  t`Source video`,
                   preview ? (
-                    `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}`
+                    preview.sourceType === "url" ? (
+                      t`${sourceSize} · not needed when the link still works`
+                    ) : (
+                      t`${sourceSize} · needed to reproduce problems with uploads`
+                    )
                   ) : (
                     <Skeleton className="mt-0.5 inline-block h-3 w-40" />
                   ),
@@ -308,22 +343,22 @@ export function ReportDialog() {
 
       {/* one reserved line for notes and errors, so the buttons never move */}
       <p className={`min-h-[18px] shrink-0 text-xs ${error ? "text-err" : "text-ink3"}`} role={error ? "alert" : undefined}>
-        {error ?? (uploadWithoutSource ? "Without the source video, problems that depend on the video itself can’t be reproduced." : "")}
+        {error ?? (uploadWithoutSource ? t`Without the source video, problems that depend on the video itself can’t be reproduced.` : "")}
       </p>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
         <button className="btn-ghost" disabled={busy} onClick={closeReport}>
-          Cancel
+          <Trans>Cancel</Trans>
         </button>
         <button className="btn-ink min-w-[10.5rem]" disabled={busy} onClick={submit}>
           {busy ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> {feedbackOnly ? "Sending…" : "Preparing…"}
+              <Loader2 className="h-4 w-4 animate-spin" /> {feedbackOnly ? t`Sending…` : t`Preparing…`}
             </>
           ) : feedbackOnly ? (
-            "Send feedback"
+            t`Send feedback`
           ) : (
-            "Download report"
+            t`Download report`
           )}
         </button>
       </div>

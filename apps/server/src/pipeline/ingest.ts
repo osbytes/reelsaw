@@ -15,8 +15,9 @@ import {
 import { takeTxLock, txLock } from "../locks.js";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { RANGE_FETCH_GAP_SEC, mergeSpans, planRanges, rangeProblemMessage, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
+import { RANGE_FETCH_GAP_SEC, mergeSpans, planRanges, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
 import { buildSparseSource, type SourcePiece } from "./sparse.js";
+import { rangeProblemsText } from "../projects/ranges.js";
 import type { Project, ProjectRange } from "../db/schema.js";
 import type { UnitOfWork } from "../uow.js";
 import type { Services } from "../services.js";
@@ -474,7 +475,8 @@ async function settleRanges(svc: Services, u: UnitOfWork, project: Project, chos
     chosen.map((r) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode })),
     { durationSec, maxClipSec: Number.POSITIVE_INFINITY },
   );
-  if (!plan.ok) throw new NonRetryableError(plan.problems.map(rangeProblemMessage).join(" "));
+  // stored as the owner reads it: the job runs in their locale
+  if (!plan.ok) throw new NonRetryableError(rangeProblemsText(plan.problems).join(" "));
   const dropped: string[] = [];
   for (const r of plan.ranges) {
     const [keep, ...rest] = r.inputs.map((i) => chosen[i]).filter((x): x is ProjectRange => x !== undefined);

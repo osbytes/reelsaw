@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import { Bot, Captions, Cpu, Database, Download, Film, Layers, ListChecks, Lock, Plug, Scissors, ScanFace, Sparkles, Users, Wrench } from "lucide-react";
 import { Code, Command } from "@/components/command";
 import { PipelineFilm } from "@/components/pipeline-film";
@@ -19,71 +21,97 @@ import { SITE } from "@/lib/site";
 const STEPS = [
   {
     icon: Download,
-    title: "Ingest",
-    body: "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it.",
+    title: t(msg`Ingest`),
+    body: t(
+      msg`Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it.`,
+    ),
   },
   {
     icon: Captions,
-    title: "Transcribe and clean",
-    body: "Audio is transcribed in parallel chunks with word timestamps. Names are fixed from your vocabulary, fillers and false starts are cut with jump cuts, and every cut is checked by listening to the seam.",
+    title: t(msg`Transcribe and clean`),
+    body: t(
+      msg`Audio is transcribed in parallel chunks with word timestamps. Names are fixed from your vocabulary, fillers and false starts are cut with jump cuts, and every cut is checked by listening to the seam.`,
+    ),
   },
   {
     icon: Sparkles,
-    title: "Pick the moments",
-    body: "Map, pool, rank: the transcript is chunked at long pauses, every standalone moment is collected, scored on hook, value, flow and shareability, and the top picks are compared head-to-head with positions swapped to cancel judge bias.",
+    title: t(msg`Pick the moments`),
+    body: t(
+      msg`Map, pool, rank: the transcript is chunked at long pauses, every standalone moment is collected, scored on hook, value, flow and shareability, and the top picks are compared head-to-head with positions swapped to cancel judge bias.`,
+    ),
   },
   {
     icon: ScanFace,
-    title: "Reframe and render",
-    body: "A tiny face detector and tracker on the CPU pick a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, follow a moving subject when there is no face, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.",
+    title: t(msg`Reframe and render`),
+    body: t(
+      msg`A tiny face detector and tracker on the CPU pick a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, follow a moving subject when there is no face, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode.`,
+    ),
   },
 ];
 
 const FEATURES = [
   {
     icon: Plug,
-    title: "Fully local by default. Any vendor by choice.",
-    body: "The installer sets up Ollama and a local Whisper, so nothing leaves the machine and no key is needed. Language, transcription and alignment models are each a provider:model string you can point at OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, OpenCode, or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime.",
+    title: t(msg`Fully local by default. Any vendor by choice.`),
+    body: t(
+      msg`The installer sets up Ollama and a local Whisper, so nothing leaves the machine and no key is needed. Language, transcription and alignment models are each a provider:model string you can point at OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, OpenCode, or any OpenAI-compatible server. No vendor is baked in; admins switch at runtime.`,
+    ),
   },
   {
     icon: ListChecks,
-    title: "Research-backed clip selection",
-    body: "No fixed clip count. Weak picks are dropped relative to the run, the best clip is always kept, and a different judge model can score and compare so a model never grades its own hooks. Click a score for the rubric breakdown.",
+    title: t(msg`Research-backed clip selection`),
+    body: t(
+      msg`No fixed clip count. Weak picks are dropped relative to the run, the best clip is always kept, and a different judge model can score and compare so a model never grades its own hooks. Click a score for the rubric breakdown.`,
+    ),
   },
   {
     icon: Scissors,
-    title: "Clean transcripts, kept honest",
-    body: "Disfluencies are located by forced alignment so karaoke highlights land on the syllable. Each fix shows inline with accept and reject, long pauses can be shortened, and your decisions survive re-runs.",
+    title: t(msg`Clean transcripts, kept honest`),
+    body: t(
+      msg`Disfluencies are located by forced alignment so karaoke highlights land on the syllable. Each fix shows inline with accept and reject, long pauses can be shortened, and your decisions survive re-runs.`,
+    ),
   },
   {
     icon: ScanFace,
-    title: "Smart reframing, any shape",
-    body: "Face, split, stack and fit layouts chosen per shot cut, rendered 9:16, 4:5, 1:1 or 16:9. Webcam-tile stacks, crowds shown whole, hand-set crops, and one clip's framing copied to the project. Override per project, per clip or per section.",
+    title: t(msg`Smart reframing, any shape`),
+    body: t(
+      msg`Face, split, stack and fit layouts chosen per shot cut, rendered 9:16, 4:5, 1:1 or 16:9. Webcam-tile stacks, crowds shown whole, hand-set crops, and one clip's framing copied to the project. Override per project, per clip or per section.`,
+    ),
   },
   {
     icon: Captions,
-    title: "Captions that read",
-    body: "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones.",
+    title: t(msg`Captions that read`),
+    body: t(
+      msg`AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones.`,
+    ),
   },
   {
     icon: Film,
-    title: "A real editor",
-    body: "Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, layers, fades in and out, intro and outro crossfades, undo and redo. Keyboard first, shortcuts listed under ?.",
+    title: t(msg`A real editor`),
+    body: t(
+      msg`Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, layers, fades in and out, intro and outro crossfades, undo and redo. Keyboard first, shortcuts listed under ?.`,
+    ),
   },
   {
     icon: Layers,
-    title: "Library, templates and export",
-    body: "A library of intros, outros, logos, stickers, b-roll and music. Layer templates save a look once and apply it to any clip. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip.",
+    title: t(msg`Library, templates and export`),
+    body: t(
+      msg`A library of intros, outros, logos, stickers, b-roll and music. Layer templates save a look once and apply it to any clip. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip.`,
+    ),
   },
   {
     icon: Users,
-    title: "Accounts, approval and quotas",
-    body: "The first account is the admin. Open, approval or closed sign-up, per-user quotas, retention, captcha, email notices (including when clips are ready if you've stepped away) and usage per account. Admins switch models and providers at runtime without a restart.",
+    title: t(msg`Accounts, approval and quotas`),
+    body: t(
+      msg`The first account is the admin. Open, approval or closed sign-up, per-user quotas, retention, captcha, email notices (including when clips are ready if you've stepped away) and usage per account. Admins switch models and providers at runtime without a restart.`,
+    ),
   },
   {
     icon: Database,
-    title: "Reliable, resumable, scalable",
-    body: 'Every stage is a pg-boss job in Postgres that checkpoints its output. A crashed worker resumes where it left off, a long video on a slow local model keeps the parts it finished (the project shows "13 of 43 parts, about 1 h left"), orphaned work is re-queued, and extra worker containers scale rendering. Local disk or any S3-compatible storage.',
+    title: t(msg`Reliable, resumable, scalable`),
+    body: t(
+      msg`Every stage is a pg-boss job in Postgres that checkpoints its output. A crashed worker resumes where it left off, a long video on a slow local model keeps the parts it finished (the project shows "13 of 43 parts, about 1 h left"), orphaned work is re-queued, and extra worker containers scale rendering. Local disk or any S3-compatible storage.`,
+    ),
   },
 ];
 
@@ -136,8 +164,8 @@ function HomeJsonLd() {
           url: SITE.url,
           description: SITE.description,
           applicationCategory: "MultimediaApplication",
-          applicationSubCategory: "Video editing",
-          operatingSystem: "Docker (Linux, macOS, Windows)",
+          applicationSubCategory: t(msg`Video editing`),
+          operatingSystem: t(msg`Docker (Linux, macOS, Windows)`),
           softwareHelp: { "@type": "CreativeWork", name: "Reelsaw README", url: `${SITE.github}#readme` },
           downloadUrl: SITE.releases,
           installUrl: `${SITE.url}/#install`,
@@ -182,25 +210,26 @@ export default async function HomePage() {
             <div className="flex flex-col items-center gap-7 text-center lg:items-start lg:text-left">
               <p className="chip border border-line bg-panel text-ink2">
                 <Lock className="h-3.5 w-3.5 text-acc-text" aria-hidden />
-                Open source · Hosted or self-hosted · MCP for agents
+                {t(msg`Open source · Hosted or self-hosted · MCP for agents`)}
               </p>
               <h1 id="hero-title" className="text-[40px] leading-[1.02] font-extrabold tracking-[-0.02em] sm:text-[58px]">
-                Long videos in.
-                <br />
-                Vertical clips out.
+                {rich(msg`Long videos in.<0/>Vertical clips out.`, { 0: <br /> })}
               </h1>
               <p className="max-w-[54ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[18px]">
-                Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is
-                speaking, and burns in captions and a hook. Every pick comes with its reason.
+                {t(
+                  msg`Paste a link to a podcast, interview or talk. Reelsaw finds the moments that stand on their own, frames them for 9:16 around whoever is speaking, and burns in captions and a hook. Every pick comes with its reason.`,
+                )}
               </p>
               <div className="flex w-full flex-col items-center gap-4 lg:items-start">
                 <HeroLinkForm />
                 <div className="flex flex-wrap items-center justify-center gap-3">
                   <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-11 px-4 text-sm">
-                    <GitHubMark /> Star on GitHub
+                    <GitHubMark />
+                    {t(msg` Star on GitHub`)}
                   </a>
                   <a href="#install" className="btn-ghost h-11 px-4 text-sm">
-                    <Cpu className="h-4 w-4" aria-hidden /> Self-host
+                    <Cpu className="h-4 w-4" aria-hidden />
+                    {t(msg` Self-host`)}
                   </a>
                 </div>
               </div>
@@ -214,17 +243,22 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="example-title"
-              eyebrow="One real run"
-              title={`A ${DEMO_MINUTES}-minute ${DEMO_RUN.source.kind} in. ${DEMO_RUN.clips} clips out.`}
-              body={`No prompt, no settings, no scrubbing: this is what a stock Reelsaw kept, in its own order, with the reasons it gave. One clip plays at a time: point at another, or swipe on a phone.`}
+              eyebrow={t(msg`One real run`)}
+              title={t(msg`A ${{ demo_minutes: DEMO_MINUTES }}-minute ${{ kind: DEMO_RUN.source.kind }} in. ${{ clips: DEMO_RUN.clips }} clips out.`)}
+              body={t(
+                msg`No prompt, no settings, no scrubbing: this is what a stock Reelsaw kept, in its own order, with the reasons it gave. One clip plays at a time: point at another, or swipe on a phone.`,
+              )}
             />
             <ClipStrip />
             <p className="text-center text-xs leading-relaxed text-ink3">
-              Source:{" "}
-              <a href={DEMO_RUN.source.url} target="_blank" rel="noreferrer" className="prose-link">
-                {DEMO_RUN.source.title}
-              </a>{" "}
-              by {DEMO_RUN.source.author}, CC BY. This run used cloud models; fully local works the same, slower.
+              {rich(msg`Source: <0/> by <1/>, CC BY. This run used cloud models; fully local works the same, slower.`, {
+                0: (
+                  <a href={DEMO_RUN.source.url} target="_blank" rel="noreferrer" className="prose-link">
+                    {DEMO_RUN.source.title}
+                  </a>
+                ),
+                1: DEMO_RUN.source.author,
+              })}
             </p>
           </div>
         </section>
@@ -234,23 +268,23 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="see-title"
-              eyebrow="See it"
-              title="Nothing is a black box"
-              body="Every automatic decision is shown where you are looking, with a one-click override."
+              eyebrow={t(msg`See it`)}
+              title={t(msg`Nothing is a black box`)}
+              body={t(msg`Every automatic decision is shown where you are looking, with a one-click override.`)}
             />
             <FeatureTabs />
             <p className="text-xs leading-relaxed text-ink3">
-              Other sources, all CC BY:{" "}
-              {OTHER_SOURCES.map((src, k) => (
-                <span key={src.url}>
-                  {k > 0 && " · "}
-                  <a href={src.url} target="_blank" rel="noreferrer" className="prose-link">
-                    {src.title}
-                  </a>{" "}
-                  by {src.author}
-                </span>
-              ))}
-              .
+              {rich(msg`Other sources, all CC BY: <0/>.`, {
+                0: OTHER_SOURCES.map((src, k) => (
+                  <span key={src.url}>
+                    {k > 0 && " · "}
+                    <a href={src.url} target="_blank" rel="noreferrer" className="prose-link">
+                      {src.title}
+                    </a>{" "}
+                    {t(msg`by ${{ author: src.author }}`)}
+                  </span>
+                )),
+              })}
             </p>
           </div>
         </section>
@@ -260,9 +294,9 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="how-title"
-              eyebrow="How it works"
-              title="Four stages, each one a resumable job"
-              body="Every stage checkpoints its output in Postgres. Restart the box mid-render and it picks up where it stopped."
+              eyebrow={t(msg`How it works`)}
+              title={t(msg`Four stages, each one a resumable job`)}
+              body={t(msg`Every stage checkpoints its output in Postgres. Restart the box mid-render and it picks up where it stopped.`)}
             />
             <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {STEPS.map((s, i) => (
@@ -281,9 +315,10 @@ export default async function HomePage() {
             <figure className="card overflow-hidden shadow-pop">
               <PipelineFilm />
               <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">
-                One video through the five queues:{" "}
-                <span className="font-mono text-[11px]">project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</span>. Every box
-                is a pg-boss queue in Postgres; a worker restarts mid-render and resumes from its last save.
+                {rich(
+                  msg`One video through the five queues: <0>project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</0>. Every box is a pg-boss queue in Postgres; a worker restarts mid-render and resumes from its last save.`,
+                  { 0: (c) => <span className="font-mono text-[11px]">{c}</span> },
+                )}
               </figcaption>
             </figure>
           </div>
@@ -294,9 +329,9 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="features-title"
-              eyebrow="Features"
-              title="Everything between the link and the upload"
-              body="Built for people who publish every week and want their own pipeline, not a credit meter."
+              eyebrow={t(msg`Features`)}
+              title={t(msg`Everything between the link and the upload`)}
+              body={t(msg`Built for people who publish every week and want their own pipeline, not a credit meter.`)}
             />
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {FEATURES.map((f) => (
@@ -316,18 +351,16 @@ export default async function HomePage() {
         <section id="agents" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="agents-title">
           <div className="container-page grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-5">
-              <p className="eyebrow">Agents and automation</p>
+              <p className="eyebrow">{t(msg`Agents and automation`)}</p>
               <h2 id="agents-title" className="text-[30px] leading-[1.1] font-bold tracking-tight text-balance sm:text-[38px]">
-                MCP is the UI for agents
+                {t(msg`MCP is the UI for agents`)}
               </h2>
               <p className="text-[16px] leading-relaxed text-ink2 text-pretty">
-                Every editing action in the app (projects, clips, transcript fixes, library, layer templates, settings and project defaults, billing links)
-                exists as a tool on the built-in MCP server; only the admin pages for users, providers and models are app-only (Model Context Protocol,
-                Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit layers and
-                framing, create and re-render clips, manage the library and layer templates, and export the results. The same tools are on every hosted plan,
-                including Free. The operator CLI mirrors the same service code for people running the box.
+                {t(
+                  msg`Every editing action in the app (projects, clips, transcript fixes, library, layer templates, settings and project defaults, billing links) exists as a tool on the built-in MCP server; only the admin pages for users, providers and models are app-only (Model Context Protocol, Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit layers and framing, create and re-render clips, manage the library and layer templates, and export the results. The same tools are on every hosted plan, including Free. The operator CLI mirrors the same service code for people running the box.`,
+                )}
               </p>
-              <ul className="flex flex-wrap gap-2" aria-label="Some MCP tools">
+              <ul className="flex flex-wrap gap-2" aria-label={t(msg`Some MCP tools`)}>
                 {MCP_TOOLS.map((t) => (
                   <li key={t} className="chip border border-line bg-panel font-mono text-[11px] font-medium text-ink2">
                     {t}
@@ -336,16 +369,19 @@ export default async function HomePage() {
               </ul>
               <div className="flex flex-wrap gap-3">
                 <a href={SITE.mcpDocs} target="_blank" rel="noreferrer" className="btn-ghost">
-                  <Bot className="h-4 w-4" aria-hidden /> MCP docs
+                  <Bot className="h-4 w-4" aria-hidden />
+                  {t(msg` MCP docs`)}
                 </a>
                 <a href={SITE.cliDocs} target="_blank" rel="noreferrer" className="btn-ghost">
-                  <Wrench className="h-4 w-4" aria-hidden /> Operator CLI
+                  <Wrench className="h-4 w-4" aria-hidden />
+                  {t(msg` Operator CLI`)}
                 </a>
               </div>
             </div>
             <div className="flex min-w-0 flex-col gap-3">
               <Command text={`claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Authorization: Bearer rs_…"`} caption="Claude Code" />
-              <Code lang="json">{`{
+              <Code lang="json">
+                {t(msg`{
   "mcpServers": {
     "reelsaw": {
       "type": "http",
@@ -353,9 +389,12 @@ export default async function HomePage() {
       "headers": { "Authorization": "Bearer rs_…" }
     }
   }
-}`}</Code>
+}`)}
+              </Code>
               <p className="text-xs text-ink3">
-                Create an API key under Settings → API keys and MCP, or set MCP_OAUTH=true so claude.ai and Claude Desktop sign in through the browser.
+                {t(
+                  msg`Create an API key under Settings → API keys and MCP, or set MCP_OAUTH=true so claude.ai and Claude Desktop sign in through the browser.`,
+                )}
               </p>
             </div>
           </div>
@@ -366,21 +405,23 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-10">
             <SectionHeading
               id="compare-title"
-              eyebrow="How it compares"
-              title="Hosted clippers charge by the minute. Self-hosted Reelsaw charges nothing."
-              body={`Opus Clip, Klap, Vizard, Submagic, 2short.ai and quso.ai meter clips, minutes or credits and watermark or expire their free tiers. The other open-source clipper still needs Gemini for layout picking and silent videos. Reelsaw is AGPL-3.0 software on your own machine, fully local or with any provider you choose: no plan, no cap, no watermark. If you would rather not run a machine, hosted Reelsaw is $12 a month for 100 source minutes — the same list prices as OpenShorts Cloud, and cheaper than Opus Clip Starter at $15. Each comparison says what the other tool does better. Pricing checked ${CHECKED}.`}
+              eyebrow={t(msg`How it compares`)}
+              title={t(msg`Hosted clippers charge by the minute. Self-hosted Reelsaw charges nothing.`)}
+              body={t(
+                msg`Opus Clip, Klap, Vizard, Submagic, 2short.ai and quso.ai meter clips, minutes or credits and watermark or expire their free tiers. The other open-source clipper still needs Gemini for layout picking and silent videos. Reelsaw is AGPL-3.0 software on your own machine, fully local or with any provider you choose: no plan, no cap, no watermark. If you would rather not run a machine, hosted Reelsaw is $12 a month for 100 source minutes — the same list prices as OpenShorts Cloud, and cheaper than Opus Clip Starter at $15. Each comparison says what the other tool does better. Pricing checked ${{ checked: CHECKED }}.`,
+              )}
             />
             <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-              <nav aria-label="Comparisons" className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">Alternatives</h3>
+              <nav aria-label={t(msg`Comparisons`)} className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">{t(msg`Alternatives`)}</h3>
                 {ALTERNATIVE_LINKS.map((l) => (
                   <a key={l.href} href={l.href} className="prose-link w-fit text-[15px]">
                     {l.label}
                   </a>
                 ))}
               </nav>
-              <nav aria-label="Guides" className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">Use cases and guides</h3>
+              <nav aria-label={t(msg`Guides`)} className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">{t(msg`Use cases and guides`)}</h3>
                 {[...USE_CASE_NAV, ...GUIDE_NAV].map((l) => (
                   <a key={l.href} href={l.href} className="prose-link w-fit text-[15px]">
                     {l.label}
@@ -397,9 +438,9 @@ export default async function HomePage() {
             <div className="container-page flex flex-col gap-10">
               <SectionHeading
                 id="changelog-title"
-                eyebrow="Recently shipped"
-                title="The changelog is public, and it moves."
-                body="Every release is tagged on GitHub with its change notes. The newest:"
+                eyebrow={t(msg`Recently shipped`)}
+                title={t(msg`The changelog is public, and it moves.`)}
+                body={t(msg`Every release is tagged on GitHub with its change notes. The newest:`)}
               />
               <RecentReleases releases={recent} />
             </div>
@@ -411,49 +452,58 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="install-title"
-              eyebrow="Self-host"
-              title="Run it yourself: one command, no source needed"
-              body="Needs Docker with Compose and about 10 GB of disk. The script writes ~/reelsaw with a compose file and generated secrets, pulls the published image and a language model sized to your RAM, then waits until the app answers."
+              eyebrow={t(msg`Self-host`)}
+              title={t(msg`Run it yourself: one command, no source needed`)}
+              body={t(
+                msg`Needs Docker with Compose and about 10 GB of disk. The script writes ~/reelsaw with a compose file and generated secrets, pulls the published image and a language model sized to your RAM, then waits until the app answers.`,
+              )}
             />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <div className="flex min-w-0 flex-col gap-3">
                 <h3 className="flex items-center gap-2 text-[15px] font-bold">
-                  <Cpu className="h-4 w-4 text-acc-text" aria-hidden /> macOS, Linux, WSL2
+                  <Cpu className="h-4 w-4 text-acc-text" aria-hidden />
+                  {t(msg` macOS, Linux, WSL2`)}
                 </h3>
                 <Command text={SITE.installSh} caption="bash" />
                 <p className="text-xs leading-relaxed text-ink3">
-                  On macOS install{" "}
-                  <a href="https://ollama.com/download" target="_blank" rel="noreferrer" className="prose-link">
-                    Ollama
-                  </a>{" "}
-                  first. On Linux the script uses a host Ollama if present, otherwise runs it in a container.
+                  {rich(msg`On macOS install <0>Ollama</0> first. On Linux the script uses a host Ollama if present, otherwise runs it in a container.`, {
+                    0: (c) => (
+                      <a href="https://ollama.com/download" target="_blank" rel="noreferrer" className="prose-link">
+                        {c}
+                      </a>
+                    ),
+                  })}
                 </p>
               </div>
               <div className="flex min-w-0 flex-col gap-3">
                 <h3 className="flex items-center gap-2 text-[15px] font-bold">
-                  <Cpu className="h-4 w-4 text-acc-text" aria-hidden /> Windows (PowerShell)
+                  <Cpu className="h-4 w-4 text-acc-text" aria-hidden />
+                  {t(msg` Windows (PowerShell)`)}
                 </h3>
                 <Command text={SITE.installPs1} caption="powershell" />
                 <p className="text-xs leading-relaxed text-ink3">
-                  With Docker Desktop running. If script execution is blocked, download install.ps1 and run it with -ExecutionPolicy Bypass.
+                  {t(msg`With Docker Desktop running. If script execution is blocked, download install.ps1 and run it with -ExecutionPolicy Bypass.`)}
                 </p>
               </div>
             </div>
             <div className="card grid grid-cols-1 gap-6 p-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
               <div className="flex flex-col gap-2">
-                <h3 className="text-[15px] font-bold">From source, or with hosted providers</h3>
+                <h3 className="text-[15px] font-bold">{t(msg`From source, or with hosted providers`)}</h3>
                 <p className="text-sm leading-relaxed text-ink2">
-                  Clone the repository, copy the example environment, set an auth secret and at least one AI provider key, and bring the stack up. Open
-                  http://localhost:3000; the first account becomes the admin.
+                  {t(
+                    msg`Clone the repository, copy the example environment, set an auth secret and at least one AI provider key, and bring the stack up. Open http://localhost:3000; the first account becomes the admin.`,
+                  )}
                 </p>
                 <a href={SITE.deployDocs} target="_blank" rel="noreferrer" className="prose-link w-fit text-sm">
-                  Deployment guide: providers, S3, workers, reverse proxies
+                  {t(msg`Deployment guide: providers, S3, workers, reverse proxies`)}
                 </a>
               </div>
-              <Code>{`git clone https://github.com/osbytes/reelsaw.git && cd reelsaw
+              <Code>
+                {t(msg`git clone https://github.com/osbytes/reelsaw.git && cd reelsaw
 cp .env.example .env
 # set BETTER_AUTH_SECRET, APP_URL and at least one AI provider key
-docker compose up -d --build`}</Code>
+docker compose up -d --build`)}
+              </Code>
             </div>
           </div>
         </section>

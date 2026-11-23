@@ -1,3 +1,4 @@
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Modal, Segmented } from "./ui";
@@ -84,6 +85,7 @@ export function CropDialog({
   initial: CropKey;
   onApply: (key: CropKey, region: ContentRegion | null) => void;
 }) {
+  const { t } = useLingui();
   const [key, setKey] = useState<CropKey>(initial);
   const pane = panes.find((p) => p.key === key) ?? panes[0]!;
   const [fields, setFields] = useState<Fields>(() => fieldsOf(pane.current ?? pane.auto));
@@ -232,14 +234,14 @@ export function CropDialog({
     <label className="flex flex-col gap-1 text-xs text-ink2">
       {label}
       <span className="relative">
-        <input className="input pe-7 font-mono" inputMode="decimal" value={fields[k]} onChange={set(k)} aria-label={`${label}, percent of the source`} />
+        <input className="input pe-7 font-mono" inputMode="decimal" value={fields[k]} onChange={set(k)} aria-label={t`${label}, percent of the source`} />
         <span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-xs text-ink3">%</span>
       </span>
     </label>
   );
   const box = region ?? pane.auto;
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Set the crop" width={720}>
+    <Modal open={open} onOpenChange={onOpenChange} title={t`Set the crop`} width={720}>
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => {
@@ -250,11 +252,19 @@ export function CropDialog({
         }}
       >
         <Dialog.Description className="text-sm leading-relaxed text-ink2">
-          Drag the box over the picture, pull its corners, or draw a new one; the numbers are percentages of the source. The box starts where the pane looks
-          now.
+          <Trans>
+            Drag the box over the picture, pull its corners, or draw a new one; the numbers are percentages of the source. The box starts where the pane looks
+            now.
+          </Trans>
         </Dialog.Description>
         {panes.length > 1 && (
-          <Segmented size="sm" ariaLabel="Which pane" value={key} options={panes.map((p) => ({ value: p.key, label: p.name }))} onChange={(k) => setKey(k)} />
+          <Segmented
+            size="sm"
+            ariaLabel={t`Which pane`}
+            value={key}
+            options={panes.map((p) => ({ value: p.key, label: p.name }))}
+            onChange={(k) => setKey(k)}
+          />
         )}
         <div
           ref={frameRef}
@@ -271,7 +281,7 @@ export function CropDialog({
             className="absolute cursor-move border-2 border-acc shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
             style={{ left: `${box.x1 * 100}%`, top: `${box.y1 * 100}%`, width: `${(box.x2 - box.x1) * 100}%`, height: `${(box.y2 - box.y1) * 100}%` }}
             role="img"
-            aria-label={`Crop box, ${fields.left}% from the left, ${fields.top}% from the top, ${fields.width}% wide, ${fields.height}% tall`}
+            aria-label={t`Crop box, ${fields.left}% from the left, ${fields.top}% from the top, ${fields.width}% wide, ${fields.height}% tall`}
           >
             {HANDLES.map(({ h, cls, cursor }) => (
               <span key={h} data-handle={h} className={`absolute h-3 w-3 rounded-[3px] border border-white bg-acc ${cls} ${cursor}`} />
@@ -279,22 +289,22 @@ export function CropDialog({
           </div>
         </div>
         <div className="grid grid-cols-4 gap-2">
-          {field("Left", "left")}
-          {field("Top", "top")}
-          {field("Width", "width")}
-          {field("Height", "height")}
+          {field(t`Left`, "left")}
+          {field(t`Top`, "top")}
+          {field(t`Width`, "width")}
+          {field(t`Height`, "height")}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-relaxed text-ink3">
           <span>
             {!region
-              ? "Enter four numbers."
+              ? t`Enter four numbers.`
               : fills
-                ? `${px!.w}×${px!.h} px, the shape of the pane: it fills it.`
-                : `${px!.w}×${px!.h} px, not the shape of the pane: shown at its own shape over a blurred copy.`}
+                ? t`${px!.w}×${px!.h} px, the shape of the pane: it fills it.`
+                : t`${px!.w}×${px!.h} px, not the shape of the pane: shown at its own shape over a blurred copy.`}
           </span>
           {region && !fills && (
             <button type="button" className="font-semibold text-acc-text" onClick={matchShape}>
-              Match the pane's shape
+              <Trans>Match the pane's shape</Trans>
             </button>
           )}
           <label className="ms-auto flex items-center gap-1.5 text-ink2">
@@ -307,7 +317,7 @@ export function CropDialog({
                 if (e.target.checked) matchShape();
               }}
             />
-            Keep the pane's shape
+            <Trans>Keep the pane's shape</Trans>
           </label>
         </div>
         <div className="flex items-center gap-2">
@@ -320,14 +330,14 @@ export function CropDialog({
                 onOpenChange(false);
               }}
             >
-              Back to automatic
+              <Trans>Back to automatic</Trans>
             </button>
           )}
           <button type="button" className="btn-ghost ms-auto" onClick={() => onOpenChange(false)}>
-            Cancel
+            <Trans>Cancel</Trans>
           </button>
           <button type="submit" className="btn-primary" disabled={!region}>
-            Apply
+            <Trans>Apply</Trans>
           </button>
         </div>
       </form>

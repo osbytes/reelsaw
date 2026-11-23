@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { rich } from "@/lib/i18n";
 import type { LegalSection } from "@/content/legal";
 import { LEGAL_UPDATED } from "@/content/legal";
 import { Breadcrumbs } from "@/components/seo";
@@ -19,7 +21,7 @@ export function LegalPage({ slug, title, intro, sections }: { slug: string; titl
             ]}
           />
           <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[40px]">{title}</h1>
-          <p className="text-sm text-ink3">Last updated {LEGAL_UPDATED}</p>
+          <p className="text-sm text-ink3">{rich(msg`Last updated <0/>`, { 0: LEGAL_UPDATED })}</p>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">{intro}</p>
         </header>
         {sections.map((s) => (

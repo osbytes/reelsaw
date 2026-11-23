@@ -4,3 +4,5 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .env*.local
+# compiled message catalogues (pnpm i18n:compile); the .po files are the source
+locales/*.ts

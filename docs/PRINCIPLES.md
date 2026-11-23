@@ -574,10 +574,12 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   (`biome.json`, a GritQL plugin, or a test that scans the source) before it becomes a line in
   `AGENTS.md`.
 - **Every string a person reads goes through the catalogue.** Reelsaw ships in English and is
-  built for more: web copy uses Lingui's `<Trans>` and `t`, whole sentences as one message, plurals
-  as ICU messages; layout uses logical CSS classes only; check UI work in the `?locale=en-XA`
-  pseudo-locale. Log lines, config keys, MCP tool names and CLI flags stay English. How, and what
-  is left to wrap: [I18N.md](I18N.md).
+  built for more: web copy uses Lingui's `<Trans>` and `t`; server errors are `AppError` with a
+  catalogue message (a stable code), and emails, notices, MCP results and CLI lines render with
+  `t(msg…)` in the reader's locale (mail: the recipient's); whole sentences as one message, plurals
+  as ICU messages; numbers, money and dates through `@reelsaw/shared` formatting; layout uses
+  logical CSS classes only; check UI work in the `?locale=en-XA` pseudo-locale. Log lines, config
+  keys, MCP tool names and CLI flags stay English. How: [I18N.md](I18N.md).
 - **Fix the class, not the instance.** A bug is evidence that the codebase made a mistake easy.
   Patching the one place it showed up leaves every sibling in place and the next person free to
   write it again. Every fix answers four questions, in the same change:

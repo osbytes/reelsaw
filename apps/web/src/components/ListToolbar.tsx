@@ -2,6 +2,8 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ArrowDownUp, Check, ListFilter, Rows3, Search, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { t } from "@lingui/core/macro";
+import { formatNumber } from "@reelsaw/shared";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 
 /**
@@ -35,7 +37,9 @@ export function facetChips(facets: ListFacet[]): ActiveFilter[] {
   return facets.flatMap((f) => {
     if (!f.value) return [];
     const o = f.options.find((x) => x.value === f.value);
-    return [{ id: f.id, label: `${f.label}: ${o?.label ?? f.value}`, onClear: () => f.onChange("") }];
+    const facet = f.label;
+    const chosen = o?.label ?? f.value;
+    return [{ id: f.id, label: t`${facet}: ${chosen}`, onClear: () => f.onChange("") }];
   });
 }
 
@@ -148,15 +152,16 @@ export function ChoiceMenu({
   onChange: (v: string) => void;
   icon?: typeof Rows3;
 }) {
+  const { t } = useLingui();
   const Icon = icon;
   const current = options.find((o) => o.value === value)?.label ?? options[0]?.label;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className={`${TOOLBAR_BUTTON} max-w-[14rem]`} aria-label={`${label}: ${current}`}>
+        <button type="button" className={`${TOOLBAR_BUTTON} max-w-[14rem]`} aria-label={t`${label}: ${current}`}>
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
           <span className="truncate max-sm:hidden">
-            <span className="text-ink3">{label}: </span>
+            <span className="text-ink3">{t`${label}: `}</span>
             {current}
           </span>
         </button>
@@ -200,7 +205,8 @@ export function SortMenu<K extends string>({
   const onChange = (v: SortChoice<K>) => change(v && def && v.key === def.value && v.dir === def.firstDir ? null : v);
   const cur = value ? options.find((o) => o.value === value.key) : undefined;
   const dirWords = (o: SortOption<K>) => ({ asc: o.asc ?? t`Ascending`, desc: o.desc ?? t`Descending` });
-  const shown = cur && value ? `${cur.label}, ${dirWords(cur)[value.dir]}` : defaultLabel;
+  const dirWord = cur && value ? dirWords(cur)[value.dir] : "";
+  const shown = cur && value ? t`${cur.label}, ${dirWord}` : defaultLabel;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -345,7 +351,7 @@ export function ListLoadMore({
   const { t } = useLingui();
   const sentinel = useLoadMoreSentinel(onMore, auto && hasMore && !loading && !busy);
   if (!hasMore) return null;
-  const n = left?.toLocaleString();
+  const n = left === undefined ? undefined : formatNumber(left);
   return (
     <>
       <span ref={sentinel} aria-hidden />

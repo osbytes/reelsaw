@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import type { Metadata } from "next";
 import { PipelineFilm } from "@/components/pipeline-film";
 
@@ -5,7 +7,7 @@ import { PipelineFilm } from "@/components/pipeline-film";
 // (it drives time through window.__pipelineFilm and screenshots every frame). Not for people:
 // noindex, not in the sitemap.
 export const metadata: Metadata = {
-  title: "Pipeline film (render source)",
+  title: t(msg`Pipeline film (render source)`),
   robots: { index: false, follow: false },
 };
 

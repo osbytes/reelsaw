@@ -5,8 +5,6 @@
  * `extend_project` and the CLI all plan through `planRanges`, so the price a person sees is the price charged.
  */
 import { z } from "zod";
-// never "./index.js": index builds its schemas from these at load time, so a cycle leaves them undefined in a bundle
-import { formatTime } from "./format.js";
 
 export const RANGE_MODES = ["find", "clip"] as const;
 export type RangeMode = (typeof RANGE_MODES)[number];
@@ -249,23 +247,6 @@ export function parseRangeArg(text: string): SourceRangeInput | null {
   const endSec = parseClock(to);
   if (startSec === null || endSec === null) return null;
   return { startSec, endSec, mode };
-}
-
-/** One sentence per problem, for an API refusal or the CLI (the web words its own). */
-export function rangeProblemMessage(p: RangeProblem): string {
-  const which = "input" in p ? `Range ${p.input + 1}` : "";
-  switch (p.kind) {
-    case "none":
-      return "Give at least one range.";
-    case "too_many":
-      return `${p.count} ranges were given; at most ${p.max} fit one request.`;
-    case "end_before_start":
-      return `${which} ends before it starts.`;
-    case "past_end":
-      return `${which} starts after the video ends (${formatTime(p.durationSec)}).`;
-    case "too_short":
-      return `${which} is shorter than ${p.minSec} seconds.`;
-  }
 }
 
 /** One bin of a video site's replay heatmap (YouTube's Most replayed): how often that stretch is watched, 0..1. */

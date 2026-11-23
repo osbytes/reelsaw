@@ -10,7 +10,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, count, countDistinct, desc, eq, gt, isNotNull, isNull, ne } from "drizzle-orm";
-import { plural, processedEndSec } from "@reelsaw/shared";
+import { processedEndSec } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { EventHandler, ReadDb } from "../event-handlers.js";
@@ -19,6 +19,8 @@ import { minutesRoomSec, QuotaError, watermarkFor } from "../quota.js";
 import { eachItem, uniqueBy } from "../lib/each.js";
 import { extendProject, findProject, rerenderProjectClips, WORKING, type Actor } from "./service.js";
 import { projectIdsInput } from "./bulk.js";
+import { msg, plural as icuPlural } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 type PlanChange = Extract<AccountEventType, "user.limits_changed" | "billing.subscribed" | "billing.changed" | "billing.complimentary">;
 
@@ -114,7 +116,10 @@ async function rerenderWatermarkedOf(svc: Services, actor: Actor, projectId: str
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     if ((await watermarkOn(svc, p.userId)) !== false)
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This account's renders still carry the watermark, so a re-render would keep it." });
+      throw new AppError(
+        "PRECONDITION_FAILED",
+        msg({ id: "project.rerender_keeps_watermark", message: "This account's renders still carry the watermark, so a re-render would keep it." }),
+      );
     return rerenderProjectClips(svc, u, p.id, (c) => c.status === "done" && c.watermark);
   });
 }
@@ -271,14 +276,23 @@ export async function startUpgradeWork(svc: Services, actor: Actor, input: Start
   const ok = out.flatMap((r) => (r.ok ? [r.value] : []));
   const clips = ok.reduce((n, v) => n + (v.kind === "rerender" ? v.queued : 0), 0);
   const extended = ok.filter((v) => v.kind === "finish").length;
-  const parts = [extended ? `clipping more of ${plural(extended, "video")}` : "", clips ? `re-rendering ${plural(clips, "clip")} without the watermark` : ""];
+  const sentence =
+    extended && clips
+      ? t(
+          msg`clipping more of ${icuPlural({ extended }, { one: "# video", other: "# videos" })} and re-rendering ${icuPlural({ clips }, { one: "# clip", other: "# clips" })} without the watermark`,
+        )
+      : extended
+        ? t(msg`clipping more of ${icuPlural({ extended }, { one: "# video", other: "# videos" })}`)
+        : clips
+          ? t(msg`re-rendering ${icuPlural({ clips }, { one: "# clip", other: "# clips" })} without the watermark`)
+          : "";
   return {
     ok: true as const,
     rerenderedClips: clips,
     extendedProjects: extended,
     failed: out.length - ok.length,
     /** "clipping more of 2 videos and re-rendering 14 clips without the watermark"; empty when nothing started */
-    sentence: parts.filter(Boolean).join(" and "),
+    sentence,
     results,
   };
 }

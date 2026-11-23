@@ -6,7 +6,9 @@ import { useSyncExternalStore } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { DELETED_PATH, deletedItemPath, formatBytes, type DeletedKind, plural } from "@reelsaw/shared";
+import { DELETED_PATH, deletedItemPath, formatBytes, type DeletedKind } from "@reelsaw/shared";
+import { plural, t } from "@lingui/core/macro";
+import { Trans } from "@lingui/react/macro";
 import { useTRPC } from "./trpc";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ConfirmDialog } from "../components/ui";
@@ -16,14 +18,20 @@ export type DeletedToastItem = { kind: DeletedKind; id: string; title: string };
 const TOAST_MS = 10_000;
 
 function heading(items: DeletedToastItem[]) {
-  if (items.length === 1) return `Deleted “${items[0]!.title}”`;
+  const n = items.length;
+  if (n === 1) {
+    const title = items[0]!.title;
+    return t`Deleted “${title}”`;
+  }
   const kinds = new Set(items.map((i) => i.kind));
   if (kinds.size === 1) {
     const k = items[0]!.kind;
-    const word = k === "project" ? "project" : k === "clip" ? "clip" : k === "asset" ? "library item" : "template";
-    return `Deleted ${plural(items.length, word)}`;
+    if (k === "project") return plural(n, { one: "Deleted # project", other: "Deleted # projects" });
+    if (k === "clip") return plural(n, { one: "Deleted # clip", other: "Deleted # clips" });
+    if (k === "asset") return plural(n, { one: "Deleted # library item", other: "Deleted # library items" });
+    return plural(n, { one: "Deleted # template", other: "Deleted # templates" });
   }
-  return `Deleted ${items.length} items`;
+  return t`Deleted ${n} items`;
 }
 
 function seePath(items: DeletedToastItem[]) {
@@ -61,6 +69,9 @@ function subscribe(l: () => void) {
 export function DeletedToastConfirm() {
   const ask = useSyncExternalStore(subscribe, () => asking);
   const items = ask?.items ?? [];
+  const firstTitle = items[0]?.title ?? "";
+  const count = items.length;
+  const freed = formatBytes(ask?.storedBytes ?? 0);
   return (
     <ConfirmDialog
       open={!!ask}
@@ -70,9 +81,13 @@ export function DeletedToastConfirm() {
         setAsking(null);
         showDeletedToast(back);
       }}
-      title={items.length === 1 ? `Delete “${items[0]!.title}” forever?` : `Delete ${items.length} items forever?`}
-      body={`Stored files are deleted permanently${ask?.storedBytes ? ` (${formatBytes(ask.storedBytes)} freed)` : ""}. This cannot be undone.`}
-      confirm="Delete forever"
+      title={items.length === 1 ? t`Delete “${firstTitle}” forever?` : t`Delete ${count} items forever?`}
+      body={
+        ask?.storedBytes
+          ? t`Stored files are deleted permanently (${freed} freed). This cannot be undone.`
+          : t`Stored files are deleted permanently. This cannot be undone.`
+      }
+      confirm={t`Delete forever`}
       danger
       onConfirm={() => {
         if (!ask) return Promise.resolve();
@@ -83,8 +98,8 @@ export function DeletedToastConfirm() {
             r && typeof r === "object" && "message" in r && typeof r.message === "string"
               ? r.message
               : items.length === 1
-                ? `Deleted “${items[0]!.title}” forever`
-                : `Deleted ${items.length} items forever`;
+                ? t`Deleted “${firstTitle}” forever`
+                : t`Deleted ${count} items forever`;
           toast(msg);
         });
       }}
@@ -96,8 +111,11 @@ export function showDeletedToast(opts: ToastOpts) {
   const { items, restorable, storedBytes, canPurge = true } = opts;
   if (!items.length) return;
   const bits: string[] = [];
-  if (storedBytes) bits.push(`Still using ${formatBytes(storedBytes)} until you delete it forever.`);
-  if (restorable) bits.push(`Restorable ${restorable}.`);
+  const size = formatBytes(storedBytes ?? 0);
+  if (storedBytes) bits.push(t`Still using ${size} until you delete it forever.`);
+  if (restorable) bits.push(t`Restorable ${restorable}.`);
+  const firstTitle = items[0]!.title;
+  const count = items.length;
   const description = bits.join(" ");
 
   toast.custom(
@@ -111,10 +129,10 @@ export function showDeletedToast(opts: ToastOpts) {
             className="text-acc-text hover:underline"
             onClick={() => {
               toast.dismiss(id);
-              void opts.onUndo().then(() => toast(items.length === 1 ? `Restored “${items[0]!.title}”` : `Restored ${items.length} items`), failToast);
+              void opts.onUndo().then(() => toast(items.length === 1 ? t`Restored “${firstTitle}”` : t`Restored ${count} items`), failToast);
             }}
           >
-            Undo
+            <Trans>Undo</Trans>
           </button>
           {canPurge ? (
             <button
@@ -125,11 +143,11 @@ export function showDeletedToast(opts: ToastOpts) {
                 setAsking(opts);
               }}
             >
-              Delete forever…
+              <Trans>Delete forever…</Trans>
             </button>
           ) : null}
           <Link to={seePath(items)} className="text-ink2 no-underline hover:underline" onClick={() => toast.dismiss(id)}>
-            See deletions
+            <Trans>See deletions</Trans>
           </Link>
         </div>
       </div>

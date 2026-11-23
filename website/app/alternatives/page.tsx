@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import type { Metadata } from "next";
 import { ArrowRight } from "lucide-react";
 import { COMPETITORS } from "@/content/competitors";
@@ -9,9 +11,10 @@ import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
 import { socialMeta } from "@/lib/social-meta";
 
-const title = "Reelsaw vs Opus Clip, Klap, Vizard, Submagic and more";
-const description =
-  "Reelsaw, the open-source AI clipper, compared with Opus Clip, Klap, Vizard, Submagic, 2short.ai, quso.ai and OpenShorts: prices, free tiers and watermarks.";
+const title = t(msg`Reelsaw vs Opus Clip, Klap, Vizard, Submagic and more`);
+const description = t(
+  msg`Reelsaw, the open-source AI clipper, compared with Opus Clip, Klap, Vizard, Submagic, 2short.ai, quso.ai and OpenShorts: prices, free tiers and watermarks.`,
+);
 
 export const metadata: Metadata = {
   title,
@@ -29,34 +32,38 @@ export default function AlternativesIndex() {
           <Breadcrumbs
             items={[
               { href: "/", label: SITE.name },
-              { href: "/alternatives", label: "Alternatives" },
+              { href: "/alternatives", label: t(msg`Alternatives`) },
             ]}
           />
-          <p className="eyebrow">Alternatives</p>
-          <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">How Reelsaw compares to the hosted clippers</h1>
+          <p className="eyebrow">{t(msg`Alternatives`)}</p>
+          <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">
+            {t(msg`How Reelsaw compares to the hosted clippers`)}
+          </h1>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">
-            Every page below says what the other tool does better, what it costs on the date checked, and when Reelsaw is the wrong pick. Prices come from each
-            vendor's public pricing page; Reelsaw's claims come from its README and source.
+            {t(
+              msg`Every page below says what the other tool does better, what it costs on the date checked, and when Reelsaw is the wrong pick. Prices come from each vendor's public pricing page; Reelsaw's claims come from its README and source.`,
+            )}
           </p>
         </header>
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {COMPETITORS.map((c) => (
             <li key={c.slug}>
               <a href={`/alternatives/${c.slug}`} className="card flex h-full flex-col gap-2 p-5 transition hover:border-line2 hover:bg-sunk/40">
-                <span className="eyebrow">Reelsaw vs {c.name}</span>
+                <span className="eyebrow">{rich(msg`Reelsaw vs <0/>`, { 0: c.name })}</span>
                 <span className="text-[17px] font-bold tracking-tight">{c.h1}</span>
                 <span className="text-sm leading-relaxed text-ink2">{c.pricing.summary}</span>
                 <span className="mt-auto flex items-center gap-1 pt-2 text-sm font-semibold text-acc-text">
-                  Read the comparison <ArrowRight className="h-4 w-4" aria-hidden />
+                  {t(msg`Read the comparison `)}
+                  <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </a>
             </li>
           ))}
         </ul>
         <TryIt />
-        <LinkList heading="Use cases" links={USE_CASE_NAV} />
-        <LinkList heading="Guides" links={GUIDE_NAV} />
-        <p className="text-xs text-ink3">Pricing checked {CHECKED}. Vendors change plans without notice; verify before you buy.</p>
+        <LinkList heading={t(msg`Use cases`)} links={USE_CASE_NAV} />
+        <LinkList heading={t(msg`Guides`)} links={GUIDE_NAV} />
+        <p className="text-xs text-ink3">{rich(msg`Pricing checked <0/>. Vendors change plans without notice; verify before you buy.`, { 0: CHECKED })}</p>
       </main>
       <Footer />
     </>

@@ -1,3 +1,4 @@
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTRPC } from "../lib/trpc";
@@ -10,9 +11,10 @@ export function TemplateEditorPage() {
   const { id = "" } = useParams();
   const trpc = useTRPC();
   const nav = useNavigate();
+  const { t } = useLingui();
   // the editor owns the document once open: a background refetch must not reset it
   const q = useQuery({ ...trpc.layerTemplates.get.queryOptions({ id }), refetchOnWindowFocus: false });
-  useDocumentTitle(pageTitle(q.data?.name, "Template"));
+  useDocumentTitle(pageTitle(q.data?.name, t`Template`));
   if (q.isPending) return <ClipEditorSkeleton />;
   if (!q.data || q.data.deletedAt) {
     const missing = !q.error || q.error.data?.code === "NOT_FOUND" || !!q.data?.deletedAt;
@@ -22,17 +24,17 @@ export function TemplateEditorPage() {
           <span className="font-mono text-2xl leading-8 text-ink3" aria-hidden>
             {missing ? "∅" : "▲"}
           </span>
-          <b className="text-lg">{missing ? "This template doesn’t exist" : "Couldn’t load this template"}</b>
+          <b className="text-lg">{missing ? <Trans>This template doesn’t exist</Trans> : <Trans>Couldn’t load this template</Trans>}</b>
           <p className="text-[13px] leading-relaxed text-ink2">
-            {missing ? "It may have been deleted (you can restore it from Deleted), or it belongs to another account." : q.error?.message}
+            {missing ? <Trans>It may have been deleted (you can restore it from Deleted), or it belongs to another account.</Trans> : q.error?.message}
           </p>
           <div className="mt-1 flex gap-2">
             <Link to="/templates" className="btn-primary py-2 no-underline">
-              Back to templates
+              <Trans>Back to templates</Trans>
             </Link>
             {!missing && (
               <button className="btn-ghost py-2" onClick={() => q.refetch()}>
-                Retry
+                <Trans>Retry</Trans>
               </button>
             )}
           </div>

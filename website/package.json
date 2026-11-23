@@ -5,13 +5,18 @@
   "license": "AGPL-3.0-only",
   "description": "reelsaw.com: the website for the Reelsaw open-source project",
   "scripts": {
-    "dev": "next dev -p 3200",
-    "build": "next build",
+    "dev": "pnpm i18n:compile && next dev -p 3200",
+    "build": "pnpm i18n:compile && next build",
     "start": "next start -p 3200",
-    "typecheck": "next typegen && tsc --noEmit -p tsconfig.json",
+    "typecheck": "pnpm i18n:compile && next typegen && tsc --noEmit -p tsconfig.json",
+    "i18n:extract": "lingui extract --clean",
+    "i18n:check": "lingui check sync",
+    "i18n:compile": "lingui compile --typescript --namespace es",
     "render:film": "node scripts/render-pipeline-film.mjs"
   },
   "dependencies": {
+    "@lingui/core": "6.12.0",
+    "@lingui/message-utils": "6.12.0",
     "@radix-ui/react-scroll-area": "^1.4.0",
     "lucide-react": "^1.60.0",
     "next": "^16.4.5",
@@ -21,6 +26,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@lingui/cli": "6.12.0",
+    "@lingui/format-po": "6.12.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",

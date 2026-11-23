@@ -1,5 +1,5 @@
 {
-  "id": "2a65687c-4473-4fb0-8599-ef8eee043003",
+  "id": "cffbb35e-4f6e-4c3f-967a-94235d38b273",
   "prevId": "9f62b1b9-70f5-4358-ae3d-40096e6fda62",
   "version": "7",
   "dialect": "postgresql",
@@ -1070,12 +1070,6 @@
           "notNull": true,
           "default": "'ai'"
         },
-        "range_id": {
-          "name": "range_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "error": {
           "name": "error",
           "type": "text",
@@ -1339,19 +1333,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "clips_range_id_project_ranges_id_fk": {
-          "name": "clips_range_id_project_ranges_id_fk",
-          "tableFrom": "clips",
-          "tableTo": "project_ranges",
-          "columnsFrom": [
-            "range_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2219,123 +2200,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.project_ranges": {
-      "name": "project_ranges",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "start_sec": {
-          "name": "start_sec",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "end_sec": {
-          "name": "end_sec",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'find'"
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ref": {
-          "name": "ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "billed_sec": {
-          "name": "billed_sec",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "picked_at": {
-          "name": "picked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "project_ranges_project_idx": {
-          "name": "project_ranges_project_idx",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "start_sec",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "project_ranges_project_id_projects_id_fk": {
-          "name": "project_ranges_project_id_projects_id_fk",
-          "tableFrom": "project_ranges",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3959,6 +3823,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "last_active_at": {
           "name": "last_active_at",

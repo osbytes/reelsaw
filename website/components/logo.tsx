@@ -18,7 +18,9 @@ export function Logo({ wordmark = true }: { wordmark?: boolean }) {
       <LogoMark />
       {wordmark && (
         <span className="text-[15px] font-extrabold tracking-tight" aria-hidden>
-          reel<span className="mx-px font-medium text-acc-text">/</span>saw
+          {"reel"}
+          <span className="mx-px font-medium text-acc-text">/</span>
+          {"saw"}
         </span>
       )}
     </a>

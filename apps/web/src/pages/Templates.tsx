@@ -9,7 +9,6 @@ import {
   isTemplateSortKey,
   layerTemplateNameSchema,
   listSortFirstDir,
-  plural,
   type TemplateBumpers,
   type TemplateLayer,
   type TemplateSortKey,
@@ -20,7 +19,8 @@ import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { readHash, useHashParams, writeHash } from "../lib/hash";
 import { useDebounced } from "../lib/useDebounced";
-import { useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
 import { ListLoadMore, ListSearch, ListToolbar, listSortToggle, type SortChoice, type SortOption, SortMenu } from "../components/ListToolbar";
 import { ago } from "../lib/time";
 import {
@@ -39,7 +39,6 @@ import {
   ListPage,
   ListRow,
   ListTable,
-  showingCount,
 } from "../components/ListPage";
 import { ConfirmDialog, Modal, MoreButton, Skeleton } from "../components/ui";
 import { pageTitle, useDocumentTitle } from "../lib/title";
@@ -56,11 +55,6 @@ interface TemplateRow {
 }
 
 const PAGE = 100;
-const SORT_OPTIONS: SortOption<TemplateSortKey>[] = [
-  { value: "name", label: "Name", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
-  { value: "created", label: "Date made", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
-  { value: "updated", label: "Last changed", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
-];
 const readSort = (h: URLSearchParams): SortChoice<TemplateSortKey> => {
   const key = h.get("sort");
   if (!isTemplateSortKey(key)) return null;
@@ -76,8 +70,13 @@ const readSort = (h: URLSearchParams): SortChoice<TemplateSortKey> => {
  * Deep link: `#template=<id>` highlights a row.
  */
 export function TemplatesPage() {
-  useDocumentTitle(pageTitle("Templates"));
   const { t } = useLingui();
+  useDocumentTitle(pageTitle(t`Templates`));
+  const SORT_OPTIONS: SortOption<TemplateSortKey>[] = [
+    { value: "name", label: t`Name`, firstDir: "asc", asc: t`A to Z`, desc: t`Z to A` },
+    { value: "created", label: t`Date made`, firstDir: "desc", asc: t`Oldest first`, desc: t`Newest first` },
+    { value: "updated", label: t`Last changed`, firstDir: "desc", asc: t`Oldest first`, desc: t`Newest first` },
+  ];
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -120,7 +119,13 @@ export function TemplatesPage() {
     h.set("template", id);
     nav({ pathname: loc.pathname, search: loc.search, hash: `#${h.toString()}` }, { replace: true });
   };
-  const noun = (n: number) => plural(n, term ? "match" : "template", term ? "matches" : "templates");
+  const noun = (n: number) => (term ? plural(n, { one: "# match", other: "# matches" }) : plural(n, { one: "# template", other: "# templates" }));
+  const showing = (shown: number, total: number) =>
+    shown < total
+      ? term
+        ? plural(total, { one: `Showing ${shown} of # match`, other: `Showing ${shown} of # matches` })
+        : plural(total, { one: `Showing ${shown} of # template`, other: `Showing ${shown} of # templates` })
+      : noun(total);
   // name | what it holds (layers, intro / outro) | updated | actions; Name and Updated sort the server query
   // null is last change, newest first: the Updated header shows it, and its toggle starts from it
   const shownSort = sort ?? { key: "updated" as const, dir: "desc" as const };
@@ -132,10 +137,10 @@ export function TemplatesPage() {
     },
   });
   const columns: ListColumn[] = [
-    { label: "Name", sort: sortable("name", "asc") },
-    { label: "Layers", width: "min-[1040px]:w-52", full: true, right: true },
-    { label: "Updated", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("updated", "desc") },
-    { label: null, srLabel: "Actions", width: LIST_ACTIONS_WIDTH },
+    { label: t`Name`, sort: sortable("name", "asc") },
+    { label: t`Layers`, width: "min-[1040px]:w-52", full: true, right: true },
+    { label: t`Updated`, width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("updated", "desc") },
+    { label: null, srLabel: t`Actions`, width: LIST_ACTIONS_WIDTH },
   ];
 
   // a deep-linked row scrolls into view once it is on the page
@@ -146,32 +151,34 @@ export function TemplatesPage() {
 
   const newTemplate = () =>
     create.mutate(
-      { name: "Untitled template", layers: [] },
+      { name: t`Untitled template`, layers: [] },
       {
-        onSuccess: (t) => {
+        onSuccess: (made) => {
           void invalidate();
-          nav(`/templates/${t.id}`);
+          nav(`/templates/${made.id}`);
         },
         onError: (err) => toast.error(err.message),
       },
     );
-  const duplicate = (t: TemplateRow) => {
-    const name = layerTemplateNameSchema.safeParse(`${t.name} (copy)`);
+  const duplicate = (tpl: TemplateRow) => {
+    const copyName = tpl.name;
+    const name = layerTemplateNameSchema.safeParse(t`${copyName} (copy)`);
     create.mutate(
-      { name: name.success ? name.data : t.name, layers: t.layers },
+      { name: name.success ? name.data : tpl.name, layers: tpl.layers },
       {
         onSuccess: (c) => {
           void invalidate();
           highlight(c.id);
-          toast(`Duplicated as “${c.name}”`);
+          const copied = c.name;
+          toast(t`Duplicated as “${copied}”`);
         },
         onError: (err) => toast.error(err.message),
       },
     );
   };
-  const openRename = (t: TemplateRow) => {
-    setDraft(t.name);
-    setRenaming(t);
+  const openRename = (tpl: TemplateRow) => {
+    setDraft(tpl.name);
+    setRenaming(tpl);
   };
   const nameOk = layerTemplateNameSchema.safeParse(draft).success;
   const saveRename = () => {
@@ -181,72 +188,86 @@ export function TemplatesPage() {
       {
         onSuccess: () => {
           setRenaming(null);
-          toast("Renamed");
+          toast(t`Renamed`);
         },
         onError: (err) => toast.error(err.message),
       },
     );
   };
 
-  const row = (t: TemplateRow) => (
-    <ListRow key={t.id} id={`template-${t.id}`} active={highlighted === t.id}>
-      <ListCell>
-        <Link to={`/templates/${t.id}`} className={`block no-underline hover:underline ${LIST_TITLE}`}>
-          {t.name}
-        </Link>
-        {/* below the fold width the layer count and the time go on a second line inside the name cell */}
-        <div className={`${LIST_SUB} min-[1040px]:hidden`}>
-          {templateSummary(t)} · updated {ago(t.updatedAt)}
-        </div>
-      </ListCell>
-      <ListCell full variant="num" className="truncate" title={templateSummary(t)}>
-        {templateSummary(t)}
-      </ListCell>
-      <ListCell full variant="muted">
-        {ago(t.updatedAt)}
-      </ListCell>
-      <ListCell variant="actions">
-        <div className="flex items-center justify-end gap-1.5">
-          <Link to={`/templates/${t.id}`} className={`btn-ghost w-[5.5rem] ${LIST_ACTION}`}>
-            Edit
+  const row = (tpl: TemplateRow) => {
+    const rowName = tpl.name;
+    const summary = templateSummary(tpl);
+    const updated = ago(tpl.updatedAt);
+    return (
+      <ListRow key={tpl.id} id={`template-${tpl.id}`} active={highlighted === tpl.id}>
+        <ListCell>
+          <Link to={`/templates/${tpl.id}`} className={`block no-underline hover:underline ${LIST_TITLE}`}>
+            {tpl.name}
           </Link>
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <MoreButton aria-label={`More actions for ${t.name}`} />
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
-                <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => nav(`/templates/${t.id}`)}>
-                  Edit
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className="menu-item" onSelect={() => openRename(t)}>
-                  Rename…
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className="menu-item" disabled={create.isPending} onSelect={() => duplicate(t)}>
-                  Duplicate
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm(t)}>
-                  Delete…
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        </div>
-      </ListCell>
-    </ListRow>
-  );
+          {/* below the fold width the layer count and the time go on a second line inside the name cell */}
+          <div className={`${LIST_SUB} min-[1040px]:hidden`}>
+            <Trans>
+              {summary} · updated {updated}
+            </Trans>
+          </div>
+        </ListCell>
+        <ListCell full variant="num" className="truncate" title={templateSummary(tpl)}>
+          {templateSummary(tpl)}
+        </ListCell>
+        <ListCell full variant="muted">
+          {ago(tpl.updatedAt)}
+        </ListCell>
+        <ListCell variant="actions">
+          <div className="flex items-center justify-end gap-1.5">
+            <Link to={`/templates/${tpl.id}`} className={`btn-ghost w-[5.5rem] ${LIST_ACTION}`}>
+              <Trans>Edit</Trans>
+            </Link>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <MoreButton aria-label={t`More actions for ${rowName}`} />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
+                  <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => nav(`/templates/${tpl.id}`)}>
+                    <Trans>Edit</Trans>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="menu-item" onSelect={() => openRename(tpl)}>
+                    <Trans>Rename…</Trans>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="menu-item" disabled={create.isPending} onSelect={() => duplicate(tpl)}>
+                    <Trans>Duplicate</Trans>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm(tpl)}>
+                    <Trans>Delete…</Trans>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
+        </ListCell>
+      </ListRow>
+    );
+  };
 
   const newButton = (
     <button className="btn-primary min-w-[9.5rem] justify-center" disabled={create.isPending} onClick={newTemplate}>
-      {create.isPending && !create.variables?.layers.length ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New template
+      {create.isPending && !create.variables?.layers.length ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{" "}
+      <Trans>New template</Trans>
     </button>
   );
+  const restoreSuffix = restoreWindow.restorable ? ` ${restoreWindow.restorable}` : "";
+  const confirmName = confirm?.name;
   const none = !!list.data && !list.isPlaceholderData && templates.length === 0;
   // no templates at all (the call to action) vs none matching the search
   const empty = none && !term;
   const noMatch = none && !!term;
   return (
-    <ListPage title="Templates" subtitle="Logos, stickers, text and sounds placed once, fitted to any clip length" actions={empty ? undefined : newButton}>
+    <ListPage
+      title={t`Templates`}
+      subtitle={t`Logos, stickers, text and sounds placed once, fitted to any clip length`}
+      actions={empty ? undefined : newButton}
+    >
       {!empty && (
         <ListToolbar
           label={t`Search templates`}
@@ -256,16 +277,18 @@ export function TemplatesPage() {
         />
       )}
       {list.error && <ListError message={list.error.message} />}
-      {noMatch && <ListEmpty icon={Layers} title={`No templates match “${term}”`} />}
+      {noMatch && <ListEmpty icon={Layers} title={t`No templates match “${term}”`} />}
       {empty && (
-        <ListEmpty icon={Layers} title="No templates yet" action={newButton}>
-          A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a
-          clip’s layers as a template from the clip editor.
+        <ListEmpty icon={Layers} title={t`No templates yet`} action={newButton}>
+          <Trans>
+            A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a
+            clip’s layers as a template from the clip editor.
+          </Trans>
         </ListEmpty>
       )}
       {(templates.length > 0 || (list.isPending && !list.error)) && (
         <section className="flex flex-col gap-2">
-          <ListTable caption="Your layer templates" columns={columns} loading={list.isPending} loadingLabel="Loading templates…">
+          <ListTable caption={t`Your layer templates`} columns={columns} loading={list.isPending} loadingLabel={t`Loading templates…`}>
             {list.isPending &&
               Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
                 <ListRow key={i} skeleton>
@@ -284,7 +307,7 @@ export function TemplatesPage() {
                   </ListCell>
                 </ListRow>
               ))}
-            {templates.map((t) => row(t))}
+            {templates.map((tpl) => row(tpl))}
           </ListTable>
           <ListFooter
             action={
@@ -297,26 +320,24 @@ export function TemplatesPage() {
               />
             }
           >
-            {list.isPending ? (
-              <Skeleton className="h-3 w-40" />
-            ) : (
-              showingCount(templates.length, totalTemplates, term ? "match" : "template", term ? "matches" : "templates")
-            )}
+            {list.isPending ? <Skeleton className="h-3 w-40" /> : showing(templates.length, totalTemplates)}
           </ListFooter>
         </section>
       )}
 
       {deleted.length > 0 && (
         <p className="text-xs text-ink3">
-          {plural(deleted.length, "deleted template")} restorable from{" "}
-          <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
-            Deleted
-          </Link>
-          {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
+          <Trans>
+            <Plural value={deleted.length} one="# deleted template" other="# deleted templates" /> restorable from{" "}
+            <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
+              Deleted
+            </Link>
+            {restoreSuffix}.
+          </Trans>
         </p>
       )}
 
-      <Modal open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)} title="Rename template">
+      <Modal open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)} title={t`Rename template`}>
         <form
           className="flex flex-col gap-3"
           onSubmit={(e) => {
@@ -324,13 +345,13 @@ export function TemplatesPage() {
             saveRename();
           }}
         >
-          <input className="input" autoFocus value={draft} maxLength={120} aria-label="Template name" onChange={(e) => setDraft(e.target.value)} />
+          <input className="input" autoFocus value={draft} maxLength={120} aria-label={t`Template name`} onChange={(e) => setDraft(e.target.value)} />
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-ghost" onClick={() => setRenaming(null)}>
-              Cancel
+              <Trans>Cancel</Trans>
             </button>
             <button type="submit" className="btn-primary min-w-[5.5rem] justify-center" disabled={!nameOk || update.isPending}>
-              {update.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Save
+              {update.isPending && <Loader2 className="h-4 w-4 animate-spin" />} <Trans>Save</Trans>
             </button>
           </div>
         </form>
@@ -338,21 +359,22 @@ export function TemplatesPage() {
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title="Delete this template?"
+        title={t`Delete this template?`}
         body={
           <>
-            “{confirm?.name}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them.{" "}
+            <Trans>“{confirmName}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them.</Trans>{" "}
             {restoreWindow.hint()}
           </>
         }
-        confirm="Delete"
+        confirm={t`Delete`}
         danger
         onConfirm={() => {
-          const t = confirm;
-          if (!t) return Promise.resolve();
-          return remove.mutateAsync({ id: t.id }).then((r) => {
-            if (r.clearedDefault) toast(`“${t.name}” is no longer the default for new projects`);
-            notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: restoreWindow.restorable });
+          const tpl = confirm;
+          if (!tpl) return Promise.resolve();
+          const gone = tpl.name;
+          return remove.mutateAsync({ id: tpl.id }).then((r) => {
+            if (r.clearedDefault) toast(t`“${gone}” is no longer the default for new projects`);
+            notifyDeleted({ items: [{ kind: "template", id: tpl.id, title: tpl.name }], restorable: restoreWindow.restorable });
           });
         }}
       />

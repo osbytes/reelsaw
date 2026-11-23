@@ -1,3 +1,4 @@
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -23,6 +24,7 @@ export function TranscriptFileModal({
   canImport: boolean;
   whyNot: string;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const client = useTRPCClient();
   const qc = useQueryClient();
@@ -42,21 +44,24 @@ export function TranscriptFileModal({
       setFile(null);
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message.slice(0, 200) : "Could not import that file"),
+    onError: (err) => toast.error(err instanceof Error ? err.message.slice(0, 200) : t`Could not import that file`),
   });
   const busy = imp.isPending;
+  const fileName = file?.name ?? t`This file`;
   const base = `/api/projects/${projectId}/transcript`;
   const runImport = async () => {
     if (file) await imp.mutateAsync({ file, language: language.trim() || undefined });
   };
 
   return (
-    <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title="Transcript files" width={460}>
+    <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title={t`Transcript files`} width={460}>
       <Dialog.Description className="text-sm leading-relaxed text-ink2">
-        Download the transcript as subtitles, or use a subtitle file instead of transcribing.
+        <Trans>Download the transcript as subtitles, or use a subtitle file instead of transcribing.</Trans>
       </Dialog.Description>
       <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-semibold text-ink2">Download</div>
+        <div className="text-xs font-semibold text-ink2">
+          <Trans>Download</Trans>
+        </div>
         <div className="flex gap-2">
           {(["srt", "vtt"] as const).map((f) =>
             hasTranscript ? (
@@ -64,20 +69,22 @@ export function TranscriptFileModal({
                 {f.toUpperCase()}
               </a>
             ) : (
-              <button key={f} className="btn-ghost min-w-[88px] justify-center" disabled title="Available once the project has a transcript">
+              <button key={f} className="btn-ghost min-w-[88px] justify-center" disabled title={t`Available once the project has a transcript`}>
                 {f.toUpperCase()}
               </button>
             ),
           )}
           {hasTranscript && (
-            <a className="btn-ghost justify-center no-underline" href={`${base}.vtt?words=1`} download title="WebVTT with a timestamp before every word">
-              VTT with word times
+            <a className="btn-ghost justify-center no-underline" href={`${base}.vtt?words=1`} download title={t`WebVTT with a timestamp before every word`}>
+              <Trans>VTT with word times</Trans>
             </a>
           )}
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-semibold text-ink2">Import</div>
+        <div className="text-xs font-semibold text-ink2">
+          <Trans>Import</Trans>
+        </div>
         <input
           ref={input}
           type="file"
@@ -90,43 +97,43 @@ export function TranscriptFileModal({
         />
         <div className="flex items-center gap-2">
           <button className="btn-ghost shrink-0" disabled={!canImport || busy} title={canImport ? undefined : whyNot} onClick={() => input.current?.click()}>
-            Choose .srt or .vtt…
+            <Trans>Choose .srt or .vtt…</Trans>
           </button>
-          <span className="min-w-0 flex-1 truncate text-sm text-ink2">{file ? file.name : "No file chosen"}</span>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink2">{file ? file.name : t`No file chosen`}</span>
         </div>
         <input
           className="input"
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
           maxLength={12}
-          placeholder="Language code (optional), e.g. en"
-          aria-label="Language code"
+          placeholder={t`Language code (optional), e.g. en`}
+          aria-label={t`Language code`}
           disabled={!canImport || busy}
         />
         <p className="min-h-[2.5rem] text-xs leading-relaxed text-ink3">
           {canImport
-            ? "The file replaces the current transcript. The project then cleans it up and picks clips again; word timing inside each line is estimated and re-aligned when a clip renders."
+            ? t`The file replaces the current transcript. The project then cleans it up and picks clips again; word timing inside each line is estimated and re-aligned when a clip renders.`
             : whyNot}
         </p>
       </div>
       <div className="flex justify-end gap-2">
         <button className="btn-ghost" disabled={busy} onClick={() => onOpenChange(false)}>
-          Close
+          <Trans>Close</Trans>
         </button>
         <button
           className="btn-primary min-w-[96px] justify-center"
           disabled={!file || !canImport || busy}
           onClick={() => (hasTranscript ? setConfirmReplace(true) : void runImport().catch(() => {}))}
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Importing" /> : "Import"}
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label={t`Importing`} /> : t`Import`}
         </button>
       </div>
       <ConfirmDialog
         open={confirmReplace}
         onOpenChange={setConfirmReplace}
-        title="Replace the transcript?"
-        body={`“${file?.name ?? "This file"}” replaces the current transcript. Your accepted and rejected fixes, cuts and corrections are lost and cannot be brought back. The project then cleans it up and picks clips again.`}
-        confirm="Replace transcript"
+        title={t`Replace the transcript?`}
+        body={t`“${fileName}” replaces the current transcript. Your accepted and rejected fixes, cuts and corrections are lost and cannot be brought back. The project then cleans it up and picks clips again.`}
+        confirm={t`Replace transcript`}
         danger
         onConfirm={runImport}
       />

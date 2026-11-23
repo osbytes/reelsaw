@@ -397,6 +397,13 @@ get a line of their own. Nothing is sent when email is off. Each note has a one-
 off under Settings → Account, with `set_email_preferences` over MCP, or an operator with
 `reelsaw email-prefs <email> --ready off`. Optional mail is split into topics (today `ready`), each with its own switch and its own unsubscribe link, so later kinds of mail can be turned off one at a time.
 
+**Language and region.** Every string a person reads (the app, errors, notices, emails, MCP results, CLI lines and
+reelsaw.com) comes from a message catalogue, and numbers, sizes, amounts and dates are formatted for the reader's
+locale. Each account picks its language and time zone under Settings → Account → Language and region,
+`set_locale_preferences` over MCP or `reelsaw locale-prefs <email>`; mail is written in the recipient's language
+with dates in their time zone. English ships today; a translation is a pull request to the catalogues
+([docs/I18N.md](docs/I18N.md)).
+
 ## Hosting for many people
 
 Everything below is off by default and switched on by environment (`deploy/.env.example` lists
@@ -685,6 +692,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 | `get_email_preferences` | Which optional emails you get, by topic. |
 | `set_email_preferences` | Turn topics of optional email on or off; omitted topics stay as they are. |
+| `get_locale_preferences` | The language your emails, notices, errors and tool results are written in, and the time zone their dates are read in. |
+| `set_locale_preferences` | Choose the language (a code from the shipped locales, or null to follow the browser) and IANA time zone (e.g. |
 | `get_billing` | Hosted instances: your plan, subscription and billing period, the limits in force and where each comes from, this period's usage, the watermark, the plans on offer, and with a cancellation scheduled what Free will be once the plan ends: its limits, where you would be over them and what that refuses. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
 | `list_transcript_flags` | The fixes Reelsaw made or suggests in a project's transcript: misheard names, fillers and repetitions to cut, and your own cuts and corrections. |
@@ -805,7 +814,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow] [--cores N --mem-mb M \| --resources follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits); --priority sets the account's queue priority (-20..20, follow = the plan) |
-| `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
+| `reelsaw email-prefs <email> [--<topic> on\|off]` | see the header of apps/server/src/cli.ts |
+| `reelsaw locale-prefs <email> [--locale <code>\|follow] [--time-zone <IANA zone>\|utc]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
 | `reelsaw languages` | the spoken languages the transcription model in force takes, for a project's language, each with what works less well for it than for English (same as the language pickers and list_languages) |

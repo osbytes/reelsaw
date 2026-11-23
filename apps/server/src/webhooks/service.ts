@@ -21,6 +21,8 @@ import { takeTxLock, txLock } from "../locks.js";
 import { limitsFor } from "../quota.js";
 import { WEBHOOK_QUEUE } from "../queue/boss.js";
 import type { Services } from "../services.js";
+import { msg, plural } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 export { WEBHOOK_EVENT_TYPES, WEBHOOK_DELIVERY_STATUSES };
 export type { WebhookEventType };
@@ -70,12 +72,20 @@ export async function checkWebhookUrl(svc: Pick<Services, "settings">, raw: stri
   } catch (err) {
     if (!(err instanceof UnsafeUrlError)) throw err;
     // the shared sentence names the source-URL setting; webhooks have their own
-    const message = err.message.includes("ALLOW_PRIVATE_SOURCE_URLS")
-      ? "That address points inside this server's network. Use a public https URL, or ask the admin to allow webhooks to private networks (ALLOW_PRIVATE_WEBHOOK_URLS)."
-      : err.message.replace("as a source", "for a webhook");
-    throw new TRPCError({ code: "BAD_REQUEST", message });
+    if (err.message.includes("ALLOW_PRIVATE_SOURCE_URLS"))
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({
+          id: "webhook.url_private",
+          message:
+            "That address points inside this server's network. Use a public https URL, or ask the admin to allow webhooks to private networks (ALLOW_PRIVATE_WEBHOOK_URLS).",
+        }),
+      );
+    // the URL check's own sentence (lib/safe-url.ts), reworded for webhooks
+    throw new TRPCError({ code: "BAD_REQUEST", message: err.message.replace("as a source", "for a webhook") });
   }
-  if (!allowPrivate && url.protocol !== "https:") throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URLs must use https." });
+  if (!allowPrivate && url.protocol !== "https:")
+    throw new AppError("BAD_REQUEST", msg({ id: "webhook.webhook_urls_must_use_https", message: "Webhook URLs must use https." }));
   return url;
 }
 
@@ -146,14 +156,27 @@ export interface EndpointInput {
 export async function createEndpoint(svc: Services, userId: string, input: EndpointInput): Promise<{ endpoint: EndpointView; secret: string }> {
   const url = await checkWebhookUrl(svc, input.url);
   const events = [...new Set(input.events)];
-  if (!events.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one event." });
+  if (!events.length) throw new AppError("BAD_REQUEST", msg({ id: "webhook.pick_least_one_event", message: "Pick at least one event." }));
   const secret = newSecret();
   const row = await svc.tx(async (u) => {
     await takeTxLock(u.db, txLock.webhooks(userId));
     const max = (await limitsFor(u.db, svc.settings.get(), userId, svc.entitlements)).MAX_WEBHOOKS_PER_USER;
     if (max > 0) {
       const n = await u.db.$count(schema.webhookEndpoints, eq(schema.webhookEndpoints.userId, userId));
-      if (n >= max) throw new TRPCError({ code: "FORBIDDEN", message: `You have ${n} webhooks, the most this account may have. Delete one to add another.` });
+      if (n >= max)
+        throw new AppError(
+          "FORBIDDEN",
+          msg({
+            id: "webhook.too_many",
+            message: plural(
+              { n },
+              {
+                one: "You have # webhook, the most this account may have. Delete one to add another.",
+                other: "You have # webhooks, the most this account may have. Delete one to add another.",
+              },
+            ),
+          }),
+        );
     }
     const [r] = await u.db
       .insert(schema.webhookEndpoints)
@@ -175,7 +198,7 @@ export interface EndpointPatch {
 /** Change an endpoint. Turning it on clears a failure streak; turning it off cancels what was waiting to be sent. */
 export async function updateEndpoint(svc: Services, userId: string, id: string, patch: EndpointPatch) {
   const url = patch.url !== undefined ? (await checkWebhookUrl(svc, patch.url)).toString() : undefined;
-  if (patch.events && !patch.events.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one event." });
+  if (patch.events && !patch.events.length) throw new AppError("BAD_REQUEST", msg({ id: "webhook.pick_least_one_event", message: "Pick at least one event." }));
   const changed: string[] = [];
   const row = await svc.tx(async (u) => {
     const [e] = await u.db
@@ -183,7 +206,7 @@ export async function updateEndpoint(svc: Services, userId: string, id: string, 
       .from(schema.webhookEndpoints)
       .where(and(eq(schema.webhookEndpoints.id, id), eq(schema.webhookEndpoints.userId, userId)))
       .for("update");
-    if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
+    if (!e) throw new AppError("NOT_FOUND", msg({ id: "webhook.no_such_webhook", message: "No such webhook" }));
     const set: Partial<WebhookEndpointRow> = {};
     if (url !== undefined && url !== e.url) {
       // a new receiver starts with a clean record: the old URL's failures do not count toward turning it off
@@ -230,9 +253,9 @@ export async function deleteEndpoint(svc: Services, userId: string, id: string) 
     .delete(schema.webhookEndpoints)
     .where(and(eq(schema.webhookEndpoints.id, id), eq(schema.webhookEndpoints.userId, userId)))
     .returning({ id: schema.webhookEndpoints.id, url: schema.webhookEndpoints.url });
-  if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
+  if (!r.length) throw new AppError("NOT_FOUND", msg({ id: "webhook.no_such_webhook", message: "No such webhook" }));
   svc.log.child({ module: "webhooks" }).info({ userId, endpointId: id, url: maskWebhookUrl(r[0]!.url) }, "webhook deleted");
-  return { ok: true as const, message: "Webhook deleted; nothing more is sent to it." };
+  return { ok: true as const, message: t(msg({ id: "webhook.deleted", message: "Webhook deleted; nothing more is sent to it." })) };
 }
 
 /**
@@ -248,13 +271,16 @@ export async function rotateSecret(svc: Services, userId: string, id: string) {
       .from(schema.webhookEndpoints)
       .where(and(eq(schema.webhookEndpoints.id, id), eq(schema.webhookEndpoints.userId, userId)))
       .for("update");
-    if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
+    if (!e) throw new AppError("NOT_FOUND", msg({ id: "webhook.no_such_webhook", message: "No such webhook" }));
     // a second rotation would drop the secret receivers were promised 24 h with
     if (e.prevSecretSealed && e.prevSecretUntil && e.prevSecretUntil.getTime() > Date.now())
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: `A rotation is already under way: the previous secret keeps signing until ${utc(e.prevSecretUntil)}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
-      });
+      throw new AppError(
+        "CONFLICT",
+        msg({
+          id: "webhook.rotation_under_way",
+          message: msg`A rotation is already under way: the previous secret keeps signing until ${{ until: utc(e.prevSecretUntil) }}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
+        }),
+      );
     await u.db
       .update(schema.webhookEndpoints)
       .set({ secretSealed: box(svc).encrypt(secret), prevSecretSealed: e.secretSealed, prevSecretUntil: until, updatedAt: new Date() })
@@ -264,7 +290,12 @@ export async function rotateSecret(svc: Services, userId: string, id: string) {
   return {
     secret,
     previousStopsAt: until,
-    message: `New secret made. Deliveries are signed with both secrets until ${utc(until)}; switch your receiver before then.`,
+    message: t(
+      msg({
+        id: "webhook.secret_rotated",
+        message: msg`New secret made. Deliveries are signed with both secrets until ${{ until: utc(until) }}; switch your receiver before then.`,
+      }),
+    ),
   };
 }
 
@@ -357,13 +388,17 @@ export async function resendDelivery(svc: Services, userId: string, deliveryId: 
         where: and(eq(schema.webhookDeliveries.id, deliveryId), eq(schema.webhookDeliveries.userId, userId)),
         columns: { status: true },
       });
-      if (!exists) throw new TRPCError({ code: "NOT_FOUND", message: "No such delivery" });
-      throw new TRPCError({ code: "CONFLICT", message: "This delivery is still being sent; wait for it to finish." });
+      if (!exists) throw new AppError("NOT_FOUND", msg({ id: "webhook.no_such_delivery", message: "No such delivery" }));
+      throw new AppError(
+        "CONFLICT",
+        msg({ id: "webhook.delivery_still_being_sent_wait", message: "This delivery is still being sent; wait for it to finish." }),
+      );
     }
     const e = await u.db.query.webhookEndpoints.findFirst({ where: eq(schema.webhookEndpoints.id, row.endpointId), columns: { enabled: true } });
-    if (!e?.enabled) throw new TRPCError({ code: "CONFLICT", message: "This webhook is turned off. Turn it on, then resend." });
+    if (!e?.enabled)
+      throw new AppError("CONFLICT", msg({ id: "webhook.webhook_turned_off_turn_then", message: "This webhook is turned off. Turn it on, then resend." }));
     await u.send(WEBHOOK_QUEUE, { deliveryId: row.id }, { singletonKey: `delivery:${row.id}:resend:${Date.now()}` });
     return row.id;
   });
-  return { ok: true as const, deliveryId: id, message: "Queued to send again." };
+  return { ok: true as const, deliveryId: id, message: t(msg({ id: "webhook.resend_queued", message: "Queued to send again." })) };
 }

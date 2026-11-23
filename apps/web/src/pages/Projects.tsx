@@ -9,13 +9,14 @@ import { useTRPC } from "../lib/trpc";
 import { PosterBumperCards } from "../components/PosterBumperCards";
 import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
-import { formatTime, isProjectSortKey, listSortFirstDir, plural, type ProjectSortKey } from "@reelsaw/shared";
+import { formatTime, isProjectSortKey, listSortFirstDir, type ProjectSortKey } from "@reelsaw/shared";
+import { plural, t } from "@lingui/core/macro";
 import { ago } from "../lib/time";
 import { useMe } from "../lib/account";
 import { summarizeError } from "../lib/errors";
 import { readHash, useHashParams, writeHash } from "../lib/hash";
 import { useDebounced } from "../lib/useDebounced";
-import { useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useShortcut, useShortcuts } from "../lib/shortcuts";
 import { ProjectsBar } from "../components/ProjectsBar";
 import { pageTitle, useDocumentTitle } from "../lib/title";
@@ -41,18 +42,19 @@ function NewProjectMenu() {
   const { startProjects, openWithFile } = useUploads();
   const videos = useRef<HTMLInputElement>(null);
   const bumper = useRef<HTMLInputElement>(null);
+  const { t } = useLingui();
   return (
     <div className="flex shrink-0">
       <Link to="/new" className="btn-primary w-[9.5rem] justify-center rounded-e-none py-2.5 text-sm no-underline">
-        <Plus className="h-4 w-4" /> New project
+        <Plus className="h-4 w-4" /> <Trans>New project</Trans>
       </Link>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
             className="btn-primary w-10 justify-center rounded-s-none border-s border-white/30 px-0 py-2.5"
-            aria-label="More ways to add"
-            title="More ways to add"
+            aria-label={t`More ways to add`}
+            title={t`More ways to add`}
           >
             <ChevronDown className="h-4 w-4" />
           </button>
@@ -60,17 +62,17 @@ function NewProjectMenu() {
         <DropdownMenu.Portal>
           <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[240px]">
             <DropdownMenu.Item className="menu-item" onSelect={() => videos.current?.click()}>
-              <Film className="h-4 w-4" /> Upload videos…
+              <Film className="h-4 w-4" /> <Trans>Upload videos…</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => openPalette()}>
-              <Link2 className="h-4 w-4" /> Paste links…
+              <Link2 className="h-4 w-4" /> <Trans>Paste links…</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
             <DropdownMenu.Item className="menu-item" onSelect={() => bumper.current?.click()}>
-              <Upload className="h-4 w-4" /> Upload intro / outro…
+              <Upload className="h-4 w-4" /> <Trans>Upload intro / outro…</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => nav("/library")}>
-              <Images className="h-4 w-4" /> Open library
+              <Images className="h-4 w-4" /> <Trans>Open library</Trans>
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -81,7 +83,7 @@ function NewProjectMenu() {
         multiple
         accept="video/*,.mkv,.mov,.mp4,.webm"
         className="hidden"
-        aria-label="Choose videos"
+        aria-label={t`Choose videos`}
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
@@ -95,7 +97,7 @@ function NewProjectMenu() {
         multiple
         accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
         className="hidden"
-        aria-label="Choose intro or outro files"
+        aria-label={t`Choose intro or outro files`}
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
@@ -111,19 +113,19 @@ function NewProjectMenu() {
 const PAGE = 24;
 
 /** The Filter menu's one facet: what a project is doing. `processing` is any working status (the server's alias). */
-const STATE_OPTIONS = [
-  { value: "", label: "Any" },
-  { value: "processing", label: "Processing" },
-  { value: "done", label: "Ready" },
-  { value: "failed", label: "Failed" },
+const stateOptions = () => [
+  { value: "", label: t`Any` },
+  { value: "processing", label: t`Processing` },
+  { value: "done", label: t`Ready` },
+  { value: "failed", label: t`Failed` },
 ];
 type State = "" | "processing" | "done" | "failed";
 const asState = (v: string | null): State => (v === "processing" || v === "done" || v === "failed" ? v : "");
-const SORT_OPTIONS: SortOption<ProjectSortKey>[] = [
-  { value: "created", label: "Date added", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
-  { value: "title", label: "Title", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
-  { value: "duration", label: "Video length", firstDir: "desc", asc: "Shortest first", desc: "Longest first" },
-  { value: "updated", label: "Last changed", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
+const sortOptions = (): SortOption<ProjectSortKey>[] => [
+  { value: "created", label: t`Date added`, firstDir: "desc", asc: t`Oldest first`, desc: t`Newest first` },
+  { value: "title", label: t`Title`, firstDir: "asc", asc: t`A to Z`, desc: t`Z to A` },
+  { value: "duration", label: t`Video length`, firstDir: "desc", asc: t`Shortest first`, desc: t`Longest first` },
+  { value: "updated", label: t`Last changed`, firstDir: "desc", asc: t`Oldest first`, desc: t`Newest first` },
 ];
 const readSort = (h: URLSearchParams): SortChoice<ProjectSortKey> => {
   const key = h.get("sort");
@@ -171,8 +173,8 @@ function CardSkeleton({ i }: { i: number }) {
 }
 
 export function ProjectsPage() {
-  useDocumentTitle(pageTitle("Projects"));
   const { t } = useLingui();
+  useDocumentTitle(pageTitle(t`Projects`));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const isAdmin = useMe().data?.role === "admin";
@@ -233,9 +235,10 @@ export function ProjectsPage() {
   const noneYet = !q.isPending && !q.isPlaceholderData && !projects.length && !q.error;
   const isEmpty = noneYet && !filtered;
   const noMatch = noneYet && filtered;
-  const facets: ListFacet[] = [{ id: "state", label: "Status", value: state, options: STATE_OPTIONS, onChange: (v) => setState(asState(v)) }];
+  const facets: ListFacet[] = [{ id: "state", label: t`Status`, value: state, options: stateOptions(), onChange: (v) => setState(asState(v)) }];
   const activeFilters = facetChips(facets);
-  const noun = (n: number) => plural(n, term ? "match" : "project", term ? "matches" : "projects");
+  const word = (n: number) => (term ? plural(n, { one: "match", other: "matches" }) : plural(n, { one: "project", other: "projects" }));
+  const noun = (n: number) => (term ? plural(n, { one: "# match", other: "# matches" }) : plural(n, { one: "# project", other: "# projects" }));
   // as many skeleton cards as the account had last time (up to a row's worth), so the grid does not collapse on load
   const skeletonCards = Math.min(6, Math.max(1, stats.data?.total ?? lastProjectCount.read() ?? 6));
   useEffect(() => {
@@ -259,7 +262,7 @@ export function ProjectsPage() {
   const selecting = sel.length > 0;
   const selected = useMemo(() => projects.filter((p) => sel.includes(p.id)), [projects, sel]);
   const toggle = (id: string) => setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
-  useShortcuts("Projects", [["Clear the selection", "Esc"]]);
+  useShortcuts(t`Projects`, [[t`Clear the selection`, "Esc"]]);
   useShortcut("escape", () => setSel([]), { enabled: selecting, preventDefault: false });
   const refreshAll = () => {
     void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
@@ -270,7 +273,9 @@ export function ProjectsPage() {
       <main className="mx-auto flex max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
         <div className="flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[28px] font-bold tracking-tight">Projects</h1>
+            <h1 className="text-[28px] font-bold tracking-tight">
+              <Trans>Projects</Trans>
+            </h1>
             {/* height reserved so the grid doesn't jump when the list arrives */}
             {stats.isPending ? (
               <div className="mt-1 flex h-5 items-center">
@@ -278,8 +283,16 @@ export function ProjectsPage() {
               </div>
             ) : stats.data && stats.data.total > 0 ? (
               <p className="mt-1 min-h-5 text-sm text-ink2">
-                {plural(stats.data.total, "project")}
-                {running ? ` · ${running} processing` : ""} · {plural(stats.data.clipsDone, "clip")} ready
+                <Plural value={stats.data.total} one="# project" other="# projects" />
+                {running ? (
+                  <>
+                    {" · "}
+                    <Plural value={running} one="# processing" other="# processing" />
+                  </>
+                ) : (
+                  ""
+                )}{" "}
+                · <Plural value={stats.data.clipsDone} one="# clip ready" other="# clips ready" />
               </p>
             ) : (
               <p className="mt-1 min-h-5" />
@@ -296,7 +309,7 @@ export function ProjectsPage() {
             controls={
               <>
                 <FilterMenu facets={facets} />
-                <SortMenu options={SORT_OPTIONS} value={sort} onChange={setSort} defaultKey="updated" />
+                <SortMenu options={sortOptions()} value={sort} onChange={setSort} defaultKey="updated" />
               </>
             }
             count={q.isPending ? <Skeleton className="h-3 w-24" /> : noun(total)}
@@ -307,26 +320,28 @@ export function ProjectsPage() {
         {q.error && <p className="text-err">{q.error.message}</p>}
 
         {noMatch && (
-          <ListEmpty icon={Search} title={term ? `No projects match “${term}”` : "No projects match"}>
-            Try other words, or another status.
+          <ListEmpty icon={Search} title={term ? t`No projects match “${term}”` : t`No projects match`}>
+            <Trans>Try other words, or another status.</Trans>
           </ListEmpty>
         )}
 
         {isEmpty && (
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
             <span className="film h-[72px] w-[42px] rounded-[8px]" />
-            <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
+            <h2 className="text-xl font-bold">
+              <Trans>Turn your first long video into clips</Trans>
+            </h2>
             <p className="text-sm leading-relaxed text-ink2">
-              Paste a YouTube link or upload a file. We’ll transcribe it, find the strongest moments and frame them for 9:16.
+              <Trans>Paste a YouTube link or upload a file. We’ll transcribe it, find the strongest moments and frame them for 9:16.</Trans>
             </p>
             <Link to="/new" className="btn-primary mt-2 py-2.5 text-sm no-underline">
-              <Plus className="h-4 w-4" /> New project
+              <Plus className="h-4 w-4" /> <Trans>New project</Trans>
             </Link>
           </div>
         )}
 
         {q.isPending && !q.error && (
-          <SkeletonRegion label="Loading projects…" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
+          <SkeletonRegion label={t`Loading projects…`} className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
             {Array.from({ length: skeletonCards }, (_, i) => (
               <CardSkeleton key={i} i={i} />
             ))}
@@ -336,12 +351,14 @@ export function ProjectsPage() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
           {projects.map((p) => {
             const active = ACTIVE.has(p.status);
+            const ready = p.clipsDone;
+            const added = ago(p.createdAt);
             const detail =
               p.status === "failed"
-                ? summarizeError(p.error ?? "Something went wrong", { admin: isAdmin }).summary
+                ? summarizeError(p.error ?? t`Something went wrong`, { admin: isAdmin }).summary
                 : p.clipCount
-                  ? `${plural(p.clipCount, "clip")} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
-                  : `Added ${ago(p.createdAt)}`;
+                  ? plural(p.clipCount, { one: `# clip · ${ready} ready · ${added}`, other: `# clips · ${ready} ready · ${added}` })
+                  : t`Added ${added}`;
             const checked = sel.includes(p.id);
             return (
               <div key={p.id} className="group relative">
@@ -353,7 +370,7 @@ export function ProjectsPage() {
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggle(p.id)}
-                    aria-label={`Select ${p.title}`}
+                    aria-label={t`Select ${p.title}`}
                     className="h-4 w-4 cursor-pointer accent-[var(--acc)]"
                   />
                 </label>
@@ -447,7 +464,7 @@ export function ProjectsPage() {
               onMore={() => void q.fetchNextPage()}
               left={Math.min(PAGE, remaining)}
             />
-            <span className="tabular-nums">{showingCount(projects.length, total, term ? "match" : "project", term ? "matches" : "projects")}</span>
+            <span className="tabular-nums">{showingCount(projects.length, total, word)}</span>
           </div>
         )}
       </main>

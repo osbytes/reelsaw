@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MUST_CHANGE_PASSWORD_COPY, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, REPO_URL } from "@reelsaw/shared";
 import { ThemeToggle } from "../App";
 import { AuthCardHeader } from "../components/AuthCardHeader";
-import { signOut } from "../lib/auth";
+import { accountNotice, signOut } from "../lib/auth";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useMe } from "../lib/account";
 import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
@@ -15,12 +16,13 @@ import { useDocumentTitle } from "../lib/title";
  * the temporary one, so there is no current-password field.
  */
 export function MustChangePasswordPage() {
+  const { t } = useLingui();
   const me = useMe();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  useDocumentTitle("Choose a password · Reelsaw");
+  useDocumentTitle(t`Choose a password · Reelsaw`);
 
   const save = useMutation({
     ...trpc.me.completePasswordChange.mutationOptions(),
@@ -42,11 +44,13 @@ export function MustChangePasswordPage() {
             save.mutate({ password });
           }}
         >
-          <AuthCardHeader title="Choose a password" titleClassName="text-[22px]" />
-          <p className="text-sm leading-relaxed text-ink2">{MUST_CHANGE_PASSWORD_COPY}</p>
-          <p className="min-h-5 text-xs text-ink3">{me.data ? `Signed in as ${me.data.email}` : ""}</p>
+          <AuthCardHeader title={t`Choose a password`} titleClassName="text-[22px]" />
+          <p className="text-sm leading-relaxed text-ink2">{accountNotice(MUST_CHANGE_PASSWORD_COPY)}</p>
+          <p className="min-h-5 text-xs text-ink3">{me.data ? t`Signed in as ${me.data.email}` : ""}</p>
           <div>
-            <label className="label">New password</label>
+            <label className="label">
+              <Trans>New password</Trans>
+            </label>
             <input
               className="input"
               name="password"
@@ -61,7 +65,9 @@ export function MustChangePasswordPage() {
             />
           </div>
           <div>
-            <label className="label">Confirm</label>
+            <label className="label">
+              <Trans>Confirm</Trans>
+            </label>
             <input
               className="input"
               name="confirm-password"
@@ -76,21 +82,21 @@ export function MustChangePasswordPage() {
           </div>
           {(save.error || mismatch || tooShort) && (
             <p className="rounded-[10px] bg-err-soft px-3 py-2 text-sm leading-relaxed text-ink">
-              {save.error?.message ?? (tooShort ? "Use at least 8 characters." : "The two passwords do not match.")}
+              {save.error?.message ?? (tooShort ? t`Use at least 8 characters.` : t`The two passwords do not match.`)}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
             <button className="btn-primary min-w-[8rem] py-2.5 text-sm" disabled={busy || password.length < PASSWORD_MIN_LENGTH || password !== confirm}>
-              {busy ? "…" : "Save password"}
+              {busy ? "…" : t`Save password`}
             </button>
             <button type="button" className="btn-quiet" onClick={() => signOut().then(() => window.location.assign("/login"))}>
-              Sign out
+              <Trans>Sign out</Trans>
             </button>
           </div>
         </form>
         <p className="absolute bottom-4 start-0 end-0 text-center text-xs text-ink3">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-            github.com/osbytes/reelsaw
+            {"github.com/osbytes/reelsaw"}
           </a>
         </p>
       </div>

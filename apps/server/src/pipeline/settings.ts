@@ -3,7 +3,8 @@
  * form (or an agent) sent. One function so the web form, MCP and re-analyze agree.
  */
 import { and, eq, isNull } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
 import {
   projectSettingsSchema,
   defaultProjectSettings,
@@ -48,7 +49,13 @@ export async function resolveProjectSettings(
     });
     if (row) continue;
     // an id the caller named that is not theirs is an error; a stale saved default is just dropped, with its seconds
-    if (given[k] === id) throw new TRPCError({ code: "NOT_FOUND", message: `That ${k === "introAssetId" ? "intro" : "outro"} is not in your library` });
+    if (given[k] === id)
+      throw new AppError(
+        "NOT_FOUND",
+        k === "introAssetId"
+          ? msg({ id: "bumper.intro_not_in_library", message: "That intro is not in your library" })
+          : msg({ id: "bumper.outro_not_in_library", message: "That outro is not in your library" }),
+      );
     delete merged[k];
     delete merged[k === "introAssetId" ? "introSec" : "outroSec"];
   }

@@ -2,6 +2,7 @@
 import { ProviderError } from "./http.js";
 import type { Catalog } from "../catalog.js";
 import type { Provider } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 export function reelsawCatalog(catalog: Catalog): Provider {
   return {
@@ -12,7 +13,13 @@ export function reelsawCatalog(catalog: Catalog): Provider {
     search: (q, { kind, cursor, limit }) => catalog.search(q, { kind, cursor, limit }),
     async resolve(externalId) {
       const hit = await catalog.find(externalId);
-      if (!hit) throw new ProviderError("That item is not in the Reelsaw catalog (it may have been removed in a newer version).");
+      if (!hit)
+        throw new ProviderError(
+          msg({
+            id: "library_provider.item_reelsaw_catalog_may_been",
+            message: "That item is not in the Reelsaw catalog (it may have been removed in a newer version).",
+          }),
+        );
       const { item, fileUrl, localPath } = hit;
       const ext =
         /\.([a-z0-9]{2,5})$/i.exec(item.url)?.[1]?.toLowerCase() ?? (item.mime.split("/")[1] ?? "bin").replace("svg+xml", "svg").replace("mpeg", "mp3");

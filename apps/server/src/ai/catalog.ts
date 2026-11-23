@@ -14,7 +14,15 @@ import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./re
 import { OPENCODE_PLANS, opencodeUserAgent, type OpenCodePlan } from "./opencode.js";
 import { aliasesOf, credentialOwner, OPENCODE_DEFAULT_BASE_URL } from "./provider-ids.js";
 import type { WordTimestampVerdict } from "./word-timestamps.js";
-import { createFuzzy, formatBytes } from "@reelsaw/shared";
+import { createFuzzy, formatBytes, formatNumber } from "@reelsaw/shared";
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "../i18n.js";
+
+/** A model's list price per million input / output tokens, in dollars, as the model picker shows it: "$0.15 / $0.60 per 1M tokens". */
+function perMillionTokens(input: number, output: number): string {
+  const usd = (n: number) => formatNumber(n, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return t(msg({ id: "models.price_per_million", message: msg`${{ input: usd(input) }} / ${{ output: usd(output) }} per 1M tokens` }));
+}
 
 export type CatalogKind = "language" | "transcription";
 
@@ -380,10 +388,7 @@ export function createModelCatalog(
         for (const m of models) {
           // the gateway types its models; untyped ones predate the field and are language models
           if ((m.modelType ?? "language") !== kind) continue;
-          const price =
-            kind === "language" && m.pricing
-              ? `$${(Number(m.pricing.input) * 1e6).toFixed(2)} / $${(Number(m.pricing.output) * 1e6).toFixed(2)} per 1M tokens`
-              : undefined;
+          const price = kind === "language" && m.pricing ? perMillionTokens(Number(m.pricing.input) * 1e6, Number(m.pricing.output) * 1e6) : undefined;
           out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
         }
       } else if (provider === "opencode") {
@@ -433,14 +438,18 @@ export function createModelCatalog(
       const plan = OPENCODE_PLANS[r.plan];
       if (r.error) {
         const group = out.groups.find((g) => g.name === plan.group)!;
-        group.notice = rejected(r.status) ? `This key cannot use ${plan.group} (HTTP ${r.status}).` : `${plan.group} could not be listed: ${r.error}.`;
+        group.notice = t(
+          rejected(r.status)
+            ? msg({ id: "models.group_key_refused", message: msg`This key cannot use ${{ group: plan.group }} (HTTP ${{ status: r.status }}).` })
+            : msg({ id: "models.group_list_failed", message: msg`${{ group: plan.group }} could not be listed: ${{ error: r.error }}.` }),
+        );
         continue;
       }
       for (const m of r.models) {
         const input = m.cost?.text?.input?.price;
         const output = m.cost?.text?.output?.price;
         // Go draws list prices from the subscription's allowance; Zen bills them
-        const price = input !== undefined && output !== undefined ? `$${input.toFixed(2)} / $${output.toFixed(2)} per 1M tokens` : "";
+        const price = input !== undefined && output !== undefined ? perMillionTokens(input, output) : "";
         out.models.push({
           id: `${r.plan}:${m.id}`,
           label: m.id,

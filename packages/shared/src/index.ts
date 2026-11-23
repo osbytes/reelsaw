@@ -1964,6 +1964,7 @@ export * from "./captions-format.js";
 export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
+export * from "./locale.js";
 export * from "./partial.js";
 export * from "./ranges.js";
 export * from "./punch-in.js";

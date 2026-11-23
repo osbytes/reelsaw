@@ -1,3 +1,5 @@
+import { msg, plural } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 /**
  * The changelog's pages beyond the list: one release (`/releases/v0.19.1`), a set of releases
  * (`/releases/v0.17.0..v0.19.1`, `/releases/v0.15.0,v0.18.2`) or the releases on some days
@@ -25,7 +27,21 @@ export function releaseDay(r: Release): string {
   return r.publishedAt.slice(0, 10);
 }
 
-const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+// month names from the catalogue, not Intl: Node and the browser must render the same text (see formatUtcDate)
+const MONTHS_LONG = [
+  t(msg`January`),
+  t(msg`February`),
+  t(msg`March`),
+  t(msg`April`),
+  t(msg`May`),
+  t(msg`June`),
+  t(msg`July`),
+  t(msg`August`),
+  t(msg`September`),
+  t(msg`October`),
+  t(msg`November`),
+  t(msg`December`),
+];
 
 function parts(day: string) {
   const d = new Date(`${day}T00:00:00Z`);
@@ -37,18 +53,18 @@ export function formatDayRange(from: string, to: string): string {
   if (from === to) return formatLongDay(from);
   const a = parts(from);
   const b = parts(to);
-  if (a.y === b.y && a.m === b.m) return `${a.d} – ${b.d} ${MONTHS_LONG[b.m]} ${b.y}`;
-  if (a.y === b.y) return `${a.d} ${MONTHS_LONG[a.m]} – ${b.d} ${MONTHS_LONG[b.m]} ${b.y}`;
-  return `${formatLongDay(from)} – ${formatLongDay(to)}`;
+  if (a.y === b.y && a.m === b.m) return t(msg`${{ from: a.d }} – ${{ to: b.d }} ${{ month: MONTHS_LONG[b.m] }} ${{ year: b.y }}`);
+  if (a.y === b.y) return t(msg`${{ from: a.d }} ${{ fromMonth: MONTHS_LONG[a.m] }} – ${{ to: b.d }} ${{ toMonth: MONTHS_LONG[b.m] }} ${{ year: b.y }}`);
+  return t(msg`${{ from: formatLongDay(from) }} – ${{ to: formatLongDay(to) }}`);
 }
 
 export function formatLongDay(day: string): string {
   const { y, m, d } = parts(day);
-  return `${d} ${MONTHS_LONG[m]} ${y}`;
+  return t(msg`${{ day: d }} ${{ month: MONTHS_LONG[m] }} ${{ year: y }}`);
 }
 
 export function releaseCount(n: number): string {
-  return n === 1 ? "1 release" : `${n} releases`;
+  return t(msg({ message: plural({ n }, { one: "# release", other: "# releases" }) }));
 }
 
 export interface ReleaseDayGroup {
@@ -74,7 +90,7 @@ export function groupReleasesByDay(releases: readonly Release[]): ReleaseDayGrou
       continue;
     }
     const { y, m, d } = parts(date);
-    groups.push({ date, monthLabel: `${MONTHS_LONG[m]} ${y}`, dayOfMonth: String(d), dayLabel: formatUtcDate(date), releases: [r] });
+    groups.push({ date, monthLabel: t(msg`${{ month: MONTHS_LONG[m] }} ${{ year: y }}`), dayOfMonth: String(d), dayLabel: formatUtcDate(date), releases: [r] });
   }
   return groups;
 }
@@ -265,16 +281,16 @@ export function resolveReleasesParam(param: string, releases: readonly Release[]
   if (selected?.length) {
     const selection = formatTagSelection(selected, releases);
     const range = /^(v[^,]+?)\.\.(v[^,]+)$/.exec(selection);
-    const label = range ? `${range[1]} to ${range[2]}` : releaseCount(selected.length);
-    return describeSet(selected, { by: "tags", selection, label, heading: `What shipped in ${label}` });
+    const label = range ? t(msg`${{ value: range[1] }} to ${{ value2: range[2] }}`) : releaseCount(selected.length);
+    return describeSet(selected, { by: "tags", selection, label, heading: t(msg`What shipped in ${{ label: label }}`) });
   }
 
   const spans = parseDaySelection(param);
   if (!spans?.length) return null;
   const selection = formatDaySelection(spans);
-  const label = spans.length === 1 ? formatDayRange(spans[0]!.from, spans[0]!.to) : `${spans.length} date ranges`;
+  const label = spans.length === 1 ? formatDayRange(spans[0]!.from, spans[0]!.to) : t(msg`${{ length: spans.length }} date ranges`);
   // "5 – 10 November 2026", but "on 6 November 2026" and "on 3 date ranges".
-  const when = spans.length === 1 && spans[0]!.from !== spans[0]!.to ? label : `on ${label}`;
+  const when = spans.length === 1 && spans[0]!.from !== spans[0]!.to ? label : t(msg`on ${{ label }}`);
   const inDays = releases.filter((r) => {
     const day = releaseDay(r);
     return spans.some((s) => day >= s.from && day <= s.to);
@@ -286,12 +302,12 @@ export function resolveReleasesParam(param: string, releases: readonly Release[]
       kind: "empty",
       selection,
       label,
-      heading: `Nothing shipped ${when}`,
+      heading: t(msg`Nothing shipped ${{ when: when }}`),
       older: releases.find((r) => releaseDay(r) < firstDay) ?? null,
       newer: releases.filter((r) => releaseDay(r) > lastDay).at(-1) ?? null,
     };
   }
-  return describeSet(inDays, { by: "days", selection, label, heading: `What shipped ${when}` });
+  return describeSet(inDays, { by: "days", selection, label, heading: t(msg`What shipped ${{ when: when }}`) });
 }
 
 function describeSet(selected: Release[], naming: { by: "tags" | "days"; selection: string; label: string; heading: string }): ResolvedReleases {

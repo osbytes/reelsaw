@@ -1,3 +1,5 @@
+import { tr } from "./tr";
+
 /**
  * What the last render did with a disfluency cut: cut, cut without a seam check (the user's own cuts
  * are never dropped, so a seam that could not be matched is applied as set and flagged), or kept in
@@ -41,12 +43,17 @@ export function cutState(flag: { start: number; end: number }, clips: CutClip[])
 
 /** Short label with a glyph for the warning states (never colour alone). */
 export function cutStateLabel(s: CutState): string {
-  return s.state === "applied" ? "Cut" : s.state === "unverified" ? "▲ Cut unverified" : "▲ Kept in audio";
+  return s.state === "applied"
+    ? tr(/*i18n*/ { id: "cutstate.applied", message: "Cut" })
+    : s.state === "unverified"
+      ? `▲ ${tr(/*i18n*/ { id: "cutstate.unverified", message: "Cut unverified" })}`
+      : `▲ ${tr(/*i18n*/ { id: "cutstate.kept", message: "Kept in audio" })}`;
 }
 
 export function cutStateTitle(s: CutState): string {
-  if (s.state === "applied") return "Removed from the audio at a verified seam.";
+  if (s.state === "applied") return tr(/*i18n*/ { id: "cutstate.appliedTitle", message: "Removed from the audio at a verified seam." });
+  const why = s.reason ? `\n${s.reason}` : "";
   if (s.state === "unverified")
-    return `Applied where you set it, without a seam check: the audio around it couldn’t be matched.${s.reason ? `\n${s.reason}` : ""}`;
-  return `The removal couldn’t be verified, so the audio was kept. Captions still drop the word.${s.reason ? `\n${s.reason}` : ""}`;
+    return `${tr(/*i18n*/ { id: "cutstate.unverifiedTitle", message: "Applied where you set it, without a seam check: the audio around it couldn’t be matched." })}${why}`;
+  return `${tr(/*i18n*/ { id: "cutstate.keptTitle", message: "The removal couldn’t be verified, so the audio was kept. Captions still drop the word." })}${why}`;
 }

@@ -8,6 +8,7 @@
  * assumed when the model does not say, generated from Whisper's own table (whisper-languages.ts).
  */
 import { WHISPER_LANGUAGE_NAMES, WHISPER_LANGUAGES } from "./whisper-languages.js";
+import { formatLocale } from "./format.js";
 
 /** "iw" → "he", "jw" → "jv", "zho" → "zh", "pt_BR" → "pt"; undefined for something that is not a language tag. */
 export function canonicalLanguage(tag: string): string | undefined {
@@ -46,7 +47,7 @@ function namer(locale: string): Intl.DisplayNames | null {
 }
 
 /** "de" → "German" (or "Deutsch" with locale "de"); the code itself when the runtime has no name for it. */
-export function languageLabel(code: string, locale = "en"): string {
+export function languageLabel(code: string, locale = formatLocale()): string {
   try {
     return namer(locale)?.of(code) ?? code;
   } catch {

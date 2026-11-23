@@ -17,6 +17,23 @@ import { inflightJobs, setListeningQueues, trackJob } from "./inflight.js";
 import { gauge, histogram, realtimeFactor, type MetricAttributes } from "../metrics.js";
 import { createDiskGate, type DiskGate } from "./disk-gate.js";
 import type { Logger } from "../log.js";
+import { eq } from "drizzle-orm";
+import { schema } from "../db/index.js";
+import { inLocaleOf } from "../i18n.js";
+
+/**
+ * A project's job renders its sentences (refusals, notices, failure text a person reads) in the owner's language and
+ * time zone, not the worker process's (docs/I18N.md).
+ */
+async function inOwnerLocale<T>(svc: Services, projectId: string | undefined, fn: () => Promise<T>): Promise<T> {
+  if (!projectId) return fn();
+  const [owner] = await svc.database.db
+    .select({ locale: schema.user.locale, timeZone: schema.user.timeZone })
+    .from(schema.projects)
+    .innerJoin(schema.user, eq(schema.user.id, schema.projects.userId))
+    .where(eq(schema.projects.id, projectId));
+  return owner ? inLocaleOf(owner, fn) : fn();
+}
 
 type Job<T> = { id: string; data: T; retryCount: number; signal: AbortSignal };
 
@@ -279,7 +296,8 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
     handler: (jobs: Job<T>[]) => Promise<void>,
   ) => {
     concurrency += options.localConcurrency;
-    const register = () => boss.work<T>(queue, options, handler).then(() => undefined);
+    const inLocale = (jobs: Job<T>[]) => inOwnerLocale(svc, jobs[0]?.data.projectId, () => handler(jobs));
+    const register = () => boss.work<T>(queue, options, inLocale).then(() => undefined);
     registrations.set(queue, register);
     await register();
   };

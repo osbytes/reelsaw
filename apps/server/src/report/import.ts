@@ -457,6 +457,8 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         renderGen: _g,
         outputKey: _o,
         thumbnailKey: _t,
+        // the bundle carries no ranges, so a clip's range would point at nothing (and break its foreign key)
+        rangeId: _r,
         ...rest
       } = c as Record<string, unknown> & typeof c;
       clipRows.push({

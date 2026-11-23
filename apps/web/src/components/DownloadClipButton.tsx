@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { upgradeFromProject } from "@reelsaw/shared";
 import { useMe } from "../lib/account";
 import { track } from "../lib/telemetry";
@@ -46,6 +47,7 @@ export function DownloadOfferHost() {
     },
     () => asking,
   );
+  const { t } = useLingui();
   const me = useMe();
   const offer = me.data?.watermark?.upgrade;
   const loaded = !!me.data;
@@ -60,16 +62,26 @@ export function DownloadOfferHost() {
     }
   }, [ask, loaded, hasOffer]);
   if (!ask || !offer) return null;
+  const mark = me.data?.watermark?.text;
   const props = { placement: ask.placement, projectId: ask.projectId, clipId: ask.clip.id };
   return (
-    <Modal open onOpenChange={(o) => !o && setAsking(null)} title="Download without the watermark?">
+    <Modal open onOpenChange={(o) => !o && setAsking(null)} title={t`Download without the watermark?`}>
       <p className="text-[13px] leading-snug text-ink2">
-        This clip carries a small {me.data?.watermark?.text ? `“${me.data.watermark.text}” ` : ""}watermark. Upgrade and Reelsaw renders this project's clips
-        again without it, by itself; you choose which other projects to clean up after checkout.
+        {mark ? (
+          <Trans>
+            This clip carries a small “{mark}” watermark. Upgrade and Reelsaw renders this project's clips again without it, by itself; you choose which other
+            projects to clean up after checkout.
+          </Trans>
+        ) : (
+          <Trans>
+            This clip carries a small watermark. Upgrade and Reelsaw renders this project's clips again without it, by itself; you choose which other projects
+            to clean up after checkout.
+          </Trans>
+        )}
       </p>
       <div className="flex flex-wrap justify-end gap-2">
         <a className="btn-ghost py-1.5 text-xs no-underline" href={hrefOf(ask.clip)} download="" onClick={() => setAsking(null)}>
-          Download with watermark
+          <Trans>Download with watermark</Trans>
         </a>
         <a
           className="btn-primary py-1.5 text-xs no-underline"
@@ -89,12 +101,12 @@ export function DownloadClipButton({ clip, projectId, className }: { clip: Downl
   if (!(clip.watermark && me.data?.watermark?.upgrade))
     return (
       <a className={className} href={hrefOf(clip)}>
-        Download
+        <Trans>Download</Trans>
       </a>
     );
   return (
     <button type="button" className={className} onClick={() => downloadClip(clip, projectId, "download")}>
-      Download
+      <Trans>Download</Trans>
     </button>
   );
 }

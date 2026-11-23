@@ -18,7 +18,7 @@ import {
   shouldOfferResendVerification,
   verifyEmailErrorFromSearch,
 } from "@reelsaw/shared";
-import { authClient, sendVerificationEmail, signIn, signUp, useSession } from "../lib/auth";
+import { accountNotice, authClient, sendVerificationEmail, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
 import { ThemeToggle } from "../App";
 import { AuthCardHeader } from "../components/AuthCardHeader";
@@ -268,7 +268,9 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           )}
           {!expiredLink && captcha && <Captcha key={captchaAttempt} provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
           {(error || notice) && (
-            <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
+            <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>
+              {error ?? accountNotice(notice)}
+            </p>
           )}
           <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
             <Pending busy={busy}>{expiredLink ? t`Send me a new link` : mode === "login" ? t`Sign in` : t`Create account`}</Pending>
@@ -302,7 +304,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
         </form>
         <p className="absolute inset-x-0 bottom-4 text-center text-xs text-ink3">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-            github.com/osbytes/reelsaw
+            {"github.com/osbytes/reelsaw"}
           </a>
         </p>
       </div>

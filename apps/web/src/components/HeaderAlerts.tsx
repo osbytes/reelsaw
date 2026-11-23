@@ -6,6 +6,7 @@
  */
 import { Link } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Plural, useLingui } from "@lingui/react/macro";
 import { useMe, useSystemStatus } from "../lib/account";
 import { refreshForNewVersion, useStaleChunkNudge } from "../lib/stale-chunk";
 import { useUnsaved } from "../lib/unsaved";
@@ -27,6 +28,7 @@ export interface HeaderAlert {
 }
 
 export function useHeaderAlerts(): HeaderAlert[] {
+  const { t } = useLingui();
   // workers report what they are short of every 15 s (ops/workers.ts), so polling faster only repeats the same answer
   const paused = useSystemStatus(30_000).data?.paused;
   const isAdmin = useMe().data?.role === "admin";
@@ -37,21 +39,21 @@ export function useHeaderAlerts(): HeaderAlert[] {
     alerts.push({
       id: "stale",
       glyph: "↑",
-      short: dirty ? "Save first" : "Refresh",
-      label: dirty ? "Save, then refresh" : "Newer version · Refresh",
-      detail: dirty ? "A newer version is ready. Refreshing now would discard unsaved edits." : "This tab is running an older version.",
+      short: dirty ? t`Save first` : t`Refresh`,
+      label: dirty ? t`Save, then refresh` : t`Newer version · Refresh`,
+      detail: dirty ? t`A newer version is ready. Refreshing now would discard unsaved edits.` : t`This tab is running an older version.`,
       tone: "acc",
       onClick: refreshForNewVersion,
     });
   }
   if (paused) {
-    const reason = paused === "disk" ? "disk nearly full" : `${paused} busy`;
+    const reason = paused === "disk" ? t`disk nearly full` : t`${paused} busy`;
     alerts.push({
       id: "paused",
       glyph: "◷",
-      short: "Paused",
-      label: `Jobs paused · ${reason}`,
-      detail: "Heavy jobs wait until a worker has room",
+      short: t`Paused`,
+      label: t`Jobs paused · ${reason}`,
+      detail: t`Heavy jobs wait until a worker has room`,
       tone: "warn",
       // admins land on the workers that are short; everyone else has nothing to change, so it stays a note
       ...(isAdmin ? { href: "/settings/system#workers" } : {}),
@@ -93,7 +95,7 @@ function AlertsMenu({ alerts }: { alerts: HeaderAlert[] }) {
           <span className="relative -top-px font-mono leading-none" aria-hidden>
             {alerts[0]!.glyph}
           </span>
-          {alerts.length} alerts
+          <Plural value={alerts.length} one="# alert" other="# alerts" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

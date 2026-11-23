@@ -9,6 +9,8 @@ import { Skeleton } from "./ui";
 import { useTRPC } from "../lib/trpc";
 import { useDebounced } from "../lib/useDebounced";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { formatNumber } from "@reelsaw/shared";
 
 type CatalogPage = inferRouterOutputs<AppRouter>["admin"]["models"]["catalog"];
 export type PickerProvider = CatalogPage["providers"][number];
@@ -32,12 +34,13 @@ export interface PickerProviderState {
 const PAGE = 50;
 /** matches per provider while searching */
 const SEARCH_PAGE = 20;
-const num = new Intl.NumberFormat();
 
 function PickerSkeleton() {
   return (
     <div role="status" className="flex flex-col gap-2 text-start">
-      <span className="sr-only">Asking providers…</span>
+      <span className="sr-only">
+        <Trans>Asking providers…</Trans>
+      </span>
       {["w-2/3", "w-1/2", "w-3/5"].map((w) => (
         <Skeleton key={w} className={`h-4 ${w}`} />
       ))}
@@ -66,7 +69,7 @@ export function ModelPicker({
   onClearCredentials,
   saving,
   label,
-  placeholder = "Pick a model",
+  placeholder,
 }: {
   kind: "language" | "transcription";
   value: string;
@@ -81,6 +84,7 @@ export function ModelPicker({
   label: string;
   placeholder?: string;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -161,7 +165,7 @@ export function ModelPicker({
             className={`inline-flex shrink-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] font-semibold ${busy ? "text-ink3" : "bg-acc-soft text-acc-text"}`}
           >
             <Download className="h-3 w-3" />
-            {busy ? "downloading…" : "download"}
+            {busy ? t`downloading…` : t`download`}
           </span>
         )}
       </button>
@@ -170,10 +174,11 @@ export function ModelPicker({
 
   const statusOf = (p: PickerProvider) => {
     const s = stateOf(p.provider);
-    if (p.error) return { text: "unreachable", tone: "text-warn" };
-    if (!p.available) return { text: s?.baseUrlEnv && !s.keyEnv.length ? "needs a URL" : "needs a key", tone: "text-ink3" };
-    if (s?.keySource === "db" || s?.baseUrlSource === "db") return { text: "entered here", tone: "text-ok" };
-    return { text: p.selfHosted ? `${num.format(p.installedCount ?? 0)} installed` : "from .env", tone: "text-ink3" };
+    if (p.error) return { text: t`unreachable`, tone: "text-warn" };
+    if (!p.available) return { text: s?.baseUrlEnv && !s.keyEnv.length ? t`needs a URL` : t`needs a key`, tone: "text-ink3" };
+    if (s?.keySource === "db" || s?.baseUrlSource === "db") return { text: t`entered here`, tone: "text-ok" };
+    const installed = formatNumber(p.installedCount ?? 0);
+    return { text: p.selfHosted ? t`${installed} installed` : t`from .env`, tone: "text-ink3" };
   };
 
   // the confirm is a dialog below this z-[80] popover: close it first
@@ -186,7 +191,7 @@ export function ModelPicker({
       <Popover.Trigger asChild>
         <button type="button" role="combobox" aria-expanded={open} aria-label={label} className="input flex min-h-[38px] items-center gap-2 py-1 text-start">
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className={`truncate font-mono text-xs ${value ? "" : "text-ink3"}`}>{value || placeholder}</span>
+            <span className={`truncate font-mono text-xs ${value ? "" : "text-ink3"}`}>{value || (placeholder ?? t`Pick a model`)}</span>
             {/* always two lines, so pickers side by side stay the same height */}
             <span className="min-h-4 truncate text-[11px] text-ink3">{current?.note ?? (value ? value.split(":")[0] : "")}</span>
           </span>
@@ -203,7 +208,7 @@ export function ModelPicker({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search every provider, or type provider:model…"
+            placeholder={t`Search every provider, or type provider:model…`}
             autoFocus
             className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
           />
@@ -218,9 +223,13 @@ export function ModelPicker({
                   >
                     <span className="w-4" />
                     <span className="min-w-0 flex-1 truncate">
-                      Use <span className="font-mono text-xs">{typed}</span>
+                      <Trans>
+                        Use <span className="font-mono text-xs">{typed}</span>
+                      </Trans>
                     </span>
-                    <span className="shrink-0 text-xs text-ink3">not among the matches; checked on save</span>
+                    <span className="shrink-0 text-xs text-ink3">
+                      <Trans>not among the matches; checked on save</Trans>
+                    </span>
                   </button>
                 )}
                 {hits.map((p) => (
@@ -234,7 +243,7 @@ export function ModelPicker({
                   />
                 ))}
                 {!canUseTyped && !hits.length && (
-                  <div className="px-3 py-6 text-center text-sm text-ink3">{searching || loading ? <PickerSkeleton /> : "No matches"}</div>
+                  <div className="px-3 py-6 text-center text-sm text-ink3">{searching || loading ? <PickerSkeleton /> : t`No matches`}</div>
                 )}
               </div>
             </ScrollArea>
@@ -263,7 +272,7 @@ export function ModelPicker({
                       </button>
                     );
                   })}
-                  {!providers.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No providers"}</div>}
+                  {!providers.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : t`No providers`}</div>}
                 </div>
               </ScrollArea>
               <ScrollArea className="max-h-[min(400px,calc(var(--radix-popover-content-available-height)-60px))]">
@@ -285,11 +294,13 @@ export function ModelPicker({
                       {selected.models.length ? (
                         <ModelList key={selected.provider} kind={kind} first={selected} limit={PAGE} row={(m) => modelRow(m, selected, false)} loadOnScroll />
                       ) : (
-                        <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No models of this kind here"}</div>
+                        <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : t`No models of this kind here`}</div>
                       )}
                     </>
                   ) : (
-                    <div className="px-3 py-6 text-center text-sm text-ink3">Pick a provider</div>
+                    <div className="px-3 py-6 text-center text-sm text-ink3">
+                      <Trans>Pick a provider</Trans>
+                    </div>
                   )}
                 </div>
               </ScrollArea>
@@ -321,6 +332,7 @@ function ModelList({
   row: (m: PickerModel) => ReactNode;
   loadOnScroll?: boolean;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const [more, setMore] = useState(false);
   const rest = useInfiniteQuery(
@@ -360,6 +372,8 @@ function ModelList({
   );
   const shownGroups = new Set(models.map((m) => m.group));
   const emptyGroups = hasMore || q ? [] : groups.filter((g) => !shownGroups.has(g.name));
+  const shownCount = formatNumber(models.length);
+  const totalCount = formatNumber(first.total);
   return (
     <>
       {models.map((m, i) => (
@@ -371,13 +385,10 @@ function ModelList({
       {emptyGroups.map((g) => heading(g.name, g.notice))}
       {models.length < first.total && (
         <div ref={sentinel} className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-ink3">
-          <span>
-            Showing {num.format(models.length)} of {num.format(first.total)}
-            {q ? " matches" : ""}
-          </span>
+          <span>{q ? t`Showing ${shownCount} of ${totalCount} matches` : t`Showing ${shownCount} of ${totalCount}`}</span>
           {hasMore && (
             <button type="button" className="rounded-[6px] px-1.5 py-0.5 hover:bg-sunk disabled:opacity-60" disabled={rest.isFetching} onClick={loadMore}>
-              {rest.isFetching ? "Loading…" : "Show more"}
+              {rest.isFetching ? t`Loading…` : t`Show more`}
             </button>
           )}
         </div>
@@ -400,29 +411,27 @@ function ProviderSummary({
   saving?: boolean | undefined;
   onSave: (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => Promise<unknown>;
 }) {
+  const { t } = useLingui();
   const [edit, setEdit] = useState(false);
   const parts: string[] = [];
+  const last4 = state.keyLast4;
+  const keyVar = state.keyEnv.find((k) => k) ?? ".env";
+  const url = state.baseUrl;
   if (state.keyEnv.length)
-    parts.push(
-      state.keySource === "db"
-        ? `key entered here (…${state.keyLast4})`
-        : state.keySource === "env"
-          ? `key from ${state.keyEnv.find((k) => k) ?? ".env"}`
-          : "no key",
-    );
-  if (state.baseUrl) parts.push(`${state.baseUrl} (${state.baseUrlSource === "db" ? "entered here" : ".env"})`);
-  if (catalog.source === "live") parts.push("live listing");
+    parts.push(state.keySource === "db" ? t`key entered here (…${last4})` : state.keySource === "env" ? t`key from ${keyVar}` : t`no key`);
+  if (url) parts.push(state.baseUrlSource === "db" ? t`${url} (entered here)` : `${url} (.env)`);
+  if (catalog.source === "live") parts.push(t`live listing`);
   return (
     <div className="mb-1 flex flex-col gap-1 border-b border-line px-2 pb-2 pt-1">
       <div className="flex items-center justify-between gap-2 text-[11px] text-ink3">
         <span className="truncate">{parts.join(" · ")}</span>
         <span className="flex shrink-0 gap-1">
           <button type="button" className="rounded-[6px] px-1.5 py-0.5 hover:bg-sunk" onClick={() => setEdit((v) => !v)}>
-            {edit ? "Close" : "Edit"}
+            {edit ? t`Close` : t`Edit`}
           </button>
           {(state.keySource === "db" || state.baseUrlSource === "db") && (
             <button type="button" className="rounded-[6px] px-1.5 py-0.5 hover:bg-sunk" onClick={() => void onClear(state.provider)}>
-              Remove
+              <Trans>Remove</Trans>
             </button>
           )}
         </span>
@@ -450,17 +459,20 @@ function ProviderForm({
   compact?: boolean;
   onDone?: () => void;
 }) {
+  const { t } = useLingui();
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(state.baseUrl ?? "");
   const [hint, setHint] = useState<string | null>(null);
   const wantsKey = state.keyEnv.length > 0 || state.provider !== "openai";
   const wantsUrl = !!state.baseUrlEnv;
+  const firstKeyVar = state.keyEnv[0] ?? "";
+  const last4 = state.keyLast4 ?? "";
   const submit = async () => {
     setHint(null);
     const patch: { apiKey?: string | null; baseUrl?: string | null } = {};
     if (apiKey.trim()) patch.apiKey = apiKey.trim();
     if (wantsUrl && baseUrl.trim() !== (state.baseUrl ?? "")) patch.baseUrl = baseUrl.trim() || null;
-    if (!Object.keys(patch).length) return setHint(wantsUrl && !state.keyEnv.length ? "Enter the server's URL" : "Enter a key");
+    if (!Object.keys(patch).length) return setHint(wantsUrl && !state.keyEnv.length ? t`Enter the server's URL` : t`Enter a key`);
     try {
       await onSave(state.provider, patch);
       setApiKey("");
@@ -482,14 +494,14 @@ function ProviderForm({
           <b>{state.title}</b>
           <span className="block text-[12px] text-ink2">
             {(catalog.error ?? state.unreadable)
-              ? "The stored key cannot be read any more (the server secret changed): enter it again."
-              : (catalog.reason ?? "Enter credentials to list its models.")}
+              ? t`The stored key cannot be read any more (the server secret changed): enter it again.`
+              : (catalog.reason ?? t`Enter credentials to list its models.`)}
           </span>
         </div>
       )}
       {wantsUrl && (
         <label className="flex flex-col gap-1 text-[12px]">
-          <span className="text-ink2">Base URL{state.provider === "openai" ? " (leave empty for api.openai.com)" : ""}</span>
+          <span className="text-ink2">{state.provider === "openai" ? t`Base URL (leave empty for api.openai.com)` : t`Base URL`}</span>
           <input
             className="input font-mono text-xs"
             value={baseUrl}
@@ -502,14 +514,13 @@ function ProviderForm({
       {wantsKey && (
         <label className="flex flex-col gap-1 text-[12px]">
           <span className="text-ink2">
-            API key
             {state.keySource === "env"
-              ? ` (replaces ${state.keyEnv[0]})`
+              ? t`API key (replaces ${firstKeyVar})`
               : state.keyLast4
-                ? ` (replaces …${state.keyLast4})`
+                ? t`API key (replaces …${last4})`
                 : state.keyEnv.length
-                  ? ""
-                  : " (optional)"}
+                  ? t`API key`
+                  : t`API key (optional)`}
           </span>
           <input
             type="password"
@@ -526,7 +537,7 @@ function ProviderForm({
       <div className="flex items-center justify-between gap-2">
         {state.docsUrl ? (
           <a href={state.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-ink3 hover:text-ink">
-            Get a key <ExternalLink className="h-3 w-3" />
+            <Trans>Get a key</Trans> <ExternalLink className="h-3 w-3" />
           </a>
         ) : (
           <span />
@@ -534,16 +545,16 @@ function ProviderForm({
         <span className="flex gap-1">
           {compact && (state.keySource === "db" || state.baseUrlSource === "db") && (
             <button type="button" className="btn-quiet text-xs" disabled={saving} onClick={() => void onClear(state.provider).then(() => onDone?.())}>
-              Remove
+              <Trans>Remove</Trans>
             </button>
           )}
           <button type="submit" className="btn-primary text-xs" disabled={saving}>
-            {saving ? "Trying…" : "Save and connect"}
+            {saving ? t`Trying…` : t`Save and connect`}
           </button>
         </span>
       </div>
       <p className="text-[11px] text-ink3">
-        Stored encrypted on this server; never shown again. Saving lists the provider's models first, so a wrong key is refused.
+        <Trans>Stored encrypted on this server; never shown again. Saving lists the provider's models first, so a wrong key is refused.</Trans>
       </p>
     </form>
   );

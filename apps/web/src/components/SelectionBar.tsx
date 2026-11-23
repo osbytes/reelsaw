@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { X } from "lucide-react";
 import { Spinner } from "./ui";
 
@@ -24,6 +25,7 @@ export function SelectionBar({
   onClear: () => void;
   children: ReactNode;
 }) {
+  const { t } = useLingui();
   return (
     <div
       role="region"
@@ -35,13 +37,19 @@ export function SelectionBar({
         <span aria-hidden className="me-1.5 inline-grid w-3 place-items-center font-mono text-acc-text">
           {busy ? <Spinner /> : "✓"}
         </span>
-        {count}
         {/* a phone has room for the actions or the word, not both */}
-        <span className="max-sm:sr-only"> selected</span>
-        {busy && <span className="sr-only">, working…</span>}
+        <Trans>
+          {count}
+          <span className="max-sm:sr-only"> selected</span>
+        </Trans>
+        {busy && (
+          <span className="sr-only">
+            <Trans>, working…</Trans>
+          </span>
+        )}
       </span>
       {children}
-      <button type="button" className="btn-ghost h-8 w-8 shrink-0 px-0" onClick={onClear} aria-label="Clear selection">
+      <button type="button" className="btn-ghost h-8 w-8 shrink-0 px-0" onClick={onClear} aria-label={t`Clear selection`}>
         <X className="h-4 w-4" />
       </button>
     </div>

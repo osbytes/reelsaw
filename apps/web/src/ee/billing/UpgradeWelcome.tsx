@@ -10,7 +10,9 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { formatMb, plural, projectPath } from "@reelsaw/shared";
+import { formatMb, formatNumber, projectPath } from "@reelsaw/shared";
+import { plural, t } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../../lib/trpc";
@@ -20,12 +22,12 @@ import { Modal, Pending, Skeleton, SkeletonRegion } from "../../components/ui";
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type Plan = RouterOutputs["billing"]["get"]["plans"][number];
 
-const num = new Intl.NumberFormat();
+const num = { format: (n: number) => formatNumber(n) };
 const m = (sec: number) => Math.round(sec / 60);
 
 /** What the new plan gives that the old one did not, one line each, old value → new value. */
 function gains(before: Plan | undefined, after: Plan): Array<{ label: string; from: string | null; to: string }> {
-  const cap = (n: number, fmt: (n: number) => string) => (n > 0 ? fmt(n) : "Unlimited");
+  const cap = (n: number, fmt: (n: number) => string) => (n > 0 ? fmt(n) : t`Unlimited`);
   // 0 = no cap: more than any number
   const more = (a: number, b: number) => (b === 0 ? a !== 0 : a !== 0 && b > a);
   const out: Array<{ label: string; from: string | null; to: string }> = [];
@@ -35,20 +37,22 @@ function gains(before: Plan | undefined, after: Plan): Array<{ label: string; fr
     const b = after.limits[key] ?? 0;
     if (a === undefined || more(a, b)) out.push({ label, from: a === undefined ? null : cap(a, fmt), to: cap(b, fmt) });
   };
-  lim("MAX_SOURCE_MINUTES_PER_MONTH", "Minutes of video a month", (n) => `${num.format(n)} min`);
-  lim("MAX_STORAGE_MB", "Storage", formatMb);
-  lim("MAX_PROJECTS_PER_USER", "Projects kept", (n) => num.format(n));
-  if (!after.watermark && (!before || before.watermark)) out.push({ label: "Watermark", from: before ? "On every clip" : null, to: "None" });
-  if (after.queuePriority > (before?.queuePriority ?? 0)) out.push({ label: "Processing queue", from: before ? "Standard" : null, to: "Ahead of lower plans" });
+  lim("MAX_SOURCE_MINUTES_PER_MONTH", t`Minutes of video a month`, (n) => t`${num.format(n)} min`);
+  lim("MAX_STORAGE_MB", t`Storage`, formatMb);
+  lim("MAX_PROJECTS_PER_USER", t`Projects kept`, (n) => num.format(n));
+  if (!after.watermark && (!before || before.watermark)) out.push({ label: t`Watermark`, from: before ? t`On every clip` : null, to: t`None` });
+  if (after.queuePriority > (before?.queuePriority ?? 0))
+    out.push({ label: t`Processing queue`, from: before ? t`Standard` : null, to: t`Ahead of lower plans` });
   return out;
 }
 
 export function UpgradeWelcome({ before, after, onClose }: { before: Plan | undefined; after: Plan; onClose: () => void }) {
+  const { t } = useLingui();
   const list = gains(before, after);
   return (
-    <Modal open onOpenChange={(o) => !o && onClose()} title={`Welcome to ${after.label}`} width={520}>
+    <Modal open onOpenChange={(o) => !o && onClose()} title={t`Welcome to ${after.label}`} width={520}>
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-        <p className="text-[13px] leading-snug text-ink2">{after.blurb || "Your new plan is active."}</p>
+        <p className="text-[13px] leading-snug text-ink2">{after.blurb || t`Your new plan is active.`}</p>
         {list.length > 0 && (
           <dl className="flex flex-col gap-1.5 rounded-[12px] bg-acc-soft px-4 py-3 text-[13px]">
             {list.map((g) => (
@@ -63,11 +67,11 @@ export function UpgradeWelcome({ before, after, onClose }: { before: Plan | unde
             ))}
           </dl>
         )}
-        <UpgradeWorkPicker placement="welcome" onStarted={onClose} empty="Nothing else to update: new videos get the new plan from the start." />
+        <UpgradeWorkPicker placement="welcome" onStarted={onClose} empty={t`Nothing else to update: new videos get the new plan from the start.`} />
       </div>
       <div className="flex justify-end">
         <button type="button" className="btn-ghost py-1.5 text-xs" onClick={onClose}>
-          Done
+          <Trans>Done</Trans>
         </button>
       </div>
     </Modal>
@@ -81,6 +85,7 @@ type Work = RouterOutputs["projects"]["upgradeWork"];
  * partly clipped. Shows the minutes the ticked videos need against what the plan covers now.
  */
 export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: "welcome" | "billing"; onStarted?: () => void; empty?: string }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const q = useQuery(trpc.projects.upgradeWork.queryOptions());
@@ -92,8 +97,10 @@ export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: 
         track("upgrade_work_started", { placement, rerenderedClips: r.rerenderedClips, extendedProjects: r.extendedProjects, failed: r.failed });
         const firstError = r.results.find((x) => !x.ok);
         if (r.sentence) toast(`${r.sentence[0]!.toUpperCase()}${r.sentence.slice(1)}`);
-        if (firstError && "error" in firstError)
-          toast.error(r.failed > 1 ? `${plural(r.failed, "project")} did not start: ${firstError.error}` : firstError.error);
+        if (firstError && "error" in firstError) {
+          const why = firstError.error;
+          toast.error(r.failed > 1 ? plural(r.failed, { one: `# project did not start: ${why}`, other: `# projects did not start: ${why}` }) : why);
+        }
         setRerender(new Set());
         setFinish(new Set());
         void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
@@ -134,35 +141,51 @@ export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: 
           <Link to={projectPath(w.upgradeProject.id)} className="font-semibold text-ink no-underline hover:underline">
             {w.upgradeProject.title}
           </Link>{" "}
-          <span className="text-ink2">is being finished and rendered without the watermark now.</span>
+          <span className="text-ink2">
+            <Trans>is being finished and rendered without the watermark now.</Trans>
+          </span>
         </p>
       )}
       {!nothing && (
         <div className="flex flex-col gap-1">
-          <h3 className="text-[13px] font-semibold">Your other projects</h3>
-          <p className="text-xs text-ink3">Pick what to update. Re-renders do not use minutes; clipping more of a video does.</p>
+          <h3 className="text-[13px] font-semibold">
+            <Trans>Your other projects</Trans>
+          </h3>
+          <p className="text-xs text-ink3">
+            <Trans>Pick what to update. Re-renders do not use minutes; clipping more of a video does.</Trans>
+          </p>
         </div>
       )}
       {w.rerender.projects.length > 0 && (
         <fieldset className="flex flex-col">
-          <legend className="pb-1 text-xs font-semibold text-ink2">Render again without the watermark</legend>
+          <legend className="pb-1 text-xs font-semibold text-ink2">
+            <Trans>Render again without the watermark</Trans>
+          </legend>
           {w.rerender.projects.map((p) => (
             <label key={p.id} className={row}>
               <input type="checkbox" className="accent-[var(--acc)]" checked={rerender.has(p.id)} onChange={() => toggle(rerender, setRerender, p.id)} />
               <span className="min-w-0 flex-1 truncate text-[13px]">{p.title}</span>
-              <span className="shrink-0 text-xs tabular-nums text-ink3">{plural(p.clips, "clip")}</span>
+              <span className="shrink-0 text-xs tabular-nums text-ink3">
+                <Plural value={p.clips} one="# clip" other="# clips" />
+              </span>
             </label>
           ))}
           {w.rerender.total > w.rerender.projects.length && (
             <p className="px-2 pt-1 text-xs text-ink3">
-              and {plural(w.rerender.total - w.rerender.projects.length, "older project")}; re-render them from their own page.
+              <Plural
+                value={w.rerender.total - w.rerender.projects.length}
+                one="and # older project; re-render them from their own page."
+                other="and # older projects; re-render them from their own page."
+              />
             </p>
           )}
         </fieldset>
       )}
       {w.finish.projects.length > 0 && (
         <fieldset className="flex flex-col">
-          <legend className="pb-1 text-xs font-semibold text-ink2">Clip the rest of the video</legend>
+          <legend className="pb-1 text-xs font-semibold text-ink2">
+            <Trans>Clip the rest of the video</Trans>
+          </legend>
           {w.finish.projects.map((p) => (
             <label key={p.id} className={`${row} ${p.busy ? "cursor-default opacity-60" : ""}`}>
               <input
@@ -173,12 +196,16 @@ export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: 
                 onChange={() => toggle(finish, setFinish, p.id)}
               />
               <span className="min-w-0 flex-1 truncate text-[13px]">{p.title}</span>
-              <span className="shrink-0 text-xs tabular-nums text-ink3">{p.busy ? "working" : `${m(p.remainingSec)} of ${m(p.durationSec)} min left`}</span>
+              <span className="shrink-0 text-xs tabular-nums text-ink3">{p.busy ? t`working` : t`${m(p.remainingSec)} of ${m(p.durationSec)} min left`}</span>
             </label>
           ))}
           {w.finish.total > w.finish.projects.length && (
             <p className="px-2 pt-1 text-xs text-ink3">
-              and {plural(w.finish.total - w.finish.projects.length, "older video")}; clip the rest from their own page.
+              <Plural
+                value={w.finish.total - w.finish.projects.length}
+                one="and # older video; clip the rest from their own page."
+                other="and # older videos; clip the rest from their own page."
+              />
             </p>
           )}
         </fieldset>
@@ -189,10 +216,10 @@ export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: 
             {finish.size === 0
               ? ""
               : w.minutesRoomSec === null
-                ? `${m(needSec)} min of video`
+                ? t`${m(needSec)} min of video`
                 : over
-                  ? `${m(needSec)} min picked, ${m(w.minutesRoomSec)} min left: the first ones get as much as fits`
-                  : `${m(needSec)} of ${m(w.minutesRoomSec)} min left`}
+                  ? t`${m(needSec)} min picked, ${m(w.minutesRoomSec)} min left: the first ones get as much as fits`
+                  : t`${m(needSec)} of ${m(w.minutesRoomSec)} min left`}
           </span>
           <button
             type="button"
@@ -201,7 +228,7 @@ export function UpgradeWorkPicker({ placement, onStarted, empty }: { placement: 
             aria-busy={start.isPending}
             onClick={() => start.mutate({ rerender: rerender.size ? [...rerender] : undefined, finish: finish.size ? [...finish] : undefined })}
           >
-            <Pending busy={start.isPending}>{picked ? `Update ${plural(picked, "project")}` : "Pick projects"}</Pending>
+            <Pending busy={start.isPending}>{picked ? plural(picked, { one: "Update # project", other: "Update # projects" }) : t`Pick projects`}</Pending>
           </button>
         </div>
       )}

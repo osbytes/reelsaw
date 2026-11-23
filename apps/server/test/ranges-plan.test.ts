@@ -11,12 +11,12 @@ import {
   parseClock,
   parseRangeArg,
   planRanges,
-  rangeProblemMessage,
   replayPeaks,
   spansSec,
   subtractSpans,
   type RangePlan,
 } from "@reelsaw/shared";
+import { rangeProblemsText } from "../src/projects/ranges.js";
 
 const D = 11524; // a 3:12:04 stream
 const opts = { durationSec: D, maxClipSec: 180, padSec: 15, fetchGapSec: 60 };
@@ -193,7 +193,7 @@ describe("planRanges", () => {
       p.problems.map((x) => x.kind),
       ["end_before_start", "past_end", "too_short"],
     );
-    assert.deepEqual(p.problems.slice(1).map(rangeProblemMessage), ["Range 2 starts after the video ends (3:12:04).", "Range 3 is shorter than 10 seconds."]);
+    assert.deepEqual(rangeProblemsText(p.problems.slice(1)), ["Range 2 starts after the video ends (3:12:04).", "Range 3 is shorter than 10 seconds."]);
   });
 
   it("refuses none and too many", () => {

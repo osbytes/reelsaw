@@ -28,6 +28,8 @@ import type { Telemetry } from "./telemetry.js";
 import type { RunInTx } from "./uow.js";
 import { FIRST_ADMIN_LOCK } from "./locks.js";
 import { EMAIL_VERIFY_EXPIRES_IN_SEC, rememberEmailVerifyToken, withLoginCallback } from "./email-verify.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "./i18n.js";
 
 /** The MCP endpoint as OAuth clients see it (token audience). */
 export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_URL).toString();
@@ -168,7 +170,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
           // inserted as a plain user and promoted in `after` by one conditional update under a lock.
           before: async (user, ctx) => {
             // checked here, at request time, so closing sign-ups applies to the next request without a restart
-            if (mode() === "closed") throw new APIError("UNPROCESSABLE_ENTITY", { message: "Sign-ups are closed on this Reelsaw." });
+            if (mode() === "closed")
+              throw new APIError("UNPROCESSABLE_ENTITY", { message: t(msg({ id: "auth.signups_closed", message: "Sign-ups are closed on this Reelsaw." })) });
             // abuse guards (abuse.ts): accounts per address per day, temporary domains, one account per mailbox.
             // 422, not 403: with email verification on, Better Auth rewrites a 403 from this hook into a fake
             // success (no session, and the submitted password is not saved). The form looks like the sign-up
@@ -353,7 +356,15 @@ export function bearerToken(headers: Headers): string | null {
 }
 
 export function blockedReason(u: Pick<AuthUser, "approvedAt" | "banned" | "banReason">): Requester["blocked"] {
-  if (u.banned) return { kind: "banned", reason: u.banReason ? `This account is suspended: ${u.banReason}` : "This account is suspended." };
+  if (u.banned)
+    return {
+      kind: "banned",
+      reason: t(
+        u.banReason
+          ? msg({ id: "auth.suspended_reason", message: msg`This account is suspended: ${{ reason: u.banReason }}` })
+          : msg({ id: "auth.suspended", message: "This account is suspended." }),
+      ),
+    };
   if (!u.approvedAt) return { kind: "pending", reason: PENDING_APPROVAL_MESSAGE };
   return null;
 }
@@ -398,7 +409,11 @@ export async function requester(auth: Auth, db: Db, headers: Headers): Promise<R
   return { user, via, canAdminister: via === "session" || keyAdmin, session, blocked: blockedReason(user) };
 }
 
-export const ADMIN_REFUSED_MESSAGE = "This key cannot change instance settings. Create a key with instance administration enabled in Settings → API keys.";
+/** An API key without instance administration asked for an admin tool: `new AppError("FORBIDDEN", ADMIN_REFUSED)`. */
+export const ADMIN_REFUSED = msg({
+  id: "auth.admin_refused",
+  message: "This key cannot change instance settings. Create a key with instance administration enabled in Settings → API keys.",
+});
 
 /**
  * Keys carry `permissions` (Better Auth's apiKey plugin): `{ admin: ["write"] }` allows the admin tools, anything

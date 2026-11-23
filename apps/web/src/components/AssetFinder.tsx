@@ -12,7 +12,9 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useLocation, useNavigate } from "react-router";
-import { DELETED_PATH, plural } from "@reelsaw/shared";
+import { DELETED_PATH, formatNumber } from "@reelsaw/shared";
+import { plural, t } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
@@ -142,6 +144,7 @@ export function AssetFinder({
   className = "",
   pickLabel,
 }: AssetFinderProps) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -196,7 +199,7 @@ export function AssetFinder({
   const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw" && providerServes(p));
   const kindOk = (k: string) => !allowed || (allowed as readonly string[]).includes(k);
   const providerLabel = (id: string) =>
-    id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1));
+    id === "reelsaw" ? t`Catalog` : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1));
 
   // #asset=<id> scrolls its tile into view once the list is there
   useEffect(() => {
@@ -214,7 +217,7 @@ export function AssetFinder({
     try {
       await fn();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong.");
+      toast.error(err instanceof Error ? err.message : t`Something went wrong.`);
     } finally {
       setPending((s) => (s.delete(key), new Set(s)));
     }
@@ -257,11 +260,11 @@ export function AssetFinder({
 
   const usageText = (r: LibraryAsset) =>
     r.usedByClips > 0
-      ? `${plural(r.usedByClips, "clip")}`
+      ? plural(r.usedByClips, { one: "# clip", other: "# clips" })
       : r.usedBy > 0
-        ? `${plural(r.usedBy, "project")}`
+        ? plural(r.usedBy, { one: "# project", other: "# projects" })
         : r.usedByTemplates > 0
-          ? `${plural(r.usedByTemplates, "template")}`
+          ? plural(r.usedByTemplates, { one: "# template", other: "# templates" })
           : undefined;
   const libTile = (r: LibraryAsset): TileModel => ({
     key: `lib:${r.id}`,
@@ -271,7 +274,7 @@ export function AssetFinder({
     durationSec: r.durationSec,
     width: r.width,
     height: r.height,
-    source: "Yours",
+    source: t`Yours`,
     license: r.provenance?.license?.name,
     hasAudio: r.hasAudio,
     thumbUrl: r.kind === "audio" ? undefined : r.mime === "image/gif" || r.mime === "image/webp" ? `/media/assets/${r.id}` : r.thumbnailUrl,
@@ -315,8 +318,17 @@ export function AssetFinder({
     />
   );
   const remoteNode = (i: RemoteItem) => {
-    const t = remoteTile(i);
-    return <AssetTile key={t.key} tile={t} mode={mode} pending={pending.has(t.key)} onPick={() => pick(t.key, () => importItem(i))} pickLabel={pickLabel} />;
+    const tile = remoteTile(i);
+    return (
+      <AssetTile
+        key={tile.key}
+        tile={tile}
+        mode={mode}
+        pending={pending.has(tile.key)}
+        onPick={() => pick(tile.key, () => importItem(i))}
+        pickLabel={pickLabel}
+      />
+    );
   };
 
   // gate on the debounced query: mounting SourceTiles on the first keystroke would fire with dq still ""
@@ -343,18 +355,18 @@ export function AssetFinder({
             className="flex-1 basis-full sm:basis-auto"
             value={q}
             onChange={(v) => setFilters({ q: v })}
-            placeholder="Search uploads, the catalog and providers…"
-            label="Search uploads, the catalog and providers"
+            placeholder={t`Search uploads, the catalog and providers…`}
+            label={t`Search uploads, the catalog and providers`}
           />
           {mode === "library" && onUpload && (
             <button
               type="button"
               className="btn-ghost h-[38px] shrink-0 max-sm:w-full max-sm:justify-center"
-              title="Videos: MP4, MOV or WebM up to 10 s and 50 MB. Images: PNG, JPG, WebP, GIF or SVG up to 20 MB. Audio: MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB. You can also drop files anywhere on the page."
+              title={t`Videos: MP4, MOV or WebM up to 10 s and 50 MB. Images: PNG, JPG, WebP, GIF or SVG up to 20 MB. Audio: MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB. You can also drop files anywhere on the page.`}
               onClick={onUpload}
             >
               {actions.uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              Upload
+              <Trans>Upload</Trans>
             </button>
           )}
         </div>
@@ -362,9 +374,9 @@ export function AssetFinder({
         {(kindChips.length > 0 || mode === "library") && (
           <div className="flex min-h-7 flex-wrap items-center gap-1.5">
             {kindChips.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t`Filter by kind`}>
                 <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
-                  All
+                  <Trans>All</Trans>
                 </Chip>
                 {kindChips.map((k) => (
                   <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
@@ -378,9 +390,9 @@ export function AssetFinder({
                 {list.isPending ? (
                   <Skeleton className="h-3 w-24" />
                 ) : q.trim() || kind ? (
-                  `${plural(rows.length, "match", "matches")} in your files`
+                  plural(rows.length, { one: "# match in your files", other: "# matches in your files" })
                 ) : (
-                  plural(list.data?.total ?? all.length, "file")
+                  plural(list.data?.total ?? all.length, { one: "# file", other: "# files" })
                 )}
               </span>
             )}
@@ -390,7 +402,7 @@ export function AssetFinder({
       </div>
 
       <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pe-1" : ""}`}>
-        <ul className={gridClass(mode)} aria-label="Library, catalog and provider results">
+        <ul className={gridClass(mode)} aria-label={t`Library, catalog and provider results`}>
           {list.isPending && Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />)}
           {rows.map(libraryTile)}
           <SourceTiles key="catalog" sid="catalog" q={dq} kind={searchKind} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
@@ -411,7 +423,7 @@ export function AssetFinder({
         </ul>
         {nothing && (
           <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">
-            {q.trim() ? `No items match “${q.trim()}”` : kind ? "No items of this kind" : "Nothing here yet. Upload a file."}
+            {q.trim() ? t`No items match “${q.trim()}”` : kind ? t`No items of this kind` : t`Nothing here yet. Upload a file.`}
           </p>
         )}
         {nextId && (
@@ -421,18 +433,29 @@ export function AssetFinder({
         )}
         {mode === "library" && !list.isPending && all.length > 0 && (
           <p className="text-xs tabular-nums text-ink3">
-            Showing {rows.length.toLocaleString()} of {(list.data?.total ?? all.length).toLocaleString()} of your files
-            {list.data?.nextCursor ? " (the newest 500 are loaded; search narrows them)" : ""}. Catalog and provider results load more on request
+            {list.data?.nextCursor ? (
+              <Trans>
+                Showing {formatNumber(rows.length)} of {formatNumber(list.data?.total ?? all.length)} of your files (the newest 500 are loaded; search narrows
+                them). Catalog and provider results load more on request
+              </Trans>
+            ) : (
+              <Trans>
+                Showing {formatNumber(rows.length)} of {formatNumber(list.data?.total ?? all.length)} of your files. Catalog and provider results load more on
+                request
+              </Trans>
+            )}
           </p>
         )}
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
         {mode === "library" && (list.data?.deleted.length ?? 0) > 0 && (
           <p className="text-xs text-ink3">
-            {plural(list.data!.deleted.length, "deleted item")} restorable from{" "}
-            <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
-              Deleted
-            </Link>
-            {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
+            <Trans>
+              <Plural value={list.data!.deleted.length} one="# deleted item" other="# deleted items" /> restorable from{" "}
+              <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
+                Deleted
+              </Link>
+              {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
+            </Trans>
           </p>
         )}
       </div>
@@ -541,7 +564,7 @@ export function AssetFinderDialog({
   kinds,
   kind,
   onPick,
-  title = "Add to clip",
+  title,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -551,7 +574,7 @@ export function AssetFinderDialog({
   title?: string;
 }) {
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title={title} width={960}>
+    <Modal open={open} onOpenChange={onOpenChange} title={title ?? t`Add to clip`} width={960}>
       {open && (
         <AssetFinder
           mode="picker"
