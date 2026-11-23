@@ -19,8 +19,13 @@ const CONTENT = /video unavailable|confirm your age|age-restricted|file is large
 const PAGE_MISSING = /Unable to download (?:webpage|JSON metadata|API page)\b[^\n]*HTTP Error (?:404|410)\b/i;
 /** YouTube's bot check, in every wording it has used; one pattern for the pool, the block check and the user's message */
 export const BOT_CHECK = /sign in to confirm|not a bot/i;
+/**
+ * ffmpeg's words for the media host turning it away (it fetches `--download-sections` itself, and yt-dlp only says
+ * "ffmpeg exited with code 1"): the exit was refused, like yt-dlp's own HTTP Error 403.
+ */
+export const FFMPEG_REFUSED = /Server returned 403 Forbidden/i;
 const PROXY = new RegExp(
-  `${BOT_CHECK.source}|${/HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/.source}`,
+  `${BOT_CHECK.source}|${FFMPEG_REFUSED.source}|${/HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/.source}`,
   "i",
 );
 

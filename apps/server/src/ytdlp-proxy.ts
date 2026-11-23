@@ -42,6 +42,7 @@ import {
   type CircuitBreakerPolicy,
 } from "cockatiel";
 import type { Logger } from "./log.js";
+import { openProxyBridge } from "./proxy-bridge.js";
 import { count, gauge, histogram } from "./metrics.js";
 import { classifyYtdlpError } from "./ytdlp-errors.js";
 
@@ -87,6 +88,13 @@ export interface ProxySnapshot {
   successRate: number | null;
 }
 
+/** One attempt's candidate: `url` has `{session}` filled (null = direct), `args` is `--proxy <url>` or nothing. */
+interface ProxyChoice {
+  id: string;
+  url: string | null;
+  args: string[];
+}
+
 export interface YtdlpProxyPool {
   readonly size: number;
   snapshot(): { next: string | null; candidates: ProxySnapshot[] };
@@ -95,17 +103,37 @@ export interface YtdlpProxyPool {
    * Proxy faults cool that candidate and continue; content errors and abort stop the walk.
    */
   run<T>(
-    fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
+    fn: (choice: ProxyChoice, signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
     opts?: { accept?: (c: ProxyCandidate) => boolean },
   ): Promise<{ value: T; id: string }>;
 }
 
 /**
- * Whether yt-dlp can hand this candidate to ffmpeg, which fetches `--download-sections` itself and speaks only
- * HTTP proxies (`-http_proxy`): a SOCKS exit would be ignored and the download would leave from this server's IP.
+ * Whether a `--download-sections` download can go through this candidate. yt-dlp hands sections to ffmpeg, which
+ * honours only `http://` proxies: with any other scheme it connects straight to the media host from this server's
+ * IP, while the media URL yt-dlp resolved is signed for the proxy's exit, so the site refuses it. `https://` works
+ * through a localhost bridge (`withFfmpegProxy`); SOCKS cannot.
  */
-export const ffmpegCanUse = (c: ProxyCandidate) => c.url === null || /^https?:/i.test(c.url);
+export const ffmpegCanUse = (c: Pick<ProxyCandidate, "url">) => c.url === null || /^https?:/i.test(c.url);
+
+/**
+ * Run `fn` with the `--proxy` value ffmpeg will really use for `url` (a candidate URL, `{session}` already filled):
+ * `http://` and direct as they are, `https://` through a localhost bridge that is closed afterwards. The one place a
+ * section download picks its proxy, so ffmpeg and yt-dlp always leave through the same exit.
+ */
+export async function withFfmpegProxy<T>(url: string | null, fn: (proxy: string | null) => Promise<T>): Promise<T> {
+  if (!ffmpegCanUse({ url })) throw new NoEligibleProxyError(NO_SECTION_PROXY);
+  if (url === null || /^http:/i.test(url)) return fn(url);
+  const bridge = await openProxyBridge(url);
+  try {
+    return await fn(bridge.url);
+  } finally {
+    await bridge.close();
+  }
+}
+
+const NO_SECTION_PROXY = "YTDLP_PROXY: no candidate can serve this download (section downloads need an HTTP(S) proxy or direct)";
 
 /** No candidate in the pool may serve this download (`accept` refused them all): a configuration answer, not a fault. */
 export class NoEligibleProxyError extends Error {}
@@ -204,9 +232,9 @@ export function applyProxySession(url: string, session = newProxySession()): str
   return url.includes(PROXY_SESSION_TOKEN) ? url.replaceAll(PROXY_SESSION_TOKEN, session) : url;
 }
 
-function proxyArgs(url: string | null): string[] {
-  if (!url) return [];
-  return ["--proxy", applyProxySession(url)];
+function choiceOf(c: ProxyCandidate): ProxyChoice {
+  const url = c.url === null ? null : applyProxySession(c.url);
+  return { id: c.id, url, args: url === null ? [] : ["--proxy", url] };
 }
 
 function errorText(err: unknown): string {
@@ -335,8 +363,7 @@ export function createYtdlpProxyPool(
       let outcome = "ok";
       try {
         const skip = opts?.accept ? slots.filter((s) => !opts.accept!(s.candidate)).map((s) => s.candidate.id) : [];
-        if (skip.length === slots.length)
-          throw new NoEligibleProxyError("YTDLP_PROXY: no candidate can serve this download (section downloads need an HTTP proxy or direct)");
+        if (skip.length === slots.length) throw new NoEligibleProxyError(NO_SECTION_PROXY);
         const out = await walk(fn, signal, state, skip);
         proxy = out.id;
         return out;
@@ -356,7 +383,7 @@ export function createYtdlpProxyPool(
   };
 
   async function walk<T>(
-    fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
+    fn: (choice: ProxyChoice, signal: AbortSignal) => Promise<T>,
     signal: AbortSignal | undefined,
     state: { fallback: boolean },
     skip: string[] = [],
@@ -380,12 +407,11 @@ export function createYtdlpProxyPool(
       for (const slot of walk) {
         signal?.throwIfAborted();
         const id = slot.candidate.id;
-        const args = proxyArgs(slot.candidate.url);
         try {
           const value = await attempt(id, false, () =>
             slot.breaker.execute(async (ctx) => {
-              if (slot.bulkhead) return slot.bulkhead.execute(() => fn({ id, args }, ctx.signal), ctx.signal);
-              return fn({ id, args }, ctx.signal);
+              if (slot.bulkhead) return slot.bulkhead.execute(() => fn(choiceOf(slot.candidate), ctx.signal), ctx.signal);
+              return fn(choiceOf(slot.candidate), ctx.signal);
             }, signal),
           );
           if (usedFallback) log?.warn({ proxyId: id, skipped: [...exclude] }, "yt-dlp proxy fallback");
@@ -419,10 +445,9 @@ export function createYtdlpProxyPool(
       const panic = [...slots].filter((s) => !exclude.has(s.candidate.id)).sort(rank)[0];
       if (panic && lastErr === undefined) {
         const id = panic.candidate.id;
-        const args = proxyArgs(panic.candidate.url);
         log?.warn({ proxyId: id }, "yt-dlp proxy all cooling, trying anyway");
         try {
-          const value = await attempt(id, true, () => fn({ id, args }, signal ?? NEVER_ABORT));
+          const value = await attempt(id, true, () => fn(choiceOf(panic.candidate), signal ?? NEVER_ABORT));
           return { value, id };
         } catch (err) {
           lastErr = err;
