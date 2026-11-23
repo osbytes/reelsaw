@@ -560,7 +560,7 @@ export function createMcpServer(
   server.registerTool("retry_project", TOOLS.retry_project, ({ id }) => run(() => api.projects.retry({ id })));
 
   server.registerTool("reanalyze_project", TOOLS.reanalyze_project, ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })));
-  server.registerTool("extend_project", TOOLS.extend_project, ({ id }) => run(() => api.projects.extend({ id })));
+  server.registerTool("extend_project", TOOLS.extend_project, ({ id, ranges }) => run(() => api.projects.extend({ id, ranges })));
   server.registerTool("list_upgrade_work", TOOLS.list_upgrade_work, () => run(() => api.projects.upgradeWork()));
   server.registerTool("start_upgrade_work", TOOLS.start_upgrade_work, ({ rerender, finish }) => run(() => api.projects.startUpgradeWork({ rerender, finish })));
 

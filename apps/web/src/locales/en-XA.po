@@ -12,12 +12,25 @@ msgstr ""
 msgid "{0, plural, one {Clip # range} other {Clip # ranges}}"
 msgstr ""
 
+#. placeholder {0}: formatTime(billed)
+#: src/components/ProjectRanges.tsx
+msgid "{0} of new video counted. Clips, fixes and settings already here stay."
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "{n, plural, one {Clip # range} other {Clip # ranges}}"
+msgstr ""
+
 #: src/pages/NewProject.tsx
 msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
 msgstr ""
 
 #: src/components/RangeTimeline.tsx
 msgid "A range needs at least {min} seconds."
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "Add a range"
 msgstr ""
 
 #: src/pages/NewProject.tsx
@@ -30,6 +43,10 @@ msgstr ""
 
 #: src/components/RangeTimeline.tsx
 msgid "Add range"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "Add ranges once this run is done"
 msgstr ""
 
 #: src/pages/Login.tsx
@@ -60,12 +77,20 @@ msgstr ""
 msgid "By creating an account you accept the <0>terms</0>."
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
+msgid "Cancel"
+msgstr ""
+
 #: src/components/ListToolbar.tsx
 msgid "Clear all"
 msgstr ""
 
 #: src/components/ListToolbar.tsx
 msgid "Clear search"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "Click the hatched time to add a range."
 msgstr ""
 
 #. placeholder {0}: formatTime(coverSec)
@@ -113,6 +138,7 @@ msgstr ""
 msgid "Enter the email you signed up with."
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
 #: src/components/RangeTimeline.tsx
 msgid "Exact clip"
 msgstr ""
@@ -125,6 +151,7 @@ msgstr ""
 msgid "Filter, {on} on"
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
 #: src/components/RangeTimeline.tsx
 msgid "Find clips"
 msgstr ""
@@ -205,6 +232,7 @@ msgstr ""
 msgid "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
 #: src/pages/NewProject.tsx
 msgid "Ranges"
 msgstr ""

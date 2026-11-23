@@ -12,6 +12,15 @@ msgstr ""
 msgid "{0, plural, one {Clip # range} other {Clip # ranges}}"
 msgstr "{0, plural, one {Clip # range} other {Clip # ranges}}"
 
+#. placeholder {0}: formatTime(billed)
+#: src/components/ProjectRanges.tsx
+msgid "{0} of new video counted. Clips, fixes and settings already here stay."
+msgstr "{0} of new video counted. Clips, fixes and settings already here stay."
+
+#: src/components/ProjectRanges.tsx
+msgid "{n, plural, one {Clip # range} other {Clip # ranges}}"
+msgstr "{n, plural, one {Clip # range} other {Clip # ranges}}"
+
 #: src/pages/NewProject.tsx
 msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
 msgstr "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
@@ -19,6 +28,10 @@ msgstr "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% 
 #: src/components/RangeTimeline.tsx
 msgid "A range needs at least {min} seconds."
 msgstr "A range needs at least {min} seconds."
+
+#: src/components/ProjectRanges.tsx
+msgid "Add a range"
+msgstr "Add a range"
 
 #: src/pages/NewProject.tsx
 msgid "Add a range on the timeline first"
@@ -31,6 +44,10 @@ msgstr "Add a range to see what it counts against your plan."
 #: src/components/RangeTimeline.tsx
 msgid "Add range"
 msgstr "Add range"
+
+#: src/components/ProjectRanges.tsx
+msgid "Add ranges once this run is done"
+msgstr "Add ranges once this run is done"
 
 #: src/pages/Login.tsx
 msgid "After you sign in, you pick up where you left off: the {plan} plan."
@@ -60,6 +77,10 @@ msgstr "By creating an account you accept the <0>terms</0> and <1>privacy policy
 msgid "By creating an account you accept the <0>terms</0>."
 msgstr "By creating an account you accept the <0>terms</0>."
 
+#: src/components/ProjectRanges.tsx
+msgid "Cancel"
+msgstr "Cancel"
+
 #: src/components/ListToolbar.tsx
 msgid "Clear all"
 msgstr "Clear all"
@@ -67,6 +88,10 @@ msgstr "Clear all"
 #: src/components/ListToolbar.tsx
 msgid "Clear search"
 msgstr "Clear search"
+
+#: src/components/ProjectRanges.tsx
+msgid "Click the hatched time to add a range."
+msgstr "Click the hatched time to add a range."
 
 #. placeholder {0}: formatTime(coverSec)
 #: src/components/RangeTimeline.tsx
@@ -113,6 +138,7 @@ msgstr "End of the new range"
 msgid "Enter the email you signed up with."
 msgstr "Enter the email you signed up with."
 
+#: src/components/ProjectRanges.tsx
 #: src/components/RangeTimeline.tsx
 msgid "Exact clip"
 msgstr "Exact clip"
@@ -125,6 +151,7 @@ msgstr "Filter"
 msgid "Filter, {on} on"
 msgstr "Filter, {on} on"
 
+#: src/components/ProjectRanges.tsx
 #: src/components/RangeTimeline.tsx
 msgid "Find clips"
 msgstr "Find clips"
@@ -205,6 +232,7 @@ msgstr "Range {n} mode"
 msgid "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
 msgstr "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
 
+#: src/components/ProjectRanges.tsx
 #: src/pages/NewProject.tsx
 msgid "Ranges"
 msgstr "Ranges"

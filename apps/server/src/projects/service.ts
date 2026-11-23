@@ -10,7 +10,7 @@
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   REFINE_STEPS,
@@ -34,6 +34,7 @@ import {
   processedEndSec,
   spansCover,
   type RangeChange,
+  type SourceRangeInput,
   MAX_RANGES,
   planRanges,
   rangeProblemMessage,
@@ -1255,6 +1256,8 @@ export interface ExtendResult {
   durationSec: number;
   /** the rest of the video is covered: nothing will be left after this run */
   whole: boolean;
+  /** ranges added (extendProject with ranges): what they count and what the planner changed */
+  ranges?: CreatedRanges;
 }
 
 /**
@@ -1267,7 +1270,13 @@ export interface ExtendResult {
  * transcription with the new limit. tRPC `projects.extend`, MCP `extend_project`, `reelsaw extend-project` and the
  * handler that follows an upgrade for the project it started from (after-upgrade.ts `finishPartialWork`) call this.
  */
-export async function extendProject(svc: Services, actor: Actor, projectId: string, o: { automatic?: boolean } = {}): Promise<ExtendResult> {
+export async function extendProject(
+  svc: Services,
+  actor: Actor,
+  projectId: string,
+  o: { automatic?: boolean; ranges?: SourceRangeInput[] | undefined; rangeOrigin?: "user" | "api" } = {},
+): Promise<ExtendResult> {
+  if (o.ranges?.length) return addRanges(svc, actor, projectId, o.ranges, o.rangeOrigin ?? "api");
   const chunkSec = svc.config.TRANSCRIBE_CHUNK_SECONDS;
   const result = await svc.tx(async (u) => {
     const owner = await findProject(u.db, actor, projectId, { deleted: false });
@@ -1282,8 +1291,17 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
       .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
       .for("no key update");
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
-    if (p.sourceLimitSec === null || p.durationSec === null)
-      throw new TRPCError({ code: "BAD_REQUEST", message: "This project already covers the whole video." });
+    if (p.sourceLimitSec === null || p.durationSec === null) {
+      const [chosen] = await u.db
+        .select({ id: schema.projectRanges.id })
+        .from(schema.projectRanges)
+        .where(and(eq(schema.projectRanges.projectId, p.id), ne(schema.projectRanges.origin, "whole")))
+        .limit(1);
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: chosen ? "This project clips ranges of its video: give the ranges to clip next." : "This project already covers the whole video.",
+      });
+    }
     const fromSec = Math.min(p.durationSec, p.sourceLimitSec);
     const room = await minutesRoomSec(u.db, svc.settings.get(), p.userId, { extension: true, ent: svc.entitlements });
     const plan = partialUntil(p.durationSec, fromSec, room.sec, chunkSec);
@@ -1326,6 +1344,84 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
     automatic: !!o.automatic,
     addedMinutes: Math.round((result.untilSec - result.fromSec) / 60),
     whole: result.whole,
+  });
+  const { userId: _u, ...out } = result;
+  return out;
+}
+
+/**
+ * Clip more of a project by ranges (docs/specs/range-clipping.md): only time no range of the project covers yet is
+ * fetched, transcribed and counted; the ranges are admitted whole or refused with the upgrade offer, never cut short.
+ * Picks up where the project stands: its clips, fixes and decisions stay, and new clips are picked only in the new
+ * ranges (around every clip there). The project may be idle or rendering; one still in its first run is restarted from
+ * transcription with the new ranges. tRPC `projects.extend`, MCP `extend_project` and `reelsaw extend-project --range`.
+ */
+async function addRanges(svc: Services, actor: Actor, projectId: string, input: SourceRangeInput[], origin: "user" | "api"): Promise<ExtendResult> {
+  const result = await svc.tx(async (u) => {
+    const owner = await findProject(u.db, actor, projectId, { deleted: false });
+    // advisory locks first (the account's minutes, then this project's retries), then transcript → clips → project
+    await takeTxLock(u.db, txLock.quota(owner.userId));
+    await takeTxLock(u.db, txLock.retry(owner.id));
+    await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, owner.id)).for("update");
+    await lockProjectClips(u, owner.id);
+    const [p] = await u.db
+      .select()
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
+      .for("no key update");
+    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+    if (p.durationSec === null)
+      throw new TRPCError({ code: "CONFLICT", message: "Reelsaw does not know this video's length yet. Add ranges once it is downloaded." });
+    const existing = await u.db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, p.id)).for("update");
+    const plan = planRanges(input, {
+      durationSec: p.durationSec,
+      maxClipSec: p.settings.maxClipSeconds,
+      processed: existing.map((r): [number, number] => [r.startSec, r.endSec]),
+    });
+    if (!plan.ok) throw new TRPCError({ code: "BAD_REQUEST", message: plan.problems.map(rangeProblemMessage).join(" ") });
+    if (plan.billedSec <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Those ranges were clipped already." });
+    // counted against every project's minutes, this one's too: only the new time is billed
+    await admitRanges(u.db, svc.settings.get(), p.userId, null, plan.billedSec, svc.entitlements);
+    await recordSourceExtension(u.db, p.userId, p.id, plan.billedSec);
+    await u.db.insert(schema.projectRanges).values(
+      plan.ranges
+        .filter((r) => r.billedSec > 0)
+        .map((r) => ({
+          id: randomUUID(),
+          projectId: p.id,
+          startSec: r.startSec,
+          endSec: r.endSec,
+          mode: r.mode,
+          origin,
+          label: r.label ?? null,
+          ref: r.ref ?? null,
+          billedSec: r.billedSec,
+        })),
+    );
+    for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await supersedeStages(u, p.id); // a stage still running for the old ranges commits nothing
+    await startRun(u, p.id, { reason: "extend", status: "queued", stage: "transcribe", continueActive: true });
+    const fromSec = Math.min(...plan.ranges.map((r) => r.startSec));
+    const untilSec = Math.max(...plan.ranges.map((r) => r.endSec));
+    await u.emit("project.extended", { projectId: p.id, fromSec, untilSec, durationSec: p.durationSec });
+    // a source retention removed is fetched again first; ingest keeps what the video was admitted as and hands on
+    await u.enqueue(p.sourceExpiredAt || !p.sourceKey ? QUEUES.ingest : QUEUES.transcribe, { projectId: p.id });
+    return {
+      fromSec,
+      untilSec,
+      durationSec: p.durationSec,
+      whole: false,
+      ranges: { billedSec: plan.billedSec, changes: plan.changes },
+      userId: p.userId,
+    };
+  });
+  svc.log.child({ module: "projects", projectId }).info({ billedSec: result.ranges.billedSec, ranges: input.length }, "ranges added to a project");
+  svc.telemetry.capture("project.extended", result.userId, {
+    projectId,
+    automatic: false,
+    addedMinutes: Math.round(result.ranges.billedSec / 60),
+    whole: false,
+    ranges: input.length,
   });
   const { userId: _u, ...out } = result;
   return out;

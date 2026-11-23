@@ -102,17 +102,17 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
 
 Goal: a finished project grows by ranges; today's "Clip the rest" is one of them.
 
-- [ ] 2.1 `extendProject(svc, actor, id, { ranges? })` (replacing its "already covers the whole video" answer for a
-      ranges project): plans the new ranges against the processed ones (only
-      new time is billed, `recordSourceExtension` with that), inserts them with the new `run_id`, and starts the run
-      from transcribe (or ingest when the source expired). No ranges: today's next-part range from `partialUntil`.
-      `after-upgrade.ts` `finishPartialWork` unchanged in behaviour.
-- [ ] 2.2 MCP `extend_project { id, ranges? }`, `reelsaw extend-project <id> --range …`, tRPC `projects.extend`.
-- [ ] 2.3 Project page (Project.tsx): the timeline with processed ranges, clip marks inside them and hatched
-      time; drag across hatched time → "New range" popover (mode, cost from `checkSource`, Clip this range);
-      clips grouped by range; `#range=<id>` deep link scrolls to and highlights it; "Find more in this range"
-      runs analyze for that range only (`reanalyze_project { rangeId }`).
-- [ ] 2.4 `partial.ts` keeps its exports for one release, reading the ranges; then the `source_limit_sec`,
+- [x] 2.1 `extendProject(svc, actor, id, { ranges })` (`addRanges`): plans the new ranges against the project's own
+      (only time no range covers is billed), admits them whole against every project's minutes, records the
+      extension, inserts them unpicked and restarts from transcribe (ingest when the source expired). Without ranges,
+      today's next part; a ranges project asked for that is told to give ranges.
+- [x] 2.2 MCP `extend_project { id, ranges? }`, `reelsaw extend-project <id> --range …`, tRPC `projects.extend`.
+- [x] 2.3 Project page: a Ranges panel (components/ProjectRanges.tsx) when the project chose ranges or has time not
+      processed yet: the timeline with what was processed (solid), its clips (marks) and hatched time; "Add a range"
+      draws new ones, shows the new time they count, and "Clip N ranges" adds them (refusals with the upgrade offer
+      inline). Clips are grouped under their range (number, times, label or mode); `#range=<id>` opens the page there.
+      Picking again in one range: re-analyze picks in every range again (1.5); a per-range re-pick is not built.
+- [ ] 2.4 (next release, by design) `partial.ts` keeps its exports for one release, reading the ranges; then the `source_limit_sec`,
       `extend_from_sec` and `transcripts.covered_sec` columns are dropped in a follow-up migration once nothing reads them.
 
 ## Slice 3 — Fetch only the ranges

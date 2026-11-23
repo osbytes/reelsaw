@@ -42,12 +42,18 @@ export function RangeTimeline({
   ranges,
   onChange,
   coverSec,
+  fixed = [],
+  marks = [],
 }: {
   durationSec: number;
   ranges: DraftRange[];
   onChange: (next: DraftRange[]) => void;
   /** Whole video: the start the minutes cover now is drawn instead of ranges, and the timeline is read-only. */
   coverSec?: number | null | undefined;
+  /** time already processed (a project's ranges), drawn solid and not editable */
+  fixed?: ReadonlyArray<{ startSec: number; endSec: number }>;
+  /** clips, drawn as marks inside what was processed */
+  marks?: ReadonlyArray<{ startSec: number; endSec: number }>;
 }) {
   const { t } = useLingui();
   const track = useRef<HTMLDivElement>(null);
@@ -89,6 +95,20 @@ export function RangeTimeline({
         onPointerUp={() => setDrag(null)}
         onPointerCancel={() => setDrag(null)}
       >
+        {fixed.map((r) => (
+          <div
+            key={`${r.startSec}-${r.endSec}`}
+            className="pointer-events-none absolute inset-y-0 rounded-[6px] border border-acc bg-acc-soft"
+            style={{ insetInlineStart: pct(r.startSec), width: pct(r.endSec - r.startSec), minWidth: 4 }}
+          />
+        ))}
+        {marks.map((c) => (
+          <span
+            key={`${c.startSec}-${c.endSec}`}
+            className="pointer-events-none absolute top-3 bottom-3 rounded-[2px] bg-acc-text"
+            style={{ insetInlineStart: pct(c.startSec), width: pct(c.endSec - c.startSec), minWidth: 3 }}
+          />
+        ))}
         {whole && coverSec !== null && (
           <div className="pointer-events-none absolute inset-y-0 start-0 rounded-[8px] border-2 border-acc bg-acc-soft/60" style={{ width: pct(coverSec) }}>
             <span className="absolute -top-6 start-0 whitespace-nowrap text-xs font-semibold text-acc-text">

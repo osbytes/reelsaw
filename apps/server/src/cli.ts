@@ -912,10 +912,20 @@ ${usage}`);
     const r = await retryOwnedProject(svc, null, pos[0]);
     console.log(`resumed ${pos[0]} at ${r.queue}`);
   },
-  /** Clip more of a partly processed video: `reelsaw extend-project <projectId>`. Same function as projects.extend and the extend_project tool. */
+  /**
+   * Clip more of a video: `reelsaw extend-project <projectId> [--range start-end[:clip]]…` (the rest of a partly processed
+   * video, or those ranges). Same function as projects.extend and the extend_project tool.
+   */
   async "extend-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw extend-project <projectId>");
-    const r = await extendProject(svc, null, pos[0]);
+    const usage = "usage: reelsaw extend-project <projectId> [--range start-end[:find|clip]]…";
+    if (!pos[0]) throw new Error(usage);
+    const ranges = rangeFlags(usage);
+    const r = await extendProject(svc, null, pos[0], { ranges, rangeOrigin: "api" });
+    if (r.ranges) {
+      console.log(`ranges added: ${Math.round((r.ranges.billedSec / 60) * 10) / 10} minutes counted`);
+      for (const c of r.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+      return;
+    }
     const m = (sec: number) => Math.round(sec / 60);
     console.log(
       `processing minutes ${m(r.fromSec)}–${m(r.untilSec)} of ${m(r.durationSec)}${r.whole ? " (the rest of the video)" : "; run it again when more minutes are available"}`,

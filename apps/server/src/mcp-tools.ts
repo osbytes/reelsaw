@@ -553,8 +553,16 @@ export const TOOLS = {
     title: "Clip the rest of a video",
     annotations: { destructiveHint: false },
     description:
-      "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade via billing_checkout_url fromProjectId does it itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
-    inputSchema: { id: projectId() },
+      "Process more of a video. Without ranges: the rest of a video only the start of which was processed (get_project partial), as much as the minutes cover, in whole 10-minute parts. With ranges: those parts too (only time no range covers yet is counted). Clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when the minutes do not cover it. Returns { fromSec, untilSec, durationSec, whole, ranges? }; then wait_for_project.",
+    inputSchema: {
+      id: projectId(),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe("More parts to clip, as create_project takes them: [{ startSec, endSec, mode?, label?, ref? }]"),
+    },
   },
   list_upgrade_work: {
     title: "List work an upgrade unlocks",

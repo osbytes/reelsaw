@@ -90,6 +90,8 @@ import {
   CLEARABLE_SETTINGS,
   projectMetadataSchema,
   createProjectInputSchema,
+  MAX_RANGES,
+  rangeSchema,
   projectSettingsPatchSchema,
   defaultProjectSettings,
   PASSWORD_MAX_LENGTH,
@@ -1567,8 +1569,14 @@ const restRouter = router({
      * where it stopped (extendProject). A quota refusal with the upgrade offer when no minutes are left.
      */
     extend: protectedProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ ctx, input }) => extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+      .input(z.object({ id: z.string(), ranges: z.array(rangeSchema).min(1).max(MAX_RANGES).optional() }))
+      .mutation(({ ctx, input }) => {
+        const surface = ctx.surface ?? (ctx.who.via === "session" ? "web" : "api");
+        return extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, {
+          ranges: input.ranges,
+          rangeOrigin: surface === "web" ? "user" : "api",
+        });
+      }),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
     refine: protectedProcedure
