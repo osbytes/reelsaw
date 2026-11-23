@@ -177,6 +177,66 @@ export function padWithinGaps(
   return { start, end };
 }
 
+/** A range's sentences with the padding around it (docs/specs/range-clipping.md): a clip snapped to them stays inside. */
+function rangeSegments(segments: TranscriptSegment[], r: { startSec: number; endSec: number }): TranscriptSegment[] {
+  return segments.filter((sg) => sg.start >= r.startSec - RANGE_PAD_SEC - 0.05 && sg.end <= r.endSec + RANGE_PAD_SEC + 0.05);
+}
+
+/**
+ * The range a candidate belongs to: the one it overlaps most (a range shorter than the shortest clip holds a clip that
+ * runs on into its padding, so its middle can be past the range's end). Undefined when it overlaps none.
+ */
+function rangeOverlapping<R extends { startSec: number; endSec: number }>(ranges: readonly R[], c: { startSec: number; endSec: number }): R | undefined {
+  let best: R | undefined;
+  let most = 0;
+  for (const r of ranges) {
+    const o = Math.min(c.endSec, r.endSec) - Math.max(c.startSec, r.startSec);
+    if (o > most) [best, most] = [r, o];
+  }
+  return best;
+}
+
+/**
+ * A candidate picked in a project's find ranges, snapped to the sentences of the range it overlaps most (with its
+ * padding), so it never reaches into time no range asked for; null when it overlaps no range or does not fit one.
+ */
+export function snapInRanges<R extends { startSec: number; endSec: number }>(
+  c: ClipCandidate,
+  ranges: readonly R[],
+  segments: TranscriptSegment[],
+  sceneCuts: number[],
+  settings: ProjectSettings,
+  endSec: number,
+  thought: Parameters<typeof snapCandidate>[5] = {},
+): { c: ClipCandidate; range: R } | null {
+  const range = rangeOverlapping(ranges, c);
+  if (!range) return null;
+  // the snapper keeps a start it finds no sentence near, so a proposal that only grazes the range is cut to it (and its
+  // padding) first, and whatever still reaches past the padding after snapping is dropped
+  const lo = Math.max(0, range.startSec - RANGE_PAD_SEC);
+  const hi = Math.min(endSec, range.endSec + RANGE_PAD_SEC);
+  const within = { ...c, startSec: Math.max(c.startSec, lo), endSec: Math.min(c.endSec, hi) };
+  const snapped = snapCandidate(within, rangeSegments(segments, range), sceneCuts, settings, hi, thought);
+  return snapped && snapped.startSec >= lo - 0.3 && snapped.endSec <= hi + 0.4 ? { c: snapped, range } : null;
+}
+
+/**
+ * An exact clip range's bounds: its ends snapped to the nearest sentences inside its padding (any length: the range is
+ * the clip), or the range as given when its padding holds no sentence to snap to.
+ */
+export function exactRangeBounds(
+  r: { startSec: number; endSec: number },
+  segments: TranscriptSegment[],
+  sceneCuts: number[],
+  settings: ProjectSettings,
+  endSec: number,
+  words?: Word[],
+): ClipCandidate {
+  const raw: ClipCandidate = { title: "", hook: "", startSec: r.startSec, endSec: r.endSec, score: 50, reasoning: "", caption: "", hashtags: [] };
+  const lenient = { ...settings, minClipSeconds: 1, maxClipSeconds: Math.max(settings.maxClipSeconds, r.endSec - r.startSec + 2 * RANGE_PAD_SEC) };
+  return snapCandidate(raw, rangeSegments(segments, r), sceneCuts, lenient, Math.min(endSec, r.endSec + RANGE_PAD_SEC), words ? { words } : {}) ?? raw;
+}
+
 export function snapCandidate(
   c: ClipCandidate,
   segments: TranscriptSegment[],
@@ -420,31 +480,13 @@ export async function analyze(ctx: StageContext) {
   const endSec = processedEndSec(project) ?? transcript.words.at(-1)?.end ?? 0;
   /** the stretch this run picks in: everything processed, only the new part of an extension, or the find ranges */
   const durationSec = hasChosenRanges ? spansSec(findRanges.map((r) => [r.startSec, r.endSec])) : Math.max(0, endSec - (extendFrom ?? 0));
-  /** a range's sentences, with the padding around it, so a clip snapped to them stays inside the range */
-  const segmentsOf = (r: { startSec: number; endSec: number }) =>
-    transcript.segments.filter((sg) => sg.start >= r.startSec - RANGE_PAD_SEC - 0.05 && sg.end <= r.endSec + RANGE_PAD_SEC + 0.05);
-  /**
-   * The find range a candidate belongs to: the one it overlaps most (a range shorter than the shortest clip holds a clip
-   * that runs on into its padding, so its middle can be past the range's end).
-   */
-  const findRangeOf = (c: { startSec: number; endSec: number }) => {
-    let best: (typeof findRanges)[number] | undefined;
-    let most = 0;
-    for (const r of findRanges) {
-      const o = Math.min(c.endSec, r.endSec) - Math.max(c.startSec, r.startSec);
-      if (o > most) [best, most] = [r, o];
-    }
-    return best;
-  };
+  const findRangeOf = (c: { startSec: number; endSec: number }) => rangeOverlapping(findRanges, c);
   /** the range a clip from this run belongs to, for `clips.range_id` */
   const rangeIdOf = (startSec: number) => (toPick.find((r) => startSec >= r.startSec - RANGE_PAD_SEC && startSec < r.endSec) ?? null)?.id ?? null;
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   /** exact clip ranges as clips, their ends snapped to sentences inside the padding; titled and scored by prepare */
   const exactRows = exactRanges.map((r, index) => {
-    const raw: ClipCandidate = { title: "", hook: "", startSec: r.startSec, endSec: r.endSec, score: 50, reasoning: "", caption: "", hashtags: [] };
-    const lenient = { ...settings, minClipSeconds: 1, maxClipSeconds: Math.max(settings.maxClipSeconds, r.endSec - r.startSec + 2 * RANGE_PAD_SEC) };
-    const snapped = snapCandidate(raw, segmentsOf(r), sceneCuts, lenient, Math.min(endSec, r.endSec + RANGE_PAD_SEC), { words: transcript.words });
-    const c = snapped ?? raw;
+    const c = exactRangeBounds(r, transcript.segments, sceneCuts, settings, endSec, transcript.words);
     return {
       id: randomUUID(),
       projectId,
@@ -659,12 +701,7 @@ export async function analyze(ctx: StageContext) {
     .map((c, i) => {
       if (!hasChosenRanges) return { c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules }), i };
       // inside a find range only: snapped to its own sentences, so it never reaches into time no range asked for
-      const r = findRangeOf(c);
-      if (!r) return { c: null, i };
-      return {
-        c: snapCandidate(c, segmentsOf(r), sceneCuts, settings, Math.min(endSec, r.endSec + RANGE_PAD_SEC), { words: transcript.words, log, rules }),
-        i,
-      };
+      return { c: snapInRanges(c, findRanges, transcript.segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules })?.c ?? null, i };
     })
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);

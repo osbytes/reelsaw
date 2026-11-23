@@ -87,8 +87,14 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       are sent in source order, so the server's "ranges 1, 2" are the ones numbered 1 and 2. The button says "Clip N
       ranges". Copy goes through lingui (en-XA checked); the track is `dir="ltr"`. Checked in the browser at desktop
       and phone width. Seen on the way, not changed: the page footer's summary and buttons overlap at phone width.
-- [ ] 1.9 Evals: an analyze suite case with two find ranges asserts no pick outside them; `--offline` covers the
-      exact-clip snapping.
+- [x] 1.9 Evals: the `selection` suite runs, on every stored transcript, `ranges-find` (a proposal every 1/80th of the
+      video through `snapInRanges`: each kept pick lies inside its find range plus padding, a proposal overlapping no
+      range is dropped, every range gets a pick) and `ranges-exact` (short and long exact ranges across the video snap
+      inside their own padding, never to nothing), model-free (`--offline`): the bound is the snapper's, so no model
+      run is needed to hold it. The first run caught picks that only grazed a range keeping their own start, up to 30 s
+      before it, in production analyze too: a proposal is now cut to its range and padding before snapping and dropped
+      if it still reaches past them. The range helpers (`rangeSegments`, `rangeOverlapping`, `snapInRanges`,
+      `exactRangeBounds`) live in analyze.ts; the suite calls `snapInRanges` and `exactRangeBounds`.
 - [ ] 1.10 Copy: README feature list, `website/content/` (the "long videos" page), docs/SELECTION.md (how picking is
       bounded), the MCP server instructions line in mcp-tools.ts.
 
