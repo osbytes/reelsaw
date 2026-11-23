@@ -1,5 +1,0 @@
----
-"@reelsaw/server": patch
----
-
-Fixes from a project audit. A link that streams with no announced size can no longer fill the disk: every yt-dlp download now stops once its file passes `MAX_SOURCE_FILE_MB`. Ranges added to a partly processed project past its processed start now give clips inside those ranges, not clips that end before they start, and a later "Clip the rest" counts only minutes not already counted for those ranges. Re-picking a project no longer makes a second clip for an exact range whose clip you edited. Error reports to Sentry leave out the visitor's address, request headers, cookies and bodies. Clips and zips taken through share links now count as downloads in product analytics. The hourly new-project count no longer counts an extension as a new project. Retrying plan refusals after an upgrade waits until a whole transcription chunk fits. A forged page link gets a clear error instead of a server error. The README, CLI reference, research notes and website now cover range clipping, output shapes, OpenCode and non-English videos.
