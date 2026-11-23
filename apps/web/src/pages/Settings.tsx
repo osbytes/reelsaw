@@ -11,6 +11,7 @@ import { ShareLinksSection } from "../components/ShareLinks";
 import { WebhooksSection } from "../components/Webhooks";
 import { AccountSection } from "../components/AccountSection";
 import { EmailSection } from "../components/EmailSection";
+import { LocaleSection } from "../components/LocaleSection";
 import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { LearningSection } from "../components/LearningSection";
@@ -44,6 +45,7 @@ type Section = readonly [id: string, label: string];
 function accountSections(hasBilling: boolean, hasEmail: boolean): Section[] {
   return [
     ["profile", "Profile"],
+    ["language", "Language and region"],
     // only when this instance sends mail; #email is the link in the ready email's footer
     ...(hasEmail ? ([["email", "Email"]] as const) : []),
     ...(hasBilling ? ([["billing", "Plan and billing"]] as const) : []),
@@ -286,6 +288,7 @@ function AccountTab({ hasBilling, hasEmail }: { hasBilling: boolean; hasEmail: b
       <div id="profile" className="scroll-mt-4">
         <AccountSection />
       </div>
+      <LocaleSection />
       {hasEmail && <EmailSection />}
       {hasBilling && (
         <div id="billing" className="flex scroll-mt-4 flex-col gap-6">

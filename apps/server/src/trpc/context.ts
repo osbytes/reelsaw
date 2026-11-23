@@ -8,6 +8,7 @@ import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
 import { asUserRequest, type Surface } from "../uow.js";
 import { checkRequestRate } from "../abuse.js";
+import { errorMessageData, scopeAccount } from "../i18n.js";
 
 export type Context = {
   svc: Services;
@@ -27,6 +28,7 @@ export function contextFactory(svc: Services) {
     const who = await requester(svc.auth, svc.database.db, req.headers);
     const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
     if (who) c?.set("userId", who.user.id);
+    if (who) scopeAccount(who.user);
     const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });
     return { svc, who, req, requestId, log: who ? base.child({ userId: who.user.id }) : base };
   };
@@ -40,6 +42,8 @@ const t = initTRPC.context<Context>().create({
       data: {
         ...shape.data,
         ...(error instanceof QuotaError && error.quota ? { quota: error.quota } : {}),
+        // the stable code and parameters of a message for people (i18n.ts AppError), beside the sentence in `message`
+        ...errorMessageData(error),
       },
     };
   },

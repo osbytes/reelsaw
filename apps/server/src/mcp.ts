@@ -25,6 +25,7 @@ import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from 
 import { assetVisibleTo } from "./library/visible.js";
 import type { TranscriptFlag } from "@reelsaw/shared";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
+import { scopeAccount } from "./i18n.js";
 
 import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
@@ -792,6 +793,8 @@ export function createMcpServer(
   server.registerTool("billing_portal_url", TOOLS.billing_portal_url, () => run(() => api.billing.portal()));
 
   server.registerTool("get_email_preferences", TOOLS.get_email_preferences, () => run(() => api.me.emailPreferences()));
+  server.registerTool("get_locale_preferences", TOOLS.get_locale_preferences, () => run(() => api.me.localePrefs()));
+  server.registerTool("set_locale_preferences", TOOLS.set_locale_preferences, (input) => run(() => api.me.updateLocalePrefs(input)));
   server.registerTool("set_email_preferences", TOOLS.set_email_preferences, (input) => run(() => api.me.updateEmailPreferences(input)));
 
   return server;
@@ -800,6 +803,8 @@ export function createMcpServer(
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
   touchLastActive(svc.database.db, svc.log, user.id);
+  // result sentences and errors in the account's language (an agent sends no locale header)
+  scopeAccount(user);
   const requestId = (c as HonoContext<AppEnv>).get("requestId");
   return serveMcpRequest(
     c.req.raw,

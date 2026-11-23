@@ -32,7 +32,15 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS, emailPreferencesPatchSchema, plural, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN, withSpokenLanguage } from "@reelsaw/shared";
+import {
+  DECISION_KINDS,
+  emailPreferencesPatchSchema,
+  localePrefsPatchSchema,
+  plural,
+  QUEUE_PRIORITY_MAX,
+  QUEUE_PRIORITY_MIN,
+  withSpokenLanguage,
+} from "@reelsaw/shared";
 import {
   applyProjectFraming,
   checkSource,
@@ -147,6 +155,7 @@ import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
 import { touchLastActive } from "../presence.js";
 import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
+import { localePrefs, setLocalePrefs } from "../notify/locale.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { projectListInput, templateListInput } from "../list-schemas.js";
@@ -528,6 +537,10 @@ const headRouter = router({
       emailEnabled: ctx.svc.email.enabled,
       emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
     })),
+    /** Language and time zone of this account's emails, notices and messages (notify/locale.ts). MCP `get_locale_preferences`. */
+    localePrefs: signedInProcedure.query(({ ctx }) => localePrefs(ctx.svc.database.db, ctx.user.id)),
+    /** Settings → Account → Language and region. Same service as MCP `set_locale_preferences` and `reelsaw locale-prefs`. */
+    updateLocalePrefs: signedInProcedure.input(localePrefsPatchSchema).mutation(({ ctx, input }) => setLocalePrefs(ctx.svc, ctx.user.id, input)),
     /** The web tab is visible and the person used it in the last couple of minutes (presence.ts): completions until now count as seen. */
     presence: signedInProcedure.mutation(({ ctx }) => {
       touchLastActive(ctx.svc.database.db, ctx.svc.log, ctx.user.id);

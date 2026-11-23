@@ -45,6 +45,7 @@ import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
 import { setEmailPreferences, UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "./notify/preferences.js";
 import { escapeHtml, layout } from "./email.js";
+import { LOCALE_HEADER, localeMiddleware } from "./i18n.js";
 
 /** What the browser may report: trimmed so a loop of errors cannot fill the log. */
 const clientLogSchema = z.object({
@@ -80,6 +81,8 @@ export function createApp(svc: Services) {
   const app = new Hono<AppEnv>();
   // request id + access log (request-log.ts); every handler logs through c.get("log")
   app.use(requestLogger(svc.log));
+  // every request renders its messages in one locale: the web app's header, the account's, Accept-Language, English (i18n.ts)
+  app.use(localeMiddleware());
   // The built SPA's id (hash of its index.html). Every API response carries it, and the page carries
   // the one it was served from, so a tab left open across a deploy notices and reloads on its next
   // route change instead of asking for chunks that are gone (apps/web/src/lib/stale-chunk.ts).
@@ -123,6 +126,7 @@ export function createApp(svc: Services) {
         "Authorization",
         "x-api-key",
         "x-filename",
+        LOCALE_HEADER,
         "trpc-accept",
         "mcp-session-id",
         "mcp-protocol-version",

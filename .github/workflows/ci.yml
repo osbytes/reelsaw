@@ -44,6 +44,7 @@ jobs:
       - run: pnpm guards
       # the English catalogue (apps/web/src/locales/en.po) matches the messages in the code (docs/I18N.md)
       - run: pnpm --filter @reelsaw/web i18n:check
+      - run: pnpm --filter @reelsaw/server i18n:check
       # clone pairs (jscpd) that touch a file this PR changed, in the job summary; reports, never fails
       - if: github.event_name == 'pull_request'
         run: node scripts/clones.mjs origin/main

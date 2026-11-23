@@ -32,6 +32,7 @@ import { Segmented, Skeleton, SkeletonRegion } from "./components/ui";
 import { ClipEditorSkeleton, ProjectPageSkeleton } from "./components/PageSkeletons";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
+import { AccountLocale } from "./components/LocaleSection";
 import { usePresence } from "./lib/presence";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -272,6 +273,7 @@ export function TopBar() {
         <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
+      <AccountLocale />
       <HeaderAlerts />
       <SearchButton />
       <Avatar />
