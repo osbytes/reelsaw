@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { msg, plural } from "@lingui/core/runtime-macro";
 import { formatDay, formatNumber } from "@reelsaw/shared";
-import { AppError, currentLocale, errorMessageData, requestLocale, scopeAccount, t, withLocale } from "../src/i18n.js";
+import { AppError, currentLocale, errorMessageData, pseudoLocalize, requestLocale, scopeAccount, t, withLocale } from "../src/i18n.js";
 
 test("a message renders in English with its values and plurals", () => {
   const title = "Talk";
@@ -34,5 +34,16 @@ test("formatting follows the scope's locale", () => {
   withLocale("en", "UTC", () => {
     assert.equal(formatNumber(1200), "1,200");
     assert.equal(formatDay("2026-12-18T12:00:00Z", { utc: true }), "December 18, 2026");
+  });
+});
+
+test("the pseudo-locale accents text and leaves ICU arguments and tags whole", () => {
+  assert.equal(
+    pseudoLocalize("Hi {name}, {n, plural, one {# clip} other {# clips}} <0>here</0>"),
+    "[Ĥí {name}, {n, plural, one {# çĺíþ} other {# çĺíþš}} <0>ĥéŕé</0>]",
+  );
+  const n = 2;
+  withLocale("en-XA", null, () => {
+    assert.equal(t(msg({ id: "test.pseudo", message: plural({ n }, { one: "# clip", other: "# clips" }) })), "[2 çĺíþš]");
   });
 });

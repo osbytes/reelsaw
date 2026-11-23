@@ -20,7 +20,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { type I18n, type MessageDescriptor, setupI18n } from "@lingui/core";
 import { formatter } from "@lingui/format-po";
 import { compileMessage } from "@lingui/message-utils/compileMessage";
-import { acceptLanguages, DEFAULT_LOCALE, isLocale, isTimeZone, type Locale, matchLocale, setFormatLocale, setFormatTimeZone } from "@reelsaw/shared";
+import {
+  acceptLanguages,
+  DEFAULT_LOCALE,
+  isLocale,
+  isTimeZone,
+  type Locale,
+  matchLocale,
+  PSEUDO_LOCALE,
+  setFormatLocale,
+  setFormatTimeZone,
+} from "@reelsaw/shared";
 import { TRPCError } from "@trpc/server";
 import type { MiddlewareHandler } from "hono";
 import { bundledAssetPath } from "./lib/assets.js";
@@ -127,7 +137,7 @@ function i18nFor(locale: Locale): I18n {
     i = setupI18n();
     i.setMessagesCompiler(compileMessage);
     // a message missing from the locale's catalogue falls back to the English in the code
-    i.load(locale, locale === DEFAULT_LOCALE ? {} : loadCatalogue(locale));
+    i.load(locale, locale === DEFAULT_LOCALE || locale === PSEUDO_LOCALE ? {} : loadCatalogue(locale));
     i.activate(locale);
     instances.set(locale, i);
   }
@@ -136,7 +146,33 @@ function i18nFor(locale: Locale): I18n {
 
 /** Render a message in the current scope's locale. */
 export function t(descriptor: MessageDescriptor): string {
-  return i18nFor(currentLocale())._(descriptor);
+  const locale = currentLocale();
+  // the pseudo-locale has no translations of its own (Lingui pseudo-localises at compile time, which the server skips)
+  if (locale === PSEUDO_LOCALE && descriptor.message) return i18nFor(locale)._({ ...descriptor, message: pseudoLocalize(descriptor.message) });
+  return i18nFor(locale)._(descriptor);
+}
+
+const ACCENTED: Record<string, string> = Object.fromEntries(
+  [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((c, i) => [c, [..."àƀçđéƒĝĥíĵķĺɱñóþǫŕšţúṽŵẋýžÀßÇĐÉƑĜĤÍĴĶĹṀÑÓÞǪŔŠŢÚṼŴẊÝŽ"][i]!]),
+);
+
+/**
+ * `?locale=en-XA` on the server: the English accented and bracketed, so a sentence that is still plain English was
+ * not routed through the catalogue. ICU arguments (`{name}`, `{n, plural, one {…}}` keys) and `<0>` tags stay intact:
+ * only text at an even brace depth (outside an argument, or inside a plural or select option) is accented.
+ */
+export function pseudoLocalize(message: string): string {
+  let out = "";
+  let depth = 0;
+  let inTag = false;
+  for (const ch of message) {
+    if (ch === "<") inTag = true;
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    out += !inTag && depth % 2 === 0 ? (ACCENTED[ch] ?? ch) : ch;
+    if (ch === ">") inTag = false;
+  }
+  return `[${out}]`;
 }
 
 // ---------- errors ----------
