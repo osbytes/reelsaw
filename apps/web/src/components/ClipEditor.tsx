@@ -1,4 +1,7 @@
 import { objectKeys } from "ts-extras";
+import { i18n } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { SourceQualityOffer } from "./SourceQualityOffer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -55,6 +58,7 @@ import {
   normalizeSections,
   adjustLabel,
   MODE_LABEL,
+  labelsOf,
   layoutLabel,
   SPLIT_SHORTCUT,
   type EditorSection,
@@ -135,16 +139,13 @@ import {
   type TranscriptSegment,
   type Word,
   BUMPER_TRANSITIONS,
-  BUMPER_TRANSITION_LABEL,
   bodyEdgeFades,
   fadeLevel,
-  plural,
   planPunchIns,
   punchInAnchor,
   layoutForShape,
   outputSize,
   OUTPUT_SHAPES,
-  SHAPE_LABEL,
   punchInLevel,
 } from "@reelsaw/shared";
 import { FadePresets, fadeText } from "./FadeField";
@@ -206,7 +207,9 @@ const FRAME = 1 / 30;
 const MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 type Tab = "captions" | "framing" | "layers" | "text" | "cuts" | "transcript";
-const PANE_NAME = ["Top", "Bottom"] as const;
+const PANE_MESSAGES = [msg`Top`, msg`Bottom`] as const;
+/** the two panes of a split, by index, in the active locale */
+const paneName = (pane: 0 | 1) => i18n._(PANE_MESSAGES[pane]);
 /** every optional field of a layout section, from the schema: the saved form and the change check cover them all */
 const SECTION_FIELDS = objectKeys(layoutSectionSchema.shape).filter(
   (k): k is Exclude<keyof LayoutSection, "start" | "end" | "mode"> => k !== "start" && k !== "end" && k !== "mode",
@@ -286,13 +289,24 @@ interface EditorDoc {
   layers: ClipLayer[];
 }
 
-const MODE_EXPLAIN: Record<string, string> = {
-  face: "9:16 crop that follows whoever is talking.",
-  split: "Two speakers, one above the other.",
-  stack: "Whole frame on top, speaker zoomed below. For screen shares with a webcam.",
-  fit: "Whole frame over a blurred background. For slides, b-roll and wide shots.",
-  center: "Static centre crop.",
-};
+const MODE_EXPLAIN: Record<string, string> = labelsOf({
+  face: msg`9:16 crop that follows whoever is talking.`,
+  split: msg`Two speakers, one above the other.`,
+  stack: msg`Whole frame on top, speaker zoomed below. For screen shares with a webcam.`,
+  fit: msg`Whole frame over a blurred background. For slides, b-roll and wide shots.`,
+  center: msg`Static centre crop.`,
+});
+// dup-of: packages/shared/src/index.ts#SHAPE_LABEL
+/** the output shapes by name (the web copy of SHAPE_LABEL in @reelsaw/shared) */
+const SHAPE_NAME = labelsOf({
+  "9:16": msg`Vertical 9:16`,
+  "4:5": msg`Portrait 4:5`,
+  "1:1": msg`Square 1:1`,
+  "16:9": msg`Landscape 16:9`,
+});
+// dup-of: packages/shared/src/index.ts#BUMPER_TRANSITION_LABEL
+/** how the intro and outro join the clip (the web copy of BUMPER_TRANSITION_LABEL in @reelsaw/shared) */
+const TRANSITION_NAME = labelsOf({ cut: msg`Cut`, dip: msg`Dip to black`, crossfade: msg`Crossfade` });
 
 /** Forced sections from the DB + auto in the gaps, covering the clip; a clip with none gets the project's framing. */
 function initialSections(clip: EditorClip, range: [number, number], settings: ProjectSettings): EditorSection[] {
@@ -390,6 +404,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 }
 
 function Swatches({ colors, value, onChange, label }: { colors: string[]; value: string; onChange: (c: string) => void; label: string }) {
+  const { t } = useLingui();
   const on = (c: string) => c.toUpperCase() === value.toUpperCase();
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -410,7 +425,7 @@ function Swatches({ colors, value, onChange, label }: { colors: string[]; value:
       ))}
       <label
         className="relative grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-full border-2 border-dashed border-line2 text-xs text-ink3"
-        title="Custom colour"
+        title={t`Custom colour`}
       >
         +
         <input type="color" className="absolute inset-0 cursor-pointer opacity-0" value={value} onChange={(e) => onChange(e.target.value.toUpperCase())} />
@@ -459,23 +474,25 @@ function LayerCard({
   onPatch: (patch: LayerPatch, key?: string) => void;
   onRemove: () => void;
 }) {
+  const { t } = useLingui();
   const fonts = useFonts();
   const min = layerMin(l);
-  const removed = loading ? "…" : "Deleted from the library";
-  const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
+  const removed = loading ? "…" : t`Deleted from the library`;
+  const kindLabel =
+    l.kind === "text" ? t`text` : l.kind === "audio" ? (isSoundEffect(asset) ? t`Sound effect` : t`Music`) : asset?.kind === "video" ? t`video` : t`image`;
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
   // pictures and text: fades in when its window opens and out when it closes (sounds have their own seconds slider)
   const fadeField = (aria: string) =>
     l.kind === "audio" ? null : (
-      <Field label="Fade in / out" hint={<span className="font-mono">{fadeText(l.fade ?? 0)}</span>}>
+      <Field label={t`Fade in / out`} hint={<span className="font-mono">{fadeText(l.fade ?? 0)}</span>}>
         <FadePresets ariaLabel={aria} value={l.fade ?? 0} onChange={(sec) => onPatch({ fade: sec || undefined })} />
       </Field>
     );
   const opacityField = (aria: string) => {
     const o = l.kind === "audio" ? 1 : (l.opacity ?? 1);
     return (
-      <Field label="Opacity" hint={<span className="font-mono">{pct(o)}%</span>}>
+      <Field label={t`Opacity`} hint={<span className="font-mono">{pct(o)}%</span>}>
         <input
           type="range"
           min={10}
@@ -515,8 +532,8 @@ function LayerCard({
               className="input h-7 w-full px-2 py-0 text-[13px] font-semibold"
               value={l.text}
               maxLength={120}
-              placeholder="Your text"
-              aria-label="Layer text"
+              placeholder={t`Your text`}
+              aria-label={t`Layer text`}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => onPatch({ text: e.target.value }, `ly-t-${l.id}`)}
             />
@@ -530,8 +547,8 @@ function LayerCard({
         </span>
         <button
           className="grid h-7 w-7 place-items-center rounded-[8px] text-ink3 hover:bg-sunk hover:text-ink"
-          aria-label="Remove layer"
-          title="Remove layer (Delete)"
+          aria-label={t`Remove layer`}
+          title={t`Remove layer (Delete)`}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -543,37 +560,37 @@ function LayerCard({
       {l.kind === "text" && (
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Size">
+            <Field label={t`Size`}>
               <Segmented
                 size="sm"
                 value={sizeIdx >= 0 ? TEXT_SIZES[sizeIdx]!.v : -1}
                 onChange={(v) => onPatch({ size: v })}
                 options={TEXT_SIZES.map((sz) => ({ value: sz.v, label: sz.l }))}
-                ariaLabel="Text size"
+                ariaLabel={t`Text size`}
               />
             </Field>
-            {opacityField("Text opacity")}
+            {opacityField(t`Text opacity`)}
           </div>
-          <Field label="Font">
+          <Field label={t`Font`}>
             <Select
               size="sm"
-              ariaLabel="Text font"
+              ariaLabel={t`Text font`}
               value={l.font ?? ""}
               onValueChange={(v) => onPatch({ font: v || undefined })}
-              options={[{ value: "", label: "Caption font" }, ...fontOptions(fonts.fonts)]}
+              options={[{ value: "", label: t`Caption font` }, ...fontOptions(fonts.fonts)]}
             />
           </Field>
-          <Field label="Colour">
-            <Swatches label="Text colour" colors={TEXT_COLORS} value={l.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => onPatch({ color: c })} />
+          <Field label={t`Colour`}>
+            <Swatches label={t`Text colour`} colors={TEXT_COLORS} value={l.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => onPatch({ color: c })} />
           </Field>
-          <Switch checked={!!l.box} onChange={(v) => onPatch({ box: v || undefined })} label="Dark plate behind the text" />
-          {fadeField("Text fade")}
+          <Switch checked={!!l.box} onChange={(v) => onPatch({ box: v || undefined })} label={t`Dark plate behind the text`} />
+          {fadeField(t`Text fade`)}
         </div>
       )}
       {l.kind === "asset" && (
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Left / right" hint={<span className="font-mono">{pct(l.x)}%</span>}>
+            <Field label={t`Left / right`} hint={<span className="font-mono">{pct(l.x)}%</span>}>
               <input
                 type="range"
                 min={0}
@@ -582,10 +599,10 @@ function LayerCard({
                 value={pct(l.x)}
                 onChange={(e) => onPatch({ x: Number(e.target.value) / 100 }, `ly-x-${l.id}`)}
                 className="accent-[var(--acc)]"
-                aria-label="Layer position across"
+                aria-label={t`Layer position across`}
               />
             </Field>
-            <Field label="Up / down" hint={<span className="font-mono">{pct(l.y)}%</span>}>
+            <Field label={t`Up / down`} hint={<span className="font-mono">{pct(l.y)}%</span>}>
               <input
                 type="range"
                 min={0}
@@ -594,10 +611,10 @@ function LayerCard({
                 value={pct(l.y)}
                 onChange={(e) => onPatch({ y: Number(e.target.value) / 100 }, `ly-y-${l.id}`)}
                 className="accent-[var(--acc)]"
-                aria-label="Layer position down"
+                aria-label={t`Layer position down`}
               />
             </Field>
-            <Field label="Width" hint={<span className="font-mono">{pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)}%</span>}>
+            <Field label={t`Width`} hint={<span className="font-mono">{pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)}%</span>}>
               <input
                 type="range"
                 min={5}
@@ -606,19 +623,21 @@ function LayerCard({
                 value={pct(l.w ?? ASSET_OVERLAY_DEFAULT_W)}
                 onChange={(e) => onPatch({ w: Number(e.target.value) / 100 }, `ly-w-${l.id}`)}
                 className="accent-[var(--acc)]"
-                aria-label="Layer width"
+                aria-label={t`Layer width`}
               />
             </Field>
-            {opacityField("Layer opacity")}
+            {opacityField(t`Layer opacity`)}
           </div>
-          {fadeField("Layer fade")}
-          {isAnimatedAsset(asset) && <Switch checked={l.loop ?? isStickerAsset(asset!)} onChange={(v) => onPatch({ loop: v })} label="Repeat while it shows" />}
+          {fadeField(t`Layer fade`)}
+          {isAnimatedAsset(asset) && (
+            <Switch checked={l.loop ?? isStickerAsset(asset!)} onChange={(v) => onPatch({ loop: v })} label={t`Repeat while it shows`} />
+          )}
         </div>
       )}
       {l.kind === "audio" && (
         <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Level" hint={<span className="font-mono">{pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)}%</span>}>
+            <Field label={t`Level`} hint={<span className="font-mono">{pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)}%</span>}>
               <input
                 type="range"
                 min={0}
@@ -627,10 +646,10 @@ function LayerCard({
                 value={pct(l.volume ?? CLIP_AUDIO_DEFAULTS.volume)}
                 onChange={(e) => onPatch({ volume: Number(e.target.value) / 100 }, `ly-vol-${l.id}`)}
                 className="accent-[var(--acc)]"
-                aria-label="Sound level"
+                aria-label={t`Sound level`}
               />
             </Field>
-            <Field label="Fade in / out" hint={<span className="font-mono">{(l.fade ?? CLIP_AUDIO_DEFAULTS.fade).toFixed(1)}s</span>}>
+            <Field label={t`Fade in / out`} hint={<span className="font-mono">{(l.fade ?? CLIP_AUDIO_DEFAULTS.fade).toFixed(1)}s</span>}>
               <input
                 type="range"
                 min={0}
@@ -639,31 +658,42 @@ function LayerCard({
                 value={l.fade ?? CLIP_AUDIO_DEFAULTS.fade}
                 onChange={(e) => onPatch({ fade: Number(e.target.value) }, `ly-fade-${l.id}`)}
                 className="accent-[var(--acc)]"
-                aria-label="Sound fade"
+                aria-label={t`Sound fade`}
               />
             </Field>
           </div>
-          <Switch checked={l.duck ?? CLIP_AUDIO_DEFAULTS.duck} onChange={(v) => onPatch({ duck: v })} label="Lower it while someone speaks" />
-          <Switch checked={l.loop ?? CLIP_AUDIO_DEFAULTS.loop} onChange={(v) => onPatch({ loop: v })} label="Repeat if it is shorter than its window" />
+          <Switch checked={l.duck ?? CLIP_AUDIO_DEFAULTS.duck} onChange={(v) => onPatch({ duck: v })} label={t`Lower it while someone speaks`} />
+          <Switch checked={l.loop ?? CLIP_AUDIO_DEFAULTS.loop} onChange={(v) => onPatch({ loop: v })} label={t`Repeat if it is shorter than its window`} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
-        <span className="text-ink3">From</span>
-        <TimeField label="Layer start" value={l.start - rangeStart} onCommit={(t) => onPatch({ start: Math.min(l.end - min, rangeStart + Math.max(0, t)) })} />
-        <span className="text-ink3">to</span>
-        <TimeField label="Layer end" value={l.end - rangeStart} onCommit={(t) => onPatch({ end: Math.max(l.start + min, rangeStart + t) })} />
+        <span className="text-ink3">
+          <Trans>From</Trans>
+        </span>
+        <TimeField
+          label={t`Layer start`}
+          value={l.start - rangeStart}
+          onCommit={(t) => onPatch({ start: Math.min(l.end - min, rangeStart + Math.max(0, t)) })}
+        />
+        <span className="text-ink3">
+          <Trans>to</Trans>
+        </span>
+        <TimeField label={t`Layer end`} value={l.end - rangeStart} onCommit={(t) => onPatch({ end: Math.max(l.start + min, rangeStart + t) })} />
         {l.kind === "audio" && (
           <>
-            <span className="text-ink3">· track from</span>
-            <TimeField label="Seconds into the track" value={l.offset ?? 0} onCommit={(t) => onPatch({ offset: Math.max(0, t) })} />
+            <span className="text-ink3">
+              {"· "}
+              <Trans>track from</Trans>
+            </span>
+            <TimeField label={t`Seconds into the track`} value={l.offset ?? 0} onCommit={(t) => onPatch({ offset: Math.max(0, t) })} />
           </>
         )}
         <button
           className="btn-ghost px-2 py-0.5 text-xs"
           onClick={() => onPatch({ start: rangeStart, end: rangeEnd })}
-          title={l.kind === "audio" ? "Play under the whole clip" : "Show it for the whole clip"}
+          title={l.kind === "audio" ? t`Play under the whole clip` : t`Show it for the whole clip`}
         >
-          Whole clip
+          <Trans>Whole clip</Trans>
         </button>
       </div>
     </div>
@@ -741,6 +771,7 @@ export function ClipEditor(props: Props) {
     renderProgress,
     onExit,
   } = props;
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -998,15 +1029,15 @@ export function ClipEditor(props: Props) {
   };
   const setIn = (t: number) => setRange([Math.min(t, range[1] - 1), range[1]]);
   const setOut = (t: number) => setRange([range[0], Math.max(t, range[0] + 1)]);
-  const splitAt = (t: number) => {
-    if (t <= range[0] + 0.5 || t >= range[1] - 0.5) return void toast("Move the playhead inside the clip to split");
-    if (sections.some((s) => Math.abs(s.start - t) < 0.5 && s.start > range[0])) return void toast("Too close to an existing transition");
-    const i = sections.findIndex((s) => t > s.start && t < s.end);
+  const splitAt = (at: number) => {
+    if (at <= range[0] + 0.5 || at >= range[1] - 0.5) return void toast(t`Move the playhead inside the clip to split`);
+    if (sections.some((s) => Math.abs(s.start - at) < 0.5 && s.start > range[0])) return void toast(t`Too close to an existing transition`);
+    const i = sections.findIndex((s) => at > s.start && at < s.end);
     if (i < 0) return;
     const s = sections[i]!;
-    setSections([...sections.slice(0, i), { ...s, end: t }, { ...s, start: t }, ...sections.slice(i + 1)]);
+    setSections([...sections.slice(0, i), { ...s, end: at }, { ...s, start: at }, ...sections.slice(i + 1)]);
     setSelected(i + 1);
-    toast(`Split at ${fmtPrecise(t - range[0])}`);
+    toast(t`Split at ${fmtPrecise(at - range[0])}`);
   };
   /** Remove the transition on one side of section i: it absorbs into that neighbour, which keeps its framing. */
   const mergeSection = (i: number, side: "left" | "right") => {
@@ -1175,7 +1206,11 @@ export function ClipEditor(props: Props) {
     const followed = (pane === 0 ? f.cx : (f.cx2 ?? f.cx)) - a.offsetX; // where the followed face sits
     const subjectX = Number(Math.max(0, Math.min(1, followed + a.offsetX)).toFixed(3));
     setPane(i, pane, { subjectX, offsetY: a.offsetY }, key);
-    toast(`${f.layout === "split" ? PANE_NAME[pane] : "The crop"} now follows the person at ${Math.round(subjectX * 100)}% (re-render to track them)`);
+    const where = Math.round(subjectX * 100);
+    if (f.layout === "split") {
+      const name = paneName(pane);
+      toast(t`${name} now follows the person at ${where}% (re-render to track them)`);
+    } else toast(t`The crop now follows the person at ${where}% (re-render to track them)`);
   };
   const resetOffset = (i: number) =>
     setSections(
@@ -1211,21 +1246,21 @@ export function ClipEditor(props: Props) {
     if (lay === "none") return [];
     if (lay === "split") {
       return [
-        { key: "crop", name: PANE_NAME[0], aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop },
-        { key: "crop2", name: PANE_NAME[1], aspect: paneAspect(f, srcW, srcH, 1), auto: auto(1), current: s.crop2 },
+        { key: "crop", name: paneName(0), aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop },
+        { key: "crop2", name: paneName(1), aspect: paneAspect(f, srcW, srcH, 1), auto: auto(1), current: s.crop2 },
       ];
     }
     if (lay === "stack") {
       return [
-        { key: "contentCrop", name: "Screen", aspect: paneAspect(f, srcW, srcH, "top"), auto: f.content ?? FULL_FRAME, current: s.contentCrop },
-        { key: "crop", name: "Speaker", aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop },
+        { key: "contentCrop", name: t`Screen`, aspect: paneAspect(f, srcW, srcH, "top"), auto: f.content ?? FULL_FRAME, current: s.contentCrop },
+        { key: "crop", name: t`Speaker`, aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop },
       ];
     }
-    return [{ key: "crop", name: "Crop", aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop }];
+    return [{ key: "crop", name: t`Crop`, aspect: paneAspect(f, srcW, srcH, 0), auto: auto(0), current: s.crop }];
   };
   const openCrop = (i: number, key: CropKey = "crop") => {
     const panes = cropPanesFor(i);
-    if (!panes.length) return void toast("This section shows the source as it is; pick a framing first");
+    if (!panes.length) return void toast(t`This section shows the source as it is; pick a framing first`);
     setCropDialog({ section: i, key: panes.some((p) => p.key === key) ? key : panes[0]!.key });
   };
   const applyCrop = (i: number, key: CropKey, region: ContentRegion | null) => {
@@ -1238,7 +1273,7 @@ export function ClipEditor(props: Props) {
         }),
       );
     } else setPane(i, key === "crop" ? 0 : 1, region ? { crop: region } : {});
-    toast(region ? `Crop set · ${regionLabel(region)} (re-render to apply)` : "Crop back to automatic");
+    toast(region ? t`Crop set · ${regionLabel(region)} (re-render to apply)` : t`Crop back to automatic`);
   };
   /** the preview's right-click menu on the picture: the crop of the pane under the pointer */
   const paneMenu = (hit: PaneHit) => {
@@ -1246,7 +1281,7 @@ export function ClipEditor(props: Props) {
     const s = sections[i]!;
     const key: CropKey = hit === "top" ? "contentCrop" : hit === 1 ? "crop2" : "crop";
     const lay = layoutOf(s, i);
-    const name = hit === "top" ? "Screen" : lay === "split" ? PANE_NAME[hit] : lay === "stack" ? "Speaker" : "Crop";
+    const name = hit === "top" ? t`Screen` : lay === "split" ? paneName(hit) : lay === "stack" ? t`Speaker` : t`Crop`;
     const fixed = key === "contentCrop" ? s.contentCrop : hit === 1 ? s.crop2 : s.crop;
     const adjusted =
       hit === "top"
@@ -1259,9 +1294,9 @@ export function ClipEditor(props: Props) {
       <>
         <OverlayMenuItem label={`${name}${fixed ? ` · ${regionLabel(fixed)}` : ""}`} disabled onSelect={() => {}} />
         <OverlayMenuSeparator />
-        <OverlayMenuItem icon={<Crop className="h-3.5 w-3.5" />} label="Set crop…" onSelect={() => openCrop(i, key)} />
+        <OverlayMenuItem icon={<Crop className="h-3.5 w-3.5" />} label={t`Set crop…`} onSelect={() => openCrop(i, key)} />
         <OverlayMenuItem
-          label="Back to automatic"
+          label={t`Back to automatic`}
           disabled={!adjusted}
           onSelect={() => (hit === "top" ? applyCrop(i, "contentCrop", null) : resetPane(i, hit))}
         />
@@ -1282,7 +1317,7 @@ export function ClipEditor(props: Props) {
     return [start, Number(Math.min(range[1], start + len).toFixed(2))];
   };
   const pushLayer = (l: ClipLayer, note: string) => {
-    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(t`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
     setLayers([...layers, l]);
     setSelectedLayer(l.id);
     if (current < l.start || current > l.end) seek(l.start);
@@ -1290,26 +1325,27 @@ export function ClipEditor(props: Props) {
     toast(note);
   };
   type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null | undefined; hasAudio?: boolean | undefined };
-  const addAssetLayer = (asset: NewLayerAsset, t: number) => {
+  const addAssetLayer = (asset: NewLayerAsset, at: number) => {
     const d = assetLayerDefaultsFor(asset);
-    const [start, end] = layerWindow(t, Math.min(d.windowSec, range[1] - t));
+    const [start, end] = layerWindow(at, Math.min(d.windowSec, range[1] - at));
+    const name = asset.name;
     pushLayer(
       { id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: d.y, w: d.w, ...(d.loop ? { loop: true } : {}) },
-      `${asset.name} added ${isStickerAsset(asset) ? "as an overlay" : "as b-roll"} · drag it on the preview`,
+      isStickerAsset(asset) ? t`${name} added as an overlay · drag it on the preview` : t`${name} added as b-roll · drag it on the preview`,
     );
   };
-  const addTextLayer = (t: number) => {
-    const [start, end] = layerWindow(t, 4);
+  const addTextLayer = (at: number) => {
+    const [start, end] = layerWindow(at, 4);
     pushLayer(
-      { id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color },
-      "Text added · type it in the Layers tab, drag it on the preview",
+      { id: newLayerId(), kind: "text", text: t`Your text`, start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color },
+      t`Text added · type it in the Layers tab, drag it on the preview`,
     );
   };
-  const addSoundLayer = (asset: NewLayerAsset, t: number) => {
+  const addSoundLayer = (asset: NewLayerAsset, at: number) => {
     const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec });
     const oneShot = defaults === SFX_AUDIO_DEFAULTS;
     // a one-shot sound lasts as long as the file; music starts at the playhead and runs to the end of the clip
-    const [start, end] = oneShot ? layerWindow(t, Math.max(0.5, asset.durationSec)) : layerWindow(t, range[1] - t);
+    const [start, end] = oneShot ? layerWindow(at, Math.max(0.5, asset.durationSec)) : layerWindow(at, range[1] - at);
     pushLayer(
       {
         id: newLayerId(),
@@ -1322,7 +1358,7 @@ export function ClipEditor(props: Props) {
         fade: defaults.fade,
         loop: defaults.loop,
       },
-      `${asset.name} plays from ${fmtPrecise(start - range[0])} · drag the block to move or shorten it`,
+      t`${asset.name} plays from ${fmtPrecise(start - range[0])} · drag the block to move or shorten it`,
     );
   };
   const removeLayer = (id: string) => {
@@ -1334,12 +1370,12 @@ export function ClipEditor(props: Props) {
     const i = layers.findIndex((l) => l.id === id);
     const l = layers[i];
     if (!l) return;
-    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(t`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
     const copy: ClipLayer =
       l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
     setLayers([...layers.slice(0, i + 1), copy, ...layers.slice(i + 1)]);
     setSelectedLayer(copy.id);
-    toast("Duplicated");
+    toast(t`Duplicated`);
   };
   /** layers are drawn in list order: last on top */
   const orderLayer = (id: string, where: "front" | "back") => {
@@ -1355,22 +1391,22 @@ export function ClipEditor(props: Props) {
     const whole = l.start <= range[0] + 0.01 && l.end >= range[1] - 0.01;
     return (
       <>
-        {o.kind === "text" && <OverlayMenuItem icon={<PencilLine className="h-3.5 w-3.5" />} label="Edit text" kbd="dbl-click" onSelect={ctx.editText} />}
+        {o.kind === "text" && <OverlayMenuItem icon={<PencilLine className="h-3.5 w-3.5" />} label={t`Edit text`} kbd={t`dbl-click`} onSelect={ctx.editText} />}
         <OverlayMenuItem
           icon={<AlignCenterHorizontal className="h-3.5 w-3.5" />}
-          label="Centre left / right"
+          label={t`Centre left / right`}
           disabled={l.x === 0.5}
           onSelect={() => patchLayer(l.id, { x: 0.5 })}
         />
         <OverlayMenuItem
           icon={<AlignCenterVertical className="h-3.5 w-3.5" />}
-          label="Centre up / down"
+          label={t`Centre up / down`}
           disabled={l.y === 0.5}
           onSelect={() => patchLayer(l.id, { y: 0.5 })}
         />
         <OverlayMenuItem
           icon={<Maximize2 className="h-3.5 w-3.5" />}
-          label="Show for the whole clip"
+          label={t`Show for the whole clip`}
           disabled={whole}
           onSelect={() => patchLayer(l.id, { start: range[0], end: range[1] })}
         />
@@ -1379,22 +1415,22 @@ export function ClipEditor(props: Props) {
             <OverlayMenuSeparator />
             <OverlayMenuItem
               icon={<BringToFront className="h-3.5 w-3.5" />}
-              label="Bring to front"
+              label={t`Bring to front`}
               disabled={layers[layers.length - 1]?.id === l.id}
               onSelect={() => orderLayer(l.id, "front")}
             />
             <OverlayMenuItem
               icon={<SendToBack className="h-3.5 w-3.5" />}
-              label="Send to back"
+              label={t`Send to back`}
               disabled={layers[0]?.id === l.id}
               onSelect={() => orderLayer(l.id, "back")}
             />
           </>
         )}
         <OverlayMenuSeparator />
-        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Copy" kbd="⌘C" onSelect={() => copyLayer(l)} />
-        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
-        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="Delete" onSelect={() => removeLayer(l.id)} />
+        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label={t`Copy`} kbd="⌘C" onSelect={() => copyLayer(l)} />
+        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label={t`Duplicate`} onSelect={() => duplicateLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label={t`Remove`} kbd={t`Delete`} onSelect={() => removeLayer(l.id)} />
       </>
     );
   };
@@ -1403,7 +1439,7 @@ export function ClipEditor(props: Props) {
       layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = assetById(l.assetId);
-        const name = a?.name ?? (assetsLoading ? "…" : "deleted");
+        const name = a?.name ?? (assetsLoading ? "…" : t`deleted`);
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name, kind: "audio" as const };
         return {
           id: l.id,
@@ -1415,7 +1451,7 @@ export function ClipEditor(props: Props) {
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layers, libraryAssets, assetsLoading],
+    [layers, libraryAssets, assetsLoading, t],
   );
   const previewOverlaysAt = (t: number): PreviewAssetOverlay[] =>
     layers
@@ -1510,7 +1546,14 @@ export function ClipEditor(props: Props) {
     } catch {
       /* private mode */
     }
-    toast(`Copied ${l.kind === "text" ? `“${l.text}”` : l.kind === "audio" ? "the sound" : "the layer"} · ⌘V pastes it at the playhead`);
+    const text = l.kind === "text" ? l.text : "";
+    toast(
+      l.kind === "text"
+        ? t`Copied “${text}” · ⌘V pastes it at the playhead`
+        : l.kind === "audio"
+          ? t`Copied the sound · ⌘V pastes it at the playhead`
+          : t`Copied the layer · ⌘V pastes it at the playhead`,
+    );
     return true;
   };
   const pasteSelection = () => {
@@ -1523,9 +1566,9 @@ export function ClipEditor(props: Props) {
     if (!raw) return false;
     const l = readClipboardLayer(raw);
     if (!l) return false;
-    const t = Math.max(range[0], Math.min(range[1] - 0.5, current));
+    const at = Math.max(range[0], Math.min(range[1] - 0.5, current));
     const len = l.end - l.start;
-    pushLayer({ ...l, id: newLayerId(), start: Number(t.toFixed(2)), end: Number(Math.min(range[1], t + len).toFixed(2)) }, "Pasted at the playhead");
+    pushLayer({ ...l, id: newLayerId(), start: Number(at.toFixed(2)), end: Number(Math.min(range[1], at + len).toFixed(2)) }, t`Pasted at the playhead`);
     return true;
   };
   /** "Browse library…" in the + menu: the catalog and providers in a dialog; an imported item lands on the lane at the playhead */
@@ -1552,7 +1595,10 @@ export function ClipEditor(props: Props) {
   };
   const still =
     selectedBumper && bumperBlocks[selectedBumper]?.thumbnailUrl
-      ? { url: bumperBlocks[selectedBumper]!.thumbnailUrl!, tag: `${selectedBumper === "intro" ? "Intro" : "Outro"} · ${bumperBlocks[selectedBumper]!.sec} s` }
+      ? {
+          url: bumperBlocks[selectedBumper]!.thumbnailUrl!,
+          tag: `${selectedBumper === "intro" ? t`Intro` : t`Outro`} · ${bumperBlocks[selectedBumper]!.sec} s`,
+        }
       : null;
 
   const clipWords = useMemo(
@@ -1707,13 +1753,13 @@ export function ClipEditor(props: Props) {
         guard.allowLeave();
         onExit();
         notifyDeleted({
-          items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
+          items: [{ kind: "clip", id: clip.id, title: title || t`Untitled clip` }],
           restorable: r.restorable,
           storedBytes: r.storedBytes,
           afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
         });
       },
-      (err: Error) => toast.error(`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
+      (err: Error) => toast.error(t`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
     );
 
   async function save(rerender: boolean): Promise<boolean> {
@@ -1735,7 +1781,7 @@ export function ClipEditor(props: Props) {
         rerender,
       });
       await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-      toast(rerender && needsRender ? (styleScope === "all" && styleChanged ? "Saved · re-rendering every clip" : "Saved · re-rendering") : "Saved");
+      toast(rerender && needsRender ? (styleScope === "all" && styleChanged ? t`Saved · re-rendering every clip` : t`Saved · re-rendering`) : t`Saved`);
       return true;
     } catch (err) {
       toast.error((err as Error).message);
@@ -1828,7 +1874,11 @@ export function ClipEditor(props: Props) {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ScrollArea className="min-h-0 flex-1" viewportRef={txViewport}>
         <div ref={txContent} className="flex flex-col gap-3 px-4 py-3" onMouseUp={() => setTimeout(readTxSelection, 0)}>
-          {txLines.length === 0 && <p className="text-ink3">No transcript around this clip.</p>}
+          {txLines.length === 0 && (
+            <p className="text-ink3">
+              <Trans>No transcript around this clip.</Trans>
+            </p>
+          )}
           {txLines.map(({ s, ws }, i) => {
             const outside = s.end < range[0] || s.start > range[1];
             return (
@@ -1863,23 +1913,25 @@ export function ClipEditor(props: Props) {
       </ScrollArea>
       {txSel && (
         <div className="absolute inset-x-3 bottom-3 z-10 flex items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-xs text-bg shadow-pop">
-          <span className="font-mono">{(txSel.end - txSel.start).toFixed(1)}s selected</span>
+          <span className="font-mono">
+            <Trans>{(txSel.end - txSel.start).toFixed(1)}s selected</Trans>
+          </span>
           <div className="flex-1" />
           <button
             className="rounded-[8px] bg-acc px-2.5 py-1 font-semibold text-acc-ink"
             onClick={() => {
-              if (txSel.end - txSel.start < 3) return void toast("Clips need at least 3s");
+              if (txSel.end - txSel.start < 3) return void toast(t`Clips need at least 3s`);
               window.getSelection()?.removeAllRanges();
               setRange([txSel.start - 0.1, txSel.end + 0.2]);
               seek(txSel.start);
               setTxSel(null);
-              toast("Range set from transcript");
+              toast(t`Range set from transcript`);
             }}
           >
-            Set range
+            <Trans>Set range</Trans>
           </button>
           <button
-            aria-label="Cancel"
+            aria-label={t`Cancel`}
             className="rounded-[8px] px-1.5 py-1 hover:bg-white/10"
             onClick={() => {
               window.getSelection()?.removeAllRanges();
@@ -1910,59 +1962,76 @@ export function ClipEditor(props: Props) {
     v.play().catch((err) => reportClientError("error", err));
   };
   const fadesSection = (
-    <div className="flex flex-col gap-3 border-t border-line pt-4" aria-label="Fades">
+    <div className="flex flex-col gap-3 border-t border-line pt-4" aria-label={t`Fades`}>
       <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold">Fades</span>
+        <span className="text-[13px] font-semibold">
+          <Trans>Fades</Trans>
+        </span>
         <span className="flex gap-1">
-          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("start")} title="Play the first seconds with the fade">
-            Play start
+          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("start")} title={t`Play the first seconds with the fade`}>
+            <Trans>Play start</Trans>
           </button>
-          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("end")} title="Play the last seconds with the fade">
-            Play end
+          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => playEdge("end")} title={t`Play the last seconds with the fade`}>
+            <Trans>Play end</Trans>
           </button>
         </span>
       </div>
       {/* one per row: four presets do not fit two abreast in the inspector's width */}
       <div className="flex flex-col gap-3">
-        <Field label={bumperBlocks.intro ? "Fade in (on the intro)" : "Fade in"} hint={<span className="font-mono">{fadeText(style.fadeIn)}</span>}>
-          <FadePresets ariaLabel="Fade in from black" value={style.fadeIn} onChange={(sec) => setStyle({ fadeIn: sec })} />
+        <Field label={bumperBlocks.intro ? t`Fade in (on the intro)` : t`Fade in`} hint={<span className="font-mono">{fadeText(style.fadeIn)}</span>}>
+          <FadePresets ariaLabel={t`Fade in from black`} value={style.fadeIn} onChange={(sec) => setStyle({ fadeIn: sec })} />
         </Field>
-        <Field label={bumperBlocks.outro ? "Fade out (on the outro)" : "Fade out"} hint={<span className="font-mono">{fadeText(style.fadeOut)}</span>}>
-          <FadePresets ariaLabel="Fade out to black" value={style.fadeOut} onChange={(sec) => setStyle({ fadeOut: sec })} />
+        <Field label={bumperBlocks.outro ? t`Fade out (on the outro)` : t`Fade out`} hint={<span className="font-mono">{fadeText(style.fadeOut)}</span>}>
+          <FadePresets ariaLabel={t`Fade out to black`} value={style.fadeOut} onChange={(sec) => setStyle({ fadeOut: sec })} />
         </Field>
       </div>
       <Field
-        label="Intro and outro join"
-        hint={hasBumper ? <span className="font-mono">{joins ? fadeText(style.bumperTransitionSec) : ""}</span> : <span>no intro or outro</span>}
+        label={t`Intro and outro join`}
+        hint={
+          hasBumper ? (
+            <span className="font-mono">{joins ? fadeText(style.bumperTransitionSec) : ""}</span>
+          ) : (
+            <span>
+              <Trans>no intro or outro</Trans>
+            </span>
+          )
+        }
       >
         <Segmented
           size="sm"
-          ariaLabel="How the intro and outro join the clip"
+          ariaLabel={t`How the intro and outro join the clip`}
           disabled={!hasBumper}
           value={style.bumperTransition}
           onChange={(v) => setStyle({ bumperTransition: v })}
-          options={BUMPER_TRANSITIONS.map((t) => ({
-            value: t,
-            label: BUMPER_TRANSITION_LABEL[t],
-            title: t === "cut" ? "Straight cut" : t === "dip" ? "Fades through black; the length stays the same" : "The two overlap, so the video gets shorter",
+          options={BUMPER_TRANSITIONS.map((kind) => ({
+            value: kind,
+            label: TRANSITION_NAME[kind],
+            title:
+              kind === "cut"
+                ? t`Straight cut`
+                : kind === "dip"
+                  ? t`Fades through black; the length stays the same`
+                  : t`The two overlap, so the video gets shorter`,
           }))}
         />
         {/* always in place, greyed out for a cut, so choosing a transition never pushes the panel down */}
         <FadePresets
-          ariaLabel="Length of the intro and outro join"
+          ariaLabel={t`Length of the intro and outro join`}
           disabled={!hasBumper || !joins}
           value={style.bumperTransitionSec}
           onChange={(sec) => setStyle({ bumperTransitionSec: sec })}
           presets={[
-            { sec: 0.3, label: "Quick" },
-            { sec: 0.6, label: "Smooth" },
-            { sec: 1, label: "Slow" },
+            { sec: 0.3, label: t`Quick` },
+            { sec: 0.6, label: t`Smooth` },
+            { sec: 1, label: t`Slow` },
           ]}
         />
       </Field>
       <p className="text-[11px] leading-snug text-ink3">
-        Picture and sound fade together. The first second is your hook, so keep a fade-in quick; a fade-out leaves a black frame where TikTok and Reels loop the
-        video. Plays here while the clip plays; needs a re-render.
+        <Trans>
+          Picture and sound fade together. The first second is your hook, so keep a fade-in quick; a fade-out leaves a black frame where TikTok and Reels loop
+          the video. Plays here while the clip plays; needs a re-render.
+        </Trans>
       </p>
     </div>
   );
@@ -1971,10 +2040,12 @@ export function ClipEditor(props: Props) {
     <div className="flex flex-col gap-5">
       {/* the follow-up action lives in the label row's reserved slot, so toggling never pushes the panel down */}
       <Field
-        label="Apply style to"
+        label={t`Apply style to`}
         hint={
           styleScope === "all" ? (
-            <span>re-renders every clip</span>
+            <span>
+              <Trans>re-renders every clip</Trans>
+            </span>
           ) : (
             <button
               className={`text-xs font-semibold text-acc-text ${Object.keys(styleOverride).length > 0 ? "" : "invisible"}`}
@@ -1982,7 +2053,7 @@ export function ClipEditor(props: Props) {
               tabIndex={Object.keys(styleOverride).length > 0 ? 0 : -1}
               onClick={() => edit({ style: projectStyle })}
             >
-              Use the project style
+              <Trans>Use the project style</Trans>
             </button>
           )
         }
@@ -1991,15 +2062,15 @@ export function ClipEditor(props: Props) {
           value={styleScope}
           onChange={setStyleScope}
           options={[
-            { value: "clip", label: "This clip" },
-            { value: "all", label: `All ${clipCount} clips`, title: "Updates the project style and re-renders every clip" },
+            { value: "clip", label: t`This clip` },
+            { value: "all", label: t`All ${clipCount} clips`, title: t`Updates the project style and re-renders every clip` },
           ]}
         />
       </Field>
-      <Field label="Shape" hint={<span>{SHAPE_LABEL[style.shape]}</span>}>
+      <Field label={t`Shape`} hint={<span>{SHAPE_NAME[style.shape]}</span>}>
         <Segmented
           size="sm"
-          ariaLabel="Shape of the video"
+          ariaLabel={t`Shape of the video`}
           value={style.shape}
           onChange={(v) => setStyle({ shape: v })}
           options={OUTPUT_SHAPES.map((s) => ({
@@ -2007,21 +2078,21 @@ export function ClipEditor(props: Props) {
             label: s,
             title:
               s === "9:16"
-                ? "TikTok, Shorts, Reels"
+                ? t`TikTok, Shorts, Reels`
                 : s === "16:9"
-                  ? "YouTube, websites: split and stack sections show the whole frame"
-                  : "Instagram and LinkedIn feeds",
+                  ? t`YouTube, websites: split and stack sections show the whole frame`
+                  : t`Instagram and LinkedIn feeds`,
           }))}
         />
       </Field>
-      <Field label="Look">
+      <Field label={t`Look`}>
         <div className="grid grid-cols-4 gap-2">
           {(
             [
-              ["karaoke", "Highlight"],
-              ["box", "Boxed"],
-              ["plain", "Outlined"],
-              ["none", "Off"],
+              ["karaoke", t`Highlight`],
+              ["box", t`Boxed`],
+              ["plain", t`Outlined`],
+              ["none", t`Off`],
             ] as const
           ).map(([v, l]) => (
             <button
@@ -2041,7 +2112,7 @@ export function ClipEditor(props: Props) {
                         : { color: "var(--ink3)", textDecoration: "line-through" }
                 }
               >
-                Aa
+                {"Aa"}
               </span>
               {l}
             </button>
@@ -2050,9 +2121,16 @@ export function ClipEditor(props: Props) {
       </Field>
       {style.captions !== "none" && (
         <>
-          <Field label="Font" hint={<span>captions and hook</span>}>
+          <Field
+            label={t`Font`}
+            hint={
+              <span>
+                <Trans>captions and hook</Trans>
+              </span>
+            }
+          >
             <Select
-              ariaLabel="Caption font"
+              ariaLabel={t`Caption font`}
               // "" is what the clip falls back to: for one clip the project's font (a null override would resolve to it
               // anyway), for the whole project the instance's
               value={(styleScope === "clip" ? (style.font ?? null) === (projectStyle.font ?? null) : !style.font) ? "" : (style.font ?? "")}
@@ -2060,14 +2138,14 @@ export function ClipEditor(props: Props) {
               options={[
                 {
                   value: "",
-                  label: styleScope === "clip" ? `Project's font (${projectStyle.font ?? fonts.defaultFamily})` : `Default (${fonts.defaultFamily})`,
+                  label: styleScope === "clip" ? t`Project's font (${projectStyle.font ?? fonts.defaultFamily})` : t`Default (${fonts.defaultFamily})`,
                 },
                 ...fontOptions(fonts.fonts),
               ]}
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Size">
+            <Field label={t`Size`}>
               <Segmented
                 size="sm"
                 value={SIZES.find((x) => Math.abs(x.v - style.captionSize) < 0.06)?.v ?? -1}
@@ -2075,7 +2153,7 @@ export function ClipEditor(props: Props) {
                 options={SIZES.map((x) => ({ value: x.v, label: x.l }))}
               />
             </Field>
-            <Field label="Words on screen" hint={<span className="font-mono">{style.wordsPerLine}</span>}>
+            <Field label={t`Words on screen`} hint={<span className="font-mono">{style.wordsPerLine}</span>}>
               <input
                 type="range"
                 min={1}
@@ -2088,8 +2166,8 @@ export function ClipEditor(props: Props) {
             </Field>
           </div>
           {style.captions === "karaoke" || style.captions === "box" ? (
-            <Field label="Highlight">
-              <Swatches label="Highlight" colors={HL} value={style.highlightColor} onChange={(c) => setStyle({ highlightColor: c })} />
+            <Field label={t`Highlight`}>
+              <Swatches label={t`Highlight`} colors={HL} value={style.highlightColor} onChange={(c) => setStyle({ highlightColor: c })} />
             </Field>
           ) : null}
           <Field
@@ -2097,20 +2175,24 @@ export function ClipEditor(props: Props) {
               <Switch
                 checked={style.emphasis}
                 onChange={(v) => setStyle({ emphasis: v })}
-                label={<span className="text-xs font-semibold text-ink2">Key words</span>}
+                label={
+                  <span className="text-xs font-semibold text-ink2">
+                    <Trans>Key words</Trans>
+                  </span>
+                }
               />
             }
           >
             {(style.emphasis || style.punchIn) && (
               <>
-                {style.emphasis && <Swatches label="Key word" colors={KW} value={style.emphasisColor} onChange={(c) => setStyle({ emphasisColor: c })} />}
+                {style.emphasis && <Swatches label={t`Key word`} colors={KW} value={style.emphasisColor} onChange={(c) => setStyle({ emphasisColor: c })} />}
                 <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] border border-line bg-panel p-1.5">
                   {emphasis.map((w, i) => (
                     <span key={w} className="inline-flex items-center gap-1 rounded-full bg-sunk py-0.5 ps-2.5 pe-1 text-xs font-semibold">
                       {w}
                       <button
                         className="grid h-4 w-4 place-items-center rounded-full text-ink3 hover:bg-line hover:text-ink"
-                        aria-label={`Remove ${w}`}
+                        aria-label={t`Remove ${w}`}
                         onClick={() => edit((d) => ({ emphasis: d.emphasis.filter((_, j) => j !== i) }))}
                       >
                         <X className="h-3 w-3" />
@@ -2119,7 +2201,7 @@ export function ClipEditor(props: Props) {
                   ))}
                   <input
                     className="min-w-[90px] flex-1 bg-transparent px-1 py-0.5 text-xs outline-none placeholder:text-ink3"
-                    placeholder="Add key word…"
+                    placeholder={t`Add key word…`}
                     value={kwDraft}
                     onChange={(e) => setKwDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -2143,7 +2225,11 @@ export function ClipEditor(props: Props) {
               <Switch
                 checked={style.punchIn}
                 onChange={(v) => setStyle({ punchIn: v })}
-                label={<span className="text-xs font-semibold text-ink2">Zoom in on key words</span>}
+                label={
+                  <span className="text-xs font-semibold text-ink2">
+                    <Trans>Zoom in on key words</Trans>
+                  </span>
+                }
               />
             }
             hint={style.punchIn ? <span className="font-mono">{style.punchInScale.toFixed(2)}x</span> : undefined}
@@ -2158,19 +2244,25 @@ export function ClipEditor(props: Props) {
                   value={style.punchInScale}
                   onChange={(e) => setStyle({ punchInScale: Number(e.target.value) }, "punchin")}
                   className="accent-[var(--acc)]"
-                  aria-label="Zoom amount"
+                  aria-label={t`Zoom amount`}
                 />
                 <p className="text-[11px] text-ink3">
-                  {punchIns.length ? `${plural(punchIns.length, "zoom")}: ${punchIns.map((z) => z.word).join(", ")}.` : "No key word fits a zoom in this clip."}{" "}
-                  Face and centre crops only, once per word, never across a cut or a change of framing.
+                  {punchIns.length ? (
+                    <Trans>
+                      <Plural value={punchIns.length} one="# zoom" other="# zooms" />: {punchIns.map((z) => z.word).join(", ")}.
+                    </Trans>
+                  ) : (
+                    <Trans>No key word fits a zoom in this clip.</Trans>
+                  )}{" "}
+                  <Trans>Face and centre crops only, once per word, never across a cut or a change of framing.</Trans>
                 </p>
               </>
             )}
           </Field>
-          <Switch checked={style.uppercase} onChange={(v) => setStyle({ uppercase: v })} label="Uppercase" />
+          <Switch checked={style.uppercase} onChange={(v) => setStyle({ uppercase: v })} label={t`Uppercase`} />
           <div className="flex items-center justify-between gap-2 text-[13px]">
             <span>
-              Caption position{" "}
+              <Trans>Caption position</Trans>{" "}
               <span className="font-mono text-xs text-ink3">
                 x {Math.round(style.captionX * 100)}% · y {Math.round(style.captionY * 100)}%
               </span>
@@ -2180,17 +2272,17 @@ export function ClipEditor(props: Props) {
               disabled={style.captionX === defaultStyle.captionX && style.captionY === defaultStyle.captionY}
               onClick={() => setStyle({ captionX: defaultStyle.captionX, captionY: defaultStyle.captionY })}
             >
-              Reset
+              <Trans>Reset</Trans>
             </button>
           </div>
-          <Switch checked={style.captionSeam} onChange={(v) => setStyle({ captionSeam: v })} label="Between the panes in split and stack sections" />
+          <Switch checked={style.captionSeam} onChange={(v) => setStyle({ captionSeam: v })} label={t`Between the panes in split and stack sections`} />
         </>
       )}
       <div className="flex flex-col gap-3 border-t border-line pt-4">
-        <Switch checked={style.showHook} onChange={(v) => setStyle({ showHook: v })} label="Hook text" />
+        <Switch checked={style.showHook} onChange={(v) => setStyle({ showHook: v })} label={t`Hook text`} />
         {style.showHook && (
           <>
-            <Field label="Show for" hint={<span className="font-mono">{style.hookSeconds}s</span>}>
+            <Field label={t`Show for`} hint={<span className="font-mono">{style.hookSeconds}s</span>}>
               <input
                 type="range"
                 min={1}
@@ -2203,19 +2295,21 @@ export function ClipEditor(props: Props) {
             </Field>
             <div className="flex items-center justify-between gap-2 text-[13px]">
               <span>
-                Hook position <span className="font-mono text-xs text-ink3">y {Math.round(style.hookY * 100)}%</span>
+                <Trans>Hook position</Trans> <span className="font-mono text-xs text-ink3">y {Math.round(style.hookY * 100)}%</span>
               </span>
               <button
                 className="btn-ghost px-2.5 py-1 text-xs"
                 disabled={style.hookX === defaultStyle.hookX && style.hookY === defaultStyle.hookY}
                 onClick={() => setStyle({ hookX: defaultStyle.hookX, hookY: defaultStyle.hookY })}
               >
-                Reset
+                <Trans>Reset</Trans>
               </button>
             </div>
           </>
         )}
-        <p className="text-[11px] text-ink3">Drag the caption or hook on the preview to move them. They snap to the centre; hold Alt to place freely.</p>
+        <p className="text-[11px] text-ink3">
+          <Trans>Drag the caption or hook on the preview to move them. They snap to the centre; hold Alt to place freely.</Trans>
+        </p>
       </div>
       {fadesSection}
     </div>
@@ -2225,28 +2319,28 @@ export function ClipEditor(props: Props) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
         <button className="btn-ghost text-xs" onClick={() => splitAt(current)}>
-          Split at playhead <span className="font-mono text-ink3">{SPLIT_SHORTCUT}</span>
+          <Trans>Split at playhead</Trans> <span className="font-mono text-ink3">{SPLIT_SHORTCUT}</span>
         </button>
         <button className="btn-ghost text-xs" disabled={selected === null || selected <= 0} onClick={() => selected !== null && mergeSection(selected, "left")}>
-          Merge with previous
+          <Trans>Merge with previous</Trans>
         </button>
         {!followsProject && (
           <button
             className="btn-quiet text-xs"
             onClick={resetLayout}
-            title={projectFramed ? "Back to the framing every clip of this project gets" : "Back to automatic framing"}
+            title={projectFramed ? t`Back to the framing every clip of this project gets` : t`Back to automatic framing`}
           >
-            {projectFramed ? "Use the project framing" : "Reset all to auto"}
+            {projectFramed ? t`Use the project framing` : t`Reset all to auto`}
           </button>
         )}
         {clipCount > 1 && (
           <button
             className="btn-ghost text-xs"
             disabled={busy}
-            title="Give every clip of this project the framing of the section under the playhead (and new clips too); re-renders them all"
+            title={t`Give every clip of this project the framing of the section under the playhead (and new clips too); re-renders them all`}
             onClick={() => setApplyAll(secIdx)}
           >
-            Use for all {clipCount} clips…
+            <Trans>Use for all {clipCount} clips…</Trans>
           </button>
         )}
       </div>
@@ -2255,9 +2349,13 @@ export function ClipEditor(props: Props) {
         const explain =
           s.mode === "auto"
             ? chose
-              ? `Auto chose ${chose}${chose.includes("Two stacked") ? ": both speakers in frame" : chose === "Follow speaker" ? ": tracking whoever talks" : ""}.`
-              : "Auto decides at render: follow the speaker, two stacked for two people, screen + speaker for a webcam over a screen (or an app screen or title card beside the speaker), whole frame when nobody is on screen."
-            : `${MODE_EXPLAIN[s.mode] ?? ""} ${chose ? `Auto would choose ${chose}.` : ""}`;
+              ? chose.includes(MODE_LABEL["split"] ?? "split")
+                ? t`Auto chose ${chose}: both speakers in frame.`
+                : chose === MODE_LABEL["face"]
+                  ? t`Auto chose ${chose}: tracking whoever talks.`
+                  : t`Auto chose ${chose}.`
+              : t`Auto decides at render: follow the speaker, two stacked for two people, screen + speaker for a webcam over a screen (or an app screen or title card beside the speaker), whole frame when nobody is on screen.`
+            : `${MODE_EXPLAIN[s.mode] ?? ""} ${chose ? t`Auto would choose ${chose}.` : ""}`;
         return (
           <div
             key={i}
@@ -2274,7 +2372,7 @@ export function ClipEditor(props: Props) {
               <Select
                 size="sm"
                 className="ms-auto w-[9.5rem]"
-                ariaLabel="Section mode"
+                ariaLabel={t`Section mode`}
                 value={s.mode}
                 onClick={(e) => e.stopPropagation()}
                 onValueChange={(v) => setMode(i, v as SectionMode)}
@@ -2290,22 +2388,24 @@ export function ClipEditor(props: Props) {
               const cropBtn = (key: CropKey) => (
                 <button
                   className="font-semibold text-acc-text"
-                  title="Fix this pane to an exact part of the source"
+                  title={t`Fix this pane to an exact part of the source`}
                   onClick={(e) => {
                     e.stopPropagation();
                     openCrop(i, key);
                   }}
                 >
-                  Crop…
+                  <Trans>Crop…</Trans>
                 </button>
               );
               return (
                 <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
                   {lay === "stack" && (
                     <>
-                      <span className="text-ink3">Screen</span>
+                      <span className="text-ink3">
+                        <Trans>Screen</Trans>
+                      </span>
                       <span className={`truncate font-mono ${s.contentCrop ? "text-ink" : "text-ink3"}`}>
-                        {s.contentCrop ? `crop ${regionLabel(s.contentCrop)}` : "whole frame or what was detected"}
+                        {s.contentCrop ? t`crop ${regionLabel(s.contentCrop)}` : t`whole frame or what was detected`}
                       </span>
                       {cropBtn("contentCrop")}
                       <button
@@ -2316,20 +2416,20 @@ export function ClipEditor(props: Props) {
                           applyCrop(i, "contentCrop", null);
                         }}
                       >
-                        Reset
+                        <Trans>Reset</Trans>
                       </button>
                     </>
                   )}
                   {panes.map((pane) => {
                     const a = paneOf(s, pane);
                     const has = !!(a.offsetX || a.offsetY || a.subjectX !== undefined || a.crop);
-                    const label = has ? adjustLabel({ offsetX: a.offsetX, offsetY: a.offsetY, subjectX: a.subjectX, crop: a.crop }) : "follows the speaker";
+                    const label = has ? adjustLabel({ offsetX: a.offsetX, offsetY: a.offsetY, subjectX: a.subjectX, crop: a.crop }) : t`follows the speaker`;
                     return (
                       <Fragment key={pane}>
-                        <span className="text-ink3">{n === 2 ? PANE_NAME[pane] : lay === "stack" ? "Speaker" : "Crop"}</span>
+                        <span className="text-ink3">{n === 2 ? paneName(pane) : lay === "stack" ? t`Speaker` : t`Crop`}</span>
                         <span
                           className={`truncate font-mono ${has ? "text-ink" : "text-ink3"}`}
-                          title={a.subjectX !== undefined ? "Follows the person at this position (fixed there when nobody is found)" : undefined}
+                          title={a.subjectX !== undefined ? t`Follows the person at this position (fixed there when nobody is found)` : undefined}
                         >
                           {label}
                         </span>
@@ -2342,15 +2442,19 @@ export function ClipEditor(props: Props) {
                             resetPane(i, pane);
                           }}
                         >
-                          Reset
+                          <Trans>Reset</Trans>
                         </button>
                       </Fragment>
                     );
                   })}
                   {!panes.length && (
                     <>
-                      <span className="text-ink3">Crop</span>
-                      <span className="truncate font-mono text-ink3">the whole frame</span>
+                      <span className="text-ink3">
+                        <Trans>Crop</Trans>
+                      </span>
+                      <span className="truncate font-mono text-ink3">
+                        <Trans>the whole frame</Trans>
+                      </span>
                       {cropBtn("crop")}
                       <span />
                     </>
@@ -2362,8 +2466,10 @@ export function ClipEditor(props: Props) {
         );
       })}
       <p className="text-[11px] leading-snug text-ink3">
-        Drag the picture to re-centre the section under the playhead; in a split, drag either speaker. Drop a pane on someone else and it follows them instead.
-        On the timeline: drag a transition to move it, double-click to remove it, right-click for more.
+        <Trans>
+          Drag the picture to re-centre the section under the playhead; in a split, drag either speaker. Drop a pane on someone else and it follows them
+          instead. On the timeline: drag a transition to move it, double-click to remove it, right-click for more.
+        </Trans>
       </p>
     </div>
   );
@@ -2372,30 +2478,32 @@ export function ClipEditor(props: Props) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-ghost text-xs" disabled={layers.length >= MAX_CLIP_LAYERS} onClick={() => setPicker({ kind: "asset", t: current })}>
-          <ImageIcon className="h-3.5 w-3.5" /> Image or video
+          <ImageIcon className="h-3.5 w-3.5" /> <Trans>Image or video</Trans>
         </button>
         <button className="btn-ghost text-xs" disabled={layers.length >= MAX_CLIP_LAYERS} onClick={() => addTextLayer(current)}>
-          <Type className="h-3.5 w-3.5" /> Text
+          <Type className="h-3.5 w-3.5" /> <Trans>Text</Trans>
         </button>
         <button
           className="btn-ghost text-xs"
           disabled={layers.length >= MAX_CLIP_LAYERS}
           onClick={() => setPicker({ kind: "audio", t: current })}
-          title="Music or a sound effect from the playhead"
+          title={t`Music or a sound effect from the playhead`}
         >
-          <MusicIcon className="h-3.5 w-3.5" /> Sound
+          <MusicIcon className="h-3.5 w-3.5" /> <Trans>Sound</Trans>
         </button>
-        <button className="btn-ghost text-xs" onClick={() => setTemplateOpen(true)} title="A saved set of layers, fitted to this clip's length">
-          <LayoutTemplate className="h-3.5 w-3.5" /> Template
+        <button className="btn-ghost text-xs" onClick={() => setTemplateOpen(true)} title={t`A saved set of layers, fitted to this clip's length`}>
+          <LayoutTemplate className="h-3.5 w-3.5" /> <Trans>Template</Trans>
         </button>
-        <span className="ms-auto text-[11px] text-ink3" title="Layers on this clip">
+        <span className="ms-auto text-[11px] text-ink3" title={t`Layers on this clip`}>
           {layers.length}/{MAX_CLIP_LAYERS}
         </span>
       </div>
       {layers.length === 0 && (
         <p className="text-xs leading-snug text-ink2">
-          A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole
-          template of them fitted to the clip. Captions stay on top of images and video.
+          <Trans>
+            A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole
+            template of them fitted to the clip. Captions stay on top of images and video.
+          </Trans>
         </p>
       )}
       {[...layers]
@@ -2421,14 +2529,16 @@ export function ClipEditor(props: Props) {
         <button
           className="btn-ghost self-start text-xs"
           onClick={() => setSaveTemplateOpen(true)}
-          title="Save these layers, with the clip's intro and outro, as a template to use on other clips, whatever their length"
+          title={t`Save these layers, with the clip's intro and outro, as a template to use on other clips, whatever their length`}
         >
-          <LayoutTemplate className="h-3.5 w-3.5" /> Save as template…
+          <LayoutTemplate className="h-3.5 w-3.5" /> <Trans>Save as template…</Trans>
         </button>
       )}
       <p className="text-[11px] leading-snug text-ink3">
-        Drag a picture or text on the preview to move it, its corner to resize it. On the timeline: drag a block to move it, its edges to trim it, double-click
-        the lane to add one.
+        <Trans>
+          Drag a picture or text on the preview to move it, its corner to resize it. On the timeline: drag a block to move it, its edges to trim it,
+          double-click the lane to add one.
+        </Trans>
       </p>
     </div>
   );
@@ -2448,30 +2558,30 @@ export function ClipEditor(props: Props) {
 
   const textTab = (
     <div className="flex flex-col gap-4">
-      <Field label="Title" hint={`${title.length}/120`}>
+      <Field label={t`Title`} hint={`${title.length}/120`}>
         <input className="input" value={title} maxLength={120} onChange={(e) => edit({ title: e.target.value }, "title")} />
       </Field>
       <Field
-        label="On-screen hook"
+        label={t`On-screen hook`}
         hint={
           <span className={hookChanged ? "text-warn" : ""}>
-            {hook.length}/80{hookChanged ? " · needs re-render" : ""}
+            {hook.length}/80{hookChanged ? ` · ${t`needs re-render`}` : ""}
           </span>
         }
       >
         <input className="input" value={hook} maxLength={80} onChange={(e) => edit({ hook: e.target.value }, "hook")} />
       </Field>
-      <Field label="Post caption" hint={`${caption.length}/300 · no re-render needed`}>
+      <Field label={t`Post caption`} hint={t`${caption.length}/300 · no re-render needed`}>
         <textarea className="input resize-none" rows={4} value={caption} maxLength={300} onChange={(e) => edit({ caption: e.target.value }, "caption")} />
       </Field>
-      <Field label="Hashtags" hint="no re-render needed">
+      <Field label={t`Hashtags`} hint={t`no re-render needed`}>
         <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] border border-line bg-panel p-1.5">
           {hashtags.map((h, i) => (
             <span key={`${h}${i}`} className="inline-flex items-center gap-1 rounded-full bg-acc-soft py-0.5 ps-2.5 pe-1 text-xs font-semibold text-acc-text">
               #{h}
               <button
                 className="grid h-4 w-4 place-items-center rounded-full hover:bg-acc/20"
-                aria-label={`Remove #${h}`}
+                aria-label={t`Remove #${h}`}
                 onClick={() => edit((d) => ({ hashtags: d.hashtags.filter((_, j) => j !== i) }))}
               >
                 <X className="h-3 w-3" />
@@ -2480,7 +2590,7 @@ export function ClipEditor(props: Props) {
           ))}
           <input
             className="min-w-[90px] flex-1 bg-transparent px-1 py-0.5 text-xs outline-none placeholder:text-ink3"
-            placeholder="#add"
+            placeholder={t`#add`}
             value={tagDraft}
             onChange={(e) => setTagDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -2510,38 +2620,73 @@ export function ClipEditor(props: Props) {
         const refused = applied ? skipped.find((s) => Math.abs(s.start - f.start) < 0.35) : undefined;
         const outcome = applied && clip.diagnostics ? cutState(f, [{ startSec: clip.startSec, endSec: clip.endSec, diagnostics: clip.diagnostics }]) : null;
         const unverified = outcome?.state === "unverified" ? outcome : undefined;
-        const label = refused ? "▲ Kept in audio" : unverified ? "▲ Cut unverified" : applied ? "Cut" : f.status === "pending" ? "Needs review" : "Kept";
+        const label = refused ? t`▲ Kept in audio` : unverified ? t`▲ Cut unverified` : applied ? t`Cut` : f.status === "pending" ? t`Needs review` : t`Kept`;
         const tone = refused || unverified || f.status === "pending" ? "bg-warn-soft" : applied ? "bg-ok-soft" : "bg-sunk";
+        const sure = Math.round(f.confidence * 100);
         const reason = refused
-          ? "The removal couldn’t be verified, so the audio was kept. Captions still drop the word."
+          ? t`The removal couldn’t be verified, so the audio was kept. Captions still drop the word.`
           : unverified
             ? cutStateTitle(unverified)
             : f.status === "pending"
-              ? "Waiting for your call in the project transcript."
+              ? t`Waiting for your call in the project transcript.`
               : f.status === "rejected"
-                ? "You kept it."
+                ? t`You kept it.`
                 : f.subkind === "manual"
-                  ? "You marked this to cut."
-                  : `${f.subkind === "repair" ? "False start" : f.subkind === "repetition" ? "Repeated word" : "Filler"} · ${Math.round(f.confidence * 100)}% confident.`;
-        return { f, label, tone, reason, refused, unverified: !!unverified };
+                  ? t`You marked this to cut.`
+                  : f.subkind === "repair"
+                    ? t`False start · ${sure}% confident.`
+                    : f.subkind === "repetition"
+                      ? t`Repeated word · ${sure}% confident.`
+                      : t`Filler · ${sure}% confident.`;
+        return { f, label, tone, reason, refused, cut: applied && !refused && !unverified, unverified: !!unverified };
       });
-  }, [flags, range, clip.diagnostics]);
-  const nCut = cuts.filter((c) => c.label === "Cut" || c.unverified).length;
+  }, [flags, range, clip.diagnostics, t]);
+  const nCut = cuts.filter((c) => c.cut || c.unverified).length;
   const nKept = cuts.filter((c) => c.refused).length;
   const nUnverified = cuts.filter((c) => c.unverified).length;
   const pauses = clip.diagnostics?.pauses;
   const cutsTab = (
     <div className="flex flex-col gap-3">
       <p className="text-[13px] leading-snug text-ink2">
-        {cuts.length
-          ? `${plural(nCut, "cut")} applied${nUnverified ? ` (▲ ${nUnverified} without a seam check)` : ""}${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}`
-          : "No disfluencies in this range."}
-        {pauses?.cuts ? ` ${plural(pauses.cuts, "pause")} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).` : ""}
-        {pauses?.skipped === "mostly-sound"
-          ? ` Pauses kept: most of this clip is sound without speech (gameplay, music), and trimming it would have removed ${(pauses.wouldRemoveSec ?? 0).toFixed(1)}s.`
-          : pauses?.keptSound
-            ? ` ${plural(pauses.keptSound, "gap")} without speech kept because ${pauses.keptSound === 1 ? "it isn’t" : "they aren’t"} quiet.`
-            : ""}
+        {cuts.length ? (
+          <>
+            <Plural value={nCut} one="# cut applied" other="# cuts applied" />
+            {nUnverified ? <Trans> (▲ {nUnverified} without a seam check)</Trans> : ""}
+            {nKept ? <Trans>; {nKept} kept because removal couldn’t be verified. Captions still drop the word.</Trans> : "."}
+          </>
+        ) : (
+          <Trans>No disfluencies in this range.</Trans>
+        )}
+        {pauses?.cuts ? (
+          <>
+            {" "}
+            <Trans>
+              <Plural value={pauses.cuts} one="# pause" other="# pauses" /> shortened to {pauses.maxPause}s ({pauses.removedSec.toFixed(1)}s removed).
+            </Trans>
+          </>
+        ) : (
+          ""
+        )}
+        {pauses?.skipped === "mostly-sound" ? (
+          <>
+            {" "}
+            <Trans>
+              Pauses kept: most of this clip is sound without speech (gameplay, music), and trimming it would have removed{" "}
+              {(pauses.wouldRemoveSec ?? 0).toFixed(1)}s.
+            </Trans>
+          </>
+        ) : pauses?.keptSound ? (
+          <>
+            {" "}
+            <Plural
+              value={pauses.keptSound}
+              one="# gap without speech kept because it isn’t quiet."
+              other="# gaps without speech kept because they aren’t quiet."
+            />
+          </>
+        ) : (
+          ""
+        )}
       </p>
       {cuts.map(({ f, label, tone, reason }) => (
         <div
@@ -2564,25 +2709,27 @@ export function ClipEditor(props: Props) {
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
             className="w-max text-xs font-semibold text-acc-text no-underline"
-            title="Review this cut in the project transcript (new tab)"
+            title={t`Review this cut in the project transcript (new tab)`}
           >
-            Open in transcript ↗
+            <Trans>Open in transcript ↗</Trans>
           </a>
         </div>
       ))}
       {cuts.length ? (
-        <p className="text-[11px] text-ink3">Accept or reject cuts in the project transcript; they apply to every clip that contains them.</p>
+        <p className="text-[11px] text-ink3">
+          <Trans>Accept or reject cuts in the project transcript; they apply to every clip that contains them.</Trans>
+        </p>
       ) : (
         <p className="text-[11px] leading-snug text-ink3">
-          To cut a stumble or a pause yourself, select it in the project transcript and choose Cut; it applies to every clip that contains it.{" "}
+          <Trans>To cut a stumble or a pause yourself, select it in the project transcript and choose Cut; it applies to every clip that contains it.</Trans>{" "}
           <a
             href={`/p/${projectId}#sel=${range[0].toFixed(2)}-${range[1].toFixed(2)}`}
             target="_blank"
             rel="noreferrer"
             className="font-semibold text-acc-text no-underline"
-            title="The project transcript with this clip's words selected (new tab)"
+            title={t`The project transcript with this clip's words selected (new tab)`}
           >
-            Open this clip in the transcript ↗
+            <Trans>Open this clip in the transcript ↗</Trans>
           </a>
         </p>
       )}
@@ -2590,13 +2737,13 @@ export function ClipEditor(props: Props) {
   );
 
   const tabs: Array<[Tab, string]> = [
-    ["captions", "Style"],
-    ["framing", "Framing"],
-    ["layers", layers.length ? `Layers · ${layers.length}` : "Layers"],
-    ["text", "Details"],
-    ["cuts", "Cuts"],
+    ["captions", t`Style`],
+    ["framing", t`Framing`],
+    ["layers", layers.length ? t`Layers · ${layers.length}` : t`Layers`],
+    ["text", t`Details`],
+    ["cuts", t`Cuts`],
   ];
-  if (layout !== "transcript" || compact) tabs.push(["transcript", "Transcript"]);
+  if (layout !== "transcript" || compact) tabs.push(["transcript", t`Transcript`]);
   const activeTab: Tab = layout === "transcript" && !compact && tab === "transcript" ? "captions" : tab;
 
   const inspector = (
@@ -2670,7 +2817,9 @@ export function ClipEditor(props: Props) {
           platform={platform}
         />
         {buffering && (
-          <div className="pointer-events-none absolute start-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">Loading…</div>
+          <div className="pointer-events-none absolute start-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">
+            <Trans>Loading…</Trans>
+          </div>
         )}
         {/* overlaid on the frame: a warning that pushed the transport down would move the buttons under the cursor */}
         {capWarn && (
@@ -2693,8 +2842,8 @@ export function ClipEditor(props: Props) {
   // the bar holds only what acts on the tracks; adding things lives on the lanes and in the inspector
   const actionBar = (
     <>
-      <button className={abtn} onClick={() => splitAt(current)} title={`Split the framing at the playhead (${SPLIT_SHORTCUT})`}>
-        <Scissors className="h-3.5 w-3.5" /> Split
+      <button className={abtn} onClick={() => splitAt(current)} title={t`Split the framing at the playhead (${SPLIT_SHORTCUT})`}>
+        <Scissors className="h-3.5 w-3.5" /> <Trans>Split</Trans>
       </button>
       <button
         className={abtn}
@@ -2702,13 +2851,13 @@ export function ClipEditor(props: Props) {
         onClick={removeSelected}
         title={
           selectedLayer
-            ? "Remove the selected layer (Delete)"
+            ? t`Remove the selected layer (Delete)`
             : selected !== null && selected > 0
-              ? "Remove the selected transition (Delete)"
-              : "Select a layer or a framing transition first"
+              ? t`Remove the selected transition (Delete)`
+              : t`Select a layer or a framing transition first`
         }
       >
-        <Trash2 className="h-3.5 w-3.5" /> Remove
+        <Trash2 className="h-3.5 w-3.5" /> <Trans>Remove</Trans>
       </button>
     </>
   );
@@ -2716,10 +2865,10 @@ export function ClipEditor(props: Props) {
   const nudge = (which: "in" | "out", d: number) => (which === "in" ? setIn(range[0] + d) : setOut(range[1] + d));
   const nb = "rounded-[7px] border border-line bg-panel px-1.5 py-1 font-mono text-[11px] text-ink hover:bg-sunk";
   const clipRangeEditor = () => (
-    <div className="flex flex-col gap-2 text-xs" aria-label="Clip in and out points">
+    <div className="flex flex-col gap-2 text-xs" aria-label={t`Clip in and out points`}>
       {(["in", "out"] as const).map((k) => (
         <div key={k} className="flex items-center gap-1">
-          <span className="w-7 font-semibold text-ink2">{k === "in" ? "In" : "Out"}</span>
+          <span className="w-7 font-semibold text-ink2">{k === "in" ? t`In` : t`Out`}</span>
           <button className={nb} onClick={() => nudge(k, -1)}>
             −1
           </button>
@@ -2727,7 +2876,7 @@ export function ClipEditor(props: Props) {
             −.1
           </button>
           <TimeField
-            label={k === "in" ? "Clip start" : "Clip end"}
+            label={k === "in" ? t`Clip start` : t`Clip end`}
             value={k === "in" ? range[0] : range[1]}
             onCommit={(t) => (k === "in" ? setIn(t) : setOut(t))}
           />
@@ -2739,33 +2888,35 @@ export function ClipEditor(props: Props) {
           </button>
         </div>
       ))}
-      <span className="text-[11px] text-ink3">{len.toFixed(1)}s · source seconds · I / O set them at the playhead</span>
+      <span className="text-[11px] text-ink3">
+        <Trans>{len.toFixed(1)}s · source seconds · I / O set them at the playhead</Trans>
+      </span>
     </div>
   );
   const transport = (
     <>
-      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current - FRAME))} title="Previous frame (←)" aria-label="Previous frame">
+      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current - FRAME))} title={t`Previous frame (←)`} aria-label={t`Previous frame`}>
         ◀︎❙
       </button>
       <button
         className="grid h-[34px] w-[44px] place-items-center rounded-[10px] bg-ink text-bg"
         onClick={togglePlay}
-        title="Play / pause (Space)"
-        aria-label={playing ? "Pause" : "Play"}
+        title={t`Play / pause (Space)`}
+        aria-label={playing ? t`Pause` : t`Play`}
       >
         {playing ? "❚❚" : "▶"}
       </button>
-      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current + FRAME))} title="Next frame (→)" aria-label="Next frame">
+      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current + FRAME))} title={t`Next frame (→)`} aria-label={t`Next frame`}>
         ❙▶︎
       </button>
       <span className="mx-1.5 min-w-[7.5rem] text-center font-mono text-xs text-ink2">
         {fmtPrecise(Math.max(0, current - range[0]))} / {fmtPrecise(len)}
       </span>
-      <button className={tbtn} onClick={() => setIn(current)} title="Set the in point at the playhead (I)">
-        [ In
+      <button className={tbtn} onClick={() => setIn(current)} title={t`Set the in point at the playhead (I)`}>
+        <Trans>[ In</Trans>
       </button>
-      <button className={tbtn} onClick={() => setOut(current)} title="Set the out point at the playhead (O)">
-        Out ]
+      <button className={tbtn} onClick={() => setOut(current)} title={t`Set the out point at the playhead (O)`}>
+        <Trans>Out ]</Trans>
       </button>
     </>
   );
@@ -2774,11 +2925,11 @@ export function ClipEditor(props: Props) {
   const canvasHeader = (
     <div className={`flex w-full flex-wrap items-center gap-2 ${compact ? "" : "min-h-9"}`}>
       {curSec && (
-        <span className={chip} title="Framing of the section under the playhead (Framing tab for all sections)">
+        <span className={chip} title={t`Framing of the section under the playhead (Framing tab for all sections)`}>
           <Select
             size="sm"
             className="-ms-2 h-6 border-0 bg-transparent"
-            ariaLabel="Section framing"
+            ariaLabel={t`Section framing`}
             value={curSec.mode}
             onValueChange={(v) => setMode(secIdx, v as SectionMode)}
             options={MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))}
@@ -2791,26 +2942,30 @@ export function ClipEditor(props: Props) {
         title={
           cropLayout
             ? framing.layout === "split"
-              ? "Drag either speaker on the preview to re-centre that pane"
-              : "Drag the picture to re-centre this section"
-            : `Not adjustable in ${MODE_LABEL[framing.layout]}`
+              ? t`Drag either speaker on the preview to re-centre that pane`
+              : t`Drag the picture to re-centre this section`
+            : t`Not adjustable in ${MODE_LABEL[framing.layout]}`
         }
       >
-        Crop{" "}
+        <Trans>Crop</Trans>{" "}
         <span className="max-w-[12rem] truncate font-mono">
-          {curSec && hasAdjust(curSec) ? adjustLabel(curSec) : framing.focus === "subject" ? "follows the subject" : "follows the speaker"}
+          {curSec && hasAdjust(curSec) ? adjustLabel(curSec) : framing.focus === "subject" ? t`follows the subject` : t`follows the speaker`}
         </span>
         <button className="font-semibold text-acc-text disabled:hidden" disabled={!curSec || !hasAdjust(curSec)} onClick={() => resetOffset(secIdx)}>
-          Reset
+          <Trans>Reset</Trans>
         </button>
       </span>
       <span className="flex-1" />
       {sourcePreviewHeight ? <SourceQualityOffer height={sourcePreviewHeight} offer={sourceUpgrade} projectId={projectId} variant="chip" /> : null}
       <Popover.Root>
         <Popover.Trigger asChild>
-          <button className={chip} title="Safe zones, platform, burned-in text" aria-label="Preview options">
-            <Eye className="h-3.5 w-3.5" /> {safe ? PLATFORM_NAME[platform] : "No safe zones"}
-            {overlays.length > 0 && <span className="font-mono text-[10px] text-ink3">CC</span>}
+          <button className={chip} title={t`Safe zones, platform, burned-in text`} aria-label={t`Preview options`}>
+            <Eye className="h-3.5 w-3.5" /> {safe ? PLATFORM_NAME[platform] : t`No safe zones`}
+            {overlays.length > 0 && (
+              <span className="font-mono text-[10px] text-ink3">
+                <Trans>CC</Trans>
+              </span>
+            )}
           </button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -2822,14 +2977,16 @@ export function ClipEditor(props: Props) {
             className="z-[80] flex w-[17rem] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
           >
             <label className="flex cursor-pointer items-center justify-between gap-3">
-              <span>Safe zones</span>
+              <span>
+                <Trans>Safe zones</Trans>
+              </span>
               <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" />
             </label>
-            <Field label="Platform">
+            <Field label={t`Platform`}>
               <Select
                 size="sm"
                 disabled={!safe}
-                ariaLabel="Platform"
+                ariaLabel={t`Platform`}
                 value={platform}
                 onValueChange={(v) => setPlatform(v as Platform)}
                 options={objectKeys(PLATFORM_NAME).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))}
@@ -2838,10 +2995,13 @@ export function ClipEditor(props: Props) {
             {overlays.length > 0 && (
               <div
                 className="flex flex-col gap-1 border-t border-line pt-3"
-                title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours"
+                title={t`Text already in the video (captions, logos) is blurred so it doesn't clash with yours`}
               >
                 <span>
-                  <span className="me-1 font-mono text-[10px]">CC</span> Burned-in text is blurred in every clip
+                  <span className="me-1 font-mono text-[10px]">
+                    <Trans>CC</Trans>
+                  </span>{" "}
+                  <Trans>Burned-in text is blurred in every clip</Trans>
                 </span>
                 <button
                   className="w-max font-semibold text-acc-text disabled:opacity-50"
@@ -2852,13 +3012,13 @@ export function ClipEditor(props: Props) {
                       .then((r) =>
                         qc
                           .invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) })
-                          .then(() => toast(`Source text kept · re-rendering ${plural(r.rerendered, "clip")}`)),
+                          .then(() => toast(t`Source text kept · re-rendering ${plural(r.rerendered, { one: "# clip", other: "# clips" })}`)),
                       )
                       .catch((err) => toast.error((err as Error).message))
                   }
-                  title="Show the source's own text in every clip of this project (re-renders them)"
+                  title={t`Show the source's own text in every clip of this project (re-renders them)`}
                 >
-                  Show it instead
+                  <Trans>Show it instead</Trans>
                 </button>
               </div>
             )}
@@ -2869,18 +3029,20 @@ export function ClipEditor(props: Props) {
   );
   /** The intro / outro choices, in the popover anchored on the block that was clicked on the timeline. */
   const bumperEditor = (slot: BumperSlot) => (
-    <div className="flex flex-col gap-2.5" aria-label={`${slot === "intro" ? "Intro" : "Outro"} for this clip`}>
+    <div className="flex flex-col gap-2.5" aria-label={slot === "intro" ? t`Intro for this clip` : t`Outro for this clip`}>
       <div className="flex h-5 items-center justify-between text-xs">
-        <span className="font-semibold text-ink2">Intro and outro of this clip</span>
+        <span className="font-semibold text-ink2">
+          <Trans>Intro and outro of this clip</Trans>
+        </span>
         <button
           className="text-acc-text hover:underline"
           onClick={() => {
             setSelectedBumper(null);
             setBumpersDialog(true);
           }}
-          title="Intro and outro for the whole project"
+          title={t`Intro and outro for the whole project`}
         >
-          Project settings…
+          <Trans>Project settings…</Trans>
         </button>
       </div>
       <BumperSelects
@@ -2891,8 +3053,8 @@ export function ClipEditor(props: Props) {
         projectOutroId={settings.outroAssetId}
       />
       <p className="text-[11px] leading-snug text-ink3">
-        {slot === "intro" ? "Plays before the clip." : "Plays after the clip."} Drag an image block's outer edge on the timeline to change how long it shows.
-        Needs a re-render.
+        {slot === "intro" ? t`Plays before the clip.` : t`Plays after the clip.`}{" "}
+        <Trans>Drag an image block's outer edge on the timeline to change how long it shows. Needs a re-render.</Trans>
       </p>
     </div>
   );
@@ -2963,35 +3125,40 @@ export function ClipEditor(props: Props) {
   let dirtyLabel: string;
   let dirtyCls: string;
   if (changed) {
-    dirtyLabel = `${dirtyCount} unsaved${needsRender ? " · needs re-render" : ""}`;
+    dirtyLabel = needsRender ? t`${dirtyCount} unsaved · needs re-render` : t`${dirtyCount} unsaved`;
     dirtyCls = "bg-warn-soft";
   } else if (rendering) {
-    dirtyLabel = clip.status === "pending" ? "Queued to render" : `Rendering ${Math.round((renderProgress ?? 0) * 100)}%`;
+    dirtyLabel = clip.status === "pending" ? t`Queued to render` : t`Rendering ${Math.round((renderProgress ?? 0) * 100)}%`;
     dirtyCls = "bg-acc-soft";
   } else if (clip.status === "failed") {
-    dirtyLabel = "▲ Render failed";
+    dirtyLabel = t`▲ Render failed`;
     dirtyCls = "bg-err-soft";
   } else {
-    dirtyLabel = clip.status === "done" ? "● Rendered" : "● Saved";
+    dirtyLabel = clip.status === "done" ? t`● Rendered` : t`● Saved`;
     dirtyCls = "bg-ok-soft";
   }
   const hb =
     "grid h-[34px] w-[34px] place-items-center rounded-[10px] border border-line bg-panel text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
   const header = (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:gap-3 sm:px-4">
-      <button className="btn-quiet px-2" onClick={requestExit} title="Back to the project">
-        <ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Project</span>
+      <button className="btn-quiet px-2" onClick={requestExit} title={t`Back to the project`}>
+        <ArrowLeft className="h-4 w-4" />{" "}
+        <span className="hidden sm:inline">
+          <Trans>Project</Trans>
+        </span>
       </button>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[11px] text-ink3">
-          {projectTitle} · clip #{clip.index + 1}
+          <Trans>
+            {projectTitle} · clip #{clip.index + 1}
+          </Trans>
         </div>
-        <div className="truncate text-[15px] font-bold leading-tight">{title || "Untitled clip"}</div>
+        <div className="truncate text-[15px] font-bold leading-tight">{title || t`Untitled clip`}</div>
       </div>
-      <button className={hb} disabled={!history.canUndo} onClick={history.undo} title={`Undo (${MOD}Z)`} aria-label="Undo">
+      <button className={hb} disabled={!history.canUndo} onClick={history.undo} title={t`Undo (${MOD}Z)`} aria-label={t`Undo`}>
         <Undo2 className="h-4 w-4" />
       </button>
-      <button className={hb} disabled={!history.canRedo} onClick={history.redo} title={`Redo (${MOD}⇧Z)`} aria-label="Redo">
+      <button className={hb} disabled={!history.canRedo} onClick={history.redo} title={t`Redo (${MOD}⇧Z)`} aria-label={t`Redo`}>
         <Redo2 className="h-4 w-4" />
       </button>
       <HeaderAlerts />
@@ -3000,7 +3167,7 @@ export function ClipEditor(props: Props) {
         <button
           className={`${hb} ${layout === "transcript" ? "!border-acc !bg-acc-soft !text-acc-text" : ""}`}
           onClick={() => setLayout(layout === "transcript" ? "classic" : "transcript")}
-          title={layout === "transcript" ? "Hide the transcript column" : "Show the transcript as a column"}
+          title={layout === "transcript" ? t`Hide the transcript column` : t`Show the transcript as a column`}
           aria-pressed={layout === "transcript"}
         >
           <PanelLeft className="h-4 w-4" />
@@ -3011,11 +3178,11 @@ export function ClipEditor(props: Props) {
         onClick={() =>
           navigator.clipboard
             .writeText(linkWith({ ...(tab !== "captions" ? { tab } : {}), ...(current > range[0] + 0.05 ? { t: fmtSec(current - range[0]) } : {}) }))
-            .then(() => toast("Link copied"))
-            .catch(() => toast.error("Couldn’t copy the link"))
+            .then(() => toast(t`Link copied`))
+            .catch(() => toast.error(t`Couldn’t copy the link`))
         }
-        title="Copy a link to this clip at the playhead"
-        aria-label="Copy link"
+        title={t`Copy a link to this clip at the playhead`}
+        aria-label={t`Copy link`}
       >
         <Link2 className="h-4 w-4" />
       </button>
@@ -3024,12 +3191,12 @@ export function ClipEditor(props: Props) {
         disabled={delClip.isPending}
         // a soft delete with an Undo toast: it asks first only when it would also throw away unsaved edits
         onClick={() => (changed ? setConfirmDelete(true) : void deleteClip())}
-        title="Delete clip"
-        aria-label="Delete clip"
+        title={t`Delete clip`}
+        aria-label={t`Delete clip`}
       >
         <Trash2 className="h-4 w-4" />
       </button>
-      <button className={`${hb} hidden sm:grid`} onClick={() => setKeysOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+      <button className={`${hb} hidden sm:grid`} onClick={() => setKeysOpen(true)} title={t`Keyboard shortcuts (?)`} aria-label={t`Keyboard shortcuts`}>
         <Keyboard className="h-4 w-4" />
       </button>
       <ThemeToggle className="hidden sm:inline-flex" />
@@ -3037,38 +3204,38 @@ export function ClipEditor(props: Props) {
         className="btn-primary min-w-[5.5rem] justify-center sm:min-w-[148px]"
         disabled={busy || (!changed && clip.status !== "failed")}
         onClick={() => requestSave(needsRender || (!changed && clip.status === "failed"))}
-        title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don’t need a re-render (${MOD}S)`}
+        title={needsRender ? t`Saves and re-renders the clip (${MOD}S)` : t`Saves; text-only edits don’t need a re-render (${MOD}S)`}
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-        <span className="sm:hidden">{!changed && clip.status === "failed" ? "Retry" : "Save"}</span>
+        <span className="sm:hidden">{!changed && clip.status === "failed" ? t`Retry` : t`Save`}</span>
         <span className="hidden sm:inline">
           {!changed && clip.status === "failed"
-            ? "Retry render"
+            ? t`Retry render`
             : needsRender
               ? styleScope === "all" && styleChanged
-                ? "Save & re-render all"
-                : "Save & re-render"
-              : "Save"}
+                ? t`Save & re-render all`
+                : t`Save & re-render`
+              : t`Save`}
         </span>
       </button>
     </header>
   );
 
   const keyList: Array<[string, string]> = [
-    ["Play / pause", "Space"],
-    ["Previous / next frame", "← →"],
-    ["Back / forward 1s", "⇧← ⇧→"],
-    ["Set in / out at playhead", "I  O"],
-    ["Split framing at playhead", `${MOD}B`],
-    ["Remove selected layer / transition", "Delete"],
-    ["Copy / paste the selected layer at the playhead", `${MOD}C  ${MOD}V`],
-    ["Undo / redo", `${MOD}Z  ⇧${MOD}Z`],
-    ["Save", `${MOD}S`],
-    ["Snapping on / off", "S"],
-    ["Disable snapping while dragging", "hold Alt"],
-    ["Zoom timeline", `${MOD} + scroll`],
+    [t`Play / pause`, t`Space`],
+    [t`Previous / next frame`, "← →"],
+    [t`Back / forward 1s`, "⇧← ⇧→"],
+    [t`Set in / out at playhead`, "I  O"],
+    [t`Split framing at playhead`, `${MOD}B`],
+    [t`Remove selected layer / transition`, t`Delete`],
+    [t`Copy / paste the selected layer at the playhead`, `${MOD}C  ${MOD}V`],
+    [t`Undo / redo`, `${MOD}Z  ⇧${MOD}Z`],
+    [t`Save`, `${MOD}S`],
+    [t`Snapping on / off`, "S"],
+    [t`Disable snapping while dragging`, t`hold Alt`],
+    [t`Zoom timeline`, t`${MOD} + scroll`],
   ];
-  useShortcuts("Clip editor", keyList);
+  useShortcuts(t`Clip editor`, keyList);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -3089,7 +3256,9 @@ export function ClipEditor(props: Props) {
         >
           {layout === "transcript" && (
             <div className="flex min-h-0 flex-col border-e border-line bg-panel">
-              <div className="shrink-0 border-b border-line px-4 py-3 text-[13px] font-bold">Transcript</div>
+              <div className="shrink-0 border-b border-line px-4 py-3 text-[13px] font-bold">
+                <Trans>Transcript</Trans>
+              </div>
               {transcript}
             </div>
           )}
@@ -3117,18 +3286,18 @@ export function ClipEditor(props: Props) {
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title="Delete this clip and its unsaved edits?"
-        body={`“${title || "Untitled clip"}” is hidden from the project and your ${plural(dirtyCount, "unsaved edit")} ${dirtyCount === 1 ? "is" : "are"} discarded; Undo brings back the clip, not the edits. ${keepWindow.hint()}`}
-        confirm="Delete clip"
+        title={t`Delete this clip and its unsaved edits?`}
+        body={`${t`“${title || t`Untitled clip`}” is hidden from the project and ${plural(dirtyCount, { one: "your # unsaved edit is", other: "your # unsaved edits are" })} discarded; Undo brings back the clip, not the edits.`} ${keepWindow.hint()}`}
+        confirm={t`Delete clip`}
         danger
         onConfirm={deleteClip}
       />
       <ConfirmDialog
         open={styleAll !== null}
         onOpenChange={(o) => !o && setStyleAll(null)}
-        title={`Use this style for all ${clipCount} clips?`}
-        body={`It becomes the style of every clip in “${projectTitle}”. Styles set on a single clip are cleared and cannot be brought back. All ${clipCount} clips re-render.`}
-        confirm="Use for all clips"
+        title={t`Use this style for all ${clipCount} clips?`}
+        body={t`It becomes the style of every clip in “${projectTitle}”. Styles set on a single clip are cleared and cannot be brought back. All ${clipCount} clips re-render.`}
+        confirm={t`Use for all clips`}
         danger
         onConfirm={async () => {
           const ask = styleAll;
@@ -3139,13 +3308,13 @@ export function ClipEditor(props: Props) {
       <ConfirmDialog
         open={applyAll !== null}
         onOpenChange={(o) => !o && setApplyAll(null)}
-        title={`Use this framing for all ${clipCount} clips?`}
+        title={t`Use this framing for all ${clipCount} clips?`}
         body={(() => {
           const s = applyAll !== null ? sections[applyAll] : undefined;
           const what = s ? `${MODE_LABEL[s.mode] ?? s.mode}${hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}` : "";
-          return `“${what}” becomes the framing of every clip in “${projectTitle}”, replacing any framing set on other clips, and of every clip added later. All ${clipCount} clips re-render.`;
+          return t`“${what}” becomes the framing of every clip in “${projectTitle}”, replacing any framing set on other clips, and of every clip added later. All ${clipCount} clips re-render.`;
         })()}
-        confirm="Use for all clips"
+        confirm={t`Use for all clips`}
         onConfirm={async () => {
           const s = applyAll !== null ? sections[applyAll] : undefined;
           setApplyAll(null);
@@ -3156,7 +3325,7 @@ export function ClipEditor(props: Props) {
             edit({ sections: [{ start: range[0], end: range[1], mode: r.reframe as SectionMode, ...(r.adjust ?? {}) }] });
             setSelected(null);
             await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-            toast(`Framing set for all ${clipCount} clips · re-rendering`);
+            toast(t`Framing set for all ${clipCount} clips · re-rendering`);
           } catch (err) {
             toast.error((err as Error).message);
           }
@@ -3177,9 +3346,9 @@ export function ClipEditor(props: Props) {
       <ApplyTemplateDialog
         open={templateOpen}
         onOpenChange={setTemplateOpen}
-        title="Apply a template to this clip"
+        title={t`Apply a template to this clip`}
         existing={existingOnClip(layers.length)}
-        actions={[{ label: "Apply", primary: true, title: "The layers join this clip; save the clip to render them", run: applyTemplate }]}
+        actions={[{ label: t`Apply`, primary: true, title: t`The layers join this clip; save the clip to render them`, run: applyTemplate }]}
         emptyExtra={
           layers.length > 0 ? (
             <button
@@ -3189,7 +3358,7 @@ export function ClipEditor(props: Props) {
                 setSaveTemplateOpen(true);
               }}
             >
-              or save this clip’s layers as one
+              <Trans>or save this clip’s layers as one</Trans>
             </button>
           ) : undefined
         }
@@ -3206,7 +3375,7 @@ export function ClipEditor(props: Props) {
       <AssetFinderDialog
         open={picker?.kind === "asset"}
         onOpenChange={(o) => !o && setPicker(null)}
-        title="Add to clip"
+        title={t`Add to clip`}
         kinds={["video", "image"]}
         onPick={(a) => {
           rememberPick(a);
@@ -3217,7 +3386,7 @@ export function ClipEditor(props: Props) {
       <AssetFinderDialog
         open={picker?.kind === "audio"}
         onOpenChange={(o) => !o && setPicker(null)}
-        title="Add a sound"
+        title={t`Add a sound`}
         kind="audio"
         onPick={(a) => {
           rememberPick(a);
@@ -3238,19 +3407,27 @@ export function ClipEditor(props: Props) {
         />
       ))}
 
-      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
+      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title={t`Unsaved changes`}>
         <p className="text-sm leading-relaxed text-ink2">
-          You have {plural(dirtyCount, "unsaved change")} to this clip{needsRender ? ", and some need a re-render" : ""}.
+          {needsRender ? (
+            <Plural
+              value={dirtyCount}
+              one="You have # unsaved change to this clip, and some need a re-render."
+              other="You have # unsaved changes to this clip, and some need a re-render."
+            />
+          ) : (
+            <Plural value={dirtyCount} one="You have # unsaved change to this clip." other="You have # unsaved changes to this clip." />
+          )}
         </p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
           <button className="btn-ghost" onClick={guard.stay}>
-            Keep editing
+            <Trans>Keep editing</Trans>
           </button>
           <button className="btn-danger" onClick={guard.leave}>
-            Discard
+            <Trans>Discard</Trans>
           </button>
           <button className="btn-primary" disabled={busy} onClick={() => requestSave(needsRender, true)}>
-            Save &amp; leave
+            <Trans>Save &amp; leave</Trans>
           </button>
         </div>
       </Modal>

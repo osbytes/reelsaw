@@ -6,6 +6,8 @@
  * (`deleted.restore` / `purge`) and the Projects page (`projects.deleteMany` / `retryMany` / `rerenderMany`).
  */
 import { TRPCError } from "@trpc/server";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
 import type { Services } from "../services.js";
 
 /** Most items one bulk call takes; the selection bars never send more. */
@@ -60,7 +62,7 @@ export async function eachItem<T, R>(
   }
   if (!out.some((r) => r.ok)) {
     if (first instanceof TRPCError) throw first;
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Something went wrong. Try again in a moment." });
+    throw new AppError("INTERNAL_SERVER_ERROR", msg({ id: "batch.all_failed", message: "Something went wrong. Try again in a moment." }));
   }
   return out;
 }

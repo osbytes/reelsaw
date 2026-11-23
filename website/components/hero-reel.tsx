@@ -1,5 +1,7 @@
 "use client";
 
+import { msg } from "@lingui/core/runtime-macro";
+import { rich, t as tr } from "@/lib/i18n";
 // The hero's right column, built to say what happened at a glance: the long source on top with the stretch
 // the clip came from marked on its timeline, and the 9:16 clip Reelsaw made from it underneath, with what the
 // pipeline did pointed out beside it (hook, framing, captions). Plays through the run's picks on its own; a dot
@@ -17,9 +19,9 @@ const HOOK_SECONDS = 3.5;
 
 /** What the pipeline did, at the height (fraction of the 9:16 frame) where it shows with default settings. */
 const CALLOUTS: { y: number; title: string; body: string; until?: number }[] = [
-  { y: 0.16, title: "Hook", body: "written by the model", until: HOOK_SECONDS },
-  { y: 0.42, title: "Framing", body: "follows whoever speaks" },
-  { y: 0.72, title: "Captions", body: "timed to every word" },
+  { y: 0.16, title: tr(msg`Hook`), body: tr(msg`written by the model`), until: HOOK_SECONDS },
+  { y: 0.42, title: tr(msg`Framing`), body: tr(msg`follows whoever speaks`) },
+  { y: 0.72, title: tr(msg`Captions`), body: tr(msg`timed to every word`) },
 ];
 
 export function HeroReel() {
@@ -43,21 +45,17 @@ export function HeroReel() {
             poster={clipPoster(`${pick.file}-before`)}
             play
             eager={i === 0}
-            label={`The original 16:9 video at ${fmtTime(pick.start)}`}
+            label={tr(msg`The original 16:9 video at ${{ fmtTime: fmtTime(pick.start) }}`)}
             className="block h-full w-full object-cover"
           />
           <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-[10px] text-white">{source.length}</span>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <p className="truncate text-xs font-semibold text-ink">
-            A {Math.round(source.seconds / 60)}-minute {source.kind}
-          </p>
+          <p className="truncate text-xs font-semibold text-ink">{rich(msg`A <0/>-minute <1/>`, { 0: Math.round(source.seconds / 60), 1: source.kind })}</p>
           <div className="relative h-2 rounded-full bg-sunk ring-1 ring-line" aria-hidden>
             <span className="absolute -inset-y-0.5 rounded-full bg-acc transition-[left,width] duration-500" style={{ left: `${left}%`, width: `${width}%` }} />
           </div>
-          <p className="font-mono text-[11px] text-ink3">
-            clip from {fmtTime(pick.start)}–{fmtTime(pick.end)}
-          </p>
+          <p className="font-mono text-[11px] text-ink3">{rich(msg`clip from <0/>–<1/>`, { 0: fmtTime(pick.start), 1: fmtTime(pick.end) })}</p>
         </div>
       </div>
 
@@ -77,7 +75,7 @@ export function HeroReel() {
 
       {/* What it became */}
       <div className="relative w-[70%] max-w-[270px] sm:ml-[150px] sm:w-[270px]">
-        <ul className="absolute top-0 right-full hidden h-full w-[150px] sm:block" aria-label="What Reelsaw did">
+        <ul className="absolute top-0 right-full hidden h-full w-[150px] sm:block" aria-label={tr(msg`What Reelsaw did`)}>
           {CALLOUTS.map((c) => (
             <li
               key={c.title}
@@ -106,11 +104,11 @@ export function HeroReel() {
               setT(0);
             }}
             onTime={onTime}
-            label={`The vertical clip Reelsaw rendered from it, with the hook “${pick.hook}” and word-highlight captions`}
+            label={tr(msg`The vertical clip Reelsaw rendered from it, with the hook “${{ hook: pick.hook }}” and word-highlight captions`)}
             className="block h-full w-full object-cover"
           />
           <span className="absolute top-3 right-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm">
-            Pick #{pick.rank} of {DEMO_RUN.clips}
+            {rich(msg`Pick #<0/> of <1/>`, { 0: pick.rank, 1: DEMO_RUN.clips })}
           </span>
         </div>
       </div>
@@ -125,12 +123,12 @@ export function HeroReel() {
               aria-hidden={k !== i}
               className={`col-start-1 row-start-1 text-sm leading-snug text-ink2 text-pretty transition-opacity duration-300 ${k === i ? "" : "invisible opacity-0"}`}
             >
-              <span className="font-semibold text-ink">Why this moment: </span>
+              <span className="font-semibold text-ink">{tr(msg`Why this moment:`)}</span>
               {p.why}
             </p>
           ))}
         </div>
-        <div className="flex gap-1.5" role="group" aria-label="Show a pick">
+        <div className="flex gap-1.5" role="group" aria-label={tr(msg`Show a pick`)}>
           {picks.map((p, k) => (
             <button
               key={p.file}
@@ -140,7 +138,7 @@ export function HeroReel() {
                 setHeld(true);
                 setT(0);
               }}
-              aria-label={`Pick #${p.rank}: ${p.hook}`}
+              aria-label={tr(msg`Pick #${{ rank: p.rank }}: ${{ hook: p.hook }}`)}
               aria-pressed={k === i}
               className="grid h-6 place-items-center px-0.5"
             >

@@ -7,6 +7,7 @@
  */
 import { ProviderError, arr, clip, extOf, httpsUrl, needKey, num, obj, str } from "./http.js";
 import type { Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://pixabay.com/api";
 const LICENSE = { id: "pixabay", name: "Pixabay Content License", url: "https://pixabay.com/service/license-summary/" };
@@ -105,16 +106,18 @@ export function pixabay({ settings, http }: ProviderDeps): Provider {
     async resolve(externalId): Promise<Resolved> {
       const [type, id] = externalId.split(":");
       if (!id || !/^\d+$/.test(id) || !["photo", "vector", "video"].includes(type ?? ""))
-        throw new ProviderError("That is not a Pixabay id (photo:<id>, vector:<id> or video:<id>).");
+        throw new ProviderError(
+          msg({ id: "library_provider.pixabay_id_photo_id_vector", message: "That is not a Pixabay id (photo:<id>, vector:<id> or video:<id>)." }),
+        );
       const r = await http.json("pixabay", type === "video" ? url("/videos/", { id }) : url("/", { id }));
       const hit = obj(arr(obj(r)["hits"])[0]);
-      if (hit["id"] === undefined) throw new ProviderError("Pixabay no longer has that item.");
+      if (hit["id"] === undefined) throw new ProviderError(msg({ id: "library_provider.pixabay_no_longer_item", message: "Pixabay no longer has that item." }));
       const page = httpsUrl(hit["pageURL"]);
       const tags = tagsOf(hit);
       const who = str(hit["user"]);
       if (type === "video") {
         const file = bestVideo(obj(hit["videos"]));
-        if (!file) throw new ProviderError("Pixabay returned no file for that video.");
+        if (!file) throw new ProviderError(msg({ id: "library_provider.pixabay_returned_no_file_video", message: "Pixabay returned no file for that video." }));
         return {
           url: file.url,
           ext: "mp4",
@@ -132,7 +135,7 @@ export function pixabay({ settings, http }: ProviderDeps): Provider {
       }
       // largeImageURL is the standard size every key gets; vectorURL needs approved full access
       const file = (type === "vector" ? httpsUrl(hit["vectorURL"]) : undefined) ?? httpsUrl(hit["largeImageURL"]) ?? httpsUrl(hit["webformatURL"]);
-      if (!file) throw new ProviderError("Pixabay returned no file for that image.");
+      if (!file) throw new ProviderError(msg({ id: "library_provider.pixabay_returned_no_file_image", message: "Pixabay returned no file for that image." }));
       return {
         url: file,
         ext: extOf(file, "jpg"),

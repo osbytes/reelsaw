@@ -7,8 +7,9 @@
  * source minutes at creation when the link announces its length and bound once ffprobe has run, storage at upload. The watermark follows the same chain.
  */
 import { and, eq, gte, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
-import { deletedProjectsPath, type QuotaAction, type QuotaRefusal, formatDay, formatMb, plural } from "@reelsaw/shared";
+import { msg, plural } from "@lingui/core/runtime-macro";
+import { deletedProjectsPath, type QuotaAction, type QuotaRefusal, formatDay, formatMb, formatMoney, formatNumber } from "@reelsaw/shared";
+import { AppError, type MessageDescriptor, t } from "./i18n.js";
 import { schema, type Db } from "./db/index.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
@@ -189,9 +190,17 @@ export async function capacityOfferFor(
   if (!u?.resources) return {};
   const more = !mine || u.resources.maxCores > mine.maxCores || (grants?.reserveCores ?? 0) > 0;
   if (!more) return {};
-  const cores = plural(u.resources.maxCores, "core");
-  const what = (grants?.reserveCores ?? 0) > 0 ? `${cores} for renders, no busy-hours wait` : `${cores} for renders`;
-  const label = u.monthlyPrice ? `${u.planLabel}: ${what}, $${u.monthlyPrice.toLocaleString("en-US")} a month` : `${u.planLabel}: ${what}`;
+  const cores = u.resources.maxCores;
+  const plan = u.planLabel;
+  const busy = (grants?.reserveCores ?? 0) > 0;
+  const price = u.monthlyPrice ? usd(u.monthlyPrice) : null;
+  const label = price
+    ? busy
+      ? t(msg`${{ plan }}: ${plural({ cores }, { one: "# core", other: "# cores" })} for renders, no busy-hours wait, ${{ price }} a month`)
+      : t(msg`${{ plan }}: ${plural({ cores }, { one: "# core", other: "# cores" })} for renders, ${{ price }} a month`)
+    : busy
+      ? t(msg`${{ plan }}: ${plural({ cores }, { one: "# core", other: "# cores" })} for renders, no busy-hours wait`)
+      : t(msg`${{ plan }}: ${plural({ cores }, { one: "# core", other: "# cores" })} for renders`);
   return { upgrade: { label, href: u.url } };
 }
 
@@ -231,9 +240,9 @@ export async function sourceQualityFor(
   if (!height) return { height };
   const u = grants?.upgrade;
   if (!u || (typeof u.sourceHeight === "number" && u.sourceHeight > 0)) return { height };
-  const label = u.monthlyPrice
-    ? `${u.planLabel}: full-quality video for $${u.monthlyPrice.toLocaleString("en-US")} a month`
-    : `${u.planLabel}: full-quality video`;
+  const plan = u.planLabel;
+  const price = u.monthlyPrice ? usd(u.monthlyPrice) : null;
+  const label = price ? t(msg`${{ plan }}: full-quality video for ${{ price }} a month`) : t(msg`${{ plan }}: full-quality video`);
   return { height, upgrade: { label, href: u.url } };
 }
 
@@ -268,19 +277,31 @@ export interface WatermarkUpgrade {
 export function watermarkUpgrade(grants: Grants | null): WatermarkUpgrade | undefined {
   const u = grants?.upgrade;
   if (u?.watermark !== false) return undefined;
-  return { label: `${u.planLabel} removes it${u.monthlyPrice ? ` for $${u.monthlyPrice.toLocaleString("en-US")} a month` : ""}`, href: u.url };
+  const plan = u.planLabel;
+  const price = u.monthlyPrice ? usd(u.monthlyPrice) : null;
+  return { label: price ? t(msg`${{ plan }} removes it for ${{ price }} a month`) : t(msg`${{ plan }} removes it`), href: u.url };
 }
+
+/** A plan price as people read it: the prices are whole US dollars a month today, held here as cents. */
+const usd = (dollars: number) => formatMoney(Math.round(dollars * 100), "USD");
 
 /** Extra analytics properties on a refusal (`firstVideo`: the account's first video was the one refused). Never content. */
 export type RefusalProps = { firstVideo?: boolean };
 
-export class QuotaError extends TRPCError {
+/**
+ * A quota refusal (TOO_MANY_REQUESTS). Its code and parameters (`messageId`, `params`, i18n.ts AppError) are the
+ * refusal's sentence; `offer` appends the plan's offer and its link for text-only readers (MCP, the CLI), and
+ * `quota.sentence` keeps the sentence alone for the screens that show the offer as a button. A plain string is
+ * kept as it is (tests, a message already rendered).
+ */
+export class QuotaError extends AppError {
   readonly quota?: QuotaRefusal | undefined;
   /** the limit that refused (a LimitKey), for analytics; the refusal's own key when it has one */
   readonly limit: string;
   readonly props: RefusalProps;
-  constructor(message: string, quota?: QuotaRefusal, limit?: string, props: RefusalProps = {}) {
-    super({ code: "TOO_MANY_REQUESTS", message });
+  constructor(message: MessageDescriptor | string, quota?: QuotaRefusal, limit?: string, props: RefusalProps = {}, offer?: string) {
+    super("TOO_MANY_REQUESTS", message);
+    if (offer) this.message = `${this.message}${offer}`;
     this.quota = quota;
     this.limit = limit ?? quota?.key ?? "unknown";
     this.props = props;
@@ -326,21 +347,22 @@ export class QuotaExceededError extends NonRetryableError {
 /** What the next paid plan would give for this limit, for the upgrade CTA. */
 export function upgradeCapacityLabel(upgrade: NonNullable<Grants["upgrade"]>, key: LimitKey): string {
   const n = upgrade.limits[key];
-  if (key === "MAX_STORAGE_MB")
-    return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${formatMb(n)} of storage` : `Upgrade to ${upgrade.planLabel}`;
-  if (key === "MAX_SOURCE_MINUTES_PER_MONTH" || key === "MAX_SOURCE_MINUTES_PER_DAY")
-    return typeof n === "number" && n > 0
-      ? upgrade.monthlyPrice
-        ? `${upgrade.planLabel}: ${n.toLocaleString("en-US")} minutes a month for $${upgrade.monthlyPrice.toLocaleString("en-US")}`
-        : `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} minutes a month`
-      : `Upgrade to ${upgrade.planLabel}`;
-  if (key === "MAX_PROJECTS_PER_USER")
-    return typeof n === "number" && n > 0 ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} projects` : `Upgrade to ${upgrade.planLabel}`;
-  if (key === "MAX_MANUAL_CLIPS_PER_USER")
-    return typeof n === "number" && n > 0
-      ? `${upgrade.planLabel} gives ${n.toLocaleString("en-US")} clips of your own`
-      : `${upgrade.planLabel}: make clips of your own`;
-  return `Upgrade to ${upgrade.planLabel}`;
+  const plan = upgrade.planLabel;
+  const upgradeTo = () => t(msg`Upgrade to ${{ plan }}`);
+  if (typeof n !== "number" || n <= 0) return key === "MAX_MANUAL_CLIPS_PER_USER" ? t(msg`${{ plan }}: make clips of your own`) : upgradeTo();
+  if (key === "MAX_STORAGE_MB") {
+    const size = formatMb(n);
+    return t(msg`${{ plan }} gives ${{ size }} of storage`);
+  }
+  if (key === "MAX_SOURCE_MINUTES_PER_MONTH" || key === "MAX_SOURCE_MINUTES_PER_DAY") {
+    const price = upgrade.monthlyPrice ? usd(upgrade.monthlyPrice) : null;
+    return price
+      ? t(msg`${{ plan }}: ${plural({ n }, { one: "# minute", other: "# minutes" })} a month for ${{ price }}`)
+      : t(msg`${{ plan }} gives ${plural({ n }, { one: "# minute", other: "# minutes" })} a month`);
+  }
+  if (key === "MAX_PROJECTS_PER_USER") return t(msg`${{ plan }} gives ${plural({ n }, { one: "# project", other: "# projects" })}`);
+  if (key === "MAX_MANUAL_CLIPS_PER_USER") return t(msg`${{ plan }} gives ${plural({ n }, { one: "# clip", other: "# clips" })} of your own`);
+  return upgradeTo();
 }
 
 function kindOf(key: LimitKey): "storage" | "other" {
@@ -358,8 +380,8 @@ export function quotaRefusal(d: LimitsDetail, key: LimitKey, sentence?: string):
 function refusalActions(d: LimitsDetail, key: LimitKey): QuotaRefusal {
   const upgrade = d.grants?.upgrade;
   const billing = d.grants != null;
-  const freeSpace: QuotaAction = { kind: "free_space", label: "Free space", href: deletedProjectsPath() };
-  const request: QuotaAction = { kind: "request", label: "Request more capacity" };
+  const freeSpace: QuotaAction = { kind: "free_space", label: t(msg`Free space`), href: deletedProjectsPath() };
+  const request: QuotaAction = { kind: "request", label: t(msg`Request more capacity`) };
   if (upgrade) {
     return {
       key,
@@ -374,17 +396,20 @@ function refusalActions(d: LimitsDetail, key: LimitKey): QuotaRefusal {
   return { key };
 }
 
-function refuse(d: LimitsDetail, key: LimitKey, message: string, props: RefusalProps = {}): never {
+function refuse(d: LimitsDetail, key: LimitKey, message: MessageDescriptor, props: RefusalProps = {}): never {
   throw new QuotaError(message, quotaRefusal(d, key), key, props);
 }
 
 /** `refuse`, with the plan's offer and its link after the sentence for text-only readers; the refusal keeps the sentence alone. */
-function refuseOffering(d: LimitsDetail, key: LimitKey, sentence: string, props: RefusalProps = {}): never {
-  throw new QuotaError(`${sentence}${hint(d, key)}`, quotaRefusal(d, key, sentence), key, props);
+function refuseOffering(d: LimitsDetail, key: LimitKey, sentence: MessageDescriptor, props: RefusalProps = {}): never {
+  throw new QuotaError(sentence, quotaRefusal(d, key, t(sentence)), key, props, hint(d, key));
 }
 
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
-const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
+/** A reset time as "00:00 UTC": 24-hour and the zone named, the same for every reader. */
+const hhmm = (ms: number) => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
+/** A reset day: billing periods are UTC, so the same day for every reader, in their language. */
+const resetDay = (d: Date) => formatDay(d, { year: false, utc: true });
 
 /** The window a monthly allowance counts in: the billing period when the account has one, else the UTC calendar month. */
 export function periodFor(grants: Grants | null, now = new Date()): { start: Date; end: Date; source: "billing" | "calendar" } {
@@ -414,8 +439,17 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.projects)
       .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
-    if (n >= l.MAX_PROJECTS_PER_USER)
-      refuse(d, "MAX_PROJECTS_PER_USER", `You have ${n} projects, the most this account may keep (${l.MAX_PROJECTS_PER_USER}). Delete one to start another.`);
+    if (n >= l.MAX_PROJECTS_PER_USER) {
+      const [count, max] = [n, l.MAX_PROJECTS_PER_USER];
+      refuse(
+        d,
+        "MAX_PROJECTS_PER_USER",
+        msg({
+          id: "quota.projects_full",
+          message: msg`You have ${plural({ count }, { other: "#" })} projects, the most this account may keep (${plural({ max }, { other: "#" })}). Delete one to start another.`,
+        }),
+      );
+    }
   }
   if (l.MAX_NEW_PROJECTS_PER_HOUR > 0) {
     const since = new Date(Date.now() - 3_600_000);
@@ -423,32 +457,47 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.sourceUsage)
       .where(and(eq(schema.sourceUsage.userId, userId), ownRow, gte(schema.sourceUsage.createdAt, since)));
-    if (n >= l.MAX_NEW_PROJECTS_PER_HOUR)
+    if (n >= l.MAX_NEW_PROJECTS_PER_HOUR) {
+      const [count, max] = [n, l.MAX_NEW_PROJECTS_PER_HOUR];
       refuse(
         d,
         "MAX_NEW_PROJECTS_PER_HOUR",
-        `${n} projects started in the last hour, the most allowed (${l.MAX_NEW_PROJECTS_PER_HOUR}). Try again in a while.`,
+        msg({
+          id: "quota.projects_per_hour",
+          message: msg`${plural({ count }, { other: "#" })} projects started in the last hour, the most allowed (${plural({ max }, { other: "#" })}). Try again in a while.`,
+        }),
       );
+    }
   }
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
     const used = await minutesToday(db, userId);
-    if (used >= l.MAX_SOURCE_MINUTES_PER_DAY)
+    if (used >= l.MAX_SOURCE_MINUTES_PER_DAY) {
+      const [max, usedMin, at] = [Math.round(l.MAX_SOURCE_MINUTES_PER_DAY), Math.round(used), hhmm(nextMidnightUtc())];
       refuse(
         d,
         "MAX_SOURCE_MINUTES_PER_DAY",
-        `Daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes of video reached (${Math.round(used)} used); resets at ${hhmm(nextMidnightUtc())}.`,
+        msg({
+          id: "quota.minutes_day",
+          message: msg`Daily limit of ${plural({ max }, { other: "#" })} minutes of video reached (${plural({ usedMin }, { other: "#" })} used); resets at ${{ at }}.`,
+        }),
       );
+    }
   }
   if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
     const period = periodFor(d.grants);
     const m = await monthlyMinutes(db, userId, period.start, d.grants);
     // a first video on the house is checked for real once its length is known (sourceMinutesExceeded)
-    if (m.used >= l.MAX_SOURCE_MINUTES_PER_MONTH && !m.firstPending)
+    if (m.used >= l.MAX_SOURCE_MINUTES_PER_MONTH && !m.firstPending) {
+      const [max, usedMin, on] = [Math.round(l.MAX_SOURCE_MINUTES_PER_MONTH), Math.round(m.used), resetDay(period.end)];
       refuseOffering(
         d,
         "MAX_SOURCE_MINUTES_PER_MONTH",
-        `Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${formatDay(period.end, { year: false, utc: true })}.`,
+        msg({
+          id: "quota.minutes_month",
+          message: msg`Monthly limit of ${plural({ max }, { other: "#" })} minutes of video reached (${plural({ usedMin }, { other: "#" })} used); resets on ${{ on }}.`,
+        }),
       );
+    }
   }
 }
 
@@ -472,12 +521,19 @@ export async function checkManualClipQuota(db: Db, instance: InstanceLimits, use
   const max = d.limits.MAX_MANUAL_CLIPS_PER_USER;
   if (max <= 0) return;
   const made = await manualClipsMade(db, userId);
-  if (made >= max)
+  if (made >= max) {
+    const [count, most] = [made, max];
     refuseOffering(
       d,
       "MAX_MANUAL_CLIPS_PER_USER",
-      `${max === 1 ? "Your free clip of your own is used" : `You have made ${made} clips of your own, the most this account may (${max})`}. The clips Reelsaw found stay yours to edit.`,
+      max === 1
+        ? msg({ id: "quota.manual_clip_used", message: "Your free clip of your own is used. The clips Reelsaw found stay yours to edit." })
+        : msg({
+            id: "quota.manual_clips_full",
+            message: msg`You have made ${plural({ count }, { other: "#" })} clips of your own, the most this account may (${plural({ most }, { other: "#" })}). The clips Reelsaw found stay yours to edit.`,
+          }),
     );
+  }
 }
 
 /**
@@ -492,12 +548,17 @@ export async function checkRestoreQuota(db: Db, instance: InstanceLimits, userId
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.projects)
     .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
-  if (n >= d.limits.MAX_PROJECTS_PER_USER)
+  if (n >= d.limits.MAX_PROJECTS_PER_USER) {
+    const [count, max] = [n, d.limits.MAX_PROJECTS_PER_USER];
     refuse(
       d,
       "MAX_PROJECTS_PER_USER",
-      `You have ${n} projects, the most this account may keep (${d.limits.MAX_PROJECTS_PER_USER}). Delete one to restore another.`,
+      msg({
+        id: "quota.projects_full_restore",
+        message: msg`You have ${plural({ count }, { other: "#" })} projects, the most this account may keep (${plural({ max }, { other: "#" })}). Delete one to restore another.`,
+      }),
     );
+  }
 }
 
 /**
@@ -543,18 +604,28 @@ export async function monthlyMinutes(
  * unit's own earlier enqueues, so a bulk re-render that would pass the limit is refused whole.
  */
 export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
-  if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.userLive >= l.MAX_LIVE_JOBS_PER_USER)
+  if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.userLive >= l.MAX_LIVE_JOBS_PER_USER) {
+    const [count, max] = [a.userLive, l.MAX_LIVE_JOBS_PER_USER];
     throw new QuotaError(
-      `You have ${a.userLive} requests queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`,
+      msg({
+        id: "quota.live_jobs",
+        message: msg`You have ${plural({ count }, { other: "#" })} requests queued or running, the most this account may have at once (${plural({ max }, { other: "#" })}). Try again when some have finished.`,
+      }),
       undefined,
       "MAX_LIVE_JOBS_PER_USER",
     );
-  if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR)
+  }
+  if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR) {
+    const [count, max] = [a.userRendersLastHour, l.MAX_RERENDERS_PER_HOUR];
     throw new QuotaError(
-      `${a.userRendersLastHour} re-renders and re-runs requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`,
+      msg({
+        id: "quota.rerenders_per_hour",
+        message: msg`${plural({ count }, { other: "#" })} re-renders and re-runs requested in the last hour, the most allowed (${plural({ max }, { other: "#" })}). Try again in a while.`,
+      }),
       undefined,
       "MAX_RERENDERS_PER_HOUR",
     );
+  }
 }
 
 /** Before an upload or a new project: what the account stores now (sources, uploads, renders, intros/outros) plus what is arriving. */
@@ -582,12 +653,17 @@ function checkStorage(d: LimitsDetail, bytes: number) {
   const l = d.limits;
   if (l.MAX_STORAGE_MB <= 0) return;
   const mb = Math.round(bytes / 1_048_576);
-  if (mb >= l.MAX_STORAGE_MB)
+  if (mb >= l.MAX_STORAGE_MB) {
+    const [stored, max] = [mb, l.MAX_STORAGE_MB];
     refuseOffering(
       d,
       "MAX_STORAGE_MB",
-      `This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Removed projects still count until you delete them forever.`,
+      msg({
+        id: "quota.storage_full",
+        message: msg`This account stores ${plural({ stored }, { other: "#" })} MB, the most allowed is ${plural({ max }, { other: "#" })} MB. Removed projects still count until you delete them forever.`,
+      }),
     );
+  }
 }
 
 /**
@@ -785,21 +861,22 @@ async function minutesOver(
   projectId: string | null,
   durationSec: number,
   ent?: Entitlements | null,
-): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; firstVideo: boolean } | null> {
+): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; descriptor: MessageDescriptor; offer: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
-  const mins = Math.round(durationSec / 60);
+  const length = Math.round(durationSec / 60);
   const except = projectId ?? undefined;
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
     const used = await minutesToday(db, userId, except);
-    if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY)
-      return {
-        d,
-        key: "MAX_SOURCE_MINUTES_PER_DAY",
-        message: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
-        sentence: `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_DAY, used)} of your ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes a day left. Resets at ${hhmm(nextMidnightUtc())}.`,
-        firstVideo: false,
-      };
+    if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY) {
+      const [rest, max, at] = [left(l.MAX_SOURCE_MINUTES_PER_DAY, used), Math.round(l.MAX_SOURCE_MINUTES_PER_DAY), hhmm(nextMidnightUtc())];
+      const descriptor = msg({
+        id: "quota.video_over_day",
+        message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes a day left. Resets at ${{ at }}.`,
+      });
+      const sentence = t(descriptor);
+      return { d, key: "MAX_SOURCE_MINUTES_PER_DAY", message: sentence, sentence, descriptor, offer: "", firstVideo: false };
+    }
   }
   if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
     const period = periodFor(d.grants);
@@ -807,13 +884,24 @@ async function minutesOver(
     // the account's first video is on the house up to the plan's allowance
     if (m.firstPending && durationSec / 60 <= m.firstFree) return null;
     if (m.used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_MONTH) {
-      const upgrade = hint(d, "MAX_SOURCE_MINUTES_PER_MONTH");
+      const offer = hint(d, "MAX_SOURCE_MINUTES_PER_MONTH");
+      const max = Math.round(l.MAX_SOURCE_MINUTES_PER_MONTH);
       // a new account has used nothing: "0 already used passes the limit" read like a fault, so say what does fit
       const fits = Math.max(m.firstFree, left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used));
-      const sentence = m.firstPending
-        ? `This video is ${mins} minutes. Your first video is free up to ${m.firstFree} minutes, and after that your plan covers ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes a month. Try a video under ${fits} minutes.`
-        : `This video is ${mins} minutes and you have ${left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used)} of your ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes left this period. Resets on ${formatDay(period.end, { year: false, utc: true })}.`;
-      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${upgrade}`, sentence, firstVideo: m.firstPending };
+      const free = m.firstFree;
+      const rest = left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used);
+      const on = resetDay(period.end);
+      const descriptor = m.firstPending
+        ? msg({
+            id: "quota.video_over_first",
+            message: msg`This video is ${plural({ length }, { other: "#" })} minutes. Your first video is free up to ${plural({ free }, { other: "#" })} minutes, and after that your plan covers ${plural({ max }, { other: "#" })} minutes a month. Try a video under ${plural({ fits }, { other: "#" })} minutes.`,
+          })
+        : msg({
+            id: "quota.video_over_month",
+            message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes left this period. Resets on ${{ on }}.`,
+          });
+      const sentence = t(descriptor);
+      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${offer}`, sentence, descriptor, offer, firstVideo: m.firstPending };
     }
   }
   return null;
@@ -882,7 +970,9 @@ export async function predictAdmission(
     return { admission: { until: plan.until, firstVideo: plan.until !== null && room.firstVideo, binding: plan.until !== null ? room.binding : null } };
   const over = await minutesOver(db, instance, userId, null, durationSec, ent);
   if (!over) return { admission: { until: null, firstVideo: false, binding: null } };
-  return { refused: new QuotaError(over.message, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }) };
+  return {
+    refused: new QuotaError(over.descriptor, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }, over.offer),
+  };
 }
 
 /** The minutes limit that binds (`binding` from minutesRoomSec; else the month's, else the day's) and its offer: the plan to move to, or a request for more on the top plan, and when it resets. */
@@ -913,12 +1003,25 @@ export async function extensionRefusal(
 ): Promise<QuotaError> {
   const d = await limitsDetail(db, instance, userId, ent);
   const key = binding ?? defaultMinutesKey(d);
-  const resets =
+  const rest = Math.round(remainingSec / 60);
+  const room = Math.floor(roomSec / 60);
+  const descriptor =
     key === "MAX_SOURCE_MINUTES_PER_MONTH"
-      ? ` this period. Resets on ${formatDay(periodFor(d.grants).end, { year: false, utc: true })}.`
-      : ` today. Resets at ${hhmm(nextMidnightUtc())}.`;
-  const sentence = `The rest of this video is ${plural(Math.round(remainingSec / 60), "minute")} and you have ${plural(Math.floor(roomSec / 60), "minute")} left${resets}`;
-  return new QuotaError(`${sentence}${hint(d, key)}`, quotaRefusal(d, key, sentence), key);
+      ? (() => {
+          const on = resetDay(periodFor(d.grants).end);
+          return msg({
+            id: "quota.extension_over_month",
+            message: msg`The rest of this video is ${plural({ rest }, { one: "# minute", other: "# minutes" })} and you have ${plural({ room }, { one: "# minute", other: "# minutes" })} left this period. Resets on ${{ on }}.`,
+          });
+        })()
+      : (() => {
+          const at = hhmm(nextMidnightUtc());
+          return msg({
+            id: "quota.extension_over_day",
+            message: msg`The rest of this video is ${plural({ rest }, { one: "# minute", other: "# minutes" })} and you have ${plural({ room }, { one: "# minute", other: "# minutes" })} left today. Resets at ${{ at }}.`,
+          });
+        })();
+  return new QuotaError(descriptor, quotaRefusal(d, key, t(descriptor)), key, {}, hint(d, key));
 }
 
 /** With no room measured: the month's limit when there is one, else the day's. */
@@ -1124,20 +1227,34 @@ export async function overages(db: Db, userId: string, detail: LimitsDetail, at 
     thisMonth && detail.limits.MAX_SOURCE_MINUTES_PER_MONTH > 0 ? monthlyMinutes(db, userId, month.start, detail.grants).then((m) => Math.round(m.used)) : 0,
   ]);
   const usage = { MAX_STORAGE_MB: storedMb, MAX_PROJECTS_PER_USER: projects, MAX_SOURCE_MINUTES_PER_MONTH: minutes };
-  const label = detail.grants?.planLabel ?? "the plan";
+  const plan = detail.grants?.planLabel ?? null;
   const out: Overage[] = [];
   for (const key of WALL_KEYS) {
     const limit = detail.limits[key];
     const used = usage[key];
     if (limit <= 0 || used < limit) continue;
     if (key === "MAX_SOURCE_MINUTES_PER_MONTH" && !thisMonth) continue;
-    const sentence =
-      key === "MAX_STORAGE_MB"
-        ? `${formatMb(used)} stored, and ${label} keeps ${formatMb(limit)}: new projects and uploads are refused until you delete some (removed projects count until deleted forever).`
-        : key === "MAX_PROJECTS_PER_USER"
-          ? `${plural(used, "project")}, and ${label} keeps ${limit}: new projects and restores are refused until you delete some.`
-          : `${plural(used, "minute")} of video used this month, and ${label} allows ${limit}: new videos are refused until ${formatDay(month.end, { year: false, utc: true })}.`;
-    out.push({ key, used, limit, sentence });
+    out.push({ key, used, limit, sentence: overageSentence(key, used, limit, plan, month.end) });
   }
   return out;
+}
+
+/** One wall as a sentence: what is used, what the plan keeps, and what is refused until when. */
+function overageSentence(key: (typeof WALL_KEYS)[number], used: number, limit: number, planLabel: string | null, end: Date): string {
+  const plan = planLabel ?? t(msg`the plan`);
+  if (key === "MAX_STORAGE_MB") {
+    const [stored, keeps] = [formatMb(used), formatMb(limit)];
+    return t(
+      msg`${{ stored }} stored, and ${{ plan }} keeps ${{ keeps }}: new projects and uploads are refused until you delete some (removed projects count until deleted forever).`,
+    );
+  }
+  const max = formatNumber(limit);
+  if (key === "MAX_PROJECTS_PER_USER")
+    return t(
+      msg`${plural({ used }, { one: "# project", other: "# projects" })}, and ${{ plan }} keeps ${{ max }}: new projects and restores are refused until you delete some.`,
+    );
+  const until = resetDay(end);
+  return t(
+    msg`${plural({ used }, { one: "# minute", other: "# minutes" })} of video used this month, and ${{ plan }} allows ${{ max }}: new videos are refused until ${{ until }}.`,
+  );
 }

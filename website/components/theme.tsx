@@ -1,5 +1,7 @@
 "use client";
 
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { Moon, Sun } from "lucide-react";
 import { useLayoutEffect, useSyncExternalStore } from "react";
 import { THEME_KEY } from "@/lib/theme-script";
@@ -83,8 +85,8 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
       type="button"
       className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`}
       onClick={toggle}
-      title={theme === "dark" ? "Light theme" : "Dark theme"}
-      aria-label="Toggle theme"
+      title={theme === "dark" ? t(msg`Light theme`) : t(msg`Dark theme`)}
+      aria-label={t(msg`Toggle theme`)}
     >
       {/* fixed-size slot: the icon swaps after hydration without moving anything */}
       <span className="grid h-4 w-4 place-items-center">

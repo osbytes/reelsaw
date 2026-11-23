@@ -7,6 +7,7 @@
  */
 import { ProviderError, arr, clip, extOf, httpsUrl, num, obj, str } from "./http.js";
 import type { ItemLicense, Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://api.openverse.org/v1";
 
@@ -81,12 +82,14 @@ export function openverse({ http }: ProviderDeps): Provider {
     async resolve(externalId): Promise<Resolved> {
       const [type, id] = externalId.split(":");
       if ((type !== "image" && type !== "audio") || !id || !/^[0-9a-f-]{36}$/i.test(id))
-        throw new ProviderError("That is not an Openverse id (image:<uuid> or audio:<uuid>).");
+        throw new ProviderError(
+          msg({ id: "library_provider.openverse_id_image_uuid_audio", message: "That is not an Openverse id (image:<uuid> or audio:<uuid>)." }),
+        );
       const r = obj(await http.json("openverse", `${API}/${type}s/${id}/`));
       const license = licenseOf(r);
       const file = httpsUrl(r["url"]);
-      if (!license) throw new ProviderError("That item's license cannot be imported.");
-      if (!file) throw new ProviderError("Openverse returned no file for that item.");
+      if (!license) throw new ProviderError(msg({ id: "library_provider.item_s_license_cannot_imported", message: "That item's license cannot be imported." }));
+      if (!file) throw new ProviderError(msg({ id: "library_provider.openverse_returned_no_file_item", message: "Openverse returned no file for that item." }));
       const tags = arr(r["tags"])
         .flatMap((t) => str(obj(t)["name"]) ?? [])
         .slice(0, 12);

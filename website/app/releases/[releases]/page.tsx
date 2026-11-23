@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
@@ -26,21 +28,21 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const feed = await githubReleases();
   const resolved = feed && resolveReleasesParam((await params).releases, feed.releases);
-  if (!resolved) return { title: "Release not found", robots: { index: false, follow: true } };
+  if (!resolved) return { title: t(msg`Release not found`), robots: { index: false, follow: true } };
   if (resolved.kind === "empty") return { title: resolved.heading, robots: { index: false, follow: true } };
   if (resolved.kind === "release") {
     const r = resolved.release;
     const url = releasePath(r.tag);
-    const description = `Reelsaw ${r.tag}, released ${formatUtcDate(r.publishedAt)}: ${releaseTitle(r)}`;
+    const description = t(msg`Reelsaw ${{ tag: r.tag }}, released ${{ formatUtcDate: formatUtcDate(r.publishedAt) }}: ${{ releaseTitle: releaseTitle(r) }}`);
     return {
       title: `${r.tag}: ${releaseTitle(r)}`,
       description,
       alternates: { canonical: url },
-      ...socialMeta({ title: `Reelsaw ${r.tag}`, description, url }),
+      ...socialMeta({ title: t(msg`Reelsaw ${{ tag: r.tag }}`), description, url }),
     };
   }
   const url = `/releases/${resolved.selection}`;
-  const description = resolved.highlights.length ? resolved.highlights.join(" ") : `What shipped in Reelsaw ${resolved.label}.`;
+  const description = resolved.highlights.length ? resolved.highlights.join(" ") : t(msg`What shipped in Reelsaw ${{ label: resolved.label }}.`);
   return {
     title: resolved.heading,
     description,
@@ -58,11 +60,13 @@ export default async function ReleasesParamPage({ params }: Props) {
     return (
       <Shell crumb={{ href: `/releases/${param}`, label: decodeSafe(param) }}>
         <div className="card p-5 text-sm text-ink2">
-          Could not load releases from GitHub just now.{" "}
-          <a href={SITE.releases} target="_blank" rel="noreferrer" className="prose-link">
-            Read them on GitHub
-          </a>
-          .
+          {rich(msg`Could not load releases from GitHub just now. <0>Read them on GitHub</0>.`, {
+            0: (c) => (
+              <a href={SITE.releases} target="_blank" rel="noreferrer" className="prose-link">
+                {c}
+              </a>
+            ),
+          })}
         </div>
       </Shell>
     );
@@ -83,10 +87,10 @@ export default async function ReleasesParamPage({ params }: Props) {
     return (
       <ReleasesNotFoundView
         title={resolved.heading}
-        description="No release went out on those days. Here are the closest ones."
+        description={t(msg`No release went out on those days. Here are the closest ones.`)}
         suggestions={[
-          ...(resolved.older ? [{ caption: "Before", release: resolved.older }] : []),
-          ...(resolved.newer ? [{ caption: "After", release: resolved.newer }] : []),
+          ...(resolved.older ? [{ caption: t(msg`Before`), release: resolved.older }] : []),
+          ...(resolved.newer ? [{ caption: t(msg`After`), release: resolved.newer }] : []),
         ]}
       />
     );
@@ -103,7 +107,7 @@ export default async function ReleasesParamPage({ params }: Props) {
         </header>
         {resolved.highlights.length > 0 && (
           <div className="card w-full shrink-0 p-4 md:w-80">
-            <p className="text-xs text-ink3">Highlights</p>
+            <p className="text-xs text-ink3">{t(msg`Highlights`)}</p>
             <ul className="mt-2 flex flex-col gap-1.5">
               {resolved.highlights.map((h) => (
                 <li key={h} className="flex gap-2 text-sm text-ink">
@@ -115,12 +119,12 @@ export default async function ReleasesParamPage({ params }: Props) {
           </div>
         )}
       </div>
-      <section aria-label="Release notes" className="mt-4">
+      <section aria-label={t(msg`Release notes`)} className="mt-4">
         <ReleaseDayList groups={groupReleasesByDay(resolved.releases)} />
       </section>
       <p className="text-sm">
         <a href="/releases" className="prose-link font-semibold">
-          See every release
+          {t(msg`See every release`)}
         </a>
       </p>
     </Shell>
@@ -134,7 +138,7 @@ function ReleasePage({ release: r, newer, older, sameDay }: { release: Release; 
         data={{
           "@context": "https://schema.org",
           "@type": "Article",
-          headline: `Reelsaw ${r.tag}: ${releaseTitle(r)}`,
+          headline: t(msg`Reelsaw ${{ tag: r.tag }}: ${{ releaseTitle: releaseTitle(r) }}`),
           datePublished: r.publishedAt,
           url: `${SITE.url}${releasePath(r.tag)}`,
           author: { "@type": "Organization", name: "osbytes", url: SITE.osbytes },
@@ -144,39 +148,39 @@ function ReleasePage({ release: r, newer, older, sameDay }: { release: Release; 
         <header className="mb-6 flex flex-col gap-3 border-b border-line pb-6">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink3">
             <VersionBadge tag={r.tag} />
-            <span>
-              Released <time dateTime={r.publishedAt}>{formatLongDay(releaseDay(r))}</time>
-            </span>
-            {r.prerelease && <span className="chip bg-warn-soft text-warn">Pre-release</span>}
+            <span>{rich(msg`Released <0/>`, { 0: <time dateTime={r.publishedAt}>{formatLongDay(releaseDay(r))}</time> })}</span>
+            {r.prerelease && <span className="chip bg-warn-soft text-warn">{t(msg`Pre-release`)}</span>}
             <a href={r.url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-ink3 hover:text-acc-text">
-              GitHub ↗
+              {t(msg`GitHub ↗`)}
             </a>
           </div>
           <h1 className="text-[26px] leading-tight font-extrabold tracking-tight text-balance sm:text-[32px]">{releaseTitle(r)}</h1>
           {sameDay.length > 0 && (
             <p className="text-sm text-ink3">
-              Also released that day:{" "}
-              {sameDay.map((o, i) => (
-                <span key={o.tag}>
-                  {i > 0 ? ", " : null}
-                  <a href={releasePath(o.tag)} className="font-mono font-medium text-ink hover:text-acc-text">
-                    {o.tag}
-                  </a>
-                </span>
-              ))}
+              {rich(msg`Also released that day: <0/>`, {
+                0: sameDay.map((o, i) => (
+                  <span key={o.tag}>
+                    {i > 0 ? ", " : null}
+                    <a href={releasePath(o.tag)} className="font-mono font-medium text-ink hover:text-acc-text">
+                      {o.tag}
+                    </a>
+                  </span>
+                )),
+              })}
             </p>
           )}
         </header>
         <ReleaseNotes release={r} />
       </article>
 
-      <nav aria-label="Other releases" className="mt-6 grid gap-3 border-t border-line pt-6 sm:grid-cols-2">
+      <nav aria-label={t(msg`Other releases`)} className="mt-6 grid gap-3 border-t border-line pt-6 sm:grid-cols-2">
         {older ? (
           <ReleaseCard
             release={older}
             caption={
               <span className="flex items-center gap-1">
-                <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Older
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                {t(msg` Older`)}
               </span>
             }
           />
@@ -189,7 +193,8 @@ function ReleasePage({ release: r, newer, older, sameDay }: { release: Release; 
             align="end"
             caption={
               <span className="flex items-center gap-1">
-                Newer <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                {t(msg`Newer `)}
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
               </span>
             }
           />
@@ -197,7 +202,7 @@ function ReleasePage({ release: r, newer, older, sameDay }: { release: Release; 
       </nav>
       <p className="text-sm">
         <a href={`/releases#${r.tag}`} className="prose-link font-semibold">
-          See every release
+          {t(msg`See every release`)}
         </a>
       </p>
     </Shell>
@@ -209,7 +214,7 @@ function Shell({ crumb, wide = false, children }: { crumb: { href: string; label
     <>
       <Header />
       <main id="main" className={`container-page flex flex-col gap-5 py-6 sm:py-8 ${wide ? "max-w-[880px]" : "max-w-[720px]"}`}>
-        <Breadcrumbs items={[{ href: "/", label: SITE.name }, { href: "/releases", label: "Releases" }, crumb]} />
+        <Breadcrumbs items={[{ href: "/", label: SITE.name }, { href: "/releases", label: t(msg`Releases`) }, crumb]} />
         {children}
       </main>
       <Footer />

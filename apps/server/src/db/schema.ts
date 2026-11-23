@@ -67,6 +67,10 @@ export const user = pgTable(
     heldBy: text("held_by"),
     /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
+    /** language of this account's emails, notices and messages (a SHIPPED_LOCALES code); null = the browser's, English in mail (notify/locale.ts) */
+    locale: text("locale"),
+    /** IANA zone the days in its emails and notices are read in; null = UTC in mail, the browser's own on screen */
+    timeZone: text("time_zone"),
     /** last seen in the web app (visible tab with recent input) or over MCP, coalesced (presence.ts). Null until then. */
     lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
     createdAt: timestamp("created_at").defaultNow().notNull(),

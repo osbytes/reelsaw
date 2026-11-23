@@ -18,7 +18,9 @@ import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import type { ClipBumpers } from "@reelsaw/shared";
-import { plural } from "@reelsaw/shared";
+import { formatNumber } from "@reelsaw/shared";
+import { plural, select, t } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -42,13 +44,19 @@ export function useBumperLibrary() {
 }
 
 export const lengthText = (a: Pick<LibraryAsset, "durationSec">) =>
-  a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
-export const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  a.durationSec >= 60 ? clockText(a.durationSec) : `${formatNumber(Number(a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)))} s`;
+export const sizeText = (n: number) =>
+  n >= 1024 * 1024 ? `${formatNumber(Number((n / 1024 / 1024).toFixed(1)))} MB` : `${formatNumber(Math.max(1, Math.round(n / 1024)))} KB`;
+/** An asset's kind as a word: "video", "image", "audio". */
+const kindWord = (kind: LibraryAsset["kind"]) => select(kind, { video: "video", image: "image", audio: "audio", other: "file" });
+/** A slot or use as a word: "intro", "outro", "overlay", "music", "layer". */
+const slotWord = (slot: string) => select(slot, { intro: "intro", outro: "outro", overlay: "overlay", music: "music", layer: "layer", other: slot });
 /** "video · 4 s · 1080×1920", "audio · 2:31" (images are drawn separately: their length is a control). */
-export const metaText = (a: LibraryAsset) =>
-  a.kind === "audio"
-    ? `audio · ${lengthText(a)}`
-    : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
+export const metaText = (a: LibraryAsset) => {
+  if (a.kind === "audio") return `${kindWord(a.kind)} · ${lengthText(a)}`;
+  const base = `${kindWord(a.kind)}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}`;
+  return a.kind === "video" && !a.hasAudio ? t`${base} · silent` : base;
+};
 
 export interface UploadJob {
   key: string;
@@ -62,6 +70,7 @@ export interface UploadJob {
 
 /** Upload (several at once, two at a time), default and delete/restore actions for the library. */
 export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) => void } = {}) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
@@ -90,7 +99,8 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const work = async () => {
     running.current++;
     for (let next = queue.current.shift(); next; next = queue.current.shift()) {
-      toast.loading(`Adding ${queue.current.length + 1} file${queue.current.length ? "s" : ""} to your library…`, { id: "bumper-batch" });
+      const pendingFiles = queue.current.length + 1;
+      toast.loading(plural(pendingFiles, { one: "Adding # file to your library…", other: "Adding # files to your library…" }), { id: "bumper-batch" });
       const { key, file } = next;
       try {
         patch(key, { state: "uploading" });
@@ -99,8 +109,9 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
         const r = await create.mutateAsync({ uploadId });
         if (r.duplicate) {
           // nothing new was stored: say so, and point at the card that already has it
-          patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
-          toast(r.restored ? `Already in your library, restored “${r.name}”` : `Already in your library: “${r.name}”`, { id: `bumper-dup-${r.id}` });
+          patch(key, { state: "done", note: r.restored ? t`restored` : t`already added` });
+          const dupName = r.name;
+          toast(r.restored ? t`Already in your library, restored “${dupName}”` : t`Already in your library: “${dupName}”`, { id: `bumper-dup-${r.id}` });
           dupRef.current?.(r.id);
         } else {
           patch(key, { state: "done" });
@@ -115,10 +126,10 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     if (--running.current === 0) {
       const { ok, failed } = finished.current;
       finished.current = { ok: 0, failed: 0 };
-      if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
+      if (failed) toast.error(t`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
       else if (ok === 0)
         toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
-      else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
+      else toast.success(ok === 1 ? t`Added to your library` : t`Added ${ok} to your library`, { id: "bumper-batch" });
     }
   };
   /** Checks sizes, then uploads and adds each file to the library, two at a time. */
@@ -135,7 +146,11 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
           name: file.name,
           pct: 0,
           state: "failed",
-          error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.`,
+          error: (() => {
+            const size = formatNumber(Math.ceil(file.size / 1024 / 1024));
+            const most = formatNumber(max / 1024 / 1024);
+            return image ? t`This file is ${size} MB. Images can be at most ${most} MB.` : t`This file is ${size} MB. Videos can be at most ${most} MB.`;
+          })(),
         });
         continue;
       }
@@ -152,12 +167,24 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const setDefault = (slot: "intro" | "outro", a: LibraryAsset, current: string | undefined) => {
     setDefaultM.mutate(
       { slot, assetId: current === a.id ? null : a.id },
-      { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail },
+      {
+        onSuccess: () => {
+          refresh();
+          if (current === a.id) toast(slot === "intro" ? t`No default intro` : t`No default outro`);
+          else toast(slot === "intro" ? t`New projects start with this intro` : t`New projects start with this outro`);
+        },
+        onError: fail,
+      },
     );
   };
   const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
     restoreM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(`Restored “${a.name}”`), true),
+      () => {
+        refresh();
+        const restoredName = a.name;
+        toast(t`Restored “${restoredName}”`);
+        return true;
+      },
       (e) => (fail(e), false),
     );
   /** Soft delete with Undo / Delete forever / See deletions (the server keeps the file, so projects using it keep rendering). */
@@ -186,7 +213,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     const next = name.trim();
     if (!next || next === a.name) return Promise.resolve(false);
     return updateM.mutateAsync({ id: a.id, name: next }).then(
-      () => (refresh(), toast(`Renamed to “${next}”`), true),
+      () => (refresh(), toast(t`Renamed to “${next}”`), true),
       (e) => (fail(e), false),
     );
   };
@@ -219,8 +246,10 @@ function RenamePopover({
   onRename: (name: string) => void;
   className?: string;
 }) {
+  const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(a.name);
+  const assetName = a.name;
   const save = () => {
     const next = v.trim();
     if (next && next !== a.name) onRename(next);
@@ -232,8 +261,8 @@ function RenamePopover({
         <button
           type="button"
           className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`}
-          aria-label={`Rename ${a.name}`}
-          title="Rename"
+          aria-label={t`Rename ${assetName}`}
+          title={t`Rename`}
         >
           <Pencil className="h-3 w-3" />
         </button>
@@ -246,7 +275,7 @@ function RenamePopover({
           className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
         >
           <label className="flex flex-col gap-1 text-ink2">
-            Name
+            <Trans>Name</Trans>
             <input
               className="input h-8 px-2 py-0 text-xs"
               type="text"
@@ -254,17 +283,17 @@ function RenamePopover({
               value={v}
               disabled={busy}
               autoFocus
-              aria-label="New name"
+              aria-label={t`New name`}
               onChange={(e) => setV(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && save()}
             />
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
-              Cancel
+              <Trans>Cancel</Trans>
             </button>
             <button type="button" className="btn-ink px-2 py-1 text-xs" disabled={busy || !v.trim() || v.trim() === a.name} onClick={save}>
-              Save
+              <Trans>Save</Trans>
             </button>
           </div>
         </Popover.Content>
@@ -275,6 +304,7 @@ function RenamePopover({
 
 /** The hidden file input behind the Library page's Upload button (the page-wide drop overlay handles drops). */
 export function UploadInput({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
+  const { t } = useLingui();
   return (
     <input
       ref={inputRef}
@@ -287,13 +317,14 @@ export function UploadInput({ inputRef, actions }: { inputRef: React.RefObject<H
         e.target.value = "";
         actions.uploadMany(files);
       }}
-      aria-label="Choose files for your library"
+      aria-label={t`Choose files for your library`}
     />
   );
 }
 
 /** Per-file progress for the current batch as a compact row; render it only while there are jobs. */
 export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
+  const { t } = useLingui();
   const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
   return (
     <div className="rounded-[10px] border border-line bg-sunk" aria-live="polite">
@@ -312,17 +343,17 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
                 <span className="min-w-0 flex-1 truncate">{j.name}</span>
                 <span className="shrink-0 font-mono text-ink3">
                   {j.state === "queued"
-                    ? "waiting"
+                    ? t`waiting`
                     : j.state === "uploading"
                       ? `${Math.round(j.pct * 100)}%`
                       : j.state === "saving"
-                        ? "adding"
+                        ? t`adding`
                         : j.state === "done"
-                          ? (j.note ?? "added")
-                          : "failed"}
+                          ? (j.note ?? t`added`)
+                          : t`failed`}
                 </span>
                 {(j.state === "done" || j.state === "failed") && (
-                  <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
+                  <button type="button" className="text-ink3 hover:text-ink" aria-label={t`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
@@ -340,7 +371,7 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
       {finished > 0 && (
         <div className="flex items-center justify-end gap-2 border-t border-line px-2 py-1 text-xs first:border-t-0">
           <button type="button" className="shrink-0 font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
-            Dismiss finished
+            <Trans>Dismiss finished</Trans>
           </button>
         </div>
       )}
@@ -412,6 +443,9 @@ export function SlotRow({
   /** seconds may be set even when the choice is "default" (the project modal) */
   secOnInherit?: boolean;
 }) {
+  const { t } = useLingui();
+  const choiceLabel = t`${label} choice`;
+  const secLabel = slot === "intro" ? t`Seconds the intro is shown` : t`Seconds the outro is shown`;
   const effective = fixed.some((f) => f.value === choice) ? (secOnInherit && (choice === "default" || choice === "inherit") ? inheritedId : null) : choice;
   const image = effective ? known.find((a) => a.id === effective && a.kind === "image") : undefined;
   if (reserveSec)
@@ -421,7 +455,7 @@ export function SlotRow({
         <BumperCombobox
           className="min-w-0"
           slot={slot}
-          label={`${label} choice`}
+          label={choiceLabel}
           value={choice}
           onChange={(c) => onChange(c, undefined)}
           fixed={fixed}
@@ -431,7 +465,7 @@ export function SlotRow({
           loading={loading}
         />
         <div className="flex w-[5rem] justify-end">
-          {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
+          {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={secLabel} />}
         </div>
       </>
     );
@@ -442,7 +476,7 @@ export function SlotRow({
         <BumperCombobox
           className="min-w-0 flex-1"
           slot={slot}
-          label={`${label} choice`}
+          label={choiceLabel}
           value={choice}
           onChange={(c) => onChange(c, undefined)}
           fixed={fixed}
@@ -451,7 +485,7 @@ export function SlotRow({
           defaultId={defaultId}
           loading={loading}
         />
-        {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
+        {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={secLabel} />}
       </div>
     </>
   );
@@ -463,7 +497,7 @@ export function LicenseBadge({ provenance: p, className = "", wrap = false }: { 
   const text = licenseText(p);
   const cls = `rounded-[5px] bg-sunk px-1 py-px text-[10px] font-semibold text-ink2 ${wrap ? "" : "block truncate"} ${className}`;
   return p.url ? (
-    <a href={p.url} target="_blank" rel="noreferrer noopener" className={`${cls} hover:text-ink hover:underline`} title={`${text} (opens the source)`}>
+    <a href={p.url} target="_blank" rel="noreferrer noopener" className={`${cls} hover:text-ink hover:underline`} title={t`${text} (opens the source)`}>
       {text}
     </a>
   ) : (
@@ -476,19 +510,21 @@ export function LicenseBadge({ provenance: p, className = "", wrap = false }: { 
 /** Tags: pick from the ones already in your library or create one (Enter); each change saves right away. */
 function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name" | "tags">; busy: boolean; onTags: (tags: string[]) => void }) {
   const library = useBumperLibrary();
+  const { t } = useLingui();
   const known = [...new Set([...(library.data?.assets ?? []).flatMap((x) => x.tags), ...a.tags])].sort((x, y) => x.localeCompare(y)); // sort-ok: tag suggestions A-Z, not list rows
+  const assetName = a.name;
   return (
     <MultiCombobox
-      label={`Tags on ${a.name}`}
-      placeholder="Add tags…"
-      searchPlaceholder="Find or create a tag…"
-      empty="No tags yet. Type one to create it."
-      footerHint="Tags make an item easy to find"
-      options={known.map((t) => ({ value: t, label: t }))}
+      label={t`Tags on ${assetName}`}
+      placeholder={t`Add tags…`}
+      searchPlaceholder={t`Find or create a tag…`}
+      empty={t`No tags yet. Type one to create it.`}
+      footerHint={t`Tags make an item easy to find`}
+      options={known.map((tag) => ({ value: tag, label: tag }))}
       value={a.tags}
       disabled={busy}
       onChange={(tags) => onTags(tags.slice(0, 30))}
-      creatable={{ noun: "tag", normalize: (q) => q.trim().toLowerCase().slice(0, 40) || null }}
+      creatable={{ noun: t`tag`, normalize: (q) => q.trim().toLowerCase().slice(0, 40) || null }}
     />
   );
 }
@@ -511,20 +547,38 @@ function AssetActions({
   onDelete: () => void;
   withLabels?: boolean;
 }) {
-  const slotBtn = (slot: "intro" | "outro", on: boolean) => (
+  const { t } = useLingui();
+  const assetName = a.name;
+  const slotTexts = (slot: "intro" | "outro") =>
+    slot === "intro"
+      ? {
+          stop: t`Stop using ${assetName} as the default intro`,
+          use: t`Use ${assetName} as the default intro`,
+          notDefault: t`Not the default intro`,
+          useAs: t`Use as intro`,
+          not: t`Not intro`,
+          short: t`Intro`,
+        }
+      : {
+          stop: t`Stop using ${assetName} as the default outro`,
+          use: t`Use ${assetName} as the default outro`,
+          notDefault: t`Not the default outro`,
+          useAs: t`Use as outro`,
+          not: t`Not outro`,
+          short: t`Outro`,
+        };
+  const slotBtn = (slot: "intro" | "outro", on: boolean, x = slotTexts(slot)) => (
     <button
       type="button"
       className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`}
       disabled={busy || a.kind === "audio"}
       aria-pressed={on}
-      aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`}
-      title={
-        a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`
-      }
+      aria-label={on ? x.stop : x.use}
+      title={a.kind === "audio" ? t`Music goes under a clip (editor → Overlays → Music), not before or after it` : on ? x.notDefault : x.useAs}
       onClick={() => onUse(slot)}
     >
       {on ? "● " : ""}
-      {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
+      {withLabels ? (on ? x.not : x.useAs) : x.short}
     </button>
   );
   return (
@@ -535,12 +589,12 @@ function AssetActions({
         type="button"
         className="btn-ghost justify-center px-1 py-1 text-xs"
         disabled={busy}
-        aria-label={`Delete ${a.name}`}
-        title="Delete"
+        aria-label={t`Delete ${assetName}`}
+        title={t`Delete`}
         onClick={onDelete}
       >
         <Trash2 className="h-3.5 w-3.5" />
-        {withLabels && "Delete"}
+        {withLabels && t`Delete`}
       </button>
     </div>
   );
@@ -548,6 +602,9 @@ function AssetActions({
 
 /** "3 s" with a pencil for an image: a tiny popover with the seconds field. */
 export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; busy: boolean; onSeconds: (sec: number) => void }) {
+  const { t } = useLingui();
+  const length = lengthText(a);
+  const assetName = a.name;
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(String(a.durationSec));
   const save = () => {
@@ -561,8 +618,8 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
         <button
           type="button"
           className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink"
-          aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`}
-          title="Change how long it is shown"
+          aria-label={t`Shown for ${length}. Change how long ${assetName} is shown`}
+          title={t`Change how long it is shown`}
         >
           {lengthText(a)}
           <Pencil className="h-3 w-3" />
@@ -576,7 +633,7 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
           className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
         >
           <label className="flex items-center gap-1.5 text-ink2">
-            Shown for
+            <Trans>Shown for</Trans>
             <input
               className="input h-7 w-16 px-1.5 py-0 text-xs"
               type="number"
@@ -586,7 +643,7 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
               value={v}
               disabled={busy}
               autoFocus
-              aria-label={`Seconds ${a.name} is shown`}
+              aria-label={t`Seconds ${assetName} is shown`}
               onChange={(e) => setV(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && save()}
             />
@@ -594,10 +651,10 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
-              Cancel
+              <Trans>Cancel</Trans>
             </button>
             <button type="button" className="btn-ink px-2 py-1 text-xs" disabled={busy} onClick={save}>
-              Save
+              <Trans>Save</Trans>
             </button>
           </div>
         </Popover.Content>
@@ -608,28 +665,36 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
 
 /** Always one line: default intro / outro, and where it is used (a popover with the projects), or "Empty". */
 export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
-  const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
-  const fix = applied ? ", re-render to apply" : "";
+  const { t } = useLingui();
+  const defaults = isIntro && isOutro ? t`● Default intro + outro` : isIntro ? t`● Default intro` : isOutro ? t`● Default outro` : "";
   const used = [
-    a.usedBy ? `${plural(a.usedBy, "project")}` : "",
-    a.usedByClips ? `${plural(a.usedByClips, "clip")}` : "",
-    a.usedByTemplates ? `${plural(a.usedByTemplates, "template")}` : "",
+    a.usedBy ? plural(a.usedBy, { one: "# project", other: "# projects" }) : "",
+    a.usedByClips ? plural(a.usedByClips, { one: "# clip", other: "# clips" }) : "",
+    a.usedByTemplates ? plural(a.usedByTemplates, { one: "# template", other: "# templates" }) : "",
   ]
     .filter(Boolean)
     .join(" · ");
+  const usedText = defaults
+    ? applied
+      ? `· ${t`used by ${used}, re-render to apply`}`
+      : `· ${t`used by ${used}`}`
+    : applied
+      ? t`Used by ${used}, re-render to apply`
+      : t`Used by ${used}`;
+  const assetName = a.name;
   return (
     <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
-      {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
+      {defaults && <span className="shrink-0 font-semibold text-acc-text">{defaults}</span>}
       {a.usedBy || a.usedByClips || a.usedByTemplates ? (
         <Popover.Root>
           <Popover.Trigger asChild>
             <button
               type="button"
               className="min-w-0 truncate text-start font-semibold text-acc-text hover:underline"
-              title="Where it’s used"
-              aria-label={`Where ${a.name} is used`}
+              title={t`Where it’s used`}
+              aria-label={t`Where ${assetName} is used`}
             >
-              {defaults ? `· used by ${used}${fix}` : `Used by ${used}${fix}`}
+              {usedText}
             </button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -639,13 +704,15 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
               collisionPadding={12}
               className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
             >
-              <b className="text-[13px]">Where “{a.name}” is used</b>
+              <b className="text-[13px]">
+                <Trans>Where “{assetName}” is used</Trans>
+              </b>
               <UsageList id={a.id} className="mt-2 max-h-[min(280px,50dvh)]" />
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
       ) : (
-        !defaults && <span className="text-ink3">{applied ? "Saved" : "○ Not used yet"}</span>
+        !defaults && <span className="text-ink3">{applied ? t`Saved` : t`○ Not used yet`}</span>
       )}
     </div>
   );
@@ -673,6 +740,17 @@ export function AssetLightbox({
   onDelete: () => void;
   onRename: (name: string) => void;
 }) {
+  const { t } = useLingui();
+  const assetName = a?.name ?? "";
+  const lightboxFacts = a
+    ? (() => {
+        const facts =
+          a.kind === "audio"
+            ? `${kindWord(a.kind)} · ${lengthText(a)} · ${sizeText(a.sizeBytes)}`
+            : `${kindWord(a.kind)} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`;
+        return a.kind === "video" && !a.hasAudio ? t`${facts} · silent` : facts;
+      })()
+    : "";
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -686,7 +764,7 @@ export function AssetLightbox({
               <div className="flex items-center gap-2">
                 <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
                 <RenamePopover asset={a} busy={busy} onRename={onRename} />
-                <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
+                <Dialog.Close className="text-ink2 hover:text-ink" aria-label={t`Close`}>
                   <X className="h-4 w-4" />
                 </Dialog.Close>
               </div>
@@ -700,7 +778,7 @@ export function AssetLightbox({
                     autoPlay
                     preload="metadata"
                     className="w-full"
-                    aria-label={`Play ${a.name}`}
+                    aria-label={t`Play ${assetName}`}
                     onPlay={(e) => playOnly(e.currentTarget)}
                   />
                 </div>
@@ -723,10 +801,7 @@ export function AssetLightbox({
               )}
               <p className="truncate font-mono text-xs text-ink3">
                 {formatTag(a.mime) ? `${formatTag(a.mime)} · ` : ""}
-                {a.kind === "audio"
-                  ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}`
-                  : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
-                {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
+                {lightboxFacts}
               </p>
               <TagEditor asset={a} busy={busy} onTags={onTags} />
               {a.provenance && (
@@ -736,20 +811,24 @@ export function AssetLightbox({
               )}
               {(a.usedBy > 0 || a.usedByClips > 0 || a.usedByTemplates > 0) && (
                 <div className="rounded-[12px] border border-line p-3">
-                  <b className="text-xs">Where it’s used</b>
+                  <b className="text-xs">
+                    <Trans>Where it’s used</Trans>
+                  </b>
                   <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
                 </div>
               )}
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onDelete={onDelete} withLabels />
               <p className="text-center text-xs text-ink3">
-                New project with it as the{" "}
-                <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
-                  intro
-                </Link>{" "}
-                ·{" "}
-                <Link to={`/new?outro=${a.id}`} className="text-ink2 hover:text-ink">
-                  outro
-                </Link>
+                <Trans>
+                  New project with it as the{" "}
+                  <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
+                    intro
+                  </Link>{" "}
+                  ·{" "}
+                  <Link to={`/new?outro=${a.id}`} className="text-ink2 hover:text-ink">
+                    outro
+                  </Link>
+                </Trans>
               </p>
             </>
           )}
@@ -761,6 +840,7 @@ export function AssetLightbox({
 
 /** Projects that use an asset (default or override) with the clips under each, and where each use comes from. */
 export function UsageList({ id, className = "" }: { id: string; className?: string }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const q = useQuery(trpc.library.usage.queryOptions({ id }));
   const projects = q.data?.projects ?? [];
@@ -769,7 +849,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
     <ScrollArea className={className}>
       <div className="flex min-h-[3rem] flex-col gap-2.5 pe-2 text-xs">
         {q.isPending && !q.error && (
-          <SkeletonRegion label="Loading usage…" className="flex flex-col gap-2.5">
+          <SkeletonRegion label={t`Loading usage…`} className="flex flex-col gap-2.5">
             {["w-2/3", "w-1/2", "w-3/5"].map((w, i) => (
               <div key={i} className="flex flex-col gap-1">
                 <Skeleton className={`h-4 ${w}`} />
@@ -779,35 +859,50 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
           </SkeletonRegion>
         )}
         {q.error && <span className="text-err">{q.error.message}</span>}
-        {q.data && projects.length === 0 && templates.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
-        {templates.map((t) => (
-          <div key={t.id} className="flex items-baseline gap-2">
-            <Link to={`/templates/${t.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
-              {t.name}
-            </Link>
-            <span className="shrink-0 text-ink3">
-              {[...t.slots, ...(t.layers ? [t.layers > 1 ? `layer ×${t.layers}` : "layer"] : [])].join(" + ")} · template
-            </span>
-          </div>
-        ))}
+        {q.data && projects.length === 0 && templates.length === 0 && (
+          <span className="text-ink3">
+            <Trans>Nothing uses it right now.</Trans>
+          </span>
+        )}
+        {templates.map((tpl) => {
+          const uses = [...tpl.slots.map(slotWord), ...(tpl.layers ? [tpl.layers > 1 ? `${slotWord("layer")} ×${tpl.layers}` : slotWord("layer")] : [])].join(
+            " + ",
+          );
+          return (
+            <div key={tpl.id} className="flex items-baseline gap-2">
+              <Link to={`/templates/${tpl.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
+                {tpl.name}
+              </Link>
+              <span className="shrink-0 text-ink3">{t`${uses} · template`}</span>
+            </div>
+          );
+        })}
         {projects.map((p) => (
           <div key={p.id} className="flex flex-col gap-1">
             <div className="flex items-baseline gap-2">
               <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
                 {p.title}
               </Link>
-              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{p.slots.join(" + ")} · project</span>}
+              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{`${p.slots.map(slotWord).join(" + ")} · ${t`project`}`}</span>}
             </div>
             {p.clips.map((c) => (
               <div key={c.id} className="flex items-baseline gap-2 ps-3">
                 <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
-                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled clip"}
+                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || t`Untitled clip`}
                 </Link>
                 <span className="shrink-0 text-ink3">
-                  {c.slots
-                    .map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s))
-                    .join(" + ")}{" "}
-                  · {c.via === "clip" ? "on the clip" : "from project"}
+                  {(() => {
+                    const uses = c.slots
+                      .map((s) =>
+                        s === "overlay" && c.overlays > 1
+                          ? `${slotWord(s)} ×${c.overlays}`
+                          : s === "music" && c.music > 1
+                            ? `${slotWord(s)} ×${c.music}`
+                            : slotWord(s),
+                      )
+                      .join(" + ");
+                    return c.via === "clip" ? t`${uses} · on the clip` : t`${uses} · from project`;
+                  })()}
                 </span>
               </div>
             ))}
@@ -828,24 +923,43 @@ export function DeleteAssetDialog({
   onClose: () => void;
   onConfirm: () => Promise<unknown>;
 }) {
+  const { t } = useLingui();
   const { hint } = useRestoreWindow("asset", !!asset);
   const used = asset ? asset.usedBy > 0 || asset.usedByTemplates > 0 : false;
+  const body = (() => {
+    if (!asset) return "";
+    const name = asset.name;
+    const after = hint();
+    if (asset.usedBy) {
+      const projects = plural(asset.usedBy, {
+        one: "The project using it keeps rendering with it (as intro, outro, overlay or music) until it picks another.",
+        other: "The # projects using it keep rendering with it (as intro, outro, overlay or music) until they pick another.",
+      });
+      const templates = asset.usedByTemplates
+        ? plural(asset.usedByTemplates, {
+            one: "A template also uses it: that layer is skipped when the template is applied.",
+            other: "# templates also use it: that layer is skipped when the template is applied.",
+          })
+        : "";
+      return [projects, templates, after].filter(Boolean).join(" ");
+    }
+    if (asset.usedByTemplates) {
+      const templates = plural(asset.usedByTemplates, {
+        one: `A template uses “${name}”: that layer is skipped when the template is applied until you restore the file or pick another.`,
+        other: `# templates use “${name}”: that layer is skipped when the template is applied until you restore the file or pick another.`,
+      });
+      return `${templates} ${after}`;
+    }
+    return t`“${name}” is hidden from pickers and defaults. ${after}`;
+  })();
   return (
     <ConfirmDialog
       open={!!asset}
       onOpenChange={(o) => !o && onClose()}
-      title="Delete from your library?"
+      title={t`Delete from your library?`}
       width={460}
-      body={
-        !asset
-          ? ""
-          : asset.usedBy
-            ? `${asset.usedBy === 1 ? "The project using it keeps" : `The ${asset.usedBy} projects using it keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} ${hint()}`
-            : asset.usedByTemplates
-              ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. ${hint()}`
-              : `“${asset.name}” is hidden from pickers and defaults. ${hint()}`
-      }
-      confirm="Delete"
+      body={body}
+      confirm={t`Delete`}
       danger
       onConfirm={onConfirm}
     >
@@ -911,23 +1025,26 @@ export function BumperSelects({
   reserveSec?: boolean;
   template?: boolean;
 }) {
+  const { t } = useLingui();
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   // music is for the audio lane, never a slot
   const assets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
-  const fixed = (projectId: string | null | undefined): FixedOption[] =>
-    template
+  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : t`deleted`)) : t`none`);
+  const fixed = (projectId: string | null | undefined): FixedOption[] => {
+    const inherited = name(projectId);
+    return template
       ? [
-          { value: "keep", label: "Clip’s own", hint: "Clips keep the one they have", icon: <Equal className="h-4 w-4" /> },
-          { value: "none", label: "None", hint: "Takes it off the clips", icon: <Ban className="h-4 w-4" /> },
+          { value: "keep", label: t`Clip’s own`, hint: t`Clips keep the one they have`, icon: <Equal className="h-4 w-4" /> },
+          { value: "none", label: t`None`, hint: t`Takes it off the clips`, icon: <Ban className="h-4 w-4" /> },
         ]
       : [
-          ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
-          { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
-          { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+          ...(keep ? [{ value: "keep", label: t`Leave as it is`, hint: t`Don’t change this slot`, icon: <Equal className="h-4 w-4" /> }] : []),
+          { value: "inherit", label: t`Project default (${inherited})`, hint: t`Follow the project`, icon: <Star className="h-4 w-4" /> },
+          { value: "none", label: t`None`, hint: t`Nothing here`, icon: <Ban className="h-4 w-4" /> },
         ];
+  };
   const row = (slot: "intro" | "outro", label: string, projectId: string | null | undefined, defaultId: string | undefined) => (
     <SlotRow
       slot={slot}
@@ -947,8 +1064,8 @@ export function BumperSelects({
     <div
       className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}
     >
-      {row("intro", "Intro", projectIntroId, defaults?.introAssetId)}
-      {row("outro", "Outro", projectOutroId, defaults?.outroAssetId)}
+      {row("intro", t`Intro`, projectIntroId, defaults?.introAssetId)}
+      {row("outro", t`Outro`, projectOutroId, defaults?.outroAssetId)}
     </div>
   );
 }
@@ -973,6 +1090,7 @@ export function ClipBumpersDialog({
   projectIntroId?: string | null | undefined;
   projectOutroId?: string | null | undefined;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
@@ -989,30 +1107,32 @@ export function ClipBumpersDialog({
       {
         onSuccess: () => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-          toast(rerender ? "Saved · re-rendering this clip" : "Saved for this clip");
+          toast(rerender ? t`Saved · re-rendering this clip` : t`Saved for this clip`);
           onOpenChange(false);
         },
         onError: (e) => toast.error(e.message),
       },
     );
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Intro and outro for this clip" width={400}>
-      <Dialog.Description className="sr-only">Choose an intro and outro for just this clip.</Dialog.Description>
+    <Modal open={open} onOpenChange={onOpenChange} title={t`Intro and outro for this clip`} width={400}>
+      <Dialog.Description className="sr-only">
+        <Trans>Choose an intro and outro for just this clip.</Trans>
+      </Dialog.Description>
       <BumperSelects value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
       <div className="flex justify-end gap-2">
         <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => onOpenChange(false)}>
-          Cancel
+          <Trans>Cancel</Trans>
         </button>
         <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
-          Save
+          <Trans>Save</Trans>
         </button>
         <button
           className="btn-ink px-2.5 py-1 text-xs"
           disabled={!dirty || update.isPending || !rendered}
-          title={rendered ? undefined : "This clip isn't rendered yet"}
+          title={rendered ? undefined : t`This clip isn't rendered yet`}
           onClick={() => save(true)}
         >
-          Save & re-render
+          <Trans>Save & re-render</Trans>
         </button>
       </div>
     </Modal>
@@ -1041,6 +1161,7 @@ export function BulkBumpersPopover({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [inner, setInner] = useState(false);
@@ -1066,8 +1187,15 @@ export function BulkBumpersPopover({
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-          const what = [v.intro !== "keep" ? "intro" : "", v.outro !== "keep" ? "outro" : ""].filter(Boolean).join(" and ");
-          toast(`Updated the ${what} on ${plural(r.updated, "clip")}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
+          const clips = plural(r.updated, { one: "# clip", other: "# clips" });
+          const head =
+            v.intro !== "keep" && v.outro !== "keep"
+              ? t`Updated the intro and outro on ${clips}`
+              : v.intro !== "keep"
+                ? t`Updated the intro on ${clips}`
+                : t`Updated the outro on ${clips}`;
+          const rerendered = r.rerendered;
+          toast(rerendered ? t`${head} · re-rendering ${rerendered}` : head);
           setV({ intro: "keep", outro: "keep" });
           setOpen(false);
           onDone();
@@ -1079,8 +1207,11 @@ export function BulkBumpersPopover({
     <Popover.Root open={open} onOpenChange={setOpen}>
       {openProp === undefined ? (
         <Popover.Trigger asChild>
-          <button className={className} title={`Set the intro and outro of ${plural(clipIds.length, "clip")}`}>
-            Intro/outro…
+          <button
+            className={className}
+            title={plural(clipIds.length, { one: "Set the intro and outro of # clip", other: "Set the intro and outro of # clips" })}
+          >
+            <Trans>Intro/outro…</Trans>
           </button>
         </Popover.Trigger>
       ) : (
@@ -1094,19 +1225,19 @@ export function BulkBumpersPopover({
           collisionPadding={12}
           className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
         >
-          <b className="text-[13px]">Intro and outro for {plural(clipIds.length, "clip")}</b>
+          <b className="text-[13px]">{plural(clipIds.length, { one: "Intro and outro for # clip", other: "Intro and outro for # clips" })}</b>
           <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
           <div className="flex justify-end gap-2">
             <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
-              Apply
+              <Trans>Apply</Trans>
             </button>
             <button
               className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs"
               disabled={nothing || many.isPending || !rerenderable}
-              title={rerenderable ? undefined : "None of the selected clips is rendered yet"}
+              title={rerenderable ? undefined : t`None of the selected clips is rendered yet`}
               onClick={() => apply(true)}
             >
-              {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
+              {many.isPending ? t`Applying…` : t`Apply & re-render ${rerenderable}`}
             </button>
           </div>
         </Popover.Content>
@@ -1140,6 +1271,7 @@ export function ProjectBumpersModal({
   introSec?: number | undefined;
   outroSec?: number | undefined;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const library = useBumperLibrary();
@@ -1156,11 +1288,14 @@ export function ProjectBumpersModal({
   const iSec = pick.introSec === undefined ? introSec : (pick.introSec ?? undefined);
   const oSec = pick.outroSec === undefined ? outroSec : (pick.outroSec ?? undefined);
   const dirty = intro !== initial.intro || outro !== initial.outro || iSec !== introSec || oSec !== outroSec;
-  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
-  const fixed = (slotDefault: string | undefined): FixedOption[] => [
-    { value: "default", label: `Default (${name(slotDefault)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
-    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
-  ];
+  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : t`deleted`)) : t`none`);
+  const fixed = (slotDefault: string | undefined): FixedOption[] => {
+    const current = name(slotDefault);
+    return [
+      { value: "default", label: t`Default (${current})`, hint: t`What Settings say now`, icon: <Star className="h-4 w-4" /> },
+      { value: "none", label: t`None`, hint: t`Nothing here`, icon: <Ban className="h-4 w-4" /> },
+    ];
+  };
   // a project may still use an asset that was deleted since; keep it selectable as itself
   const row = (slot: "intro" | "outro", label: string, choice: Choice, sec: number | undefined, slotDefault: string | undefined) => (
     <SlotRow
@@ -1192,7 +1327,7 @@ export function ProjectBumpersModal({
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
           void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
-          toast(r.rerendered ? `Saved · re-rendering ${plural(r.rerendered, "clip")}` : "Saved");
+          toast(r.rerendered ? plural(r.rerendered, { one: "Saved · re-rendering # clip", other: "Saved · re-rendering # clips" }) : t`Saved`);
           setPick({});
           onOpenChange(false);
         },
@@ -1200,23 +1335,25 @@ export function ProjectBumpersModal({
       },
     );
   return (
-    <Modal open={open} onOpenChange={(o) => (setPick({}), onOpenChange(o))} title="Intro and outro for this project" width={460}>
+    <Modal open={open} onOpenChange={(o) => (setPick({}), onOpenChange(o))} title={t`Intro and outro for this project`} width={460}>
       <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-        {row("intro", "Intro", intro, iSec, defaults?.introAssetId)}
-        {row("outro", "Outro", outro, oSec, defaults?.outroAssetId)}
+        {row("intro", t`Intro`, intro, iSec, defaults?.introAssetId)}
+        {row("outro", t`Outro`, outro, oSec, defaults?.outroAssetId)}
       </div>
       <p className="min-h-8 text-xs text-ink3">
-        {dirty ? `Re-render ${plural(clipCount, "clip")} now, or save and re-render later.` : "Manage the library on the Library page."}
+        {dirty
+          ? plural(clipCount, { one: "Re-render # clip now, or save and re-render later.", other: "Re-render # clips now, or save and re-render later." })
+          : t`Manage the library on the Library page.`}
       </p>
       <div className="flex flex-wrap justify-end gap-2">
         <button className="btn-ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          <Trans>Cancel</Trans>
         </button>
         <button className="btn-ghost" disabled={!dirty || save.isPending} onClick={() => apply(false)}>
-          Save
+          <Trans>Save</Trans>
         </button>
         <button className="btn-ink min-w-[10rem]" disabled={!dirty || save.isPending} onClick={() => apply(true)}>
-          {save.isPending ? "Saving…" : `Save & re-render ${clipCount}`}
+          {save.isPending ? t`Saving…` : t`Save & re-render ${clipCount}`}
         </button>
       </div>
     </Modal>

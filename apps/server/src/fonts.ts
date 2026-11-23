@@ -18,12 +18,13 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { FONT_FILE_EXTS, MAX_FONT_BYTES, TEXT_FONTS, fontFamilySchema } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import { takeTxLock, txLock } from "./locks.js";
 import type { Services } from "./services.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError, type MessageDescriptor, t } from "./i18n.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -146,13 +147,24 @@ export async function readFontFamily(file: string): Promise<string | null> {
   return first ? first : null;
 }
 
-/** Why a file cannot be a font upload, before anything is read from it, or null. Pure. */
-export function fontFileProblem(filename: string, sizeBytes: number): string | null {
+/** Why a file cannot be a font upload, before anything is read from it, or null: the message, for an AppError. Pure. */
+function fontFileProblemMessage(filename: string, sizeBytes: number): MessageDescriptor | null {
   const ext = path.extname(filename).toLowerCase();
-  if (!(FONT_FILE_EXTS as readonly string[]).includes(ext)) return `Fonts are ${FONT_FILE_EXTS.join(", ")} files.`;
-  if (sizeBytes <= 0) return "The file is empty.";
-  if (sizeBytes > MAX_FONT_BYTES) return `The file is ${Math.ceil(sizeBytes / 1048576)} MB; a font may be ${MAX_FONT_BYTES / 1048576} MB at most.`;
+  if (!(FONT_FILE_EXTS as readonly string[]).includes(ext))
+    return msg({ id: "font.file_type", message: msg`Fonts are ${{ types: FONT_FILE_EXTS.join(", ") }} files.` });
+  if (sizeBytes <= 0) return msg({ id: "font.file_empty", message: "The file is empty." });
+  if (sizeBytes > MAX_FONT_BYTES)
+    return msg({
+      id: "font.file_too_large",
+      message: msg`The file is ${{ sizeMb: Math.ceil(sizeBytes / 1048576) }} MB; a font may be ${{ maxMb: MAX_FONT_BYTES / 1048576 }} MB at most.`,
+    });
   return null;
+}
+
+/** Why a file cannot be a font upload, before anything is read from it, or null, as a sentence in the current locale. Pure. */
+export function fontFileProblem(filename: string, sizeBytes: number): string | null {
+  const problem = fontFileProblemMessage(filename, sizeBytes);
+  return problem ? t(problem) : null;
 }
 
 /**
@@ -166,12 +178,16 @@ export async function addFont(
   input: { file: string; filename: string /** the upload the file came from, dropped with the insert */; upload?: { id: string; storageKey: string } },
 ): Promise<FontInfo> {
   const st = await fs.stat(input.file);
-  const problem = fontFileProblem(input.filename, st.size);
-  if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+  const problem = fontFileProblemMessage(input.filename, st.size);
+  if (problem) throw new AppError("BAD_REQUEST", problem);
   const raw = await readFontFamily(input.file);
-  if (!raw) throw new TRPCError({ code: "BAD_REQUEST", message: "This file could not be read as a font." });
+  if (!raw) throw new AppError("BAD_REQUEST", msg({ id: "font.file_could_not_read_font", message: "This file could not be read as a font." }));
   const parsed = fontFamilySchema.safeParse(raw);
-  if (!parsed.success) throw new TRPCError({ code: "BAD_REQUEST", message: `The font's name "${raw.slice(0, 80)}" cannot be used in captions.` });
+  if (!parsed.success)
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "font.name_unusable", message: msg`The font's name "${{ name: raw.slice(0, 80) }}" cannot be used in captions.` }),
+    );
   const family = parsed.data;
   const id = randomUUID();
   const ext = path.extname(input.filename).toLowerCase();
@@ -187,12 +203,12 @@ export async function addFont(
       const existing = state.available.get(family.toLowerCase());
       if (existing) {
         const uploaded = state.uploaded.some((f) => f.family.toLowerCase() === family.toLowerCase());
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: uploaded
-            ? `A font named ${existing} is already uploaded. Remove it first to replace it.`
-            : `${existing} already comes with this server, so it needs no upload: pick it by name.`,
-        });
+        throw new AppError(
+          "CONFLICT",
+          uploaded
+            ? msg({ id: "font.already_uploaded", message: msg`A font named ${{ existing }} is already uploaded. Remove it first to replace it.` })
+            : msg({ id: "font.already_built_in", message: msg`${{ existing }} already comes with this server, so it needs no upload: pick it by name.` }),
+        );
       }
       const [r] = await u.db
         .insert(schema.fonts)
@@ -234,10 +250,10 @@ export async function addFont(
 /** `add_font` / the Settings upload: the admin's own upload (POST /api/upload) becomes a font, and the upload is dropped. */
 export async function addFontFromUpload(svc: Services, actor: FontsActor, uploadId: string): Promise<FontInfo> {
   const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, uploadId), eq(schema.uploads.userId, actor.id)) });
-  if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+  if (!up) throw new AppError("NOT_FOUND", msg({ id: "font.upload_not_found", message: "Upload not found" }));
   // cheap checks before the bytes are pulled out of the store
-  const problem = fontFileProblem(up.filename, up.sizeBytes);
-  if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+  const problem = fontFileProblemMessage(up.filename, up.sizeBytes);
+  if (problem) throw new AppError("BAD_REQUEST", problem);
   await fs.mkdir(svc.paths.tmp, { recursive: true });
   const local = path.join(svc.paths.tmp, `font-${randomUUID()}${path.extname(up.filename).toLowerCase()}`);
   try {
@@ -261,7 +277,11 @@ export async function removeFonts(svc: Services, actor: FontsActor, ids: string[
       .where(inArray(schema.fonts.id, ids))
       .returning({ id: schema.fonts.id, family: schema.fonts.family, storageKey: schema.fonts.storageKey });
     const missing = ids.filter((id) => !rows.some((r) => r.id === id));
-    if (missing.length) throw new TRPCError({ code: "NOT_FOUND", message: `No uploaded font with id ${missing[0]} (built-in fonts cannot be removed).` });
+    if (missing.length)
+      throw new AppError(
+        "NOT_FOUND",
+        msg({ id: "font.not_uploaded", message: msg`No uploaded font with id ${{ id: missing[0] ?? "" }} (built-in fonts cannot be removed).` }),
+      );
     const removed = rows.map((r) => ({ id: r.id, family: r.family }));
     await u.emit("fonts.changed", { userId: actor.id, email: actor.email, added: [], removed }, { actorId: actor.id === "cli" ? null : actor.id });
     u.afterCommit(async () => {

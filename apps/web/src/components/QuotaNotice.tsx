@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { upgradeFromProject, type QuotaAction, type QuotaRefusal } from "@reelsaw/shared";
 import { openReport } from "../lib/report";
 import { track } from "../lib/telemetry";
+import { t } from "@lingui/core/macro";
 
 export function quotaFromError(err: unknown): QuotaRefusal | undefined {
   if (!err || typeof err !== "object") return;
@@ -33,6 +34,7 @@ function Action({
   // the server's `quota.refused` / `quota.warned` count who met the limit; this counts who acted on it (upgrade, request, free space)
   const clicked = () => track("quota_action_clicked", { key: quota.key, action: action.kind, placement });
   if (action.kind === "request") {
+    const limitName = quota.key.replaceAll("_", " ").toLowerCase();
     return (
       <button
         type="button"
@@ -40,7 +42,7 @@ function Action({
         onClick={() => {
           clicked();
           openReport({
-            prefill: `I'd like more capacity on my current plan (${quota.key.replaceAll("_", " ").toLowerCase()}).`,
+            prefill: t`I'd like more capacity on my current plan (${limitName}).`,
             tags: { source: "quota-capacity", limit: quota.key },
           });
         }}

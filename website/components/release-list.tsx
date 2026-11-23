@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import type { ReactNode } from "react";
 import { Footer } from "./footer";
 import { Header } from "./header";
@@ -113,10 +115,10 @@ function ReleaseArticle({ release: r, current, first }: { release: Release; curr
         <time dateTime={r.publishedAt} className="text-sm text-ink3 md:hidden">
           {utcDate(r.publishedAt)}
         </time>
-        {r.prerelease && <span className="chip bg-warn-soft text-warn">Pre-release</span>}
-        {you && <span className="chip bg-acc-soft text-acc-text">This install</span>}
+        {r.prerelease && <span className="chip bg-warn-soft text-warn">{t(msg`Pre-release`)}</span>}
+        {you && <span className="chip bg-acc-soft text-acc-text">{t(msg`This install`)}</span>}
         <a href={r.url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-ink3 hover:text-acc-text">
-          GitHub ↗
+          {t(msg`GitHub ↗`)}
         </a>
       </header>
       <ReleaseNotes release={r} />
@@ -163,7 +165,7 @@ export function ReleasesNotFoundView({
     <>
       <Header />
       <main id="main" className="container-page flex max-w-[560px] flex-col items-center gap-4 py-20 text-center">
-        <p className="eyebrow">Releases</p>
+        <p className="eyebrow">{t(msg`Releases`)}</p>
         <h1 className="text-[28px] leading-tight font-extrabold tracking-tight text-balance">{title}</h1>
         <p className="max-w-[44ch] text-ink2">{description}</p>
         {suggestions.length > 0 && (
@@ -176,7 +178,7 @@ export function ReleasesNotFoundView({
           </ul>
         )}
         <a href="/releases" className="prose-link mt-2 font-semibold">
-          See every release
+          {t(msg`See every release`)}
         </a>
       </main>
       <Footer />
@@ -204,7 +206,7 @@ export function RecentReleases({ releases }: { releases: Release[] }) {
         ))}
       </ol>
       <a href="/releases" className="prose-link mt-4 inline-block text-sm font-semibold">
-        Read the changelog
+        {t(msg`Read the changelog`)}
       </a>
     </div>
   );

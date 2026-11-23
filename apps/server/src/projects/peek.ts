@@ -1,6 +1,8 @@
+import { msg } from "@lingui/core/runtime-macro";
 import { LRUCache } from "lru-cache";
 import { z } from "zod";
 import type { MediaTools } from "../media.js";
+import { t } from "../i18n.js";
 
 const oembedSchema = z.object({ title: z.string().optional(), thumbnail_url: z.string().optional(), author_name: z.string().optional() });
 
@@ -63,7 +65,16 @@ export function isUnfinishedStream(info: { is_live?: boolean | null | undefined;
 /** The link is a live, scheduled or still-processing stream: refused before anything is downloaded, on every attempt alike. */
 export class LiveSourceError extends Error {
   constructor() {
-    super(LIVE_SOURCE_MESSAGE);
+    // LIVE_SOURCE_MESSAGE in the requester's language (the constant stays English for stored failure reasons)
+    super(
+      t(
+        msg({
+          id: "source.live",
+          message:
+            "This link is a live stream, one that has not started yet, or one that just ended and is still being processed, so there is no finished video to download. Add it again once its recording is up (a stream that just ended can take a few hours), or upload the file instead (New project → Upload).",
+        }),
+      ),
+    );
     this.name = "LiveSourceError";
   }
 }

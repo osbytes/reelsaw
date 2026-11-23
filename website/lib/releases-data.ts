@@ -2,6 +2,8 @@
  * Copy of packages/shared/src/releases.ts. The website is outside the pnpm workspace, so it
  * cannot import @reelsaw/shared; keep the two files in step when the feed shape changes.
  */
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "./i18n";
 import { z } from "zod";
 
 /** Same host as `REPO_URL` in index.ts — kept local so this module does not import the barrel. */
@@ -141,21 +143,42 @@ export function weekdayOf(day: string): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
   return new Date(`${day}T00:00:00Z`).getUTCDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const MONTHS = [
+  t(msg({ context: "short month", message: "Jan" })),
+  t(msg({ context: "short month", message: "Feb" })),
+  t(msg({ context: "short month", message: "Mar" })),
+  t(msg({ context: "short month", message: "Apr" })),
+  t(msg({ context: "short month", message: "May" })),
+  t(msg({ context: "short month", message: "Jun" })),
+  t(msg({ context: "short month", message: "Jul" })),
+  t(msg({ context: "short month", message: "Aug" })),
+  t(msg({ context: "short month", message: "Sep" })),
+  t(msg({ context: "short month", message: "Oct" })),
+  t(msg({ context: "short month", message: "Nov" })),
+  t(msg({ context: "short month", message: "Dec" })),
+];
 
 export function monthLabel(day: string): string {
   return MONTHS[new Date(`${day}T00:00:00Z`).getUTCMonth()] ?? "";
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const WEEKDAYS = [
+  t(msg({ context: "short weekday", message: "Sun" })),
+  t(msg({ context: "short weekday", message: "Mon" })),
+  t(msg({ context: "short weekday", message: "Tue" })),
+  t(msg({ context: "short weekday", message: "Wed" })),
+  t(msg({ context: "short weekday", message: "Thu" })),
+  t(msg({ context: "short weekday", message: "Fri" })),
+  t(msg({ context: "short weekday", message: "Sat" })),
+];
 
-/** Locale-stable UTC date, so Node and the browser do not disagree on "Sep" vs "Sept". */
+/** Locale-stable UTC date, so Node and the browser do not disagree on "Sep" vs "Sept": names from the catalogue, not Intl. */
 export function formatUtcDate(isoOrDay: string, withWeekday = false): string {
   const day = isoOrDay.length >= 10 ? isoOrDay.slice(0, 10) : utcDay(isoOrDay);
   const d = new Date(`${day}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return isoOrDay;
-  const body = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-  return withWeekday ? `${WEEKDAYS[d.getUTCDay()]}, ${body}` : body;
+  const body = t(msg`${{ day: d.getUTCDate() }} ${{ month: MONTHS[d.getUTCMonth()] }} ${{ year: d.getUTCFullYear() }}`);
+  return withWeekday ? t(msg`${{ weekday: WEEKDAYS[d.getUTCDay()] }}, ${{ date: body }}`) : body;
 }
 
 /** Strip a leading `v` and keep only a semver-looking tag; otherwise the raw tag. */

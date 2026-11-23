@@ -1,12 +1,14 @@
+import { useLingui } from "@lingui/react/macro";
 import { Kbd, Modal } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { useShortcutGroups } from "../lib/shortcuts";
 
 /** The `?` sheet: every shortcut the current screen has registered, grouped by view. */
 export function ShortcutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { t } = useLingui();
   const groups = useShortcutGroups();
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Keyboard shortcuts" width={460}>
+    <Modal open={open} onOpenChange={onOpenChange} title={t`Keyboard shortcuts`} width={460}>
       <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-4 text-[13px]">
           {groups.map((g) => (

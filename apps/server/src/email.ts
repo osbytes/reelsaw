@@ -4,10 +4,13 @@
  * smtp uses nodemailer; resend uses the Resend HTTP API. Boot checks the driver so a typo fails fast.
  *
  * Templates send multipart HTML + plain text. HTML is table-based and inline-styled for mail
- * clients; no remote images or tracking pixels. The plain-text part keeps the same links.
+ * clients; no remote images or tracking pixels. The plain-text part keeps the same links. Copy comes from the server
+ * catalogue (i18n.ts) in the recipient's language: build a mail inside `inLocaleOf(recipient, …)`.
  */
+import { msg, plural } from "@lingui/core/runtime-macro";
 import { unsubscribeHeaders } from "./notify/preferences.js";
-import { REPO_URL } from "@reelsaw/shared";
+import { localeDir, REPO_URL } from "@reelsaw/shared";
+import { currentLocale, type MessageDescriptor, t } from "./i18n.js";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
 
@@ -168,27 +171,45 @@ function linkFallback(href: string): string {
   const safe = escapeHtml(href);
   return (
     `<p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:${ink3};word-break:break-all">` +
-    `Or paste this link into your browser:<br>` +
+    `${escapeHtml(t(msg`Or paste this link into your browser:`))}<br>` +
     `<a href="${safe}" style="color:${accText};text-decoration:underline">${safe}</a></p>`
   );
+}
+
+/**
+ * A message as mail HTML: its values escaped, its own text kept (the catalogue is ours), and its numbered tags
+ * (`<0>projects page</0>`) turned into the markup `tags` gives, so a link stays inside its sentence for translators.
+ */
+export function htmlMessage(descriptor: MessageDescriptor, tags: Record<number, (inner: string) => string> = {}): string {
+  // the whole sentence is escaped (a translation's own "&" or "<" is text), then only the numbered tags become markup
+  return escapeHtml(t(descriptor)).replace(/&lt;(\d+)&gt;(.*?)&lt;\/\1&gt;/gs, (_, n: string, inner: string) => tags[Number(n)]?.(inner) ?? inner);
+}
+
+/** The same message as plain text: its numbered tags dropped, their words kept. */
+function tx(descriptor: MessageDescriptor): string {
+  return t(descriptor).replace(/<\/?\d+>/g, "");
 }
 
 /** Muted footer under the card: brand + source repo (no tracking). */
 function footerHtml(): string {
   const href = escapeHtml(REPO_URL);
-  return `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`;
+  return htmlMessage(msg`Sent by Reelsaw · <0>github.com/osbytes/reelsaw</0> · No tracking.`, {
+    0: (inner) => `<a href="${href}" style="color:${ink3};text-decoration:underline">${inner}</a>`,
+  });
 }
 
 function footerText(): string {
-  return `Sent by Reelsaw · ${REPO_URL} · No tracking.`;
+  const repo = REPO_URL;
+  return t(msg`Sent by Reelsaw · ${{ repo }} · No tracking.`);
 }
 
-/** Shared shell: soft page background, white card, brand, body, muted footer. */
+/** Shared shell: soft page background, white card, brand, body, muted footer. In the current scope's language and direction. */
 export function layout(opts: { preheader: string; title: string; bodyHtml: string }): string {
   const preheader = escapeHtml(opts.preheader);
   const title = escapeHtml(opts.title);
+  const lang = currentLocale();
   return (
-    `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light only"><title>${title}</title></head>` +
+    `<!DOCTYPE html><html lang="${escapeHtml(lang)}" dir="${localeDir(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light only"><title>${title}</title></head>` +
     `<body style="margin:0;padding:0;background-color:${bg};color:${ink}">` +
     // Hidden preheader for inbox previews
     `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${bg}">${preheader}</div>` +
@@ -254,104 +275,116 @@ ${o.billingUrl}
   });
 }
 
-/** Branded HTML + plain-text templates. No tracking. */
+/**
+ * Branded HTML + plain-text templates. No tracking. Each renders in the current locale scope (i18n.ts): the caller
+ * builds the mail inside `inLocaleOf(recipient, …)`, so it reads in the recipient's language, not the actor's.
+ */
 export const templates = {
   waitingForApproval: (appUrl: string, name: string, email: string) => {
     const who = name ? `${name} (${email})` : email;
+    const person = name || email;
     const url = `${appUrl.replace(/\/$/, "")}/admin/users`;
     return message({
-      subject: `${name || email} is waiting for approval`,
-      preheader: `${who} signed up and is waiting for an admin.`,
-      title: "New sign-up waiting",
-      text: `${who} signed up for Reelsaw and is waiting for an admin.\n\nApprove or decline: ${url}\n`,
+      subject: t(msg`${{ person }} is waiting for approval`),
+      preheader: t(msg`${{ who }} signed up and is waiting for an admin.`),
+      title: t(msg`New sign-up waiting`),
+      text: `${t(msg`${{ who }} signed up for Reelsaw and is waiting for an admin.`)}\n\n${t(msg`Approve or decline: ${{ url }}`)}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">${escapeHtml(who)} signed up for Reelsaw and is waiting for an admin.</p>` +
-        ctaButton(url, "Review sign-ups") +
+        `<p style="margin:0 0 12px">${htmlMessage(msg`${{ who }} signed up for Reelsaw and is waiting for an admin.`)}</p>` +
+        ctaButton(url, t(msg`Review sign-ups`)) +
         linkFallback(url),
     });
   },
   webhookDisabled: (appUrl: string, endpoint: string, reason: string) => {
     const url = `${appUrl.replace(/\/$/, "")}/settings#webhooks`;
+    const stopped = msg`Reelsaw stopped sending events to <0>${{ endpoint }}</0>.`;
     return message({
-      subject: "A Reelsaw webhook was turned off",
-      preheader: `${endpoint} stopped receiving events.`,
-      title: "Webhook turned off",
-      text: `Reelsaw stopped sending events to ${endpoint}.
+      subject: t(msg`A Reelsaw webhook was turned off`),
+      preheader: t(msg`${{ endpoint }} stopped receiving events.`),
+      title: t(msg`Webhook turned off`),
+      text: `${tx(stopped)}
 
 ${reason}
 
-Fix the receiver, then turn the webhook back on and resend what it missed: ${url}
+${t(msg`Fix the receiver, then turn the webhook back on and resend what it missed: ${{ url }}`)}
 `,
       bodyHtml:
-        `<p style="margin:0 0 12px">Reelsaw stopped sending events to <b>${escapeHtml(endpoint)}</b>.</p>` +
+        `<p style="margin:0 0 12px">${htmlMessage(stopped, { 0: (inner) => `<b>${inner}</b>` })}</p>` +
         `<p style="margin:0 0 12px">${escapeHtml(reason)}</p>` +
-        `<p style="margin:0 0 12px">Fix the receiver, then turn the webhook back on and resend what it missed from its delivery log.</p>` +
-        ctaButton(url, "Open webhooks") +
+        `<p style="margin:0 0 12px">${escapeHtml(t(msg`Fix the receiver, then turn the webhook back on and resend what it missed from its delivery log.`))}</p>` +
+        ctaButton(url, t(msg`Open webhooks`)) +
         linkFallback(url),
     });
   },
   /** A cancellation was scheduled: when the plan ends and what Free will refuse then (`over`: quota.ts overages sentences). */
-  planEnding: (billingUrl: string, planLabel: string, endsOn: string, over: string[], expect: string[] = []) =>
-    planMail({
-      subject: `Your Reelsaw ${planLabel} plan ends on ${endsOn}`,
-      preheader: `${planLabel} stays until ${endsOn}, then the account moves to Free.`,
-      title: `${planLabel} ends on ${endsOn}`,
-      lead: `Your ${planLabel} plan is canceled. It stays in force until ${endsOn}, then the account moves to the Free plan. Nothing is deleted.`,
+  planEnding: (billingUrl: string, planLabel: string, endsOn: string, over: string[], expect: string[] = []) => {
+    const plan = planLabel;
+    const on = endsOn;
+    return planMail({
+      subject: t(msg`Your Reelsaw ${{ plan }} plan ends on ${{ on }}`),
+      preheader: t(msg`${{ plan }} stays until ${{ on }}, then the account moves to Free.`),
+      title: t(msg`${{ plan }} ends on ${{ on }}`),
+      lead: t(msg`Your ${{ plan }} plan is canceled. It stays in force until ${{ on }}, then the account moves to the Free plan. Nothing is deleted.`),
       sections: [
-        { lead: "On that day this account would be over Free's limits:", items: over },
-        { lead: "What else changes on Free:", items: expect },
+        { lead: t(msg`On that day this account would be over Free's limits:`), items: over },
+        { lead: t(msg`What else changes on Free:`), items: expect },
       ],
-      tail: "Changed your mind? Renew from the Billing page before then and nothing changes.",
+      tail: t(msg`Changed your mind? Renew from the Billing page before then and nothing changes.`),
       billingUrl,
-      cta: "Open billing",
-    }),
+      cta: t(msg`Open billing`),
+    });
+  },
   /** The subscription ended: the account is on Free now, where it is over Free's limits, and what else changed (`expect`). */
-  planEnded: (billingUrl: string, planLabel: string, over: string[], expect: string[] = []) =>
-    planMail({
-      subject: `Your Reelsaw ${planLabel} plan has ended`,
-      preheader: "The account is on the Free plan now. Your projects and clips are all still here.",
-      title: "You're on Free now",
-      lead: `Your ${planLabel} plan has ended and the account is on the Free plan. Your projects and clips are all still here.`,
+  planEnded: (billingUrl: string, planLabel: string, over: string[], expect: string[] = []) => {
+    const plan = planLabel;
+    return planMail({
+      subject: t(msg`Your Reelsaw ${{ plan }} plan has ended`),
+      preheader: t(msg`The account is on the Free plan now. Your projects and clips are all still here.`),
+      title: t(msg`You're on Free now`),
+      lead: t(msg`Your ${{ plan }} plan has ended and the account is on the Free plan. Your projects and clips are all still here.`),
       sections: [
-        { lead: "This account is over Free's limits:", items: over },
-        { lead: "What else changes on Free:", items: expect },
+        { lead: t(msg`This account is over Free's limits:`), items: over },
+        { lead: t(msg`What else changes on Free:`), items: expect },
       ],
-      tail: "Pick a plan again any time to lift the limits.",
+      tail: t(msg`Pick a plan again any time to lift the limits.`),
       billingUrl,
-      cta: "See plans",
-    }),
+      cta: t(msg`See plans`),
+    });
+  },
   approved: (appUrl: string) => {
     const url = `${appUrl.replace(/\/$/, "")}/login`;
     return message({
-      subject: "Your Reelsaw account is ready",
-      preheader: "An admin approved your account. You can sign in now.",
-      title: "You're in",
-      text: `An admin approved your account. Sign in: ${url}\n`,
+      subject: t(msg`Your Reelsaw account is ready`),
+      preheader: t(msg`An admin approved your account. You can sign in now.`),
+      title: t(msg`You're in`),
+      text: `${t(msg`An admin approved your account. Sign in: ${{ url }}`)}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">An admin approved your account. You can sign in and start cutting.</p>` + ctaButton(url, "Sign in") + linkFallback(url),
+        `<p style="margin:0 0 12px">${escapeHtml(t(msg`An admin approved your account. You can sign in and start cutting.`))}</p>` +
+        ctaButton(url, t(msg`Sign in`)) +
+        linkFallback(url),
     });
   },
   resetPassword: (url: string) =>
     message({
-      subject: "Reset your Reelsaw password",
-      preheader: "Use the button below if you asked to reset your password.",
-      title: "Reset your password",
-      text: `Someone asked to reset the password for this account. If that was you, open:\n\n${url}\n\nIf not, ignore this message; nothing changes.\n`,
+      subject: t(msg`Reset your Reelsaw password`),
+      preheader: t(msg`Use the button below if you asked to reset your password.`),
+      title: t(msg`Reset your password`),
+      text: `${t(msg`Someone asked to reset the password for this account. If that was you, open:`)}\n\n${url}\n\n${t(msg`If not, ignore this message; nothing changes.`)}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">Someone asked to reset the password for this account. If that was you, choose a new one:</p>` +
-        ctaButton(url, "Reset password") +
+        `<p style="margin:0 0 12px">${escapeHtml(t(msg`Someone asked to reset the password for this account. If that was you, choose a new one:`))}</p>` +
+        ctaButton(url, t(msg`Reset password`)) +
         linkFallback(url) +
-        `<p style="margin:20px 0 0;font-size:13px;color:${ink3}">If you didn't ask for this, ignore the message — nothing changes.</p>`,
+        `<p style="margin:20px 0 0;font-size:13px;color:${ink3}">${escapeHtml(t(msg`If you didn't ask for this, ignore the message — nothing changes.`))}</p>`,
     }),
   verifyEmail: (url: string) =>
     message({
-      subject: "Confirm your email for Reelsaw",
-      preheader: "Confirm this address to finish signing up. The link works for 24 hours.",
-      title: "Confirm your email",
-      text: `Confirm this address to finish signing up. The link works for 24 hours:\n\n${url}\n`,
+      subject: t(msg`Confirm your email for Reelsaw`),
+      preheader: t(msg`Confirm this address to finish signing up. The link works for 24 hours.`),
+      title: t(msg`Confirm your email`),
+      text: `${t(msg`Confirm this address to finish signing up. The link works for 24 hours:`)}\n\n${url}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">Confirm this address to finish signing up for Reelsaw. The link works for 24 hours.</p>` +
-        ctaButton(url, "Confirm email") +
+        `<p style="margin:0 0 12px">${escapeHtml(t(msg`Confirm this address to finish signing up for Reelsaw. The link works for 24 hours.`))}</p>` +
+        ctaButton(url, t(msg`Confirm email`)) +
         linkFallback(url),
     }),
   /**
@@ -376,58 +409,83 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
     const allRerender = n > 0 && opts.hidden === 0 && opts.projects.every((p) => p.rerender);
     const first = opts.milestone === 1;
     const subject = first
-      ? "Your first clips are ready"
+      ? t(msg`Your first clips are ready`)
       : n === 1 && allRerender
-        ? "A new render is ready"
+        ? t(msg`A new render is ready`)
         : n === 1
-          ? "Your clips are ready"
-          : `${n} projects are ready`;
+          ? t(msg`Your clips are ready`)
+          : t(msg({ id: "email.ready.projects", message: plural({ n }, { one: "# project is ready", other: "# projects are ready" }) }));
     const one = opts.projects[0];
+    const title = one?.title ?? "";
     // the clip count covers the listed projects only, so a note with more says how many projects instead
-    const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : opts.hidden > 0 ? `${n} projects` : `${n} projects, ${clipCount(clips)}`;
+    const preheader =
+      n === 1 && one
+        ? t(msg({ id: "email.ready.preheader_one", message: msg`${plural({ clips }, { one: "# clip", other: "# clips" })} from ${{ title }}` }))
+        : opts.hidden > 0
+          ? t(msg({ id: "email.ready.preheader_count", message: plural({ n }, { one: "# project", other: "# projects" }) }))
+          : t(
+              msg({
+                id: "email.ready.preheader_many",
+                message: msg`${plural({ n }, { one: "# project", other: "# projects" })}, ${plural({ clips }, { one: "# clip", other: "# clips" })}`,
+              }),
+            );
     const intro =
       n === 1
         ? allRerender
-          ? "A new render finished while you were away."
-          : "This finished while you were away."
+          ? t(msg`A new render finished while you were away.`)
+          : t(msg`This finished while you were away.`)
         : allRerender
-          ? "New renders finished while you were away."
-          : "These finished while you were away.";
-    const hi = opts.greeting ? `Hi ${escapeHtml(opts.greeting)} — ` : "";
-    const firstLine = first ? (n === 1 ? "This is the first project you've finished." : "These are the first projects you've finished.") : null;
-    const milestoneLine = opts.milestone && opts.milestone > 1 ? `That's ${opts.milestone} projects finished.` : null;
+          ? t(msg`New renders finished while you were away.`)
+          : t(msg`These finished while you were away.`);
+    const greeting = opts.greeting;
+    const hello = greeting ? msg`Hi ${{ greeting }} — ${{ intro }}` : null;
+    const firstLine = first ? (n === 1 ? t(msg`This is the first project you've finished.`) : t(msg`These are the first projects you've finished.`)) : null;
+    const count = opts.milestone ?? 0;
+    const milestoneLine = opts.milestone && opts.milestone > 1 ? t(msg`That's ${{ count }} projects finished.`) : null;
     const home = `${base}/`;
     const open = n === 1 && one ? `${base}/p/${encodeURIComponent(one.id)}` : home;
     const blocks = opts.projects.map((p) => projectBlock(base, p)).join("");
+    const hidden = opts.hidden;
+    const moreLine = msg`And ${{ hidden }} more on your <0>projects page</0>.`;
     const more =
-      opts.hidden > 0
-        ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
+      hidden > 0
+        ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">${htmlMessage(moreLine, {
+            0: (inner) => `<a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">${inner}</a>`,
+          })}</p>`
         : "";
+    const settingsHref = escapeHtml(`${base}/settings#email`);
     const stop = opts.unsubscribeUrl
-      ? `<p style="margin:20px 0 0;font-size:12px;color:${ink3}">You get this because a project finished while you were away. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:${ink3};text-decoration:underline">Stop these emails</a> or change it under <a href="${escapeHtml(`${base}/settings#email`)}" style="color:${ink3};text-decoration:underline">Settings → Account</a>.</p>`
+      ? `<p style="margin:20px 0 0;font-size:12px;color:${ink3}">${htmlMessage(
+          msg`You get this because a project finished while you were away. <0>Stop these emails</0> or change it under <1>Settings → Account</1>.`,
+          {
+            0: (inner) => `<a href="${escapeHtml(opts.unsubscribeUrl ?? "")}" style="color:${ink3};text-decoration:underline">${inner}</a>`,
+            1: (inner) => `<a href="${settingsHref}" style="color:${ink3};text-decoration:underline">${inner}</a>`,
+          },
+        )}</p>`
       : "";
+    const unsubscribe = opts.unsubscribeUrl ?? "";
     const mail = message({
       subject,
       preheader,
       title: subject,
       text: [
-        `${opts.greeting ? `Hi ${opts.greeting} — ` : ""}${intro}`,
+        hello ? t(hello) : intro,
         firstLine,
         milestoneLine,
         ...opts.projects.map((p) => projectText(base, p)),
-        opts.hidden > 0 ? `And ${opts.hidden} more: ${home}` : null,
-        n === 1 ? `Open: ${open}` : `Open your projects: ${home}`,
-        opts.unsubscribeUrl ? `Stop these emails: ${opts.unsubscribeUrl}` : null,
+        hidden > 0 ? t(msg`And ${{ hidden }} more: ${{ home }}`) : null,
+        n === 1 ? t(msg`Open: ${{ open }}`) : t(msg`Open your projects: ${{ home }}`),
+        opts.unsubscribeUrl ? t(msg`Stop these emails: ${{ unsubscribe }}`) : null,
       ]
         .filter((s): s is string => !!s)
         .join("\n\n"),
       bodyHtml:
-        `<p style="margin:0 0 12px">${hi}${intro}</p>` +
-        (firstLine ? `<p style="margin:0 0 12px">${firstLine}</p>` : "") +
-        (milestoneLine ? `<p style="margin:0 0 16px;color:${accText};font-weight:600">${milestoneLine}</p>` : "") +
+        `<p style="margin:0 0 12px">${hello ? htmlMessage(hello) : escapeHtml(intro)}</p>` +
+        (firstLine ? `<p style="margin:0 0 12px">${escapeHtml(firstLine)}</p>` : "") +
+        (milestoneLine ? `<p style="margin:0 0 16px;color:${accText};font-weight:600">${escapeHtml(milestoneLine)}</p>` : "") +
         blocks +
         more +
-        ctaButton(open, n === 1 ? "Open project" : "Open projects") +
+        ctaButton(open, n === 1 ? t(msg`Open project`) : t(msg`Open projects`)) +
         linkFallback(open) +
         stop,
     });
@@ -435,24 +493,28 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
   },
 };
 
-function clipCount(n: number): string {
-  return n === 1 ? "1 clip" : `${n} clips`;
+function clipCount(clips: number): string {
+  return t(msg({ id: "email.ready.clips", message: plural({ clips }, { one: "# clip", other: "# clips" }) }));
 }
 
-function failedCount(n: number): string {
-  return n === 1 ? "1 needs another try" : `${n} need another try`;
+function failedCount(failed: number): string {
+  return t(msg({ id: "email.ready.failed", message: plural({ failed }, { one: "# needs another try", other: "# need another try" }) }));
+}
+
+/** The highlighted clip names, then "and N more" when the project has others. */
+function highlightNames(names: string, more: number): string {
+  return more > 0 ? t(msg`${{ names }} and ${{ more }} more`) : names;
 }
 
 function projectBlock(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
   const href = escapeHtml(`${base}/p/${encodeURIComponent(p.id)}`);
   const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(" · ");
-  const names = p.highlights.map((h) => escapeHtml(h)).join(" · ");
-  const extra = p.more > 0 ? ` and ${p.more} more` : "";
+  const names = p.highlights.join(" · ");
   return (
     `<p style="margin:14px 0 0">` +
     `<a href="${href}" style="color:${ink};font-weight:600;text-decoration:underline">${escapeHtml(p.title)}</a><br>` +
     `<span style="color:${ink3};font-size:13px">${bits}</span>` +
-    (names ? `<br><span style="font-size:14px">${names}${extra}</span>` : "") +
+    (names ? `<br><span style="font-size:14px">${escapeHtml(highlightNames(names, p.more))}</span>` : "") +
     `</p>`
   );
 }
@@ -460,6 +522,5 @@ function projectBlock(base: string, p: { id: string; title: string; clips: numbe
 function projectText(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
   const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(", ");
   const names = p.highlights.join(", ");
-  const extra = p.more > 0 ? ` and ${p.more} more` : "";
-  return `${p.title} — ${bits}${names ? `\n${names}${extra}` : ""}\n${base}/p/${p.id}`;
+  return `${p.title} — ${bits}${names ? `\n${highlightNames(names, p.more)}` : ""}\n${base}/p/${p.id}`;
 }

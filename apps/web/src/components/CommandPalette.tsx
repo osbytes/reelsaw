@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
+import { Trans } from "@lingui/react/macro";
 import { useShortcut } from "../lib/shortcuts";
 import { useSession } from "../lib/auth";
 import { isOnlyUrls } from "../lib/links";
@@ -28,7 +29,7 @@ function PaletteLoading({ onClose }: { onClose: () => void }) {
         className="fixed start-1/2 top-[12dvh] z-[86] flex h-[52px] w-[min(640px,calc(100vw-24px))] -translate-x-1/2 items-center gap-3 rounded-[18px] border border-line bg-panel px-4 text-[15px] text-ink3 shadow-pop"
       >
         <Spinner />
-        Search projects, clips and your library, or paste video links…
+        <Trans>Search projects, clips and your library, or paste video links…</Trans>
       </div>
     </>
   );

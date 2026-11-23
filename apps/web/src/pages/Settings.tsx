@@ -11,6 +11,7 @@ import { ShareLinksSection } from "../components/ShareLinks";
 import { WebhooksSection } from "../components/Webhooks";
 import { AccountSection } from "../components/AccountSection";
 import { EmailSection } from "../components/EmailSection";
+import { LocaleSection } from "../components/LocaleSection";
 import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { LearningSection } from "../components/LearningSection";
@@ -34,43 +35,47 @@ import {
 } from "../components/InstanceSettings";
 import { BILLING_PATH, CHANGELOG_URL, REPO_URL, formatMb } from "@reelsaw/shared";
 import { pageTitle, useDocumentTitle } from "../lib/title";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
 
-type Section = readonly [id: string, label: string];
+type Section = readonly [id: string, label: MessageDescriptor];
 
 /** Your account's sections, in page order (/settings; /settings/billing lands on #billing). */
 function accountSections(hasBilling: boolean, hasEmail: boolean): Section[] {
   return [
-    ["profile", "Profile"],
+    ["profile", msg`Profile`],
+    ["language", msg`Language and region`],
     // only when this instance sends mail; #email is the link in the ready email's footer
-    ...(hasEmail ? ([["email", "Email"]] as const) : []),
-    ...(hasBilling ? ([["billing", "Plan and billing"]] as const) : []),
-    ["defaults", "Project defaults"],
-    ["learning", "Learning"],
-    ["api-keys", "API keys and MCP"],
-    ["webhooks", "Webhooks"],
-    ["share-links", "Share links"],
-    ["connected-apps", "Connected apps"],
+    ...(hasEmail ? ([["email", msg`Email`]] as const) : []),
+    ...(hasBilling ? ([["billing", msg`Plan and billing`]] as const) : []),
+    ["defaults", msg`Project defaults`],
+    ["learning", msg`Learning`],
+    ["api-keys", msg`API keys and MCP`],
+    ["webhooks", msg`Webhooks`],
+    ["share-links", msg`Share links`],
+    ["connected-apps", msg`Connected apps`],
   ];
 }
 
 /** The instance's sections (admins, /settings/system), in page order. */
 const SYSTEM_SECTIONS: Section[] = [
-  ["overview", "Overview"],
-  ["workers", "Workers"],
-  ["queue", "Queue"],
-  ["models", "Models"],
-  ["access", "Access"],
-  ["signup-rules", "Sign-up rules"],
-  ["limits", "Limits"],
-  ["pipeline", "Pipeline"],
-  ["captions", "Captions"],
-  ["retention", "Retention"],
-  ["operations", "Operations"],
-  ["library", "Library"],
-  ["log-level", "Log level"],
+  ["overview", msg`Overview`],
+  ["workers", msg`Workers`],
+  ["queue", msg`Queue`],
+  ["models", msg`Models`],
+  ["access", msg`Access`],
+  ["signup-rules", msg`Sign-up rules`],
+  ["limits", msg`Limits`],
+  ["pipeline", msg`Pipeline`],
+  ["captions", msg`Captions`],
+  ["retention", msg`Retention`],
+  ["operations", msg`Operations`],
+  ["library", msg`Library`],
+  ["log-level", msg`Log level`],
 ];
 
 /**
@@ -80,6 +85,7 @@ const SYSTEM_SECTIONS: Section[] = [
  * deep-links a section.
  */
 export function SettingsPage() {
+  const { t } = useLingui();
   const me = useMe();
   const status = useSystemStatus();
   const loc = useLocation();
@@ -88,7 +94,7 @@ export function SettingsPage() {
   const system = loc.pathname.endsWith("/system") && isAdmin;
   const hasEmail = !!me.data?.emailEnabled;
   const sections = system ? SYSTEM_SECTIONS : accountSections(hasBilling, hasEmail);
-  useDocumentTitle(pageTitle(system ? "System" : "Settings"));
+  useDocumentTitle(pageTitle(system ? t`System` : t`Settings`));
   const ids = sections.map(([id]) => id);
   const active = useActiveSection(ids, loc.pathname === BILLING_PATH ? "billing" : undefined);
   const tab = ({ isActive }: { isActive: boolean }) =>
@@ -100,36 +106,40 @@ export function SettingsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-baseline gap-x-3">
-              <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
+              <h1 className="text-[28px] font-bold tracking-tight">
+                <Trans>Settings</Trans>
+              </h1>
               <span className="min-h-5 font-mono text-xs text-ink3">
                 {status.data ? (
                   <>
                     <a href={CHANGELOG_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-                      Reelsaw {status.data.version}
+                      <Trans>Reelsaw {status.data.version}</Trans>
                     </a>
                     {" · "}
                     <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-                      github.com/osbytes/reelsaw
+                      {REPO_URL.replace(/^https:\/\//, "")}
                     </a>
                   </>
                 ) : null}
               </span>
             </div>
             <p className="mt-1 min-h-5 text-sm text-ink2">
-              {system
-                ? "What this instance runs and the settings that change without a restart; the rest comes from .env."
-                : "Your account, your plan, your defaults for new projects, and keys for agents and tools."}
+              {system ? (
+                <Trans>What this instance runs and the settings that change without a restart; the rest comes from .env.</Trans>
+              ) : (
+                <Trans>Your account, your plan, your defaults for new projects, and keys for agents and tools.</Trans>
+              )}
             </p>
           </div>
           {/* the tab row keeps its height for everyone, so the page does not jump when the role loads */}
-          <nav className="flex min-h-[34px] gap-1" aria-label="Settings tabs">
+          <nav className="flex min-h-[34px] gap-1" aria-label={t`Settings tabs`}>
             {isAdmin && (
               <>
                 <NavLink to="/settings" end className={({ isActive }) => tab({ isActive: isActive || loc.pathname === BILLING_PATH })}>
-                  Account
+                  <Trans>Account</Trans>
                 </NavLink>
                 <NavLink to="/settings/system" className={tab}>
-                  System
+                  <Trans>System</Trans>
                 </NavLink>
               </>
             )}
@@ -150,10 +160,11 @@ const linkClass = (on: boolean) =>
 
 /** This tab's sections: a sticky column on wide screens (the grid cell spans the content, so it can follow), a scrollable row on phones. */
 function SideNav({ sections, active, users }: { sections: Section[]; active: string; users: boolean }) {
+  const { t } = useLingui();
   return (
     <div className="md:sticky md:top-0 md:self-start md:pt-1">
       <ScrollArea fadeEdges className="-mx-4 px-4 md:mx-0 md:px-0">
-        <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label="Settings sections">
+        <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label={t`Settings sections`}>
           {sections.map(([id, label]) => (
             <a
               key={id}
@@ -165,12 +176,12 @@ function SideNav({ sections, active, users }: { sections: Section[]; active: str
               }}
               className={linkClass(active === id)}
             >
-              {label}
+              {t(label)}
             </a>
           ))}
           {users && (
             <Link to="/admin/users" className={`${linkClass(false)} md:mt-2 md:border-t md:border-line md:pt-3`}>
-              Users <ArrowUpRight className="h-3.5 w-3.5 text-ink3" aria-hidden />
+              <Trans>Users</Trans> <ArrowUpRight className="h-3.5 w-3.5 text-ink3" aria-hidden />
             </Link>
           )}
         </nav>
@@ -244,14 +255,30 @@ function useLandOnSection(ids: readonly string[], ready: boolean, landing?: stri
   }, [ready, loc.pathname, loc.hash]);
 }
 
+/** The on-device model names, as the Overview lists them. */
+const ON_DEVICE_MODEL: Record<"text" | "aligner" | "asd" | "vad", MessageDescriptor> = {
+  text: msg`text`,
+  aligner: msg`alignment`,
+  asd: msg`active speaker`,
+  vad: msg`vad`,
+};
+
 /** "text, alignment on cpu; vad on cpu (always)" or, when a GPU provider was asked for, which models got it. */
-function onDeviceSummary(d: { requested: string; faces: string | null; text: string | null; vad: string | null; aligner: string | null; asd: string | null }) {
+function onDeviceSummary(
+  d: { requested: string; faces: string | null; text: string | null; vad: string | null; aligner: string | null; asd: string | null },
+  t: (m: MessageDescriptor) => string,
+) {
   const on = (["text", "aligner", "asd", "vad"] as const).filter((k) => d[k]);
-  if (!on.length) return "all off";
+  if (!on.length) return t(msg`all off`);
   const byProvider = new Map<string, string[]>();
-  for (const k of on) byProvider.set(d[k]!, [...(byProvider.get(d[k]!) ?? []), k === "aligner" ? "alignment" : k === "asd" ? "active speaker" : k]);
-  const parts = [...byProvider].map(([p, ks]) => `${ks.join(", ")} on ${p}`);
-  return d.requested !== "cpu" && !on.some((k) => d[k] === d.requested) ? `${parts.join("; ")} (${d.requested} unavailable)` : parts.join("; ");
+  for (const k of on) byProvider.set(d[k]!, [...(byProvider.get(d[k]!) ?? []), t(ON_DEVICE_MODEL[k])]);
+  const parts = [...byProvider].map(([provider, ks]) => {
+    const models = ks.join(", ");
+    return t(msg`${models} on ${provider}`);
+  });
+  const joined = parts.join("; ");
+  const requested = d.requested;
+  return requested !== "cpu" && !on.some((k) => d[k] === requested) ? t(msg`${joined} (${requested} unavailable)`) : joined;
 }
 
 /**
@@ -286,6 +313,7 @@ function AccountTab({ hasBilling, hasEmail }: { hasBilling: boolean; hasEmail: b
       <div id="profile" className="scroll-mt-4">
         <AccountSection />
       </div>
+      <LocaleSection />
       {hasEmail && <EmailSection />}
       {hasBilling && (
         <div id="billing" className="flex scroll-mt-4 flex-col gap-6">
@@ -319,7 +347,50 @@ function AccountTab({ hasBilling, hasEmail }: { hasBilling: boolean; hasEmail: b
   );
 }
 
+type SystemFacts = {
+  storage: string;
+  renderConcurrency: { mode: string; max: number };
+  limits: { maxCpuPercent: number; minFreeMemMB: number; minFreeDiskMB: number };
+  email: string;
+  openaiBaseUrl: string | null;
+  compatBaseUrl: string | null;
+  gpu: { vendor: string; devices: string[] } | null;
+  videoEncoder: { name: string; reason: string };
+  faceDetection: boolean;
+  onDevice: Parameters<typeof onDeviceSummary>[0];
+  otel: boolean;
+  mcpUrl: string;
+  mcpOauth: boolean;
+};
+
+/** Facts that come from .env and need a restart to change; shown so an admin knows what this box runs. */
+function envFacts(s: SystemFacts, t: (m: MessageDescriptor) => string): (readonly [string, string])[] {
+  const max = s.renderConcurrency.max;
+  const cpu = s.limits.maxCpuPercent;
+  const mem = formatMb(s.limits.minFreeMemMB);
+  const disk = formatMb(s.limits.minFreeDiskMB);
+  const vendor = s.gpu?.vendor ?? "";
+  const devices = s.gpu?.devices.join(", ") || t(msg`device present, no driver tools`);
+  const faces = s.onDevice.faces ?? "";
+  return [
+    [t(msg`Storage`), s.storage],
+    [t(msg`Render concurrency`), s.renderConcurrency.mode === "auto" ? t(msg`automatic · up to ${max} per process`) : t(msg`${max} per process (fixed)`)],
+    [t(msg`Admission`), t(msg`heavy jobs wait above ${cpu}% CPU, under ${mem} memory or ${disk} disk free`)],
+    [t(msg`Email`), s.email],
+    [t(msg`OpenAI base URL`), s.openaiBaseUrl ?? "api.openai.com"],
+    [t(msg`Compatible base URL`), s.compatBaseUrl ?? t(msg`not set`)],
+    [t(msg`GPU (this process)`), s.gpu ? `${vendor}: ${devices}` : t(msg`none visible`)],
+    [t(msg`Video encoder`), `${s.videoEncoder.name} · ${s.videoEncoder.reason}`],
+    [t(msg`Face detection`), s.faceDetection ? t(msg`on · ${faces}`) : t(msg`off`)],
+    [t(msg`On-device models`), onDeviceSummary(s.onDevice, t)],
+    [t(msg`OpenTelemetry`), s.otel ? t(msg`on`) : t(msg`off`)],
+    [t(msg`MCP endpoint`), s.mcpUrl],
+    [t(msg`MCP sign-in`), s.mcpOauth ? t(msg`OAuth or API key`) : t(msg`API key only (MCP_OAUTH is off)`)],
+  ];
+}
+
 function SystemTab() {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const q = useQuery({ ...trpc.admin.system.queryOptions(), refetchInterval: 15_000 });
   const s = q.data;
@@ -328,36 +399,15 @@ function SystemTab() {
     !!s,
   );
 
-  /** Facts that come from .env and need a restart to change; shown so an admin knows what this box runs. */
-  const env = s
-    ? [
-        ["Storage", s.storage],
-        [
-          "Render concurrency",
-          s.renderConcurrency.mode === "auto" ? `automatic · up to ${s.renderConcurrency.max} per process` : `${s.renderConcurrency.max} per process (fixed)`,
-        ],
-        [
-          "Admission",
-          `heavy jobs wait above ${s.limits.maxCpuPercent}% CPU, under ${formatMb(s.limits.minFreeMemMB)} memory or ${formatMb(s.limits.minFreeDiskMB)} disk free`,
-        ],
-        ["Email", s.email],
-        ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
-        ["Compatible base URL", s.compatBaseUrl ?? "not set"],
-        ["GPU (this process)", s.gpu ? `${s.gpu.vendor}: ${s.gpu.devices.join(", ") || "device present, no driver tools"}` : "none visible"],
-        ["Video encoder", `${s.videoEncoder.name} · ${s.videoEncoder.reason}`],
-        ["Face detection", s.faceDetection ? `on · ${s.onDevice.faces}` : "off"],
-        ["On-device models", onDeviceSummary(s.onDevice)],
-        ["OpenTelemetry", s.otel ? "on" : "off"],
-        ["MCP endpoint", s.mcpUrl],
-        ["MCP sign-in", s.mcpOauth ? "OAuth or API key" : "API key only (MCP_OAUTH is off)"],
-      ]
-    : [];
+  const env = s ? envFacts(s, t) : [];
 
   return (
     <>
       <section id="overview" className="flex scroll-mt-4 flex-col gap-5 rounded-[16px] border border-line bg-panel p-5">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h2 className="text-[15px] font-bold">Overview</h2>
+          <h2 className="text-[15px] font-bold">
+            <Trans>Overview</Trans>
+          </h2>
           <UpdateStatusLine version={s ? `${s.version.version} · ${s.version.commit}` : null} />
         </div>
         <UpdateBanner />
@@ -365,11 +415,15 @@ function SystemTab() {
         <ProcessingTimes />
         <div>
           <div className="flex items-baseline gap-2">
-            <h3 className="text-[13px] font-bold">From .env</h3>
-            <span className="text-xs text-ink3">changes need a restart</span>
+            <h3 className="text-[13px] font-bold">
+              <Trans>From .env</Trans>
+            </h3>
+            <span className="text-xs text-ink3">
+              <Trans>changes need a restart</Trans>
+            </span>
           </div>
           {!s ? (
-            <SkeletonRegion label="Loading configuration…" className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+            <SkeletonRegion label={t`Loading configuration…`} className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
               {Array.from({ length: 12 }, (_, i) => (
                 <div key={i} className="contents">
                   <Skeleton className="h-3.5 w-28" />
@@ -401,40 +455,40 @@ function SystemTab() {
 
       <InstanceSettingsGroup
         id="access"
-        title="Access"
-        intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in."
+        title={t`Access`}
+        intro={t`Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in.`}
         fields={ACCESS_FIELDS}
       />
       <SignupRulesSection />
       <InstanceSettingsGroup
         id="limits"
-        title="Limits"
-        intro="Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh."
+        title={t`Limits`}
+        intro={t`Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh.`}
         fields={LIMIT_FIELDS}
       />
       <InstanceSettingsGroup
         id="pipeline"
-        title="Pipeline"
-        intro="Refine-stage ceilings for every account. Off by default. Turn a gate on so projects (and Project defaults) may opt into that step; leave off to keep every account on the fast path."
+        title={t`Pipeline`}
+        intro={t`Refine-stage ceilings for every account. Off by default. Turn a gate on so projects (and Project defaults) may opt into that step; leave off to keep every account on the fast path.`}
         fields={PIPELINE_FIELDS}
       />
       <FontsSection />
       <InstanceSettingsGroup
         id="retention"
-        title="Retention"
-        intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep."
+        title={t`Retention`}
+        intro={t`How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep.`}
         fields={RETENTION_FIELDS}
       />
       <InstanceSettingsGroup
         id="operations"
-        title="Operations"
-        intro="Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers."
+        title={t`Operations`}
+        intro={t`Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers.`}
         fields={OPERATIONS_FIELDS}
       />
       <InstanceSettingsGroup
         id="library"
-        title="Library"
-        intro="Where Browse finds sounds, icons and media. The Reelsaw catalog and Iconify need nothing; paste a free key to switch a provider on. Keys are stored encrypted and never shown again."
+        title={t`Library`}
+        intro={t`Where Browse finds sounds, icons and media. The Reelsaw catalog and Iconify need nothing; paste a free key to switch a provider on. Keys are stored encrypted and never shown again.`}
         fields={LIBRARY_FIELDS}
       />
 

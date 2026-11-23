@@ -10,8 +10,6 @@ import {
   ABUSE_FLAGS,
   ADDRESS_FLAGS,
   type AbuseFlag,
-  FLAG_HELP,
-  FLAG_LABEL,
   type FlagGroup,
   formatBytes,
   inFlagGroup,
@@ -23,7 +21,7 @@ import {
   type UserGroupBy,
   type UserSortKey,
   userSortFirstDir,
-  plural,
+  formatNumber,
   formatPriority,
   QUEUE_PRIORITY_MAX,
   QUEUE_PRIORITY_MIN,
@@ -31,6 +29,8 @@ import {
   RESOURCE_CEILING_MAX_MEM_MB,
 } from "@reelsaw/shared";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { msg, plural, t } from "@lingui/core/macro";
+import { i18n, type MessageDescriptor } from "@lingui/core";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import {
@@ -106,14 +106,28 @@ const readFlag = (h: URLSearchParams): FlagFilter => {
   return isAbuseFlag(f) ? f : h.get("flagged") === "1" ? "any" : "";
 };
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** The abuse flags in the active locale (keys from @reelsaw/shared; its English labels are for the CLI). */
+const FLAG_NAME: Record<AbuseFlag, MessageDescriptor> = {
+  shared_ip: msg`shared ip`,
+  signup_burst: msg`signup burst`,
+  disposable_email: msg`disposable email`,
+};
+const FLAG_SENTENCE: Record<AbuseFlag, MessageDescriptor> = {
+  shared_ip: msg`Three or more accounts signed up from the same address in the last 7 days`,
+  signup_burst: msg`Five or more accounts from the same address within one hour`,
+  disposable_email: msg`The email domain is a known temporary-address service`,
+};
+const flagName = (f: AbuseFlag) => i18n._(FLAG_NAME[f]);
+const accountsCount = (n: number) => plural(n, { one: "# account", other: "# accounts" });
+const sectionsCount = (n: number) => plural(n, { one: "# section", other: "# sections" });
 /**
  * "Group": one section per abuse reason (then the unflagged), with the address flags split by sign-up address; one
  * section per shared sign-up address (then the rest); or one flat list. In the hash as group=flag or group=ip.
  */
-const GROUP_OPTIONS = [
-  { value: "", label: "None" },
-  { value: "flag", label: "Flag" },
-  { value: "ip", label: "Sign-up address" },
+const groupOptions = () => [
+  { value: "", label: t`None` },
+  { value: "flag", label: t`Flag` },
+  { value: "ip", label: t`Sign-up address` },
 ];
 const asGroup = (v: string | null): UserGroupBy | "" => (isUserGroupBy(v) ? v : "");
 type UserFilterInput = {
@@ -158,50 +172,57 @@ const readSort = (h: URLSearchParams): Sort => {
 /** The sort as list input: spread into every admin.users.list / groups call, so sections page in the same order. */
 type SortInput = { sort?: UserSortKey | undefined; dir?: SortDir | undefined };
 
-const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
-  pending: { glyph: "◷", tone: "text-warn", word: "Pending" },
-  active: { glyph: "●", tone: "text-ok", word: "Active" },
-  suspended: { glyph: "✕", tone: "text-err", word: "Suspended" },
+const STATUS: Record<Status, { glyph: string; tone: string; word: MessageDescriptor }> = {
+  pending: { glyph: "◷", tone: "text-warn", word: msg`Pending` },
+  active: { glyph: "●", tone: "text-ok", word: msg`Active` },
+  suspended: { glyph: "✕", tone: "text-err", word: msg`Suspended` },
 };
-const STATUS_OPTIONS = [
-  { value: "", label: "Any" },
-  { value: "pending", label: "Pending" },
-  { value: "active", label: "Active" },
-  { value: "suspended", label: "Suspended" },
+const statusOptions = () => [
+  { value: "", label: t`Any` },
+  { value: "pending", label: t`Pending` },
+  { value: "active", label: t`Active` },
+  { value: "suspended", label: t`Suspended` },
 ];
-const VERIFIED_OPTIONS = [
-  { value: "", label: "Any" },
-  { value: "yes", label: "Verified" },
-  { value: "no", label: "Unverified" },
+const verifiedOptions = () => [
+  { value: "", label: t`Any` },
+  { value: "yes", label: t`Verified` },
+  { value: "no", label: t`Unverified` },
 ];
 
 type BulkAction = "approve" | "hold" | "suspend" | "reinstate" | "delete";
 type BulkResult = { changed: number; unchanged: number; skipped: Array<{ id: string; email: string; reason: string }> };
 /** The Sort menu: the same columns as the sortable headers, for widths where the headers fold away. */
-const SORT_OPTIONS: SortOption<UserSortKey>[] = [
-  { value: "name", label: "Name", firstDir: "asc", asc: "A to Z", desc: "Z to A" },
-  { value: "status", label: "Status", firstDir: "asc", asc: "Active, pending, suspended", desc: "Suspended, pending, active" },
-  { value: "created", label: "Signed up", firstDir: "desc", asc: "Oldest first", desc: "Newest first" },
-  { value: "lastActive", label: "Last active", firstDir: "desc", asc: "Longest ago first", desc: "Most recent first" },
-  { value: "projects", label: "Projects (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
-  { value: "sourceMinutes", label: "Minutes (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
-  { value: "clipsRendered", label: "Clips (all time)", firstDir: "desc", asc: "Fewest first", desc: "Most first" },
-  { value: "storedBytes", label: "Stored", firstDir: "desc", asc: "Smallest first", desc: "Largest first" },
+const sortOptions = (): SortOption<UserSortKey>[] => [
+  { value: "name", label: t`Name`, firstDir: "asc", asc: t`A to Z`, desc: t`Z to A` },
+  { value: "status", label: t`Status`, firstDir: "asc", asc: t`Active, pending, suspended`, desc: t`Suspended, pending, active` },
+  { value: "created", label: t`Signed up`, firstDir: "desc", asc: t`Oldest first`, desc: t`Newest first` },
+  { value: "lastActive", label: t`Last active`, firstDir: "desc", asc: t`Longest ago first`, desc: t`Most recent first` },
+  { value: "projects", label: t`Projects (all time)`, firstDir: "desc", asc: t`Fewest first`, desc: t`Most first` },
+  { value: "sourceMinutes", label: t`Minutes (all time)`, firstDir: "desc", asc: t`Fewest first`, desc: t`Most first` },
+  { value: "clipsRendered", label: t`Clips (all time)`, firstDir: "desc", asc: t`Fewest first`, desc: t`Most first` },
+  { value: "storedBytes", label: t`Stored`, firstDir: "desc", asc: t`Smallest first`, desc: t`Largest first` },
 ];
 
 /** Accounts per bulk call (BULK_USERS on the server): a longer selection goes in several calls. */
 const BULK_CHUNK = 50;
-const BULK_DONE: Record<BulkAction, string> = {
-  approve: "Approved",
-  hold: "Sent back to approval:",
-  suspend: "Suspended",
-  reinstate: "Reinstated",
-  delete: "Deleted",
+/** "Approved 3 accounts": what a bulk run did, as one sentence per action. */
+const bulkDone = (a: BulkAction, n: number): string => {
+  switch (a) {
+    case "approve":
+      return plural(n, { one: "Approved # account", other: "Approved # accounts" });
+    case "hold":
+      return plural(n, { one: "Sent back to approval: # account", other: "Sent back to approval: # accounts" });
+    case "suspend":
+      return plural(n, { one: "Suspended # account", other: "Suspended # accounts" });
+    case "reinstate":
+      return plural(n, { one: "Reinstated # account", other: "Reinstated # accounts" });
+    case "delete":
+      return plural(n, { one: "Deleted # account", other: "Deleted # accounts" });
+  }
 };
 
 const PAGE = 50;
 
-const num = new Intl.NumberFormat();
 const asStatus = (v: string | null): Status | "" => (v === "pending" || v === "active" || v === "suspended" ? v : "");
 const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "no" ? v : "");
 
@@ -212,8 +233,8 @@ const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "
  * rows, or on every account matching the filters ("Select all 1,204"), in pages of 50 on the server.
  */
 export function AdminUsersPage() {
-  useDocumentTitle(pageTitle("Users"));
   const { t } = useLingui();
+  useDocumentTitle(pageTitle(t`Users`));
   const trpc = useTRPC();
   const client = useTRPCClient();
   const qc = useQueryClient();
@@ -326,25 +347,25 @@ export function AdminUsersPage() {
   const flagCounts = useQuery(trpc.admin.users.flagCounts.queryOptions());
   const flagOptions = useMemo(() => {
     const c = flagCounts.data;
-    const n = (k: "any" | AbuseFlag) => (c ? num.format(c[k]) : undefined);
+    const n = (k: "any" | AbuseFlag) => (c ? formatNumber(c[k]) : undefined);
     return [
-      { value: "", label: "Any" },
-      { value: "any", label: "Any flag", hint: n("any") },
-      ...ABUSE_FLAGS.map((f) => ({ value: f, label: sentence(FLAG_LABEL[f]), hint: n(f) })),
+      { value: "", label: t`Any` },
+      { value: "any", label: t`Any flag`, hint: n("any") },
+      ...ABUSE_FLAGS.map((f) => ({ value: f, label: sentence(flagName(f)), hint: n(f) })),
     ];
-  }, [flagCounts.data]);
+  }, [flagCounts.data, t]);
   const refresh = () => void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
-  const done = (msg: string) => () => {
-    toast(msg);
+  const done = (text: () => string) => () => {
+    toast(text());
     refresh();
   };
   const fail = (e: { message: string }) => toast.error(e.message);
-  const approve = useMutation({ ...trpc.admin.users.approve.mutationOptions(), onSuccess: done("Approved"), onError: fail });
-  const hold = useMutation({ ...trpc.admin.users.hold.mutationOptions(), onSuccess: done("Sent back to approval"), onError: fail });
-  const setRole = useMutation({ ...trpc.admin.users.setRole.mutationOptions(), onSuccess: done("Role changed"), onError: fail });
-  const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
-  const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
-  const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account deleted"), onError: fail });
+  const approve = useMutation({ ...trpc.admin.users.approve.mutationOptions(), onSuccess: done(() => t`Approved`), onError: fail });
+  const hold = useMutation({ ...trpc.admin.users.hold.mutationOptions(), onSuccess: done(() => t`Sent back to approval`), onError: fail });
+  const setRole = useMutation({ ...trpc.admin.users.setRole.mutationOptions(), onSuccess: done(() => t`Role changed`), onError: fail });
+  const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done(() => t`Suspended`), onError: fail });
+  const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done(() => t`Reinstated`), onError: fail });
+  const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done(() => t`Account deleted`), onError: fail });
   const loaded = useMemo(() => {
     if (!groupBy) return (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[];
     // an account flagged for two reasons is in two sections: once here
@@ -356,7 +377,8 @@ export function AdminUsersPage() {
   /** the filter "every match" acts on: the whole list, or the one section picked */
   const allFilter = (a: AllOf): UserFilterInput => (a.id ? a.filter : filter);
   const allTotal = allOf?.id ? allOf.total : total;
-  const allLabel = allOf?.id ? `every account in “${allOf.label}”` : "every matching account";
+  const allOfLabel = allOf?.label ?? "";
+  const allLabel = allOf?.id ? t`every account in “${allOfLabel}”` : t`every matching account`;
   /** One action over the selection: chunks of checked ids, or every page of the filter until the server says it is done. */
   const bulk = useMutation({
     mutationFn: async ({
@@ -391,9 +413,12 @@ export function AdminUsersPage() {
     },
     onMutate: ({ ids }) => setProgress({ done: 0, of: ids?.length ?? allTotal }),
     onSuccess: (r) => {
-      const parts = [`${BULK_DONE[r.action]} ${plural(r.changed, "account")}`];
-      if (r.unchanged) parts.push(`${num.format(r.unchanged)} left as they were`);
-      if (r.skipped.length) parts.push(`${num.format(r.skipped.length)} skipped: ${r.skipped[0]!.reason}`);
+      const parts = [bulkDone(r.action, r.changed)];
+      const unchanged = formatNumber(r.unchanged);
+      const skipped = formatNumber(r.skipped.length);
+      const why = r.skipped[0]?.reason ?? "";
+      if (r.unchanged) parts.push(t`${unchanged} left as they were`);
+      if (r.skipped.length) parts.push(t`${skipped} skipped: ${why}`);
       toast(parts.join(" · "));
       setSel([]);
       setAllOf(null);
@@ -448,9 +473,9 @@ export function AdminUsersPage() {
       reason: reason || undefined,
     });
   /** What a bulk action acts on, for its title and its confirm: "every matching account (1,204)" or "3 accounts". */
-  const scope = (a: BulkAction) => (allOf ? `${allLabel} (${num.format(allTotal)})` : plural(targets(a).length, "account"));
+  const scope = (a: BulkAction) => (allOf ? `${allLabel} (${formatNumber(allTotal)})` : accountsCount(targets(a).length));
   const bulkOff = (a: BulkAction) => busy || (!allMatching && targets(a).length === 0);
-  const bulkTitle = (a: BulkAction, verb: string, none: string) => (bulkOff(a) && !busy ? none : `${verb} ${scope(a)}`);
+  const bulkTitle = (a: BulkAction, verb: (what: string) => string, none: string) => (bulkOff(a) && !busy ? none : verb(scope(a)));
 
   const skeletonRow = (i: number, key: string | number = i) => (
     <ListRow key={key} tall skeleton>
@@ -484,12 +509,24 @@ export function AdminUsersPage() {
     const self = r.id === selfId;
     const checked = isChecked(r);
     const u = r.usage;
-    const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${formatBytes(u.storedBytes)}`;
-    const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
-    const active = r.lastActive ? ago(r.lastActive) : "never";
-    const stateLabel = r.status === "pending" ? "Approve" : r.status === "suspended" ? "Reinstate" : "Suspend";
+    const projects = formatNumber(u.projects);
+    const minutes = formatNumber(u.sourceMinutes);
+    const clips = formatNumber(u.clipsRendered);
+    const stored = formatBytes(u.storedBytes);
+    const line = t`${projects} projects · ${minutes} min · ${clips} clips · ${stored}`;
+    const calls = formatNumber(u.llmCalls);
+    const tokensIn = formatNumber(Math.round(u.llmInputTokens / 1000));
+    const tokensOut = formatNumber(Math.round(u.llmOutputTokens / 1000));
+    const model = t`All time: ${calls} model calls, ${tokensIn}k tokens in, ${tokensOut}k out`;
+    const active = r.lastActive ? ago(r.lastActive) : t`never`;
+    const stateLabel = r.status === "pending" ? t`Approve` : r.status === "suspended" ? t`Reinstate` : t`Suspend`;
     const stateOff = busy || (self && r.status === "active");
-    const stateWhy = self && r.status === "active" ? "You cannot suspend your own account" : undefined;
+    const stateWhy = self && r.status === "active" ? t`You cannot suspend your own account` : undefined;
+    const email = r.email;
+    const heldRule = r.heldBy ?? "";
+    const heldKind = heldRule.split(" ")[0] ?? "";
+    const ip = r.signupIp;
+    const statusWord = i18n._(st.word);
     const stateRun = () => {
       if (r.status === "pending") approve.mutate({ id: r.id });
       else if (r.status === "suspended") unban.mutate({ id: r.id });
@@ -508,17 +545,21 @@ export function AdminUsersPage() {
               checked={checked}
               disabled={allMatching || bulk.isPending}
               onChange={() => toggle(r.id)}
-              aria-label={`Select ${r.email}`}
+              aria-label={t`Select ${email}`}
             />
           </label>
         </ListCell>
         <ListCell title={model}>
           <div className="flex items-center gap-2">
             <span className={`min-w-0 ${LIST_TITLE}`}>{r.name || r.email}</span>
-            {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
+            {r.role === "admin" && (
+              <span className="chip shrink-0 bg-acc-soft text-acc-text">
+                <Trans>admin</Trans>
+              </span>
+            )}
             {r.mustChangePassword && (
-              <span className="chip shrink-0 bg-warn-soft text-warn" title="reelsaw set-password --must-change: they pick a new password at next sign-in">
-                must change password
+              <span className="chip shrink-0 bg-warn-soft text-warn" title={t`reelsaw set-password --must-change: they pick a new password at next sign-in`}>
+                <Trans>must change password</Trans>
               </span>
             )}
             {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
@@ -529,53 +570,62 @@ export function AdminUsersPage() {
                 type="button"
                 className="chip shrink-0 bg-sunk text-ink2 hover:text-ink"
                 onClick={() => setHeldBy(r.heldBy ?? "")}
-                title={`Held for approval by the sign-up rule ${r.heldBy}. They only see “waiting for approval”. Click to list everyone it held.`}
+                title={t`Held for approval by the sign-up rule ${heldRule}. They only see “waiting for approval”. Click to list everyone it held.`}
               >
-                held · {r.heldBy.split(" ")[0]}
+                <Trans>held · {heldKind}</Trans>
               </button>
             )}
             {/* a click lists everyone flagged for the same reason */}
-            {r.flags.filter(isAbuseFlag).map((f) => (
-              <button
-                type="button"
-                key={f}
-                className="chip shrink-0 bg-warn-soft text-warn hover:brightness-110"
-                onClick={() => setFlag(f)}
-                title={`${sentence(FLAG_HELP[f])}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}. Click to list everyone flagged for this.`}
-              >
-                ⚑ {FLAG_LABEL[f]}
-              </button>
-            ))}
-            {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
+            {r.flags.filter(isAbuseFlag).map((f) => {
+              const help = i18n._(FLAG_SENTENCE[f]);
+              return (
+                <button
+                  type="button"
+                  key={f}
+                  className="chip shrink-0 bg-warn-soft text-warn hover:brightness-110"
+                  onClick={() => setFlag(f)}
+                  title={
+                    ip ? t`${help} · signed up from ${ip}. Click to list everyone flagged for this.` : t`${help}. Click to list everyone flagged for this.`
+                  }
+                >
+                  ⚑ {flagName(f)}
+                </button>
+              );
+            })}
+            {self && (
+              <span className="shrink-0 text-xs text-ink3">
+                <Trans>(you)</Trans>
+              </span>
+            )}
           </div>
           {/* the address truncates; whether it is verified always shows */}
           <div className="flex min-w-0 items-baseline gap-1.5 text-xs text-ink3">
             <span className="min-w-0 truncate">{r.email}</span>
             <span
               className={`shrink-0 ${r.emailVerified ? "text-ok" : "text-warn"}`}
-              title={r.emailVerified ? "They confirmed this address" : "They have not confirmed this address yet"}
+              title={r.emailVerified ? t`They confirmed this address` : t`They have not confirmed this address yet`}
             >
-              {r.emailVerified ? "✓ verified" : "◇ unverified"}
+              {r.emailVerified ? `✓ ${t`verified`}` : `◇ ${t`unverified`}`}
             </span>
           </div>
           <div className={`${LIST_SUB} min-[1040px]:hidden`}>
             <span className={st.tone}>
-              {st.glyph} {st.word}
+              {st.glyph} {statusWord}
             </span>{" "}
-            · {line} · active {active}
+            · {line} · <Trans>active {active}</Trans>
           </div>
         </ListCell>
         <ListCell full className={`text-xs ${st.tone}`} title={r.banReason ?? undefined}>
-          {st.glyph} {st.word}
+          {st.glyph} {statusWord}
         </ListCell>
         <ListCell full variant="num">
-          {num.format(u.projects)}
+          {formatNumber(u.projects)}
         </ListCell>
         <ListCell full variant="num">
-          {num.format(u.sourceMinutes)}
+          {formatNumber(u.sourceMinutes)}
         </ListCell>
         <ListCell full variant="num">
-          {num.format(u.clipsRendered)}
+          {formatNumber(u.clipsRendered)}
         </ListCell>
         <ListCell full variant="num">
           {formatBytes(u.storedBytes)}
@@ -594,20 +644,24 @@ export function AdminUsersPage() {
               {stateLabel}
             </button>
             <button className={`btn-ghost w-[4.25rem] ${LIST_ACTION}`} onClick={() => setLimitsFor(r)}>
-              Limits
+              <Trans>Limits</Trans>
             </button>
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <MoreButton aria-label={`More actions for ${r.email}`} />
+                <MoreButton aria-label={t`More actions for ${email}`} />
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
                   <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} disabled={stateOff} onSelect={stateRun}>
                     {stateLabel}
-                    {stateWhy && <span className="menu-hint">not your own</span>}
+                    {stateWhy && (
+                      <span className="menu-hint">
+                        <Trans>not your own</Trans>
+                      </span>
+                    )}
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => setLimitsFor(r)}>
-                    Limits…
+                    <Trans>Limits…</Trans>
                   </DropdownMenu.Item>
                   {r.status === "active" && (
                     <DropdownMenu.Item
@@ -615,8 +669,8 @@ export function AdminUsersPage() {
                       disabled={busy || self || r.role === "admin"}
                       onSelect={() => setConfirm({ kind: "hold", row: r })}
                     >
-                      Require approval…
-                      {(self || r.role === "admin") && <span className="menu-hint">{self ? "not your own" : "not an admin"}</span>}
+                      <Trans>Require approval…</Trans>
+                      {(self || r.role === "admin") && <span className="menu-hint">{self ? t`not your own` : t`not an admin`}</span>}
                     </DropdownMenu.Item>
                   )}
                   {r.status === "pending" && (
@@ -628,19 +682,27 @@ export function AdminUsersPage() {
                         setConfirm({ kind: "ban", row: r });
                       }}
                     >
-                      Suspend
+                      <Trans>Suspend</Trans>
                     </DropdownMenu.Item>
                   )}
                   <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => window.setTimeout(() => setRuleFor(r), 0)}>
-                    Add sign-up rule…
+                    <Trans>Add sign-up rule…</Trans>
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setConfirm({ kind: "role", row: r })}>
-                    {r.role === "admin" ? "Remove admin…" : "Make admin…"}
-                    {self && <span className="menu-hint">not your own</span>}
+                    {r.role === "admin" ? t`Remove admin…` : t`Make admin…`}
+                    {self && (
+                      <span className="menu-hint">
+                        <Trans>not your own</Trans>
+                      </span>
+                    )}
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
-                    Delete account…
-                    {self && <span className="menu-hint">not your own</span>}
+                    <Trans>Delete account…</Trans>
+                    {self && (
+                      <span className="menu-hint">
+                        <Trans>not your own</Trans>
+                      </span>
+                    )}
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
@@ -653,7 +715,7 @@ export function AdminUsersPage() {
   // the same state as the Sort menu: natural direction, the other one, then the default order
   const sortable = (k: UserSortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => ({
     dir: sort?.key === k ? (sort.dir === "asc" ? 1 : -1) : null,
-    title: usage ? "All time. Sorts every matching account" : "Sorts every matching account",
+    title: usage ? t`All time. Sorts every matching account` : t`Sorts every matching account`,
     onToggle: () => setSort(listSortToggle(sort, k, userSortFirstDir(k))),
   });
   // the actions column fits the state button, Limits and the menu; below the fold width only the menu
@@ -673,26 +735,26 @@ export function AdminUsersPage() {
               setAllOf(null);
               setSel(allOn ? [] : allIds);
             }}
-            aria-label={allOn ? "Clear selection" : "Select all loaded accounts"}
+            aria-label={allOn ? t`Clear selection` : t`Select all loaded accounts`}
           />
         </label>
       ),
       width: "w-11",
     },
-    { label: "Account", sort: sortable("name") },
-    { label: "Status", width: "min-[1040px]:w-28", full: true, sort: sortable("status") },
-    { label: "Projects", width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("projects", true) },
-    { label: "Minutes", width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("sourceMinutes", true) },
-    { label: "Clips", width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("clipsRendered", true) },
-    { label: "Stored", width: "min-[1040px]:w-[5.5rem]", full: true, right: true, sort: sortable("storedBytes", true) },
-    { label: "Active", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
-    { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
+    { label: t`Account`, sort: sortable("name") },
+    { label: t`Status`, width: "min-[1040px]:w-28", full: true, sort: sortable("status") },
+    { label: t`Projects`, width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("projects", true) },
+    { label: t`Minutes`, width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("sourceMinutes", true) },
+    { label: t`Clips`, width: "min-[1040px]:w-[4.5rem]", full: true, right: true, sort: sortable("clipsRendered", true) },
+    { label: t`Stored`, width: "min-[1040px]:w-[5.5rem]", full: true, right: true, sort: sortable("storedBytes", true) },
+    { label: t`Active`, width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
+    { label: null, srLabel: t`Actions`, width: "w-14 min-[1040px]:w-[14rem]" },
   ];
   const filtered = !!(flag || status || verified || heldBy || signupIp);
   const facets: ListFacet[] = [
-    { id: "status", label: "Status", value: status, options: STATUS_OPTIONS, onChange: (v) => setStatus(asStatus(v)) },
-    { id: "verified", label: "Email", value: verified, options: VERIFIED_OPTIONS, onChange: (v) => setVerified(asYesNo(v)) },
-    { id: "flag", label: "Flag", value: flag, options: flagOptions, onChange: (v) => setFlag(v === "any" || isAbuseFlag(v) ? v : "") },
+    { id: "status", label: t`Status`, value: status, options: statusOptions(), onChange: (v) => setStatus(asStatus(v)) },
+    { id: "verified", label: t`Email`, value: verified, options: verifiedOptions(), onChange: (v) => setVerified(asYesNo(v)) },
+    { id: "flag", label: t`Flag`, value: flag, options: flagOptions, onChange: (v) => setFlag(v === "any" || isAbuseFlag(v) ? v : "") },
   ];
   /** what narrows the list, as chips: the facets, and the two filters that only arrive by link (a sign-up rule, one address) */
   const activeFilters: ActiveFilter[] = [
@@ -701,8 +763,8 @@ export function AdminUsersPage() {
       ? [
           {
             id: "held",
-            label: `Held by ${heldBy}`,
-            title: `Only accounts the sign-up rule ${heldBy} held. Click to show everyone.`,
+            label: t`Held by ${heldBy}`,
+            title: t`Only accounts the sign-up rule ${heldBy} held. Click to show everyone.`,
             onClear: () => setHeldBy(""),
           },
         ]
@@ -711,14 +773,31 @@ export function AdminUsersPage() {
       ? [
           {
             id: "ip",
-            label: `From ${signupIp}`,
-            title: `Only accounts that signed up from ${signupIp}. Click to show everyone.`,
+            label: t`From ${signupIp}`,
+            title: t`Only accounts that signed up from ${signupIp}. Click to show everyone.`,
             onClear: () => setSignupIp(""),
           },
         ]
       : []),
   ];
-  const noun = (n: number) => plural(n, q ? "match" : "account", q ? "matches" : "accounts");
+  const noun = (n: number) => (q ? plural(n, { one: "# match", other: "# matches" }) : accountsCount(n));
+  const pendingText = formatNumber(pending);
+  const totalText = formatNumber(total);
+  const shownRows = formatNumber(rows.length);
+  const totalNoun = noun(total);
+  const sectionCount = sectionsCount(sections.length);
+  const totalAccounts = accountsCount(total);
+  const approveScope = scope("approve");
+  const holdScope = scope("hold");
+  const suspendScope = scope("suspend");
+  const deleteScope = scope("delete");
+  const allLabelSentence = sentence(allLabel);
+  const allTotalText = formatNumber(allTotal);
+  const deleteAccounts = accountsCount(targets("delete").length);
+  const deleteProjects = formatNumber(targets("delete").reduce((n, r) => n + r.projects, 0));
+  const confirmEmail = confirm?.row.email;
+  const progressDone = formatNumber(progress?.done ?? 0);
+  const progressOf = formatNumber(progress?.of ?? 0);
   const colCount = { folded: columns.filter((c) => !c.full).length, full: columns.length };
   /** what every section, at any depth, takes from the page */
   const sectionProps: SectionShared = {
@@ -743,10 +822,10 @@ export function AdminUsersPage() {
 
   return (
     <ListPage
-      title="Users"
+      title={t`Users`}
       subtitle={
         <>
-          Who can use this instance
+          <Trans>Who can use this instance</Trans>
           {pending > 0 && (
             <>
               {" · "}
@@ -756,7 +835,7 @@ export function AdminUsersPage() {
                 onClick={() => setStatus("pending")}
                 title={t`List the accounts waiting for approval`}
               >
-                {num.format(pending)} waiting for approval
+                <Trans>{pendingText} waiting for approval</Trans>
               </button>
             </>
           )}
@@ -769,17 +848,17 @@ export function AdminUsersPage() {
         controls={
           <>
             <FilterMenu facets={facets} />
-            <ChoiceMenu label={t`Group`} value={groupBy} options={GROUP_OPTIONS} onChange={(v) => setGroupBy(asGroup(v))} />
-            <SortMenu options={SORT_OPTIONS} value={sort} onChange={setSort} defaultLabel="Pending, then newest" />
+            <ChoiceMenu label={t`Group`} value={groupBy} options={groupOptions()} onChange={(v) => setGroupBy(asGroup(v))} />
+            <SortMenu options={sortOptions()} value={sort} onChange={setSort} defaultLabel={t`Pending, then newest`} />
           </>
         }
-        count={pendingList ? <Skeleton className="h-3 w-24" /> : groupBy ? `${noun(total)} in ${plural(sections.length, "section")}` : noun(total)}
+        count={pendingList ? <Skeleton className="h-3 w-24" /> : groupBy ? t`${totalNoun} in ${sectionCount}` : totalNoun}
         filters={activeFilters}
       />
       {listError && <ListError message={listError.message} />}
       {empty && (
-        <ListEmpty icon={Users} title={q ? `No accounts match “${q}”` : "No accounts match"}>
-          {filtered ? "Try another status, email or flag filter." : undefined}
+        <ListEmpty icon={Users} title={q ? t`No accounts match “${q}”` : t`No accounts match`}>
+          {filtered ? t`Try another status, email or flag filter.` : undefined}
         </ListEmpty>
       )}
       {((groupBy ? sections.length > 0 : rows.length > 0) || (pendingList && !listError)) && (
@@ -787,14 +866,14 @@ export function AdminUsersPage() {
           <ListTable
             caption={
               groupBy === "ip"
-                ? "Accounts grouped by sign-up address, with all-time usage"
+                ? t`Accounts grouped by sign-up address, with all-time usage`
                 : groupBy
-                  ? "Accounts grouped by abuse flag, shared addresses split by address, with all-time usage"
-                  : "Accounts, with all-time usage"
+                  ? t`Accounts grouped by abuse flag, shared addresses split by address, with all-time usage`
+                  : t`Accounts, with all-time usage`
             }
             columns={columns}
             loading={pendingList}
-            loadingLabel="Loading accounts…"
+            loadingLabel={t`Loading accounts…`}
           >
             {groupBy ? (
               groups.isPending ? (
@@ -838,14 +917,20 @@ export function AdminUsersPage() {
             {pendingList ? (
               <Skeleton className="h-3 w-40" />
             ) : groupBy ? (
-              `${plural(total, "account")} in ${plural(sections.length, "section")}${groupBy === "flag" && sections.length > 1 ? " · an account with two flags is in both" : ""}`
+              groupBy === "flag" && sections.length > 1 ? (
+                t`${totalAccounts} in ${sectionCount} · an account with two flags is in both`
+              ) : (
+                t`${totalAccounts} in ${sectionCount}`
+              )
+            ) : q && !sort && total > rows.length ? (
+              t`Showing the best ${shownRows} of ${totalNoun}`
             ) : (
-              `${q && !sort && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${noun(total)}`
+              t`Showing ${shownRows} of ${totalNoun}`
             )}
           </ListFooter>
           {(selected.length > 0 || allMatching) && (
             <SelectionBar
-              label="Selected accounts"
+              label={t`Selected accounts`}
               count={selCount}
               busy={busy}
               onClear={() => {
@@ -855,7 +940,9 @@ export function AdminUsersPage() {
             >
               {progress ? (
                 <span className="min-w-[6rem] px-1.5 text-xs tabular-nums text-ink3" aria-live="polite">
-                  {num.format(progress.done)} of {num.format(progress.of)}…
+                  <Trans>
+                    {progressDone} of {progressOf}…
+                  </Trans>
                 </span>
               ) : (
                 allOn &&
@@ -864,9 +951,9 @@ export function AdminUsersPage() {
                   <button
                     type="button"
                     className="btn-ghost h-8 px-2 text-xs"
-                    onClick={() => setAllOf({ id: null, filter, label: "every matching account", total, covers: () => true })}
+                    onClick={() => setAllOf({ id: null, filter, label: t`every matching account`, total, covers: () => true })}
                   >
-                    Select all {num.format(total)}
+                    <Trans>Select all {totalText}</Trans>
                   </button>
                 )
               )}
@@ -874,36 +961,44 @@ export function AdminUsersPage() {
                 type="button"
                 className="btn-ghost h-8"
                 disabled={bulkOff("approve")}
-                title={bulkTitle("approve", "Approve", "None of the selected accounts is waiting for approval")}
+                title={bulkTitle("approve", (what) => t`Approve ${what}`, t`None of the selected accounts is waiting for approval`)}
                 onClick={() => (allMatching ? setBulkConfirm("approve") : void runBulk("approve").catch(() => {}))}
               >
-                Approve
+                <Trans>Approve</Trans>
               </button>
               <button
                 type="button"
                 className="btn-ghost h-8"
                 disabled={bulkOff("suspend")}
-                title={bulkTitle("suspend", "Suspend", "The selected accounts are already suspended")}
+                title={bulkTitle("suspend", (what) => t`Suspend ${what}`, t`The selected accounts are already suspended`)}
                 onClick={() => {
                   setBanReason("");
                   setBulkConfirm("suspend");
                 }}
               >
-                Suspend…
+                <Trans>Suspend…</Trans>
               </button>
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
-                  <MoreButton aria-label="More actions for the selection" />
+                  <MoreButton aria-label={t`More actions for the selection`} />
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
                     <DropdownMenu.Item className="menu-item" disabled={bulkOff("reinstate")} onSelect={() => void runBulk("reinstate").catch(() => {})}>
-                      Reinstate
-                      {bulkOff("reinstate") && !busy && <span className="menu-hint">none suspended</span>}
+                      <Trans>Reinstate</Trans>
+                      {bulkOff("reinstate") && !busy && (
+                        <span className="menu-hint">
+                          <Trans>none suspended</Trans>
+                        </span>
+                      )}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item className="menu-item" disabled={bulkOff("hold")} onSelect={() => window.setTimeout(() => setBulkConfirm("hold"), 0)}>
-                      Require approval…
-                      {bulkOff("hold") && !busy && <span className="menu-hint">none active</span>}
+                      <Trans>Require approval…</Trans>
+                      {bulkOff("hold") && !busy && (
+                        <span className="menu-hint">
+                          <Trans>none active</Trans>
+                        </span>
+                      )}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
                     <DropdownMenu.Item
@@ -911,7 +1006,7 @@ export function AdminUsersPage() {
                       disabled={bulkOff("delete")}
                       onSelect={() => window.setTimeout(() => setBulkConfirm("delete"), 0)}
                     >
-                      Delete accounts…
+                      <Trans>Delete accounts…</Trans>
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
@@ -926,102 +1021,113 @@ export function AdminUsersPage() {
       <ConfirmDialog
         open={bulkConfirm === "approve"}
         onOpenChange={(o) => !o && setBulkConfirm(null)}
-        title={`Approve ${scope("approve")}?`}
-        body="Every one of them that is waiting can use the app right away and is told by email. Accounts already approved stay as they are."
-        confirm="Approve"
+        title={t`Approve ${approveScope}?`}
+        body={t`Every one of them that is waiting can use the app right away and is told by email. Accounts already approved stay as they are.`}
+        confirm={t`Approve`}
         onConfirm={() => runBulk("approve")}
       />
       <ConfirmDialog
         open={bulkConfirm === "hold"}
         onOpenChange={(o) => !o && setBulkConfirm(null)}
-        title={`Require approval for ${scope("hold")}?`}
-        body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until approved again. They are not told why, and their projects stay. Admins and your own account are left out."
-        confirm="Require approval"
+        title={t`Require approval for ${holdScope}?`}
+        body={t`From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until approved again. They are not told why, and their projects stay. Admins and your own account are left out.`}
+        confirm={t`Require approval`}
         onConfirm={() => runBulk("hold")}
       />
       <ConfirmDialog
         open={bulkConfirm === "suspend"}
         onOpenChange={(o) => !o && setBulkConfirm(null)}
-        title={`Suspend ${scope("suspend")}?`}
+        title={t`Suspend ${suspendScope}?`}
         body={
           <>
-            They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay. Your own account and the last admin are
-            left out.
+            <Trans>
+              They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay. Your own account and the last admin
+              are left out.
+            </Trans>
             <input
               className="input mt-3"
-              placeholder="Reason (shown to them, optional)"
+              placeholder={t`Reason (shown to them, optional)`}
               value={banReason}
               onChange={(e) => setBanReason(e.target.value)}
               maxLength={300}
-              aria-label="Reason"
+              aria-label={t`Reason`}
             />
           </>
         }
-        confirm="Suspend"
+        confirm={t`Suspend`}
         danger
         onConfirm={() => runBulk("suspend", banReason)}
       />
       <ConfirmDialog
         open={bulkConfirm === "delete"}
         onOpenChange={(o) => !o && setBulkConfirm(null)}
-        title={`Delete ${scope("delete")} forever?`}
+        title={t`Delete ${deleteScope} forever?`}
         body={
           allMatching
-            ? `${sentence(allLabel)} (${num.format(allTotal)}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
-            : `${plural(targets("delete").length, "account")}, with ${num.format(targets("delete").reduce((n, r) => n + r.projects, 0))} projects and all their clips and files, are deleted permanently. This cannot be undone.`
+            ? t`${allLabelSentence} (${allTotalText}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
+            : t`${deleteAccounts}, with ${deleteProjects} projects and all their clips and files, are deleted permanently. This cannot be undone.`
         }
-        confirm="Delete accounts forever"
+        confirm={t`Delete accounts forever`}
         danger
         onConfirm={() => runBulk("delete")}
       />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title={`Delete ${confirm?.row.email ?? "this account"} forever?`}
-        body={<>Their {plural(confirm?.row.projects ?? 0, "project")}, clips and files are deleted permanently. This cannot be undone.</>}
-        confirm="Delete account forever"
+        title={confirmEmail ? t`Delete ${confirmEmail} forever?` : t`Delete this account forever?`}
+        body={plural(confirm?.row.projects ?? 0, {
+          one: "Their # project, clips and files are deleted permanently. This cannot be undone.",
+          other: "Their # projects, clips and files are deleted permanently. This cannot be undone.",
+        })}
+        confirm={t`Delete account forever`}
         danger
         onConfirm={() => (confirm ? remove.mutateAsync({ id: confirm.row.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "role"}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title={confirm?.row.role === "admin" ? `Remove admin from ${confirm.row.email}?` : `Make ${confirm?.row.email ?? "this account"} an admin?`}
+        title={
+          confirm?.row.role === "admin"
+            ? t`Remove admin from ${confirmEmail}?`
+            : confirmEmail
+              ? t`Make ${confirmEmail} an admin?`
+              : t`Make this account an admin?`
+        }
         body={
           confirm?.row.role === "admin"
-            ? "They lose user management and instance settings right away. Their account and projects stay."
-            : "Right away, they can manage every account and change instance settings, models and provider keys."
+            ? t`They lose user management and instance settings right away. Their account and projects stay.`
+            : t`Right away, they can manage every account and change instance settings, models and provider keys.`
         }
-        confirm={confirm?.row.role === "admin" ? "Remove admin" : "Make admin"}
+        confirm={confirm?.row.role === "admin" ? t`Remove admin` : t`Make admin`}
         danger={confirm?.row.role !== "admin"}
         onConfirm={() => (confirm ? setRole.mutateAsync({ id: confirm.row.id, role: confirm.row.role === "admin" ? "user" : "admin" }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "hold"}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title={`Require approval for ${confirm?.row.email ?? "this account"}?`}
-        body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until you approve them again. They are not told why, and their projects stay."
-        confirm="Require approval"
+        title={confirmEmail ? t`Require approval for ${confirmEmail}?` : t`Require approval for this account?`}
+        body={t`From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until you approve them again. They are not told why, and their projects stay.`}
+        confirm={t`Require approval`}
         onConfirm={() => (confirm ? hold.mutateAsync({ id: confirm.row.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "ban"}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title={`Suspend ${confirm?.row.email ?? "this account"}?`}
+        title={confirmEmail ? t`Suspend ${confirmEmail}?` : t`Suspend this account?`}
         body={
           <>
-            They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay.
+            <Trans>They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay.</Trans>
             <input
               className="input mt-3"
-              placeholder="Reason (shown to them, optional)"
+              placeholder={t`Reason (shown to them, optional)`}
               value={banReason}
               onChange={(e) => setBanReason(e.target.value)}
               maxLength={300}
-              aria-label="Reason"
+              aria-label={t`Reason`}
             />
           </>
         }
-        confirm="Suspend"
+        confirm={t`Suspend`}
         danger
         onConfirm={() => (confirm ? ban.mutateAsync({ id: confirm.row.id, reason: banReason || undefined }) : Promise.resolve())}
       />
@@ -1086,6 +1192,7 @@ function UserGroupSection({
 }) {
   const { closed, onToggle, onRows, order, renderRow, skeletonRow, colCount, pageSize, isChecked, allOfId, onSetMany, onSelectAll, onlyAddress, disabled } =
     shared;
+  const { t } = useLingui();
   const trpc = useTRPC();
   const open = !closed.has(id);
   const list = useInfiniteQuery(
@@ -1115,6 +1222,9 @@ function UserGroupSection({
   const headCell = nested ? "h-9 border-t border-line bg-panel align-middle" : "sticky top-9 z-[5] h-10 border-t border-line bg-sunk align-middle";
   // as many placeholders as the section will show, so the rows land where the skeleton was
   const expected = Math.min(total, pageSize);
+  const totalText = formatNumber(total);
+  const shownText = formatNumber(rows.length);
+  const nextText = formatNumber(Math.min(PAGE, total - rows.length));
   return (
     <>
       <tr>
@@ -1135,11 +1245,11 @@ function UserGroupSection({
               aria-label={
                 split
                   ? on
-                    ? `Clear the accounts in ${label}`
-                    : `Select all ${num.format(total)} in ${label}`
+                    ? t`Clear the accounts in ${label}`
+                    : t`Select all ${totalText} in ${label}`
                   : on
-                    ? `Clear the accounts in ${label}`
-                    : `Select the loaded accounts in ${label}`
+                    ? t`Clear the accounts in ${label}`
+                    : t`Select the loaded accounts in ${label}`
               }
             />
           </label>
@@ -1162,18 +1272,20 @@ function UserGroupSection({
                   {label}
                 </span>
               )}
-              <span className="shrink-0 text-xs tabular-nums text-ink2">{plural(total, "account")}</span>
-              <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{split ? `${help}, by address` : help}</span>
+              <span className="shrink-0 text-xs tabular-nums text-ink2">{accountsCount(total)}</span>
+              <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{split ? t`${help}, by address` : help}</span>
             </button>
             <span className="ms-auto flex shrink-0 items-center gap-1 text-xs">
               {allOfHere ? (
-                <span className="text-ink2">All {num.format(total)} selected</span>
+                <span className="text-ink2">
+                  <Trans>All {totalText} selected</Trans>
+                </span>
               ) : (
                 !split &&
                 on &&
                 total > rows.length && (
                   <button type="button" className="btn-ghost h-7 px-2 text-xs" disabled={disabled} onClick={selectAll}>
-                    Select all {num.format(total)}
+                    <Trans>Select all {totalText}</Trans>
                   </button>
                 )
               )}
@@ -1182,9 +1294,9 @@ function UserGroupSection({
                   type="button"
                   className="btn-ghost h-7 px-2 text-xs"
                   onClick={() => onlyAddress(key)}
-                  title={`List only the accounts that signed up from ${key}, whatever their flags`}
+                  title={t`List only the accounts that signed up from ${key}, whatever their flags`}
                 >
-                  Only this address
+                  <Trans>Only this address</Trans>
                 </button>
               )}
             </span>
@@ -1199,10 +1311,12 @@ function UserGroupSection({
           <SpanCells cols={colCount} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "ps-8 pe-3" : "px-3"}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="tabular-nums">
-                {num.format(rows.length)} of {num.format(total)} in {label}
+                <Trans>
+                  {shownText} of {totalText} in {label}
+                </Trans>
               </span>
               <button type="button" className="btn-ghost h-8 min-w-[8rem]" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
-                {list.isFetchingNextPage ? "Loading…" : `Load ${num.format(Math.min(PAGE, total - rows.length))} more`}
+                {list.isFetchingNextPage ? t`Loading…` : t`Load ${nextText} more`}
               </button>
             </div>
           </SpanCells>
@@ -1267,7 +1381,10 @@ function MoreAddresses({ n, cols, nested = false }: { n: number; cols: { folded:
   return (
     <tr>
       <SpanCells cols={cols} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "ps-8 pe-3" : "px-3"}`}>
-        {plural(n, "more shared address", "more shared addresses")} not shown. Search or filter to narrow the list.
+        {plural(n, {
+          one: "# more shared address not shown. Search or filter to narrow the list.",
+          other: "# more shared addresses not shown. Search or filter to narrow the list.",
+        })}
       </SpanCells>
     </tr>
   );
@@ -1312,24 +1429,28 @@ type LimitKey =
   | "MAX_REQUESTS_PER_HOUR"
   | "MAX_WEBHOOKS_PER_USER"
   | "MAX_MANUAL_CLIPS_PER_USER";
-const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string }> = [
-  { key: "MAX_PROJECTS_PER_USER", label: "Projects kept", window: "all projects the account has now", unit: "projects" },
-  { key: "MAX_SOURCE_MINUTES_PER_DAY", label: "Minutes of video per day", window: "since 00:00 UTC today", unit: "minutes" },
-  { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: "Minutes of video per month", window: "this billing period, or the calendar month", unit: "minutes" },
-  { key: "MAX_NEW_PROJECTS_PER_HOUR", label: "New projects per hour", window: "the last 60 minutes", unit: "projects" },
-  { key: "MAX_LIVE_JOBS_PER_USER", label: "Jobs at once", window: "queued or running now", unit: "jobs" },
-  { key: "MAX_RERENDERS_PER_HOUR", label: "Renders asked for per hour", window: "re-renders and new clips, the last 60 minutes", unit: "renders" },
-  { key: "MAX_STORAGE_MB", label: "Storage", window: "sources, uploads, renders and intros/outros kept now", unit: "MB" },
-  { key: "MAX_REQUESTS_PER_MINUTE", label: "Changes per minute", window: "API mutations and MCP tool calls, this minute", unit: "requests" },
-  { key: "MAX_REQUESTS_PER_HOUR", label: "Changes per hour", window: "the last 60 minutes", unit: "requests" },
-  { key: "MAX_WEBHOOKS_PER_USER", label: "Webhooks", window: "endpoints the account has now", unit: "webhooks" },
-  { key: "MAX_MANUAL_CLIPS_PER_USER", label: "Clips made by hand", window: "every clip the account added by hand, deleted ones too", unit: "clips" },
+const LIMITS: Array<{ key: LimitKey; label: MessageDescriptor; window: MessageDescriptor; unit: MessageDescriptor | string }> = [
+  { key: "MAX_PROJECTS_PER_USER", label: msg`Projects kept`, window: msg`all projects the account has now`, unit: msg`projects` },
+  { key: "MAX_SOURCE_MINUTES_PER_DAY", label: msg`Minutes of video per day`, window: msg`since 00:00 UTC today`, unit: msg`minutes` },
+  { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: msg`Minutes of video per month`, window: msg`this billing period, or the calendar month`, unit: msg`minutes` },
+  { key: "MAX_NEW_PROJECTS_PER_HOUR", label: msg`New projects per hour`, window: msg`the last 60 minutes`, unit: msg`projects` },
+  { key: "MAX_LIVE_JOBS_PER_USER", label: msg`Jobs at once`, window: msg`queued or running now`, unit: msg`jobs` },
+  { key: "MAX_RERENDERS_PER_HOUR", label: msg`Renders asked for per hour`, window: msg`re-renders and new clips, the last 60 minutes`, unit: msg`renders` },
+  { key: "MAX_STORAGE_MB", label: msg`Storage`, window: msg`sources, uploads, renders and intros/outros kept now`, unit: "MB" },
+  { key: "MAX_REQUESTS_PER_MINUTE", label: msg`Changes per minute`, window: msg`API mutations and MCP tool calls, this minute`, unit: msg`requests` },
+  { key: "MAX_REQUESTS_PER_HOUR", label: msg`Changes per hour`, window: msg`the last 60 minutes`, unit: msg`requests` },
+  { key: "MAX_WEBHOOKS_PER_USER", label: msg`Webhooks`, window: msg`endpoints the account has now`, unit: msg`webhooks` },
+  { key: "MAX_MANUAL_CLIPS_PER_USER", label: msg`Clips made by hand`, window: msg`every clip the account added by hand, deleted ones too`, unit: msg`clips` },
 ];
 
+/** Where the watermark decision in force comes from, as the hint names it. */
+const wmWhyOf = (src: string | undefined) =>
+  src === "admin" ? t`admins never get one` : src === "plan" ? t`from the plan` : src === "override" ? t`your choice` : t`instance setting`;
+
 const WATERMARK_OPTIONS = [
-  { value: "default", label: "Follow", title: "Follow the plan and the instance setting" },
-  { value: "on", label: "Always", title: "Always burn the watermark into this account's renders" },
-  { value: "off", label: "Never", title: "Never burn the watermark into this account's renders" },
+  { value: "default", label: msg`Follow`, title: msg`Follow the plan and the instance setting` },
+  { value: "on", label: msg`Always`, title: msg`Always burn the watermark into this account's renders` },
+  { value: "off", label: msg`Never`, title: msg`Never burn the watermark into this account's renders` },
 ] as const;
 
 /**
@@ -1338,6 +1459,7 @@ const WATERMARK_OPTIONS = [
  * Empty = the instance setting or the plan (0 = unlimited).
  */
 function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const q = useQuery(trpc.admin.users.limits.queryOptions({ id: row.id }));
@@ -1349,7 +1471,6 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const prio = prioDraft ?? prioCurrent;
   const prioValue = prio.trim() === "" ? null : Number(prio);
   const prioInvalid = prioValue !== null && (!Number.isInteger(prioValue) || prioValue < QUEUE_PRIORITY_MIN || prioValue > QUEUE_PRIORITY_MAX);
-  const { t } = useLingui();
   // resource ceiling (hosted plans only; q.data.resources is null self-hosted): both fields, or both empty to follow the plan
   const [resDraft, setResDraft] = useState<{ cores: string; mem: string } | null>(null);
   const resOverride = q.data?.resources?.override ?? null;
@@ -1366,6 +1487,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const wmCurrent = q.data?.watermark.override === true ? "on" : q.data?.watermark.override === false ? "off" : "default";
   const wm = wmDraft ?? wmCurrent;
   const hasPlans = row.plan !== null;
+  const rowEmail = row.email;
   const planCurrent = q.data?.plan ?? "free";
   const plan = planDraft ?? planCurrent;
   const invalidate = () => {
@@ -1373,6 +1495,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
     void qc.invalidateQueries({ queryKey: trpc.admin.billing.pathKey() });
   };
   const fail = (e: { message: string }) => toast.error(e.message);
+  const wmWhyText = wmWhyOf(q.data?.watermark.source);
   const save = useMutation({ ...trpc.admin.users.setLimits.mutationOptions(), onError: fail });
   const saveWm = useMutation({ ...trpc.admin.users.setWatermark.mutationOptions(), onError: fail });
   const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
@@ -1380,34 +1503,63 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const saveRes = useMutation({ ...trpc.admin.users.setResources.mutationOptions(), onError: fail });
   const busy = save.isPending || saveWm.isPending || savePlan.isPending || savePrio.isPending || saveRes.isPending;
   const resPlan = q.data?.resources?.plan;
+  const maxCores = RESOURCE_CEILING_MAX_CORES;
+  const maxMem = RESOURCE_CEILING_MAX_MEM_MB;
+  const coresOf = (n: number) => plural(n, { one: "# core", other: "# cores" });
+  const resOverrideText = resCores !== null ? coresOf(resCores) : "";
+  const resMemText = resMem ?? 0;
+  const resPlanCores = resPlan ? coresOf(resPlan.maxCores) : "";
+  const resPlanMem = resPlan?.maxMemMB ?? 0;
   const resHint = !q.data?.resources
     ? ""
     : resInvalid
-      ? `Both, in whole numbers: 1 to ${RESOURCE_CEILING_MAX_CORES} cores and 1 to ${RESOURCE_CEILING_MAX_MEM_MB} MB. Leave both empty to follow the plan.`
-      : `${resCores !== null ? `Override: ${plural(resCores, "core")} / ${resMem} MB.` : "Following the plan."} ${resPlan ? `The plan gives ${plural(resPlan.maxCores, "core")} / ${resPlan.maxMemMB} MB.` : ""} A scan past it gets fewer threads, a render waits in the queue.`;
+      ? t`Both, in whole numbers: 1 to ${maxCores} cores and 1 to ${maxMem} MB. Leave both empty to follow the plan.`
+      : [
+          resCores !== null ? t`Override: ${resOverrideText} / ${resMemText} MB.` : t`Following the plan.`,
+          resPlan ? t`The plan gives ${resPlanCores} / ${resPlanMem} MB.` : "",
+          t`A scan past it gets fewer threads, a render waits in the queue.`,
+        ]
+          .filter(Boolean)
+          .join(" ");
+  const prioMin = QUEUE_PRIORITY_MIN;
+  const prioMax = QUEUE_PRIORITY_MAX;
+  const prioShown = prioValue !== null ? formatPriority(prioValue) : "";
+  const prioAbs = Math.abs(prioValue ?? 0);
+  const planPrio = q.data?.queuePriority.plan ? formatPriority(q.data.queuePriority.plan) : "";
   const prioHint = !q.data
     ? ""
     : prioInvalid
-      ? `A whole number from ${QUEUE_PRIORITY_MIN} to ${QUEUE_PRIORITY_MAX}.`
+      ? t`A whole number from ${prioMin} to ${prioMax}.`
       : prioValue !== null
-        ? `${formatPriority(prioValue)}: next jobs start as if this account had ${Math.abs(prioValue)} ${prioValue >= 0 ? "fewer" : "more"} queued. ${q.data.queuePriority.plan ? `The plan gives ${formatPriority(q.data.queuePriority.plan)}.` : ""}`
-        : q.data.queuePriority.plan
-          ? `Following the plan: ${formatPriority(q.data.queuePriority.plan)}, ahead of Free.`
-          : "Following the plan: no priority (0). Negative holds an account back.";
-  const sourceWord = (k: LimitKey) =>
-    q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance";
+        ? [
+            prioValue >= 0
+              ? t`${prioShown}: next jobs start as if this account had ${prioAbs} fewer queued.`
+              : t`${prioShown}: next jobs start as if this account had ${prioAbs} more queued.`,
+            planPrio ? t`The plan gives ${planPrio}.` : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : planPrio
+          ? t`Following the plan: ${planPrio}, ahead of Free.`
+          : t`Following the plan: no priority (0). Negative holds an account back.`;
+  const planName = q.data?.plan;
+  const planPrioOrZero = formatPriority(q.data?.queuePriority.plan ?? 0);
+  const planWord = planName ? t`${planName} plan` : t`plan`;
+  const sourceWord = (k: LimitKey) => (q.data?.source[k] === "plan" ? planWord : q.data?.source[k] === "override" ? t`override` : t`instance`);
   const wmHint =
     wm === "on"
-      ? "Next render: watermark on (always)."
+      ? t`Next render: watermark on (always).`
       : wm === "off"
-        ? "Next render: no watermark (never)."
+        ? t`Next render: no watermark (never).`
         : !q.data
           ? ""
           : wmDraft === "default" && q.data.watermark.override != null
-            ? "Next render: follow the plan and instance setting (after save)."
-            : `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).`;
+            ? t`Next render: follow the plan and instance setting (after save).`
+            : q.data.watermark.effective
+              ? t`Next render: watermark on (${wmWhyText}).`
+              : t`Next render: no watermark (${wmWhyText}).`;
   return (
-    <Modal open onOpenChange={(o) => !o && onClose()} title={`Limits for ${row.email}`} width={460}>
+    <Modal open onOpenChange={(o) => !o && onClose()} title={t`Limits for ${rowEmail}`} width={460}>
       <form
         className="flex min-h-0 flex-col gap-3"
         onSubmit={async (e) => {
@@ -1426,7 +1578,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           } catch {
             return; // the toast said why; keep the dialog open
           }
-          toast("Saved");
+          toast(t`Saved`);
           invalidate();
           onClose();
         }}
@@ -1436,7 +1588,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
             {hasPlans && (
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="limit-plan" className="text-xs font-semibold text-ink2">
-                  Plan
+                  <Trans>Plan</Trans>
                 </label>
                 {q.isPending ? (
                   <Skeleton className="h-[38px] w-full rounded-[10px]" />
@@ -1444,45 +1596,45 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                   <Select
                     value={plan}
                     onValueChange={setPlanDraft}
-                    ariaLabel="Plan"
+                    ariaLabel={t`Plan`}
                     options={[
-                      { value: "free", label: "Free (no grant)" },
-                      { value: "starter", label: "Starter, complimentary" },
-                      { value: "creator", label: "Creator, complimentary" },
-                      { value: "pro", label: "Pro, complimentary" },
+                      { value: "free", label: t`Free (no grant)` },
+                      { value: "starter", label: t`Starter, complimentary` },
+                      { value: "creator", label: t`Creator, complimentary` },
+                      { value: "pro", label: t`Pro, complimentary` },
                     ]}
                   />
                 )}
                 <span className="min-h-4 text-xs text-ink3">
                   {q.data
                     ? q.data.plan && q.data.plan !== "free"
-                      ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.`
-                      : "Free. A complimentary grant gives a plan without Stripe."
+                      ? t`In force: ${planName}. A complimentary grant is refused while the account pays through Stripe.`
+                      : t`Free. A complimentary grant gives a plan without Stripe.`
                     : ""}
                 </span>
               </div>
             )}
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-ink2">Watermark</span>
+              <span className="text-xs font-semibold text-ink2">
+                <Trans>Watermark</Trans>
+              </span>
               {q.isPending ? (
                 <Skeleton className="h-[38px] w-full rounded-[10px]" />
               ) : (
                 <Segmented
-                  ariaLabel="Watermark"
+                  ariaLabel={t`Watermark`}
                   value={wm}
                   onChange={setWmDraft}
                   className="w-full"
-                  options={WATERMARK_OPTIONS.map((o) => ({ value: o.value, label: o.label, title: o.title }))}
+                  options={WATERMARK_OPTIONS.map((o) => ({ value: o.value, label: i18n._(o.label), title: i18n._(o.title) }))}
                 />
               )}
               <span className="min-h-4 text-xs text-ink3">{wmHint}</span>
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="limit-queue-priority" className="flex items-baseline justify-between text-xs font-semibold text-ink2">
-                Queue priority
-                <span className="font-normal text-ink3">
-                  {q.data && !prio.trim() ? (q.data.queuePriority.plan ? `${q.data.plan ?? "plan"} plan` : "default") : ""}
-                </span>
+                <Trans>Queue priority</Trans>
+                <span className="font-normal text-ink3">{q.data && !prio.trim() ? (q.data.queuePriority.plan ? planWord : t`default`) : ""}</span>
               </label>
               {q.isPending ? (
                 <Skeleton className="h-[38px] w-full rounded-[10px]" />
@@ -1496,7 +1648,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                   max={QUEUE_PRIORITY_MAX}
                   value={prio}
                   aria-invalid={prioInvalid || undefined}
-                  placeholder={q.data ? `plan: ${formatPriority(q.data.queuePriority.plan)}` : ""}
+                  placeholder={q.data ? t`plan: ${planPrioOrZero}` : ""}
                   onChange={(e) => setPrioDraft(e.target.value)}
                 />
               )}
@@ -1506,7 +1658,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               <div className="flex flex-col gap-1.5">
                 <span className="flex items-baseline justify-between text-xs font-semibold text-ink2">
                   <Trans>Resource ceiling</Trans>
-                  <span className="font-normal text-ink3">{resCores === null && resMem === null ? `${q.data.plan ?? "plan"} plan` : "override"}</span>
+                  <span className="font-normal text-ink3">{resCores === null && resMem === null ? planWord : t`override`}</span>
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -1518,7 +1670,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                     aria-label={t`Most cores at once`}
                     aria-invalid={resInvalid || undefined}
                     value={res.cores}
-                    placeholder={resPlan ? `plan: ${plural(resPlan.maxCores, "core")}` : "cores"}
+                    placeholder={resPlan ? t`plan: ${resPlanCores}` : t`cores`}
                     onChange={(e) => setResDraft({ ...res, cores: e.target.value })}
                   />
                   <input
@@ -1530,24 +1682,39 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                     aria-label={t`Most memory at once, MB`}
                     aria-invalid={resInvalid || undefined}
                     value={res.mem}
-                    placeholder={resPlan ? `plan: ${resPlan.maxMemMB} MB` : "MB"}
+                    placeholder={resPlan ? t`plan: ${resPlanMem} MB` : "MB"}
                     onChange={(e) => setResDraft({ ...res, mem: e.target.value })}
                   />
                 </div>
                 <span className={`min-h-4 text-xs ${resInvalid ? "text-err" : "text-ink3"}`}>{resHint}</span>
               </div>
             )}
-            {LIMITS.map(({ key, label, window, unit }) => {
+            {LIMITS.map(({ key, label: labelMsg, window: windowMsg, unit: unitMsg }) => {
+              const label = i18n._(labelMsg);
+              const window = i18n._(windowMsg);
+              const unit = typeof unitMsg === "string" ? unitMsg : i18n._(unitMsg);
               const used = q.data?.usage?.[key];
               const typed = values[key]?.trim();
               const cap = typed ? Number(typed) : (q.data?.effective?.[key] ?? 0);
               const ratio = used === undefined || !cap ? 0 : used / cap;
               const state =
                 ratio >= 1
-                  ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" }
+                  ? { glyph: "✕", word: t`Over the limit`, tone: "text-err", bar: "bg-err" }
                   : ratio >= 0.8
-                    ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" }
+                    ? { glyph: "◷", word: t`Near the limit`, tone: "text-warn", bar: "bg-warn" }
                     : null;
+              const usedText = formatNumber(used ?? 0);
+              const capText = formatNumber(cap);
+              const src = q.data?.source[key] === "plan" ? t`plan` : t`instance`;
+              const inForce = !q.data
+                ? ""
+                : q.data.effective[key] === 0 && !q.data.overrides[key]
+                  ? t`unlimited`
+                  : q.data.source[key] === "override"
+                    ? q.data.instance[key] === 0
+                      ? t`unlimited`
+                      : String(q.data.instance[key])
+                    : String(q.data.effective[key]);
               return (
                 <div key={key} className="flex flex-col gap-1.5">
                   <label htmlFor={`limit-${key}`} className="flex items-baseline justify-between text-xs font-semibold text-ink2">
@@ -1563,11 +1730,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                       type="number"
                       min={0}
                       value={values[key] ?? ""}
-                      placeholder={
-                        q.data
-                          ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}`
-                          : ""
-                      }
+                      placeholder={q.data ? `${src}: ${inForce}` : ""}
                       onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
                     />
                   )}
@@ -1583,9 +1746,9 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                       {used === undefined ? (
                         <Skeleton className="inline-block h-3 w-32 align-middle" />
                       ) : cap ? (
-                        `${num.format(used)} of ${num.format(cap)} ${unit}`
+                        t`${usedText} of ${capText} ${unit}`
                       ) : (
-                        `${num.format(used)} ${unit}, no cap`
+                        t`${usedText} ${unit}, no cap`
                       )}{" "}
                       · {window}
                     </span>
@@ -1594,15 +1757,17 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                 </div>
               );
             })}
-            <p className="text-xs text-ink3">0 = unlimited. Empty = the plan's value, else the instance setting. An override wins over the plan.</p>
+            <p className="text-xs text-ink3">
+              <Trans>0 = unlimited. Empty = the plan's value, else the instance setting. An override wins over the plan.</Trans>
+            </p>
           </div>
         </ScrollArea>
         <div className="flex shrink-0 justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
-            Cancel
+            <Trans>Cancel</Trans>
           </button>
           <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data || prioInvalid || resInvalid}>
-            {busy ? "…" : "Save"}
+            {busy ? "…" : t`Save`}
           </button>
         </div>
       </form>

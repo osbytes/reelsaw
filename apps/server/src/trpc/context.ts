@@ -2,12 +2,14 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { QuotaError } from "../quota.js";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { Services } from "../services.js";
-import { ADMIN_REFUSED_MESSAGE, cannotUseApp, requester, type Requester } from "../auth.js";
+import { ADMIN_REFUSED, cannotUseApp, requester, type Requester } from "../auth.js";
 import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
 import { asUserRequest, type Surface } from "../uow.js";
 import { checkRequestRate } from "../abuse.js";
+import { AppError, errorMessageData, scopeAccount } from "../i18n.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 export type Context = {
   svc: Services;
@@ -27,6 +29,7 @@ export function contextFactory(svc: Services) {
     const who = await requester(svc.auth, svc.database.db, req.headers);
     const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
     if (who) c?.set("userId", who.user.id);
+    if (who) scopeAccount(who.user);
     const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });
     return { svc, who, req, requestId, log: who ? base.child({ userId: who.user.id }) : base };
   };
@@ -40,6 +43,8 @@ const t = initTRPC.context<Context>().create({
       data: {
         ...shape.data,
         ...(error instanceof QuotaError && error.quota ? { quota: error.quota } : {}),
+        // the stable code and parameters of a message for people (i18n.ts AppError), beside the sentence in `message`
+        ...errorMessageData(error),
       },
     };
   },
@@ -51,7 +56,7 @@ export const publicProcedure = t.procedure;
 
 /** Any signed-in account, including ones waiting for approval or suspended (for `me`, sign-out helpers). */
 export const signedInProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.who) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to continue (or send a valid API key)." });
+  if (!ctx.who) throw new AppError("UNAUTHORIZED", msg({ id: "auth.sign_in_required", message: "Sign in to continue (or send a valid API key)." }));
   return next({ ctx: { ...ctx, who: ctx.who, user: ctx.who.user } });
 });
 
@@ -73,8 +78,8 @@ export const protectedProcedure = signedInProcedure.use(async ({ ctx, next, type
 });
 
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admins only" });
+  if (ctx.user.role !== "admin") throw new AppError("FORBIDDEN", msg({ id: "auth.admins_only", message: "Admins only" }));
   // an API key or OAuth connector acts as its admin only when it was allowed to (auth.ts, README "MCP")
-  if (!ctx.who.canAdminister) throw new TRPCError({ code: "FORBIDDEN", message: ADMIN_REFUSED_MESSAGE });
+  if (!ctx.who.canAdminister) throw new AppError("FORBIDDEN", ADMIN_REFUSED);
   return next({ ctx });
 });

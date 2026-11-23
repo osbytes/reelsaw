@@ -6,6 +6,7 @@
  */
 import { ProviderError, arr, clip, obj, str } from "./http.js";
 import type { ItemLicense, Provider, ProviderDeps, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 export const ICONIFY_SETS = ["lucide", "tabler", "mdi", "ph", "heroicons", "ri", "solar"] as const;
 const COLOR = /^#?[0-9a-f]{6}$/i;
@@ -51,7 +52,9 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
   const parse = (id: string) => {
     const [prefix, name] = id.split(":");
     if (!prefix || !name || !(ICONIFY_SETS as readonly string[]).includes(prefix) || !/^[a-z0-9][a-z0-9-]*$/.test(name))
-      throw new ProviderError("That is not an Iconify id from an allowed set (<prefix>:<name>).");
+      throw new ProviderError(
+        msg({ id: "library_provider.iconify_id_allowed_set_prefix", message: "That is not an Iconify id from an allowed set (<prefix>:<name>)." }),
+      );
     return { prefix, name };
   };
   return {
@@ -100,9 +103,11 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
     },
     async resolve(externalId, opts): Promise<Resolved> {
       const { prefix, name } = parse(externalId);
-      if (opts?.color && !COLOR.test(opts.color)) throw new ProviderError("color must be a hex value like #ffffff.");
+      if (opts?.color && !COLOR.test(opts.color))
+        throw new ProviderError(msg({ id: "library_provider.color_must_hex_value_like", message: "color must be a hex value like #ffffff." }));
       const license = (await setLicenses())[prefix];
-      if (!license || !PERMISSIVE.test(license.id)) throw new ProviderError("That icon set's license cannot be imported.");
+      if (!license || !PERMISSIVE.test(license.id))
+        throw new ProviderError(msg({ id: "library_provider.icon_set_s_license_cannot", message: "That icon set's license cannot be imported." }));
       return {
         url: svgUrl(prefix, name, opts?.color ?? "#ffffff"),
         ext: "svg",

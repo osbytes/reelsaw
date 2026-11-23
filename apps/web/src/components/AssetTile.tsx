@@ -10,6 +10,7 @@ import { AudioLines, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from
 import { isStickerAsset } from "@reelsaw/shared";
 import { formatTag } from "../lib/library";
 import { lengthText, type LibraryAsset } from "./BumperField";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 /** What a tile draws, whatever it came from. */
 export interface TileModel {
@@ -39,7 +40,7 @@ export interface TileModel {
 let stopPrevious: (() => void) | null = null;
 
 export function AssetTile({
-  tile: t,
+  tile,
   pending,
   highlighted,
   leaving,
@@ -47,7 +48,7 @@ export function AssetTile({
   onOpen,
   onSelect,
   onPick,
-  pickLabel = "Add to clip",
+  pickLabel: pickLabelProp,
 }: {
   tile: TileModel;
   /** picking (importing a catalog / provider result, then adding the layer) is in flight */
@@ -60,6 +61,8 @@ export function AssetTile({
   onPick?: () => void;
   pickLabel?: string | undefined;
 }) {
+  const { t } = useLingui();
+  const pickLabel = pickLabelProp ?? t`Add to clip`;
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -81,31 +84,33 @@ export function AssetTile({
     if (playing) return stop();
     stopPrevious?.();
     stopPrevious = () => stopRef.current();
-    if (t.kind === "audio" && t.previewUrl) {
+    if (tile.kind === "audio" && tile.previewUrl) {
       const a = new Audio();
-      if (/^https?:\/\//i.test(t.previewUrl)) a.setAttribute("referrerpolicy", "no-referrer");
-      a.src = t.previewUrl;
+      if (/^https?:\/\//i.test(tile.previewUrl)) a.setAttribute("referrerpolicy", "no-referrer");
+      a.src = tile.previewUrl;
       a.onended = () => setPlaying(false);
       audio.current = a;
       void a.play().catch(() => setPlaying(false));
     }
     setPlaying(true);
   };
-  const row = t.row;
+  const row = tile.row;
   const picker = mode === "picker";
-  const fmt = formatTag(t.mime);
+  const fmt = formatTag(tile.mime);
   const remote = (url?: string) => !!url && /^https?:\/\//i.test(url);
   // CDNs (Giphy, Pexels, …) often refuse a localhost Referer; same-origin /media needs the cookie, not this.
-  const referrerPolicy = remote(t.previewUrl) || remote(t.thumbUrl) ? ("no-referrer" as const) : undefined;
+  const referrerPolicy = remote(tile.previewUrl) || remote(tile.thumbUrl) ? ("no-referrer" as const) : undefined;
   const gifLike = (url?: string) => !!url && /\.gif(\?|#|$)/i.test(url);
   // a GIF URL is not a <video> source (Giphy/Klipy used to send one); draw it as an img so it still loops
-  const previewIsImage = t.kind === "image" || !!t.mime?.startsWith("image/") || gifLike(t.previewUrl);
-  const thumb = failed ? undefined : (gifLike(t.previewUrl) ? t.previewUrl : undefined) || t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined);
+  const previewIsImage = tile.kind === "image" || !!tile.mime?.startsWith("image/") || gifLike(tile.previewUrl);
+  const thumb = failed
+    ? undefined
+    : (gifLike(tile.previewUrl) ? tile.previewUrl : undefined) || tile.thumbUrl || (tile.kind === "image" ? tile.previewUrl : undefined);
   const idleAnimates = gifLike(thumb);
   // imported GIF-as-mp4 loops in the tile like a GIF; remote results already have an animated gif thumb (don't fetch every mp4)
-  const stickerVideo = t.kind === "video" && !!t.previewUrl && !previewIsImage && !idleAnimates && isStickerAsset(t);
-  const showVideo = (playing || stickerVideo) && t.kind === "video" && !!t.previewUrl && !previewIsImage;
-  const playable = t.kind !== "image" && !!t.previewUrl && !previewIsImage && !idleAnimates && !stickerVideo;
+  const stickerVideo = tile.kind === "video" && !!tile.previewUrl && !previewIsImage && !idleAnimates && isStickerAsset(tile);
+  const showVideo = (playing || stickerVideo) && tile.kind === "video" && !!tile.previewUrl && !previewIsImage;
+  const playable = tile.kind !== "image" && !!tile.previewUrl && !previewIsImage && !idleAnimates && !stickerVideo;
   useEffect(() => {
     const v = video.current;
     if ((playing || stickerVideo) && v)
@@ -115,10 +120,18 @@ export function AssetTile({
   }, [playing, stickerVideo]);
   const chip = "inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white";
   // an image's stored duration is only how long it shows as an intro / outro, never a media length
-  const size = t.kind === "image" ? (t.width && t.height ? `${t.width}×${t.height}` : "") : t.durationSec ? lengthText({ durationSec: t.durationSec }) : "";
+  const size =
+    tile.kind === "image"
+      ? tile.width && tile.height
+        ? `${tile.width}×${tile.height}`
+        : ""
+      : tile.durationSec
+        ? lengthText({ durationSec: tile.durationSec })
+        : "";
   const showAdd = picker;
-  const addLabel = `${pickLabel}: ${t.name}`;
-  const meta = [t.kind, size, t.source, t.license].filter(Boolean).join(" · ");
+  const addLabel = t`${pickLabel}: ${tile.name}`;
+  const kindWord = tile.kind === "audio" ? t`audio` : tile.kind === "video" ? t`video` : t`image`;
+  const meta = [kindWord, size, tile.source, tile.license].filter(Boolean).join(" · ");
   return (
     <li
       id={row ? `asset-${row.id}` : undefined}
@@ -131,8 +144,8 @@ export function AssetTile({
               video.current = el;
               if (el && referrerPolicy) el.setAttribute("referrerpolicy", referrerPolicy);
             }}
-            src={t.previewUrl}
-            poster={t.thumbUrl}
+            src={tile.previewUrl}
+            poster={tile.thumbUrl}
             muted
             loop
             autoPlay={stickerVideo}
@@ -145,21 +158,21 @@ export function AssetTile({
             alt=""
             loading="lazy"
             referrerPolicy={referrerPolicy}
-            className={`absolute inset-0 h-full w-full ${t.mime === "image/svg+xml" || idleAnimates ? "object-contain p-1" : "object-cover"}`}
+            className={`absolute inset-0 h-full w-full ${tile.mime === "image/svg+xml" || idleAnimates ? "object-contain p-1" : "object-cover"}`}
             onError={() => setFailed(true)}
           />
-        ) : t.kind === "audio" ? (
+        ) : tile.kind === "audio" ? (
           <AudioLines className="absolute start-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 text-ink3" aria-hidden />
         ) : null}
         {picker ? (
-          <button type="button" className="absolute inset-0" aria-label={`${pickLabel}: ${t.name}`} disabled={pending} onClick={onPick} />
+          <button type="button" className="absolute inset-0" aria-label={addLabel} disabled={pending} onClick={onPick} />
         ) : (
-          onOpen && <button type="button" className="absolute inset-0" aria-label={`View ${t.name}`} title="Details" onClick={onOpen} />
+          onOpen && <button type="button" className="absolute inset-0" aria-label={t`View ${tile.name}`} title={t`Details`} onClick={onOpen} />
         )}
         <span className={`pointer-events-none absolute start-1.5 top-1.5 ${chip}`}>
-          {t.kind === "audio" ? (
+          {tile.kind === "audio" ? (
             <AudioLines className="h-3 w-3" aria-hidden />
-          ) : t.kind === "video" ? (
+          ) : tile.kind === "video" ? (
             <Film className="h-3 w-3" aria-hidden />
           ) : (
             <ImageIcon className="h-3 w-3" aria-hidden />
@@ -170,18 +183,18 @@ export function AssetTile({
           <button
             type="button"
             onClick={toggle}
-            aria-label={playing ? `Pause ${t.name}` : `Play ${t.name}`}
+            aria-label={playing ? t`Pause ${tile.name}` : t`Play ${tile.name}`}
             aria-pressed={playing}
             className="absolute bottom-1.5 end-1.5 z-[1] grid h-8 w-8 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop hover:bg-white"
           >
             {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="translate-x-px" />}
           </button>
         )}
-        {t.usage ? (
-          <span className={`pointer-events-none absolute bottom-1.5 start-1.5 ${chip}`}>{t.usage}</span>
-        ) : t.kind !== "image" && t.durationSec ? (
+        {tile.usage ? (
+          <span className={`pointer-events-none absolute bottom-1.5 start-1.5 ${chip}`}>{tile.usage}</span>
+        ) : tile.kind !== "image" && tile.durationSec ? (
           <span className="pointer-events-none absolute bottom-1.5 start-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white">
-            {lengthText({ durationSec: t.durationSec })}
+            {lengthText({ durationSec: tile.durationSec })}
           </span>
         ) : null}
         {showAdd && (
@@ -189,23 +202,32 @@ export function AssetTile({
             type="button"
             disabled={pending}
             onClick={onPick}
-            aria-label={pending ? "Adding…" : addLabel}
+            aria-label={pending ? t`Adding…` : addLabel}
             title={pickLabel}
             className="absolute end-1.5 top-1.5 z-[1] inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
           >
             {pending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}
-            {picker && !pending && <span>Add</span>}
+            {picker && !pending && (
+              <span>
+                <Trans>Add</Trans>
+              </span>
+            )}
           </button>
         )}
       </div>
       <div className="min-w-0 text-xs">
         {onSelect ? (
-          <button type="button" className="block w-full truncate text-start font-semibold text-ink" onClick={onSelect} title={`${t.name} (link to this item)`}>
-            {t.name}
+          <button
+            type="button"
+            className="block w-full truncate text-start font-semibold text-ink"
+            onClick={onSelect}
+            title={t`${tile.name} (link to this item)`}
+          >
+            {tile.name}
           </button>
         ) : (
-          <div className="truncate font-semibold" title={t.name}>
-            {t.name}
+          <div className="truncate font-semibold" title={tile.name}>
+            {tile.name}
           </div>
         )}
         <div className="h-4 truncate whitespace-nowrap text-ink3" title={meta}>

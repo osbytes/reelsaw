@@ -11,7 +11,8 @@ import {
   resetPasswordFromSearch,
   resetPasswordPath,
 } from "@reelsaw/shared";
-import { requestPasswordReset, resetPassword } from "../lib/auth";
+import { accountNotice, requestPasswordReset, resetPassword } from "../lib/auth";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Captcha } from "../components/Captcha";
 import { ThemeToggle } from "../App";
 import { AuthCardHeader } from "../components/AuthCardHeader";
@@ -23,6 +24,7 @@ import { Skeleton, SkeletonRegion } from "../components/ui";
 
 /** Request a reset email, or choose a new password from the emailed link (`?token=`). */
 export function ResetPasswordPage() {
+  const { t } = useLingui();
   const nav = useNavigate();
   const location = useLocation();
   const fromLink = resetPasswordFromSearch(location.search);
@@ -38,13 +40,13 @@ export function ResetPasswordPage() {
   const captcha = status.data?.captcha ?? null;
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaEpoch, setCaptchaEpoch] = useState(0);
-  const onToken = useCallback((t: string | null) => setCaptchaToken(t), []);
+  const onToken = useCallback((token: string | null) => setCaptchaToken(token), []);
   function consumeCaptcha() {
     setCaptchaToken(null);
     setCaptchaEpoch((n) => n + 1);
   }
   const choosing = !!fromLink.token;
-  useDocumentTitle(fromLink.expired ? "This link expired · Reelsaw" : "Reset password · Reelsaw");
+  useDocumentTitle(fromLink.expired ? t`This link expired · Reelsaw` : t`Reset password · Reelsaw`);
 
   const request = useMutation({
     mutationFn: async () => {
@@ -53,7 +55,7 @@ export function ResetPasswordPage() {
         redirectTo: RESET_PASSWORD_CALLBACK_PATH,
         fetchOptions: captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined,
       });
-      if (r.error) throw new Error(r.error.message ?? "Could not send a reset link");
+      if (r.error) throw new Error(r.error.message ?? t`Could not send a reset link`);
     },
     onSuccess: () => {
       consumeCaptcha();
@@ -66,9 +68,9 @@ export function ResetPasswordPage() {
   const save = useMutation({
     mutationFn: async () => {
       const token = fromLink.token;
-      if (!token) throw new Error("This reset link is missing. Request a new one.");
+      if (!token) throw new Error(t`This reset link is missing. Request a new one.`);
       const r = await resetPassword({ newPassword: password, token });
-      if (r.error) throw new Error(r.error.message ?? "Could not change the password");
+      if (r.error) throw new Error(r.error.message ?? t`Could not change the password`);
     },
     onSuccess: () => {
       track("password_reset_completed");
@@ -79,7 +81,7 @@ export function ResetPasswordPage() {
   // a token is enough to choose a new password even if email was turned off after the link was sent
   if (!choosing && status.isPending) {
     return (
-      <SkeletonRegion label="Loading…" className="mx-auto flex min-h-dvh max-w-[380px] flex-col justify-center gap-3 px-6">
+      <SkeletonRegion label={t`Loading…`} className="mx-auto flex min-h-dvh max-w-[380px] flex-col justify-center gap-3 px-6">
         <Skeleton className="h-7 w-2/3" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-10 w-full rounded-[10px]" />
@@ -89,10 +91,10 @@ export function ResetPasswordPage() {
   }
   if (!choosing && status.data?.emailEnabled === false) {
     return (
-      <AuthShell title={fromLink.expired ? "This link expired" : "Reset password"}>
-        <p className="rounded-[10px] bg-warn-soft px-3 py-2 text-sm leading-relaxed text-ink">{RESET_PASSWORD_UNAVAILABLE}</p>
+      <AuthShell title={fromLink.expired ? t`This link expired` : t`Reset password`}>
+        <p className="rounded-[10px] bg-warn-soft px-3 py-2 text-sm leading-relaxed text-ink">{accountNotice(RESET_PASSWORD_UNAVAILABLE)}</p>
         <Link to="/login" className="w-full text-center text-xs text-ink3 no-underline hover:text-ink">
-          Back to sign in
+          <Trans>Back to sign in</Trans>
         </Link>
       </AuthShell>
     );
@@ -102,8 +104,8 @@ export function ResetPasswordPage() {
   const rawError = (choosing ? save.error?.message : request.error?.message) ?? null;
   const error = rawError && /invalid token/i.test(rawError) ? RESET_PASSWORD_EXPIRED_NOTICE : rawError;
   const busy = request.isPending || save.isPending;
-  const intro = !choosing && !notice && !error ? "We'll email a link if this address has an account." : null;
-  const banner = error ?? notice ?? (mismatch ? "The two passwords do not match." : intro);
+  const intro = !choosing && !notice && !error ? t`We'll email a link if this address has an account.` : null;
+  const banner = accountNotice(error ?? notice ?? (mismatch ? t`The two passwords do not match.` : intro));
   const tone = error || mismatch ? "err" : notice ? "warn" : null;
 
   function submit(e: React.FormEvent) {
@@ -118,12 +120,14 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <AuthShell title={fromLink.expired ? "This link expired" : choosing ? "Choose a new password" : "Reset your password"}>
+    <AuthShell title={fromLink.expired ? t`This link expired` : choosing ? t`Choose a new password` : t`Reset your password`}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         {choosing ? (
           <>
             <div>
-              <label className="label">New password</label>
+              <label className="label">
+                <Trans>New password</Trans>
+              </label>
               <input
                 className="input"
                 name="password"
@@ -136,7 +140,9 @@ export function ResetPasswordPage() {
               />
             </div>
             <div>
-              <label className="label">Confirm password</label>
+              <label className="label">
+                <Trans>Confirm password</Trans>
+              </label>
               <input
                 className="input"
                 name="confirm-password"
@@ -151,7 +157,9 @@ export function ResetPasswordPage() {
           </>
         ) : (
           <div>
-            <label className="label">Email</label>
+            <label className="label">
+              <Trans>Email</Trans>
+            </label>
             <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
         )}
@@ -165,10 +173,10 @@ export function ResetPasswordPage() {
           className="btn-primary w-full min-w-[12rem] py-2.5 text-sm"
           disabled={busy || (!choosing && !!captcha && !captchaToken) || (choosing && (password.length < 8 || password !== confirm))}
         >
-          {busy ? "…" : choosing ? "Change password" : fromLink.expired ? "Send me a new link" : "Send reset link"}
+          {busy ? "…" : choosing ? t`Change password` : fromLink.expired ? t`Send me a new link` : t`Send reset link`}
         </button>
         <Link to="/login" className="w-full text-center text-xs text-ink3 no-underline hover:text-ink">
-          Back to sign in
+          <Trans>Back to sign in</Trans>
         </Link>
       </form>
     </AuthShell>
@@ -186,7 +194,7 @@ function AuthShell({ title, children }: { title: string; children: React.ReactNo
         </div>
         <p className="absolute bottom-4 start-0 end-0 text-center text-xs text-ink3">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
-            github.com/osbytes/reelsaw
+            {"github.com/osbytes/reelsaw"}
           </a>
         </p>
       </div>

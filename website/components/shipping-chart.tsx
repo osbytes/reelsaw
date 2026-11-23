@@ -1,10 +1,20 @@
 "use client";
 
+import { msg, plural } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatUtcDate, type ActivityDay, type ReleasesFeed } from "@/lib/releases-data";
 
-const DAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""] as const;
+const DAY_LABELS = [
+  "",
+  t(msg({ context: "short weekday", message: "Mon" })),
+  "",
+  t(msg({ context: "short weekday", message: "Wed" })),
+  "",
+  t(msg({ context: "short weekday", message: "Fri" })),
+  "",
+];
 /** Level 0 uses line, not sunk, so empty days stay visible on a panel. */
 const LEVEL_CLASS = ["bg-line", "bg-acc-soft", "bg-acc/40", "bg-acc/70", "bg-acc"] as const;
 
@@ -13,7 +23,7 @@ function utcLabel(day: string) {
 }
 
 function commitsWord(n: number) {
-  return n === 1 ? "1 commit" : `${n} commits`;
+  return t(msg({ message: plural({ n }, { one: "# commit", other: "# commits" }) }));
 }
 
 type CellAnchor = { top: number; bottom: number; cx: number };
@@ -94,7 +104,7 @@ export function ShippingChart({ feed, onSelectRelease }: { feed: ReleasesFeed; o
   return (
     <div ref={root} className="flex w-fit max-w-full flex-col gap-1.5">
       <h2 id="activity-title" className="sr-only">
-        Shipping activity
+        {t(msg`Shipping activity`)}
       </h2>
       <div className="overflow-x-auto overflow-y-visible">
         <div
@@ -191,7 +201,9 @@ function Cell({
   const shipped = day.releases.length > 0;
   const live = day.inWindow && !day.future;
   const label = live
-    ? `${utcLabel(day.date)}: ${commitsWord(day.commits)}${shipped ? `, shipped ${day.releases.map((r) => r.version).join(", ")}` : ""}`
+    ? shipped
+      ? t(msg`${{ day: utcLabel(day.date) }}: ${{ commits: commitsWord(day.commits) }}, shipped ${{ versions: day.releases.map((r) => r.version).join(", ") }}`)
+      : t(msg`${{ day: utcLabel(day.date) }}: ${{ commits: commitsWord(day.commits) }}`)
     : utcLabel(day.date);
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: the button inside the cell takes focus (ARIA grid pattern)
@@ -279,7 +291,7 @@ function Tip({
                   onSelectRelease?.(r.tag);
                 }}
               >
-                Shipped {r.version}
+                {rich(msg`Shipped <0/>`, { 0: r.version })}
               </button>
             </li>
           ))}
@@ -293,17 +305,16 @@ function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-none text-ink3">
       <span className="flex items-center gap-1">
-        Less
-        {LEVEL_CLASS.map((c, i) => (
-          <span key={i} className={`inline-block size-2.5 rounded-[2px] ${c}`} />
-        ))}
-        More
+        {rich(msg`Less<0/>More`, { 0: LEVEL_CLASS.map((c, i) => <span key={i} className={`inline-block size-2.5 rounded-[2px] ${c}`} />) })}
       </span>
       <span className="flex items-center gap-1">
-        <span className="relative inline-block size-2.5 rounded-[2px] bg-acc-soft">
-          <span className="absolute top-1/2 left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc" />
-        </span>
-        Release
+        {rich(msg`<0/>Release`, {
+          0: (
+            <span className="relative inline-block size-2.5 rounded-[2px] bg-acc-soft">
+              <span className="absolute top-1/2 left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc" />
+            </span>
+          ),
+        })}
       </span>
     </div>
   );

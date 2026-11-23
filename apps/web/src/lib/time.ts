@@ -1,12 +1,22 @@
-import { formatDay, formatSeconds } from "@reelsaw/shared";
+import { formatDay, formatNumber, formatSeconds } from "@reelsaw/shared";
+import { t } from "@lingui/core/macro";
 
 /** "5 min ago" style age for lists. */
 export function ago(d: string | Date) {
   const s = (Date.now() - new Date(d).getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)} d ago`;
+  if (s < 60) return t`just now`;
+  if (s < 3600) {
+    const n = formatNumber(Math.floor(s / 60));
+    return t`${n} min ago`;
+  }
+  if (s < 86400) {
+    const n = formatNumber(Math.floor(s / 3600));
+    return t`${n} h ago`;
+  }
+  if (s < 86400 * 7) {
+    const n = formatNumber(Math.floor(s / 86400));
+    return t`${n} d ago`;
+  }
   return formatDay(d, { month: "short" });
 }
 

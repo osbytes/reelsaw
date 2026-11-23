@@ -32,6 +32,7 @@ import {
   QUEUE_PRIORITY_MAX,
   QUEUE_PRIORITY_MIN,
   emailPreferencesPatchSchema,
+  localePrefsPatchSchema,
   templateBumpersSchema,
 } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
@@ -1057,6 +1058,19 @@ export const TOOLS = {
     description:
       "Turn topics of optional email on or off; omitted topics stay as they are. ready = the note sent when projects finish while you are away (Settings → Account, or the link in the email). Mail you need (password reset, verification) is not affected. Returns { ok, emailPreferences }.",
     inputSchema: emailPreferencesPatchSchema.shape,
+    annotations: { idempotentHint: true },
+  },
+  get_locale_preferences: {
+    title: "Language and region",
+    description:
+      "The language your emails, notices, errors and tool results are written in, and the time zone their dates are read in. Returns { locale, timeZone }; null locale follows the browser in the app (English in mail), null timeZone is the browser's own on screen and UTC in mail.",
+    annotations: { readOnlyHint: true },
+  },
+  set_locale_preferences: {
+    title: "Set language and region",
+    description:
+      "Choose the language (a code from the shipped locales, or null to follow the browser) and IANA time zone (e.g. Europe/Berlin, or null) for your emails, notices, errors and tool results; omitted fields stay as they are. Settings → Account shows the same. Returns { ok, locale, timeZone }.",
+    inputSchema: localePrefsPatchSchema.shape,
     annotations: { idempotentHint: true },
   },
   get_billing: {

@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Analytics } from "@/components/analytics";
 import { ThemeSync } from "@/components/theme";
+import { msg } from "@lingui/core/runtime-macro";
+import { DIR, LOCALE, OG_LOCALE, t } from "@/lib/i18n";
 import { SITE } from "@/lib/site";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme-script";
 import "./globals.css";
@@ -30,26 +32,26 @@ export const metadata: Metadata = {
   description: SITE.description,
   applicationName: SITE.name,
   keywords: [
-    "video clipper",
-    "AI video clipping",
-    "long-form to short-form",
-    "self-hosted",
-    "open source",
-    "YouTube to Shorts",
-    "TikTok clips",
+    t(msg`video clipper`),
+    t(msg`AI video clipping`),
+    t(msg`long-form to short-form`),
+    t(msg`self-hosted`),
+    t(msg`open source`),
+    t(msg`YouTube to Shorts`),
+    t(msg`TikTok clips`),
     "Reels",
-    "9:16 reframing",
-    "auto captions",
-    "karaoke captions",
-    "transcription",
-    "MCP server",
+    t(msg`9:16 reframing`),
+    t(msg`auto captions`),
+    t(msg`karaoke captions`),
+    t(msg`transcription`),
+    t(msg`MCP server`),
     "Docker",
     "Ollama",
     "Whisper",
-    "OpusClip alternative",
+    t(msg`OpusClip alternative`),
   ],
-  authors: [{ name: "Reelsaw contributors", url: SITE.github }],
-  creator: "Reelsaw contributors",
+  authors: [{ name: t(msg`Reelsaw contributors`), url: SITE.github }],
+  creator: t(msg`Reelsaw contributors`),
   category: "technology",
   alternates: { canonical: "/" },
   openGraph: {
@@ -58,7 +60,7 @@ export const metadata: Metadata = {
     url: "/",
     title: SITE.title,
     description: SITE.description,
-    locale: "en_US",
+    locale: OG_LOCALE,
   },
   twitter: { card: "summary_large_image", title: SITE.title, description: SITE.description },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
@@ -74,7 +76,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     // suppressHydrationWarning: the boot script sets data-theme before React hydrates.
     // ThemeSync puts it back when a later commit rebuilds <html> without that attribute.
-    <html lang="en" className={`${hanken.variable} ${jetbrains.variable}`} suppressHydrationWarning>
+    <html lang={LOCALE} dir={DIR} className={`${hanken.variable} ${jetbrains.variable}`} suppressHydrationWarning>
       <head>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: our own constant, run before paint so the theme does not flash */}
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lint ratchet: per-rule counts of the Biome diagnostics that are not errors yet, of Knip's unused exports and
-// types (knip.json), and of user-facing literals in the web app (i18n/*, scripts/i18n-literals.mjs), may only go
+// types (knip.json), and of user-facing literals in the web app, server and website (i18n/*, scripts/i18n-literals.mjs), may only go
 // down. Knip's other kinds (unused files, dependencies, unlisted imports) and i18n/physical-css have a baseline of
 // 0, so any new one fails.
 // biome.json keeps a rule at "warn" while old code still breaks it (or "off" with the rule listed in
@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { i18nFindings } from "./i18n-literals.mjs";
+import { i18nFindings, serverFindings, siteFindings } from "./i18n-literals.mjs";
 
 const BASELINE = "scripts/lint-baseline.json";
 // rules off in biome.json because old code breaks them too often to show as warnings, counted here
@@ -68,8 +68,8 @@ for (const issue of k.issues ?? [])
     if (n && kind !== "file") counts[`knip/${kind}`] = (counts[`knip/${kind}`] ?? 0) + n;
   }
 
-// strings and layout that bypass internationalisation in the web app (scripts/i18n-literals.mjs, docs/I18N.md)
-for (const f of i18nFindings()) counts[f.kind] = (counts[f.kind] ?? 0) + 1;
+// strings and layout that bypass internationalisation in the web app, the server and the website (scripts/i18n-literals.mjs, docs/I18N.md)
+for (const f of [...i18nFindings(), ...serverFindings(), ...siteFindings()]) counts[f.kind] = (counts[f.kind] ?? 0) + 1;
 
 const sorted = Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
 if (process.argv.includes("--update")) {

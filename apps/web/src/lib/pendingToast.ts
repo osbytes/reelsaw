@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { t } from "@lingui/core/macro";
 
 /**
  * Work started from something that closes at once (a ⋯ menu item, a command palette row) has nowhere of its own to
@@ -18,7 +19,8 @@ export async function pendingToast<T>(
     toast(typeof done === "function" ? done(r) : done, { id });
     return r;
   } catch (e) {
-    toast.error(`${failed}: ${(e instanceof Error ? e.message : "something went wrong").slice(0, 120)}`, { id });
+    const why = (e instanceof Error ? e.message : t`something went wrong`).slice(0, 120);
+    toast.error(t`${failed}: ${why}`, { id });
     return undefined;
   }
 }

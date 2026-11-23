@@ -18,7 +18,6 @@
  */
 import Stripe from "stripe";
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "../../db/index.js";
 import { BILLING_STATUSES, type BillingInterval, type BillingStatus, type BillingSubscriptionRow } from "../../db/schema.js";
 import type { Services } from "../../services.js";
@@ -29,6 +28,8 @@ import { takeTxLock, txLock } from "../../locks.js";
 import { billingPath, plural } from "@reelsaw/shared";
 import { ALL_LOOKUP_KEYS, FREE, PAID_PLANS, PLANS, planByLookupKey, planOf, publicPlan, type Interval } from "./plans.js";
 import { createEntitlements, effectivePlan, grantsOf, LIVE_STATUSES, pendingCancelAt } from "./entitlements.js";
+import { msg, select } from "@lingui/core/runtime-macro";
+import { AppError } from "../../i18n.js";
 
 export const SYNC_QUEUE = "billing.sync";
 const SYNC_RETRY_LIMIT = 8;
@@ -220,7 +221,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
 
   const priceFor = async (plan: string, interval: Interval) => {
     const p = planOf(plan);
-    if (!p.lookupKeys) throw new TRPCError({ code: "BAD_REQUEST", message: `${p.label} has no price` });
+    if (!p.lookupKeys) throw new AppError("BAD_REQUEST", msg({ id: "billing.no_price", message: msg`${{ label: p.label }} has no price` }));
     const key = p.lookupKeys[interval];
     if (!prices.has(key)) await resolvePrices();
     return prices.get(key)!;
@@ -241,10 +242,20 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const customer = await ensureCustomer(user);
     if (row?.stripeSubscriptionId && isLive(row.status) && row.status !== "complimentary") {
       if (row.priceId === price)
-        throw new TRPCError({ code: "BAD_REQUEST", message: `You are already on ${planOf(plan).label} (${interval === "year" ? "yearly" : "monthly"}).` });
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({
+            id: "billing.already_on_plan",
+            message: msg`You are already on ${{ plan: planOf(plan).label }} (${select({ interval }, { year: "yearly", other: "monthly" })}).`,
+          }),
+        );
       const sub = await stripe.subscriptions.retrieve(row.stripeSubscriptionId);
       const item = sub.items.data[0];
-      if (!item) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The subscription has no item to change; contact support." });
+      if (!item)
+        throw new AppError(
+          "PRECONDITION_FAILED",
+          msg({ id: "billing.subscription_no_item_change_contact", message: "The subscription has no item to change; contact support." }),
+        );
       const session = await stripe.billingPortal.sessions.create({
         customer,
         return_url: url(billingPath()),
@@ -258,10 +269,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       return { url: session.url, kind: "change" };
     }
     if (row?.status === "complimentary")
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: `This account has ${planOf(row.plan).label} as a courtesy; ask an admin before paying for a plan.`,
-      });
+      throw new AppError(
+        "PRECONDITION_FAILED",
+        msg({
+          id: "billing.complimentary_plan",
+          message: msg`This account has ${{ plan: planOf(row.plan).label }} as a courtesy; ask an admin before paying for a plan.`,
+        }),
+      );
     // our row can lag Stripe (a lost webhook, a sync still queued): never start a second subscription for a customer
     // who has one that is not over. Bring the row up to date and let them manage that one in the Billing Portal.
     const existing = await openSubscriptionOf(customer);
@@ -300,7 +314,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
 
   async function portal(user: { id: string; email: string; name: string }): Promise<{ url: string }> {
     const have = await db().query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) });
-    if (!have) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No billing account yet: pick a plan first." });
+    if (!have)
+      throw new AppError("PRECONDITION_FAILED", msg({ id: "billing.no_billing_account_yet_pick", message: "No billing account yet: pick a plan first." }));
     const session = await stripe.billingPortal.sessions.create({ customer: have.stripeCustomerId, return_url: url(billingPath()) });
     return { url: session.url };
   }
@@ -702,14 +717,18 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
 
   /** Admin: grant a plan without Stripe (null = remove the grant). Refused while a live Stripe subscription exists. */
   async function setComplimentary(actorId: string, userId: string, plan: string | null) {
-    if (plan && !PLANS.some((p) => p.name === plan)) throw new TRPCError({ code: "BAD_REQUEST", message: `No plan named ${plan}` });
+    if (plan && !PLANS.some((p) => p.name === plan))
+      throw new AppError("BAD_REQUEST", msg({ id: "billing.no_plan_named", message: msg`No plan named ${{ plan }}` }));
     return svc.tx(async (u) => {
       await takeTxLock(u.db, txLock.billing(userId));
       const user = await u.db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { email: true } });
-      if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
+      if (!user) throw new AppError("NOT_FOUND", msg({ id: "billing.no_such_user", message: "No such user" }));
       const [cur] = await u.db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId)).for("update");
       if (cur?.stripeSubscriptionId && isLive(cur.status))
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This account pays through Stripe; cancel that subscription in Stripe first." });
+        throw new AppError(
+          "PRECONDITION_FAILED",
+          msg({ id: "billing.account_pays_through_stripe_cancel", message: "This account pays through Stripe; cancel that subscription in Stripe first." }),
+        );
       const now = new Date();
       if (plan) {
         const values = {

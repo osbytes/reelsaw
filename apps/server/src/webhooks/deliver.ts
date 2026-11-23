@@ -5,7 +5,6 @@
  * of failures (5 or more) turn it off and email the owner. Each attempt is its own `webhooks.deliver` job.
  */
 import { and, count, eq, gte, inArray, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { Webhook } from "standardwebhooks";
 import { schema } from "../db/index.js";
 import type { WebhookDeliveryRow } from "../db/schema.js";
@@ -14,6 +13,8 @@ import { WEBHOOK_QUEUE } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import { buildBody } from "./payload.js";
 import { cancelPending, maskWebhookUrl, signingSecrets, webhookEventId } from "./service.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
 
 /** Seconds before attempt 2, 3, …; 8 attempts over about 22 h. */
 export const RETRY_DELAYS_SEC = [30, 120, 600, 3600, 3 * 3600, 6 * 3600, 12 * 3600] as const;
@@ -298,8 +299,9 @@ export async function testEndpoint(svc: Services, userId: string, endpointId: st
   const e = await svc.database.db.query.webhookEndpoints.findFirst({
     where: and(eq(schema.webhookEndpoints.id, endpointId), eq(schema.webhookEndpoints.userId, userId)),
   });
-  if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
-  if (!e.enabled) throw new TRPCError({ code: "CONFLICT", message: "This webhook is turned off. Turn it on to send a test." });
+  if (!e) throw new AppError("NOT_FOUND", msg({ id: "webhook.no_such_webhook", message: "No such webhook" }));
+  if (!e.enabled)
+    throw new AppError("CONFLICT", msg({ id: "webhook.webhook_turned_off_turn_send", message: "This webhook is turned off. Turn it on to send a test." }));
   const [d] = await svc.database.db
     .insert(schema.webhookDeliveries)
     .values({ endpointId, userId, type: "webhook.test", status: "pending", nextAttemptAt: new Date() })

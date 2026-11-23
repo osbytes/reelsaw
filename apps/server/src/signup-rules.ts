@@ -20,7 +20,6 @@
 import { BlockList, isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
 import type { SignupRuleRow } from "./db/schema.js";
 import type { Services } from "./services.js";
@@ -29,6 +28,8 @@ import { ABUSE_FLAGS, type AbuseFlag, isAbuseFlag } from "@reelsaw/shared";
 import { emailDomain, emailKey, isDisposable } from "./abuse.js";
 import { takeTxLock, txLock } from "./locks.js";
 import { MAX_SIGNUP_RULES, type ListSignupRulesInput, type ManageSignupRulesInput, type SignupRuleAction, type SignupRuleKind } from "./signup-rules-schema.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError, type MessageDescriptor } from "./i18n.js";
 
 export type SignupRule = Pick<SignupRuleRow, "id" | "kind" | "pattern" | "action">;
 
@@ -51,31 +52,43 @@ function plainIp(ip: string): string {
  * The pattern as stored, or a sentence saying what is wrong with it. Emails and domains are lower-case (sign-ups
  * are compared lower-case); an address range keeps the form it was typed in once it parses.
  */
-export function normalizePattern(kind: SignupRuleKind, raw: string): { pattern: string } | { error: string } {
+export function normalizePattern(kind: SignupRuleKind, raw: string): { pattern: string } | { error: MessageDescriptor } {
   const p = raw.trim().toLowerCase();
   switch (kind) {
     case "ip": {
       const [addr = "", bits, extra] = p.split("/");
       const family = isIP(addr);
-      if (!family || extra !== undefined) return { error: `“${raw}” is not an IP address or a range like 203.0.113.0/24.` };
+      if (!family || extra !== undefined)
+        return { error: msg({ id: "signup_rule.ip_invalid", message: msg`“${{ raw }}” is not an IP address or a range like 203.0.113.0/24.` }) };
       if (bits === undefined) return { pattern: plainIp(addr) };
       const max = family === 4 ? 32 : 128;
       const n = Number(bits);
-      if (!/^\d{1,3}$/.test(bits) || n > max) return { error: `“${raw}”: the range after / must be 0-${max}.` };
+      if (!/^\d{1,3}$/.test(bits) || n > max)
+        return { error: msg({ id: "signup_rule.ip_range_bits", message: msg`“${{ raw }}”: the range after / must be 0-${{ max }}.` }) };
       return { pattern: `${addr}/${n}` };
     }
     case "email": {
-      if (!/^[^\s@]+@[^\s@]+$/.test(p)) return { error: `“${raw}” is not an email pattern. Use name@domain, with * for any characters (spam*@gmail.com).` };
-      if (/^\*+@\*+$/.test(p)) return { error: "That pattern matches every address. Change SIGNUP_MODE instead." };
+      if (!/^[^\s@]+@[^\s@]+$/.test(p))
+        return {
+          error: msg({
+            id: "signup_rule.email_invalid",
+            message: msg`“${{ raw }}” is not an email pattern. Use name@domain, with * for any characters (spam*@gmail.com).`,
+          }),
+        };
+      if (/^\*+@\*+$/.test(p))
+        return { error: msg({ id: "signup_rule.email_matches_all", message: "That pattern matches every address. Change SIGNUP_MODE instead." }) };
       return { pattern: p };
     }
     case "domain": {
       const d = p.replace(/^@/, "").replace(/^\*\./, "");
-      if (!/^(?=.{3,253}$)([a-z0-9-]+\.)+[a-z0-9-]{2,}$/.test(d)) return { error: `“${raw}” is not an email domain (example.com).` };
+      if (!/^(?=.{3,253}$)([a-z0-9-]+\.)+[a-z0-9-]{2,}$/.test(d))
+        return { error: msg({ id: "signup_rule.domain_invalid", message: msg`“${{ raw }}” is not an email domain (example.com).` }) };
       return { pattern: d };
     }
     case "flag":
-      return isAbuseFlag(p) ? { pattern: p } : { error: `“${raw}” is not a flag. Use one of: ${ABUSE_FLAGS.join(", ")}.` };
+      return isAbuseFlag(p)
+        ? { pattern: p }
+        : { error: msg({ id: "signup_rule.flag_invalid", message: msg`“${{ raw }}” is not a flag. Use one of: ${{ flags: ABUSE_FLAGS.join(", ") }}.` }) };
   }
 }
 
@@ -221,7 +234,8 @@ export async function listSignupRules(svc: Pick<Services, "database">, input?: L
   const test = t
     ? await (async () => {
         const ip = t.ip?.trim() || null;
-        if (ip && !isIP(plainIp(ip))) throw new TRPCError({ code: "BAD_REQUEST", message: `“${ip}” is not an IP address.` });
+        if (ip && !isIP(plainIp(ip)))
+          throw new AppError("BAD_REQUEST", msg({ id: "signup_rule.not_ip_address", message: msg`“${{ ip }}” is not an IP address.` }));
         const d = await evaluateSignup(db, { email: t.email, ip: ip ? plainIp(ip) : null });
         return {
           email: t.email,
@@ -243,13 +257,13 @@ export async function listSignupRules(svc: Pick<Services, "database">, input?: L
 export async function changeSignupRules(svc: Pick<Services, "tx">, actor: RulesActor, input: ManageSignupRulesInput) {
   const add = (input.add ?? []).map((r) => {
     const n = normalizePattern(r.kind, r.pattern);
-    if ("error" in n) throw new TRPCError({ code: "BAD_REQUEST", message: n.error });
+    if ("error" in n) throw new AppError("BAD_REQUEST", n.error);
     return { ...r, pattern: n.pattern, note: r.note?.trim() || null };
   });
   const seen = new Set<string>();
   for (const r of add) {
     const k = ruleLabel(r);
-    if (seen.has(k)) throw new TRPCError({ code: "BAD_REQUEST", message: `${k} is listed twice.` });
+    if (seen.has(k)) throw new AppError("BAD_REQUEST", msg({ id: "signup_rule.listed_twice", message: msg`${{ k }} is listed twice.` }));
     seen.add(k);
   }
   const removeIds = [...new Set(input.remove ?? [])];
@@ -258,21 +272,27 @@ export async function changeSignupRules(svc: Pick<Services, "tx">, actor: RulesA
     const removed = removeIds.length ? await u.db.delete(schema.signupRules).where(inArray(schema.signupRules.id, removeIds)).returning() : [];
     if (removed.length < removeIds.length) {
       const gone = removeIds.filter((id) => !removed.some((r) => r.id === id));
-      throw new TRPCError({ code: "NOT_FOUND", message: `No such rule: ${gone.join(", ")}` });
+      throw new AppError("NOT_FOUND", msg({ id: "signup_rule.not_found", message: msg`No such rule: ${{ ids: gone.join(", ") }}` }));
     }
     const existing = await u.db.select().from(schema.signupRules);
     if (existing.length + add.length > MAX_SIGNUP_RULES)
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `An instance keeps at most ${MAX_SIGNUP_RULES} sign-up rules. Remove some first, or widen one (a range, a domain).`,
-      });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({
+          id: "signup_rule.instance_keeps_most_sign_up",
+          message: msg`An instance keeps at most ${{ maxSignupRules: MAX_SIGNUP_RULES }} sign-up rules. Remove some first, or widen one (a range, a domain).`,
+        }),
+      );
     for (const r of add) {
       const dup = existing.find((e) => e.kind === r.kind && e.pattern === r.pattern);
       if (dup)
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `There is already a rule for ${ruleLabel(r)} (${dup.action}). Remove it first to change what it does.`,
-        });
+        throw new AppError(
+          "CONFLICT",
+          msg({
+            id: "signup_rule.duplicate",
+            message: msg`There is already a rule for ${{ rule: ruleLabel(r) }} (${{ action: dup.action }}). Remove it first to change what it does.`,
+          }),
+        );
     }
     const added = add.length
       ? await u.db

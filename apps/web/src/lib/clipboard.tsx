@@ -1,16 +1,20 @@
 import { toast } from "sonner";
+import { t } from "@lingui/core/macro";
+import { Trans } from "@lingui/react/macro";
 
 /**
  * When the browser refuses the clipboard (permissions, an embedded browser, an insecure origin), the text is shown in a
  * toast that stays until closed, selected, so the person can copy it themselves instead of losing it to an error.
  */
-export function showTextToCopy(text: string, why = "Your browser didn’t allow copying.") {
+export function showTextToCopy(text: string, why: string = t`Your browser didn’t allow copying.`) {
   toast(
     <div className="flex w-full min-w-0 flex-col gap-1.5">
-      <span>{why} Copy it from here:</span>
+      <span>
+        <Trans>{why} Copy it from here:</Trans>
+      </span>
       <input
         readOnly
-        aria-label="Text to copy"
+        aria-label={t`Text to copy`}
         className="input w-full font-mono text-xs"
         value={text}
         autoFocus

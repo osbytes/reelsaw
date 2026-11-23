@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ import { Segmented, Skeleton, SkeletonRegion } from "./components/ui";
 import { ClipEditorSkeleton, ProjectPageSkeleton } from "./components/PageSkeletons";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
+import { AccountLocale } from "./components/LocaleSection";
 import { usePresence } from "./lib/presence";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -57,13 +59,16 @@ export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: stri
 }
 
 export function Logo() {
+  const { t } = useLingui();
   return (
     // the wordmark is an image of the name, so the link's name is "Reelsaw" and matches what it shows (WCAG 2.5.3)
     <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
-      <span className="sr-only sm:hidden">Reelsaw</span>
+      <span className="sr-only sm:hidden">{t`Reelsaw`}</span>
       <LogoMark />
-      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" role="img" aria-label="Reelsaw">
-        reel<span className="mx-px font-medium text-acc-text">/</span>saw
+      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" role="img" aria-label={t`Reelsaw`}>
+        {"reel"}
+        <span className="mx-px font-medium text-acc-text">/</span>
+        {"saw"}
       </span>
     </Link>
   );
@@ -71,12 +76,13 @@ export function Logo() {
 
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, toggle] = useTheme();
+  const { t } = useLingui();
   return (
     <button
       className={`btn-ghost h-[34px] w-[34px] px-0 ${className}`}
       onClick={toggle}
-      title={theme === "dark" ? "Light theme" : "Dark theme"}
-      aria-label="Toggle theme"
+      title={theme === "dark" ? t`Light theme` : t`Dark theme`}
+      aria-label={t`Toggle theme`}
     >
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
@@ -92,6 +98,7 @@ function Avatar() {
   const me = useMe();
   const navigate = useNavigate();
   const [theme] = useTheme();
+  const { t } = useLingui();
   const u = data?.user;
   if (!u) return null;
   const isAdmin = me.data?.role === "admin";
@@ -108,7 +115,7 @@ function Avatar() {
         <button
           className="relative grid h-[30px] w-[30px] shrink-0 place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text"
           title={u.email}
-          aria-label="Account"
+          aria-label={t`Account`}
         >
           {initials}
           <UpdateDot />
@@ -122,72 +129,83 @@ function Avatar() {
               <span className="block truncate text-[13px] font-semibold text-ink">{u.name || u.email}</span>
               <span className="block truncate text-xs text-ink3">
                 {u.email}
-                {isAdmin ? " · admin" : ""}
+                {isAdmin ? (
+                  <>
+                    {" · "}
+                    <Trans>admin</Trans>
+                  </>
+                ) : (
+                  ""
+                )}
               </span>
             </span>
           </DropdownMenu.Label>
           {sep}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
-            <SettingsIcon className="h-4 w-4" /> Settings
+            <SettingsIcon className="h-4 w-4" /> <Trans>Settings</Trans>
           </DropdownMenu.Item>
           {me.data?.ee?.billing && (
             <DropdownMenu.Item className="menu-item" onSelect={() => navigate(BILLING_PATH)}>
-              <CreditCard className="h-4 w-4" /> Plan and billing
+              <CreditCard className="h-4 w-4" /> <Trans>Plan and billing</Trans>
             </DropdownMenu.Item>
           )}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate(DELETED_PATH)}>
-            <Trash2 className="h-4 w-4" /> Deleted
+            <Trash2 className="h-4 w-4" /> <Trans>Deleted</Trans>
           </DropdownMenu.Item>
           {isAdmin && (
             <>
               {sep}
-              <DropdownMenu.Label className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wide text-ink3 uppercase">Instance</DropdownMenu.Label>
+              <DropdownMenu.Label className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wide text-ink3 uppercase">
+                <Trans>Instance</Trans>
+              </DropdownMenu.Label>
               <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings/system")}>
-                <Server className="h-4 w-4" /> System
+                <Server className="h-4 w-4" /> <Trans>System</Trans>
                 <UpdateMenuHint />
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/admin/users")}>
-                <Users className="h-4 w-4" /> Users
+                <Users className="h-4 w-4" /> <Trans>Users</Trans>
                 <PendingUsersHint />
               </DropdownMenu.Item>
             </>
           )}
           {sep}
           <div className="flex items-center justify-between gap-2 px-2.5 py-1">
-            <span className="text-[13px] text-ink2">Theme</span>
+            <span className="text-[13px] text-ink2">
+              <Trans>Theme</Trans>
+            </span>
             <Segmented
               size="sm"
-              ariaLabel="Theme"
+              ariaLabel={t`Theme`}
               value={theme}
               onChange={setTheme}
               options={[
-                { value: "light", label: <Sun className="h-3.5 w-3.5" aria-label="Light" />, title: "Light theme" },
-                { value: "dark", label: <Moon className="h-3.5 w-3.5" aria-label="Dark" />, title: "Dark theme" },
+                { value: "light", label: <Sun className="h-3.5 w-3.5" aria-label={t`Light`} />, title: t`Light theme` },
+                { value: "dark", label: <Moon className="h-3.5 w-3.5" aria-label={t`Dark`} />, title: t`Dark theme` },
               ]}
             />
           </div>
           {sep}
           <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
-            <LifeBuoy className="h-4 w-4" /> Report an issue…
+            <LifeBuoy className="h-4 w-4" /> <Trans>Report an issue…</Trans>
             <span className="menu-hint">
               <span className="kbd">!</span>
             </span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" asChild>
             <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">
-              <Sparkles className="h-4 w-4" /> What&apos;s new
+              <Sparkles className="h-4 w-4" /> <Trans>What&apos;s new</Trans>
               <ExternalLink className="menu-hint h-3.5 w-auto" aria-hidden />
             </a>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" asChild>
             <a href={REPO_URL} target="_blank" rel="noreferrer">
-              <Code2 className="h-4 w-4" /> Source on GitHub
+              <Code2 className="h-4 w-4" /> <Trans>Source on GitHub</Trans>
               <ExternalLink className="menu-hint h-3.5 w-auto" aria-hidden />
             </a>
           </DropdownMenu.Item>
           {sep}
           <DropdownMenu.Item className="menu-item" onSelect={() => signOut().then(() => window.location.assign("/login"))}>
-            <LogOut className="h-4 w-4" /> Sign out
+            <LogOut className="h-4 w-4" /> <Trans>Sign out</Trans>
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -204,8 +222,9 @@ function usePendingUsers() {
 
 function PendingUsersHint() {
   const n = usePendingUsers();
+  const { t } = useLingui();
   return n ? (
-    <span className="ms-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+    <span className="ms-auto rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title={t`Waiting for approval`}>
       {n}
     </span>
   ) : null;
@@ -215,12 +234,13 @@ function PendingUsersHint() {
 function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const me = useMe();
   const pending = usePendingUsers();
+  const { t } = useLingui();
   if (me.data?.role !== "admin") return null;
   return (
     <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
-      Users
+      <Trans>Users</Trans>
       {pending ? (
-        <span className="ms-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
+        <span className="ms-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title={t`Waiting for approval`}>
           {pending}
         </span>
       ) : null}
@@ -242,8 +262,12 @@ function SearchButton() {
       aria-keyshortcuts={mod === "⌘" ? "Meta+K" : "Control+K"}
     >
       <Search className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="sr-only sm:hidden">Search</span>
-      <span className="hidden min-w-0 flex-1 truncate text-start text-ink2 sm:inline">Search or paste a link…</span>
+      <span className="sr-only sm:hidden">
+        <Trans>Search</Trans>
+      </span>
+      <span className="hidden min-w-0 flex-1 truncate text-start text-ink2 sm:inline">
+        <Trans>Search or paste a link…</Trans>
+      </span>
       <span className="kbd hidden shrink-0 text-ink2 opacity-100 sm:inline-grid" aria-hidden>
         {mod}K
       </span>
@@ -261,17 +285,18 @@ export function TopBar() {
       <Logo />
       <nav className="flex shrink-0 gap-0.5 sm:gap-1">
         <NavLink to="/" className={() => nav({ isActive: inProjects })}>
-          Projects
+          <Trans>Projects</Trans>
         </NavLink>
         <NavLink to="/library" className={nav}>
-          Library
+          <Trans>Library</Trans>
         </NavLink>
         <NavLink to="/templates" className={nav}>
-          Templates
+          <Trans>Templates</Trans>
         </NavLink>
         <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
+      <AccountLocale />
       <HeaderAlerts />
       <SearchButton />
       <Avatar />
@@ -299,8 +324,9 @@ function Shell({ children, fallback = <PageFallback /> }: { children: React.Reac
  * skeleton passes it to Protected as `fallback`, so loading shows one skeleton, not this one and then that.
  */
 function PageFallback() {
+  const { t } = useLingui();
   return (
-    <SkeletonRegion label="Loading…" className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
+    <SkeletonRegion label={t`Loading…`} className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
       <Skeleton className="h-8 w-48" />
       <Skeleton className="h-40 w-full rounded-[16px]" />
     </SkeletonRegion>
@@ -309,8 +335,9 @@ function PageFallback() {
 
 /** What shows while the session and account load: a bar and a few content blocks, no "Loading…" text. */
 function AppSkeleton() {
+  const { t } = useLingui();
   return (
-    <SkeletonRegion label="Loading…" className="flex h-dvh flex-col overflow-hidden">
+    <SkeletonRegion label={t`Loading…`} className="flex h-dvh flex-col overflow-hidden">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-6">
         <Skeleton className="h-6 w-28" />
         <Skeleton className="ms-auto h-8 w-8 rounded-full" />
@@ -426,10 +453,11 @@ function HomePage() {
 }
 
 export function App() {
-  useShortcuts("Everywhere", [
-    ["Search, jump or run an action", `${MOD}K`],
-    ["Report an issue", "!"],
-    ["Show this list", "?"],
+  const { t } = useLingui();
+  useShortcuts(t`Everywhere`, [
+    [t`Search, jump or run an action`, `${MOD}K`],
+    [t`Report an issue`, "!"],
+    [t`Show this list`, "?"],
   ]);
   return (
     <>

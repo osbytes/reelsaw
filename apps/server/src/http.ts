@@ -44,7 +44,9 @@ import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
 import { setEmailPreferences, UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "./notify/preferences.js";
-import { escapeHtml, layout } from "./email.js";
+import { escapeHtml, htmlMessage, layout } from "./email.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { LOCALE_HEADER, localeMiddleware, t } from "./i18n.js";
 
 /** What the browser may report: trimmed so a loop of errors cannot fill the log. */
 const clientLogSchema = z.object({
@@ -80,6 +82,8 @@ export function createApp(svc: Services) {
   const app = new Hono<AppEnv>();
   // request id + access log (request-log.ts); every handler logs through c.get("log")
   app.use(requestLogger(svc.log));
+  // every request renders its messages in one locale: the web app's header, the account's, Accept-Language, English (i18n.ts)
+  app.use(localeMiddleware());
   // The built SPA's id (hash of its index.html). Every API response carries it, and the page carries
   // the one it was served from, so a tab left open across a deploy notices and reloads on its next
   // route change instead of asking for chunks that are gone (apps/web/src/lib/stale-chunk.ts).
@@ -123,6 +127,7 @@ export function createApp(svc: Services) {
         "Authorization",
         "x-api-key",
         "x-filename",
+        LOCALE_HEADER,
         "trpc-accept",
         "mcp-session-id",
         "mcp-protocol-version",
@@ -159,18 +164,20 @@ export function createApp(svc: Services) {
     const p = (html: string) => `<p style="margin:0 0 12px">${html}</p>`;
     const page = (status: 200 | 400, title: string, bodyHtml: string) => c.html(layout({ preheader: title, title, bodyHtml }), status);
     if (!isEmailTopic(topic) || !userId || !verifyUnsubscribeToken(config.BETTER_AUTH_SECRET, userId, topic, token)) {
-      return page(400, "This link does not work", p("Turn emails on or off under Settings → Account in Reelsaw instead."));
+      return page(400, t(msg`This link does not work`), p(htmlMessage(msg`Turn emails on or off under Settings → Account in Reelsaw instead.`)));
     }
     const settings = escapeHtml(`${config.APP_URL.replace(/\/$/, "")}/settings#email`);
-    const stopped = escapeHtml(EMAIL_TOPICS[topic].stopped);
+    const settingsLink = (inner: string) => `<a href="${settings}">${inner}</a>`;
+    // the page reads in the language of whoever opened the link (the request's locale, i18n.ts)
+    const stopped = EMAIL_TOPICS[topic].stopped;
     if (c.req.method === "GET") {
       const action = escapeHtml(`${UNSUBSCRIBE_PATH}?${new URL(c.req.url).searchParams}`);
       return page(
         200,
-        "Stop these emails?",
-        p(`You will no longer get ${stopped}. Mail you need, such as password resets, still comes.`) +
-          `<form method="post" action="${action}" style="margin:20px 0"><button type="submit" style="font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer">Stop these emails</button></form>` +
-          p(`Or change it under <a href="${settings}">Settings → Account</a>.`),
+        t(msg`Stop these emails?`),
+        p(htmlMessage(msg`You will no longer get ${{ stopped }}. Mail you need, such as password resets, still comes.`)) +
+          `<form method="post" action="${action}" style="margin:20px 0"><button type="submit" style="font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer">${escapeHtml(t(msg`Stop these emails`))}</button></form>` +
+          p(htmlMessage(msg`Or change it under <0>Settings → Account</0>.`, { 0: settingsLink })),
       );
     }
     const gone = await setEmailPreferences(svc, userId, { [topic]: false }, "unsubscribe_link").then(
@@ -183,7 +190,11 @@ export function createApp(svc: Services) {
     // a deleted account gets no more mail anyway; the page says the same either way
     if (gone) c.get("log").info({ userId, topic }, "unsubscribe for a deleted account");
     else c.get("log").info({ userId, topic }, "email unsubscribed");
-    return page(200, "You're unsubscribed", p(`You will no longer get ${stopped}. Turn it back on under <a href="${settings}">Settings → Account</a>.`));
+    return page(
+      200,
+      t(msg`You're unsubscribed`),
+      p(htmlMessage(msg`You will no longer get ${{ stopped }}. Turn it back on under <0>Settings → Account</0>.`, { 0: settingsLink })),
+    );
   });
   // OAuth dynamic client registration is open to anyone (claude.ai registers itself); cap it per address so the client table cannot be flooded
   const registrations = new WindowCounter(20);
