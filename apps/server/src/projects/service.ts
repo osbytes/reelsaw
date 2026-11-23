@@ -1055,6 +1055,10 @@ export const checkSourceInput = z
       .max(MAX_RANGES)
       .optional()
       .describe("The parts you would clip (as create_project takes them): priced and checked against your minutes instead of the whole video"),
+    lookupLength: z
+      .boolean()
+      .optional()
+      .describe("Look the link's length up even without a minutes limit (the range timeline needs it); durationSec in the answer"),
   })
   .refine((v) => !!v.sourceUrl !== (v.durationSec !== undefined), { message: "Give sourceUrl or durationSec, not both" });
 
@@ -1075,6 +1079,8 @@ export interface SourcePartial {
 export interface SourceCheck {
   /** the video's length in minutes, when it is known (a link whose site does not say has none) */
   minutes: number | null;
+  /** the same length in seconds (the range timeline is drawn from it) */
+  durationSec: number | null;
   /** the video is accepted, but only its start is processed now; null when all of it is (or it is refused) */
   partial: SourcePartial | null;
   /** false: creating the project now would be refused (message and quota say why and what to do; no quota for a live stream); null: the length is unknown, so ingest decides */
@@ -1105,17 +1111,21 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutesAllowance(db, s, userId, svc.entitlements),
     input.durationSec ??
       (input.sourceUrl
-        ? (input.ranges ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch((err: unknown) => {
-            if (err instanceof LiveSourceError) return "live" as const;
-            throw err;
-          })
+        ? (input.ranges || input.lookupLength ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch(
+            (err: unknown) => {
+              if (err instanceof LiveSourceError) return "live" as const;
+              throw err;
+            },
+          )
         : null),
   ]);
-  if (durationSec === "live") return { minutes: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance, ranges: null };
+  if (durationSec === "live")
+    return { minutes: null, durationSec: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance, ranges: null };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
+  const lengthSec = durationSec || null;
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
-    return { minutes, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance, ranges: null };
+    return { minutes, durationSec: lengthSec, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance, ranges: null };
   };
   try {
     await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
@@ -1131,6 +1141,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
       const problems = plan.problems.map(rangeProblemMessage);
       return {
         minutes,
+        durationSec: lengthSec,
         partial: null,
         fits: false,
         message: problems.join(" "),
@@ -1146,13 +1157,13 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
       if (err instanceof QuotaError) return { ...refused(err), ranges: priced };
       throw err;
     }
-    return { minutes, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
+    return { minutes, durationSec: lengthSec, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
   }
-  if (!durationSec) return { minutes, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
+  if (!durationSec) return { minutes, durationSec: lengthSec, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
   const r = await predictAdmission(db, s, userId, durationSec, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
   if ("refused" in r) return refused(r.refused);
   const until = r.admission.until;
-  if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
+  if (until === null) return { minutes, durationSec: lengthSec, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
   const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
   const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
   const partial: SourcePartial = {
@@ -1174,7 +1185,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutes: partial.minutes,
     totalMinutes: partial.totalMinutes,
   });
-  return { minutes, partial, fits: true, message: null, quota: null, allowance, ranges: null };
+  return { minutes, durationSec: lengthSec, partial, fits: true, message: null, quota: null, allowance, ranges: null };
 }
 
 /**

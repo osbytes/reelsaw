@@ -78,10 +78,15 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       `clip.done` / `clip.failed` (events and webhooks) carry `rangeId` and `ref`. Shared modules index.ts imports
       values from never import index.ts back (test/shared-import-cycle.test.ts): the cycle left `rangeSchema`
       undefined in the bundle and refused every create.
-- [ ] 1.8 Web, NewProject.tsx: Whole video / Ranges toggle, the shadow timeline (track, ruler, click to add,
-      drag ends, typed start and end, mode per range, remove), and the "Before you start" panel fed by the same
-      `checkSource` call (debounced; the panel's height is reserved so nothing shifts). Phone: tap to add, drag
-      handles ≥ 44 px, the start bar pinned at the bottom (`h-dvh` layout, docs/UI.md).
+- [x] 1.8 Web, New project: a "What to clip" section (Whole video / Ranges) once a link or file is given. Ranges draws
+      the shadow timeline (components/RangeTimeline.tsx) from the length `check_source` looks up (`lookupLength`, and
+      `durationSec` in its answer) or the file's own: click or tap to add a 3-minute range, drag either end (44 px
+      handles, arrow keys on the focused end), a ruler; the list types exact times, picks Find clips / Exact clip per
+      range and removes; under it, what the ranges count and skip, the planner's changes in words and the refusal with
+      the upgrade offer, repriced as they change without moving anything (`keepPreviousData`, reserved heights). Ranges
+      are sent in source order, so the server's "ranges 1, 2" are the ones numbered 1 and 2. The button says "Clip N
+      ranges". Copy goes through lingui (en-XA checked); the track is `dir="ltr"`. Checked in the browser at desktop
+      and phone width. Seen on the way, not changed: the page footer's summary and buttons overlap at phone width.
 - [ ] 1.9 Evals: an analyze suite case with two find ranges asserts no pick outside them; `--offline` covers the
       exact-clip snapping.
 - [ ] 1.10 Copy: README feature list, `website/content/` (the "long videos" page), docs/SELECTION.md (how picking is

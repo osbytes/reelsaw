@@ -7,6 +7,31 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
 
+#. placeholder {0}: ranges.length
+#: src/pages/NewProject.tsx
+msgid "{0, plural, one {Clip # range} other {Clip # ranges}}"
+msgstr "{0, plural, one {Clip # range} other {Clip # ranges}}"
+
+#: src/pages/NewProject.tsx
+msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+msgstr "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+
+#: src/components/RangeTimeline.tsx
+msgid "A range needs at least {min} seconds."
+msgstr "A range needs at least {min} seconds."
+
+#: src/pages/NewProject.tsx
+msgid "Add a range on the timeline first"
+msgstr "Add a range on the timeline first"
+
+#: src/pages/NewProject.tsx
+msgid "Add a range to see what it counts against your plan."
+msgstr "Add a range to see what it counts against your plan."
+
+#: src/components/RangeTimeline.tsx
+msgid "Add range"
+msgstr "Add range"
+
 #: src/pages/Login.tsx
 msgid "After you sign in, you pick up where you left off: the {plan} plan."
 msgstr "After you sign in, you pick up where you left off: the {plan} plan."
@@ -43,6 +68,11 @@ msgstr "Clear all"
 msgid "Clear search"
 msgstr "Clear search"
 
+#. placeholder {0}: formatTime(coverSec)
+#: src/components/RangeTimeline.tsx
+msgid "Clipped now: 0:00–{0}"
+msgstr "Clipped now: 0:00–{0}"
+
 #: src/pages/Login.tsx
 msgid "Could not continue the authorization"
 msgstr "Could not continue the authorization"
@@ -67,9 +97,25 @@ msgstr "Descending"
 msgid "Email"
 msgstr "Email"
 
+#: src/components/RangeTimeline.tsx
+msgid "End"
+msgstr "End"
+
+#: src/components/RangeTimeline.tsx
+msgid "End of range {n}"
+msgstr "End of range {n}"
+
+#: src/components/RangeTimeline.tsx
+msgid "End of the new range"
+msgstr "End of the new range"
+
 #: src/pages/Login.tsx
 msgid "Enter the email you signed up with."
 msgstr "Enter the email you signed up with."
+
+#: src/components/RangeTimeline.tsx
+msgid "Exact clip"
+msgstr "Exact clip"
 
 #: src/components/ListToolbar.tsx
 msgid "Filter"
@@ -78,6 +124,10 @@ msgstr "Filter"
 #: src/components/ListToolbar.tsx
 msgid "Filter, {on} on"
 msgstr "Filter, {on} on"
+
+#: src/components/RangeTimeline.tsx
+msgid "Find clips"
+msgstr "Find clips"
 
 #: src/pages/Login.tsx
 msgid "Forgot password?"
@@ -127,6 +177,10 @@ msgstr "Need an account? Sign up"
 msgid "New accounts wait for an admin to approve them before they can start projects."
 msgstr "New accounts wait for an admin to approve them before they can start projects."
 
+#: src/components/RangeTimeline.tsx
+msgid "No ranges yet. Click the timeline to add one, or type a start and end below."
+msgstr "No ranges yet. Click the timeline to add one, or type a start and end below."
+
 #: src/components/ListToolbar.tsx
 msgid "Order"
 msgstr "Order"
@@ -134,6 +188,38 @@ msgstr "Order"
 #: src/pages/Login.tsx
 msgid "Password"
 msgstr "Password"
+
+#: src/pages/NewProject.tsx
+msgid "Pricing the ranges…"
+msgstr "Pricing the ranges…"
+
+#: src/pages/NewProject.tsx
+msgid "Range {n} ends at the end of the video, {end}."
+msgstr "Range {n} ends at the end of the video, {end}."
+
+#: src/components/RangeTimeline.tsx
+msgid "Range {n} mode"
+msgstr "Range {n} mode"
+
+#: src/pages/NewProject.tsx
+msgid "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
+msgstr "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
+
+#: src/pages/NewProject.tsx
+msgid "Ranges"
+msgstr "Ranges"
+
+#: src/pages/NewProject.tsx
+msgid "Ranges {which} overlap: they are clipped as one, {from}–{to}."
+msgstr "Ranges {which} overlap: they are clipped as one, {from}–{to}."
+
+#: src/pages/NewProject.tsx
+msgid "Reading the file’s length…"
+msgstr "Reading the file’s length…"
+
+#: src/components/RangeTimeline.tsx
+msgid "Remove range {n}"
+msgstr "Remove range {n}"
 
 #: src/components/ListToolbar.tsx
 msgid "Remove this filter"
@@ -211,6 +297,38 @@ msgstr "Sort:"
 msgid "Sort: {shown}"
 msgstr "Sort: {shown}"
 
+#: src/components/RangeTimeline.tsx
+msgid "Start"
+msgstr "Start"
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of range {n}"
+msgstr "Start of range {n}"
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of the new range"
+msgstr "Start of the new range"
+
+#: src/pages/NewProject.tsx
+msgid "That time was clipped already."
+msgstr "That time was clipped already."
+
+#: src/components/RangeTimeline.tsx
+msgid "The end has to come after the start."
+msgstr "The end has to come after the start."
+
+#: src/components/RangeTimeline.tsx
+msgid "The video ends at {ends}."
+msgstr "The video ends at {ends}."
+
+#: src/components/RangeTimeline.tsx
+msgid "The whole video"
+msgstr "The whole video"
+
+#: src/pages/NewProject.tsx
+msgid "These ranges don’t fit your plan’s minutes; see the note under them"
+msgstr "These ranges don’t fit your plan’s minutes; see the note under them"
+
 #: src/pages/Login.tsx
 msgid "This link expired"
 msgstr "This link expired"
@@ -218,3 +336,19 @@ msgstr "This link expired"
 #: src/pages/Login.tsx
 msgid "This link expired · Reelsaw"
 msgstr "This link expired · Reelsaw"
+
+#: src/pages/NewProject.tsx
+msgid "This site does not say how long the video is, so there is no timeline. Clip the whole video, or try the link again."
+msgstr "This site does not say how long the video is, so there is no timeline. Clip the whole video, or try the link again."
+
+#: src/components/RangeTimeline.tsx
+msgid "Use h:mm:ss or m:ss, like 1:15:00."
+msgstr "Use h:mm:ss or m:ss, like 1:15:00."
+
+#: src/pages/NewProject.tsx
+msgid "What to clip"
+msgstr "What to clip"
+
+#: src/pages/NewProject.tsx
+msgid "Whole video"
+msgstr "Whole video"

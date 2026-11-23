@@ -7,6 +7,31 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en-XA\n"
 
+#. placeholder {0}: ranges.length
+#: src/pages/NewProject.tsx
+msgid "{0, plural, one {Clip # range} other {Clip # ranges}}"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "A range needs at least {min} seconds."
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Add a range on the timeline first"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Add a range to see what it counts against your plan."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Add range"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "After you sign in, you pick up where you left off: the {plan} plan."
 msgstr ""
@@ -43,6 +68,11 @@ msgstr ""
 msgid "Clear search"
 msgstr ""
 
+#. placeholder {0}: formatTime(coverSec)
+#: src/components/RangeTimeline.tsx
+msgid "Clipped now: 0:00–{0}"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Could not continue the authorization"
 msgstr ""
@@ -67,8 +97,24 @@ msgstr ""
 msgid "Email"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "End"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "End of range {n}"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "End of the new range"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "Enter the email you signed up with."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Exact clip"
 msgstr ""
 
 #: src/components/ListToolbar.tsx
@@ -77,6 +123,10 @@ msgstr ""
 
 #: src/components/ListToolbar.tsx
 msgid "Filter, {on} on"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Find clips"
 msgstr ""
 
 #: src/pages/Login.tsx
@@ -127,12 +177,48 @@ msgstr ""
 msgid "New accounts wait for an admin to approve them before they can start projects."
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "No ranges yet. Click the timeline to add one, or type a start and end below."
+msgstr ""
+
 #: src/components/ListToolbar.tsx
 msgid "Order"
 msgstr ""
 
 #: src/pages/Login.tsx
 msgid "Password"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Pricing the ranges…"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Range {n} ends at the end of the video, {end}."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Range {n} mode"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Ranges"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Ranges {which} overlap: they are clipped as one, {from}–{to}."
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Reading the file’s length…"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Remove range {n}"
 msgstr ""
 
 #: src/components/ListToolbar.tsx
@@ -211,10 +297,58 @@ msgstr ""
 msgid "Sort: {shown}"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "Start"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of range {n}"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of the new range"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "That time was clipped already."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "The end has to come after the start."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "The video ends at {ends}."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "The whole video"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "These ranges don’t fit your plan’s minutes; see the note under them"
+msgstr ""
+
 #: src/pages/Login.tsx
 msgid "This link expired"
 msgstr ""
 
 #: src/pages/Login.tsx
 msgid "This link expired · Reelsaw"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "This site does not say how long the video is, so there is no timeline. Clip the whole video, or try the link again."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Use h:mm:ss or m:ss, like 1:15:00."
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "What to clip"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Whole video"
 msgstr ""
