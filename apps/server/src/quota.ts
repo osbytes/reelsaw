@@ -866,6 +866,8 @@ async function minutesOver(
   ent?: Entitlements | null,
   what: "video" | "ranges" = "video",
 ): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; descriptor: MessageDescriptor; offer: string; firstVideo: boolean } | null> {
+  // every comparison below is false for NaN, which would let any video in: a length that is not a number is a bug
+  if (!Number.isFinite(durationSec) || durationSec < 0) throw new Error(`minutes check needs a length in seconds, got ${durationSec}`);
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const length = Math.round(durationSec / 60);
