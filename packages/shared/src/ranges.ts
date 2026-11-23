@@ -234,13 +234,21 @@ export function parseClock(text: string): number | null {
  * Null when it does not parse.
  */
 export function parseRangeArg(text: string): SourceRangeInput | null {
-  const m = /^\s*([\d:.]+)\s*-\s*([\d:.]+)\s*(?::\s*(find|clip))?\s*$/.exec(text);
-  const [, from, to, mode] = m ?? [];
-  if (from === undefined || to === undefined) return null;
+  // plain splitting, no backtracking pattern: the CLI hands this whatever was typed
+  const parts = text.trim().split("-");
+  if (parts.length !== 2) return null;
+  const [from = "", rest = ""] = parts;
+  let to = rest.trim();
+  let mode: RangeMode = "find";
+  for (const m of RANGE_MODES)
+    if (to.endsWith(`:${m}`)) {
+      mode = m;
+      to = to.slice(0, -(m.length + 1)).trim();
+    }
   const startSec = parseClock(from);
   const endSec = parseClock(to);
   if (startSec === null || endSec === null) return null;
-  return { startSec, endSec, mode: (mode as RangeMode | undefined) ?? "find" };
+  return { startSec, endSec, mode };
 }
 
 /** One sentence per problem, for an API refusal or the CLI (the web words its own). */
