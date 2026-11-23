@@ -6,33 +6,39 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as RadixSelect from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp, ChevronsUpDown, MoreHorizontal } from "lucide-react";
 import type { ProjectStatus, ClipStatus } from "@reelsaw/shared";
+import { t } from "@lingui/core/macro";
+import { Trans } from "@lingui/react/macro";
+// subscribes the component to locale changes; the core `t` reads the same i18n instance
+import { useLingui as useLinguiContext } from "@lingui/react";
 
 type Tone = "ok" | "acc" | "warn" | "err" | "idle";
 const TONE_BG: Record<Tone, string> = { ok: "bg-ok-soft", acc: "bg-acc-soft", warn: "bg-warn-soft", err: "bg-err-soft", idle: "bg-sunk" };
 const TONE_FG: Record<Tone, string> = { ok: "text-ok", acc: "text-acc-text", warn: "text-warn", err: "text-err", idle: "text-ink3" };
 
-const STATUS: Record<ProjectStatus | ClipStatus, [glyph: string, word: string, tone: Tone]> = {
-  queued: ["◷", "Queued", "warn"],
-  pending: ["○", "Waiting", "idle"],
-  ingesting: ["◔", "Preparing", "acc"],
-  transcribing: ["◔", "Transcribing", "acc"],
-  refining: ["◔", "Refining", "acc"],
-  analyzing: ["◔", "Finding moments", "acc"],
-  rendering: ["◔", "Rendering", "acc"],
-  preparing: ["…", "Preparing", "acc"],
-  done: ["●", "Ready", "ok"],
-  failed: ["▲", "Failed", "err"],
-};
+/** The glyph, word (in the active locale) and tone of a status; read at render time so a locale change shows. */
+const statusTable = (): Record<ProjectStatus | ClipStatus, [glyph: string, word: string, tone: Tone]> => ({
+  queued: ["◷", t`Queued`, "warn"],
+  pending: ["○", t`Waiting`, "idle"],
+  ingesting: ["◔", t`Preparing`, "acc"],
+  transcribing: ["◔", t`Transcribing`, "acc"],
+  refining: ["◔", t`Refining`, "acc"],
+  analyzing: ["◔", t`Finding moments`, "acc"],
+  rendering: ["◔", t`Rendering`, "acc"],
+  preparing: ["…", t`Preparing`, "acc"],
+  done: ["●", t`Ready`, "ok"],
+  failed: ["▲", t`Failed`, "err"],
+});
 
-export function statusMeta(status: ProjectStatus | ClipStatus) {
-  return STATUS[status] ?? (["○", status, "idle"] as const);
+export function statusMeta(s: ProjectStatus | ClipStatus) {
+  return statusTable()[s] ?? (["○", s, "idle"] as const);
 }
 
 /** Status indicator: a glyph and a word, never colour alone. */
 export function StatusBadge({ status, label, tone }: { status: ProjectStatus | ClipStatus; label?: string; tone?: Tone }) {
-  const [g, w, t] = statusMeta(status);
+  useLinguiContext();
+  const [g, w, own] = statusMeta(status);
   return (
-    <span className={`chip text-ink ${TONE_BG[tone ?? t]}`}>
+    <span className={`chip text-ink ${TONE_BG[tone ?? own]}`}>
       <span className="font-mono">{g}</span> {label ?? w}
     </span>
   );
@@ -40,9 +46,10 @@ export function StatusBadge({ status, label, tone }: { status: ProjectStatus | C
 
 /** Inline status: glyph + word in the tone colour, no background. */
 export function StatusText({ status, label, className = "" }: { status: ProjectStatus | ClipStatus; label?: string | undefined; className?: string }) {
-  const [g, w, t] = statusMeta(status);
+  useLinguiContext();
+  const [g, w, tone] = statusMeta(status);
   return (
-    <span className={`text-xs font-semibold whitespace-nowrap ${TONE_FG[t]} ${className}`}>
+    <span className={`text-xs font-semibold whitespace-nowrap ${TONE_FG[tone]} ${className}`}>
       <span className="font-mono">{g}</span> {label ?? w}
     </span>
   );
@@ -80,10 +87,11 @@ export function Skeleton({ className = "" }: { className?: string }) {
 }
 
 /** Wraps a skeleton region so assistive tech hears one "Loading…" instead of nothing. */
-export function SkeletonRegion({ children, label = "Loading…", className = "" }: { children: ReactNode; label?: string; className?: string }) {
+export function SkeletonRegion({ children, label, className = "" }: { children: ReactNode; label?: string; className?: string }) {
+  useLinguiContext();
   return (
     <div role="status" aria-busy="true" className={className}>
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{label ?? t`Loading…`}</span>
       {children}
     </div>
   );
@@ -204,6 +212,7 @@ export function ConfirmDialog({
   children?: ReactNode;
   width?: number;
 }) {
+  useLinguiContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -216,7 +225,7 @@ export function ConfirmDialog({
       await onConfirm();
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(e instanceof Error ? e.message : t`Something went wrong`);
     } finally {
       setBusy(false);
     }
@@ -234,7 +243,7 @@ export function ConfirmDialog({
       )}
       <div className="mt-1 flex justify-end gap-2">
         <button className="btn-ghost" disabled={busy} onClick={() => onOpenChange(false)}>
-          Cancel
+          <Trans>Cancel</Trans>
         </button>
         <button className={danger ? "btn-danger-solid" : "btn-ink"} disabled={busy} aria-busy={busy} onClick={() => void run()}>
           <Pending busy={busy}>{confirm}</Pending>
@@ -342,8 +351,8 @@ export function Combobox({
   value,
   onValueChange,
   options,
-  placeholder = "Choose…",
-  emptyText = "No matches",
+  placeholder: placeholderProp,
+  emptyText: emptyTextProp,
   className = "",
   ariaLabel,
   size = "md",
@@ -357,6 +366,9 @@ export function Combobox({
   ariaLabel: string;
   size?: "sm" | "md";
 }) {
+  useLinguiContext();
+  const placeholder = placeholderProp ?? t`Choose…`;
+  const emptyText = emptyTextProp ?? t`No matches`;
   const [open, setOpen] = useState(false);
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   const current = options.find((o) => o.value === value);
@@ -383,7 +395,7 @@ export function Combobox({
         >
           <Command loop>
             <Command.Input
-              placeholder="Type to filter…"
+              placeholder={t`Type to filter…`}
               className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
             />
             <ScrollArea className="max-h-[min(260px,calc(var(--radix-popover-content-available-height)-60px))]">
@@ -419,8 +431,15 @@ export const MoreButton = forwardRef<
   HTMLButtonElement,
   Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> & { "aria-label": string; size?: "sm" | "md" }
 >(function MoreButton({ className = "", size = "sm", ...props }, ref) {
+  useLinguiContext();
   return (
-    <button ref={ref} type="button" title="More actions" {...props} className={`btn-ghost shrink-0 px-0 ${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${className}`}>
+    <button
+      ref={ref}
+      type="button"
+      title={t`More actions`}
+      {...props}
+      className={`btn-ghost shrink-0 px-0 ${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${className}`}
+    >
       <MoreHorizontal className="h-4 w-4" />
     </button>
   );

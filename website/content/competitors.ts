@@ -1,11 +1,13 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { CHECKED } from "./reelsaw";
 import type { Competitor } from "./types";
 
-const notStated = "Not stated on the pricing page";
+const notStated = t(msg`Not stated on the pricing page`);
 
-const pickThemNoInstall = "You want posting, scheduling or a large caption-style library in the same product as clipping, not a zip to upload yourself.";
+const pickThemNoInstall = t(msg`You want posting, scheduling or a large caption-style library in the same product as clipping, not a zip to upload yourself.`);
 
-const pickReelsawMeter = "You clip long sources every week: self-host with no meter, or hosted Starter at $12/mo for 100 source minutes, watermark-free.";
+const pickReelsawMeter = t(msg`You clip long sources every week: self-host with no meter, or hosted Starter at $12/mo for 100 source minutes, watermark-free.`);
 
 export const COMPETITORS: Competitor[] = [
   {
@@ -14,96 +16,109 @@ export const COMPETITORS: Competitor[] = [
     site: "https://www.opus.pro",
     pricingUrl: "https://www.opus.pro/pricing",
     checked: CHECKED,
-    metaTitle: "Free, open-source Opus Clip alternative you self-host",
-    metaDescription:
-      "Reelsaw vs Opus Clip: a self-hosted, open-source AI clipper with no watermark and no credits, compared with Opus Clip's Free, $15 and $29 plans.",
-    h1: "The open-source Opus Clip alternative you run yourself",
+    metaTitle: t(msg`Free, open-source Opus Clip alternative you self-host`),
+    metaDescription: t(
+      msg`Reelsaw vs Opus Clip: a self-hosted, open-source AI clipper with no watermark and no credits, compared with Opus Clip's Free, $15 and $29 plans.`,
+    ),
+    h1: t(msg`The open-source Opus Clip alternative you run yourself`),
     intro: [
-      "Opus Clip is the best-known AI clipping service: paste a link, get vertical clips with captions and B-roll, and pay by plan. Reelsaw does the clipping part of that job as software you install, so the questions are what you give up, what you gain, and what each actually costs.",
-      "This page keeps to what both products document. Opus Clip's prices come from its public pricing page on the date below; Reelsaw's claims come from its README and source.",
+      t(
+        msg`Opus Clip is the best-known AI clipping service: paste a link, get vertical clips with captions and B-roll, and pay by plan. Reelsaw does the clipping part of that job as software you install, so the questions are what you give up, what you gain, and what each actually costs.`,
+      ),
+      t(
+        msg`This page keeps to what both products document. Opus Clip's prices come from its public pricing page on the date below; Reelsaw's claims come from its README and source.`,
+      ),
     ],
     pricing: {
-      summary: "Four plans. The free plan watermarks captions and expires exports after three days; watermark-free export starts at $15 a month.",
+      summary: t(msg`Four plans. The free plan watermarks captions and expires exports after three days; watermark-free export starts at $15 a month.`),
       plans: [
         {
-          name: "Free",
+          name: t(msg`Free`),
           price: "$0",
-          includes: "Captions with watermark, MP4 export for 3 days at up to 1080p, media expires after 3 days, 1 brand template, no B-roll, no API",
+          includes: t(msg`Captions with watermark, MP4 export for 3 days at up to 1080p, media expires after 3 days, 1 brand template, no B-roll, no API`),
         },
         {
-          name: "Starter",
-          price: "$15/mo",
-          includes: "Watermark-free export, 30-day export window, 3 AI-image and 3 stock B-roll clips a month, 1 brand template",
+          name: t(msg`Starter`),
+          price: t(msg`$15/mo`),
+          includes: t(msg`Watermark-free export, 30-day export window, 3 AI-image and 3 stock B-roll clips a month, 1 brand template`),
         },
         {
-          name: "Pro",
-          price: "$29/mo",
-          includes:
-            "No export limit, 50 AI-image B-roll clips a day and unlimited stock, AI video B-roll, Video Editing API, Scheduler API, MCP connector, Zapier (up to 300 credits/mo), 2 to 4 users, up to 4 brand templates, 100 GB storage",
+          name: t(msg`Pro`),
+          price: t(msg`$29/mo`),
+          includes: t(
+            msg`No export limit, 50 AI-image B-roll clips a day and unlimited stock, AI video B-roll, Video Editing API, Scheduler API, MCP connector, Zapier (up to 300 credits/mo), 2 to 4 users, up to 4 brand templates, 100 GB storage`,
+          ),
         },
-        { name: "Business", price: "Custom", includes: "Everything in Pro, CMS integration, unlimited seats and storage" },
+        { name: t(msg`Business`), price: t(msg`Custom`), includes: t(msg`Everything in Pro, CMS integration, unlimited seats and storage`) },
       ],
-      note: "Yearly prices and per-plan minute allowances were not shown as plain numbers on the page when checked; usage is metered in plan credits.",
+      note: t(msg`Yearly prices and per-plan minute allowances were not shown as plain numbers on the page when checked; usage is metered in plan credits.`),
     },
     them: {
-      entry: "$15/mo (Starter) for watermark-free export; $0 with a watermark",
-      free: "Yes: watermarked captions, 3-day export window, 3-day media storage",
-      watermark: "On the free plan; removed from Starter up",
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "Opus Clip's own models; not configurable",
-      moments: "Yes",
-      reframe: "Yes",
-      captions: "Yes, large caption-style library",
+      entry: t(msg`$15/mo (Starter) for watermark-free export; $0 with a watermark`),
+      free: t(msg`Yes: watermarked captions, 3-day export window, 3-day media storage`),
+      watermark: t(msg`On the free plan; removed from Starter up`),
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`Opus Clip's own models; not configurable`),
+      moments: t(msg`Yes`),
+      reframe: t(msg`Yes`),
+      captions: t(msg`Yes, large caption-style library`),
       fillers: notStated,
-      dubbing: "Not listed on the pricing page when checked",
-      publishing: "Yes: Scheduler API on Pro and up",
-      agents: "Video Editing API, MCP connector and Zapier on Pro and up",
-      cap: "Metered in plan credits; media and exports expire on Free and Starter",
-      accounts: "2 to 4 users on Pro, unlimited on Business",
+      dubbing: t(msg`Not listed on the pricing page when checked`),
+      publishing: t(msg`Yes: Scheduler API on Pro and up`),
+      agents: t(msg`Video Editing API, MCP connector and Zapier on Pro and up`),
+      cap: t(msg`Metered in plan credits; media and exports expire on Free and Starter`),
+      accounts: t(msg`2 to 4 users on Pro, unlimited on Business`),
     },
     betterAt: [
-      "Zero setup: nothing to install, nothing to keep running.",
-      "B-roll: AI-image, stock and AI-video B-roll are built into the paid plans. Reelsaw can overlay library or stock B-roll you pick; it does not auto-insert matched B-roll or generate AI video.",
-      "Caption styling breadth and brand templates.",
-      "Scheduling and publishing from the same place.",
+      t(msg`Zero setup: nothing to install, nothing to keep running.`),
+      t(
+        msg`B-roll: AI-image, stock and AI-video B-roll are built into the paid plans. Reelsaw can overlay library or stock B-roll you pick; it does not auto-insert matched B-roll or generate AI video.`,
+      ),
+      t(msg`Caption styling breadth and brand templates.`),
+      t(msg`Scheduling and publishing from the same place.`),
     ],
     pickThem: [
       pickThemNoInstall,
-      "You rely on auto B-roll, a large caption-style library or scheduled publishing.",
-      "Your sources are short, so a per-plan credit allowance stays cheap.",
+      t(msg`You rely on auto B-roll, a large caption-style library or scheduled publishing.`),
+      t(msg`Your sources are short, so a per-plan credit allowance stays cheap.`),
     ],
     pickReelsaw: [
       pickReelsawMeter,
-      "The source video must stay on your hardware (clients, pre-release content, internal recordings).",
-      "You want to read, change or automate the pipeline: MCP, CLI, your own models, your own judge model.",
-      "You run a team and want accounts, approval and quotas without a per-seat price.",
+      t(msg`The source video must stay on your hardware (clients, pre-release content, internal recordings).`),
+      t(msg`You want to read, change or automate the pipeline: MCP, CLI, your own models, your own judge model.`),
+      t(msg`You run a team and want accounts, approval and quotas without a per-seat price.`),
     ],
     faqs: [
       {
-        q: "Is there a free alternative to Opus Clip?",
-        a: "Reelsaw is free software under the AGPL-3.0. Install it on your own machine with one command and there is no plan, no credit meter and no watermark. Your only costs are the hardware and, if you pick cloud models, their per-call price. A hosted Free plan at app.reelsaw.com runs the same code (first video up to 60 minutes, then 20 minutes a month, with a watermark); Starter is $12/mo for 100 source minutes, watermark-free, against Opus Clip Starter at $15/mo.",
+        q: t(msg`Is there a free alternative to Opus Clip?`),
+        a: t(
+          msg`Reelsaw is free software under the AGPL-3.0. Install it on your own machine with one command and there is no plan, no credit meter and no watermark. Your only costs are the hardware and, if you pick cloud models, their per-call price. A hosted Free plan at app.reelsaw.com runs the same code (first video up to 60 minutes, then 20 minutes a month, with a watermark); Starter is $12/mo for 100 source minutes, watermark-free, against Opus Clip Starter at $15/mo.`,
+        ),
       },
       {
-        q: "Is there an open-source alternative to Opus Clip?",
-        a: "Yes. Reelsaw's source is on GitHub under the AGPL-3.0, written in TypeScript. OpenShorts is another open-source option, MIT-licensed and Python-based, with a hosted tier.",
+        q: t(msg`Is there an open-source alternative to Opus Clip?`),
+        a: t(
+          msg`Yes. Reelsaw's source is on GitHub under the AGPL-3.0, written in TypeScript. OpenShorts is another open-source option, MIT-licensed and Python-based, with a hosted tier.`,
+        ),
       },
       {
-        q: "Does Opus Clip's free plan add a watermark?",
-        a:
-          "Its pricing page lists captions 'with watermark' on the Free plan and watermark-free export from the Starter plan ($15/mo) upward, as of " +
-          CHECKED +
-          ".",
+        q: t(msg`Does Opus Clip's free plan add a watermark?`),
+        a: t(
+          msg`Its pricing page lists captions 'with watermark' on the Free plan and watermark-free export from the Starter plan ($15/mo) upward, as of ${{ checked: CHECKED }}.`,
+        ),
       },
       {
-        q: "Can I automate Opus Clip or Reelsaw from an agent?",
-        a: "Both. Opus Clip offers a Video Editing API, an MCP connector and Zapier on its Pro plan. Reelsaw ships an MCP server, signed webhooks (which Zapier, Make and n8n can subscribe to) and an operator CLI on every install, with no plan gate, including the hosted Free plan.",
+        q: t(msg`Can I automate Opus Clip or Reelsaw from an agent?`),
+        a: t(
+          msg`Both. Opus Clip offers a Video Editing API, an MCP connector and Zapier on its Pro plan. Reelsaw ships an MCP server, signed webhooks (which Zapier, Make and n8n can subscribe to) and an operator CLI on every install, with no plan gate, including the hosted Free plan.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://www.opus.pro/pricing", label: "Opus Clip pricing, checked " + CHECKED + " on the vendor's public pricing page" },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://www.opus.pro/pricing", label: t(msg`Opus Clip pricing, checked ${{ checked: CHECKED }} on the vendor's public pricing page`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -112,78 +127,85 @@ export const COMPETITORS: Competitor[] = [
     site: "https://klap.app",
     pricingUrl: "https://klap.app/pricing",
     checked: CHECKED,
-    metaTitle: "Open-source Klap alternative with no clip quota",
-    metaDescription:
-      "Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14/mo; Reelsaw is open source you self-host, with no quota and no watermark.",
-    h1: "Klap alternative: unlimited clips on your own machine",
+    metaTitle: t(msg`Open-source Klap alternative with no clip quota`),
+    metaDescription: t(
+      msg`Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14/mo; Reelsaw is open source you self-host, with no quota and no watermark.`,
+    ),
+    h1: t(msg`Klap alternative: unlimited clips on your own machine`),
     intro: [
-      "Klap prices by clips per month and bundles publishing to TikTok, Instagram and LinkedIn. Reelsaw is open-source software that turns long videos into vertical clips on hardware you control, and leaves publishing to you; a hosted plan meters source minutes, never clips.",
-      "Below is what Klap's pricing page showed when checked, what Reelsaw does for the same job, and when each is the better pick.",
+      t(
+        msg`Klap prices by clips per month and bundles publishing to TikTok, Instagram and LinkedIn. Reelsaw is open-source software that turns long videos into vertical clips on hardware you control, and leaves publishing to you; a hosted plan meters source minutes, never clips.`,
+      ),
+      t(msg`Below is what Klap's pricing page showed when checked, what Reelsaw does for the same job, and when each is the better pick.`),
     ],
     pricing: {
-      summary: "Three plans measured in clips per month, shown with yearly billing (the toggle says yearly saves 50%).",
+      summary: t(msg`Three plans measured in clips per month, shown with yearly billing (the toggle says yearly saves 50%).`),
       plans: [
         {
-          name: "Basic",
-          price: "$14/mo billed yearly",
-          includes: "100 clips a month, AI clipping, unlimited TikTok, Instagram and LinkedIn accounts, analytics",
+          name: t(msg`Basic`),
+          price: t(msg`$14/mo billed yearly`),
+          includes: t(msg`100 clips a month, AI clipping, unlimited TikTok, Instagram and LinkedIn accounts, analytics`),
         },
-        { name: "Pro", price: "$39/mo billed yearly", includes: "300 clips a month, same features" },
-        { name: "Pro+", price: "$94/mo billed yearly", includes: "1,000 clips a month, same features" },
+        { name: t(msg`Pro`), price: t(msg`$39/mo billed yearly`), includes: t(msg`300 clips a month, same features`) },
+        { name: t(msg`Pro+`), price: t(msg`$94/mo billed yearly`), includes: t(msg`1,000 clips a month, same features`) },
       ],
-      note: "Monthly prices, a free plan, watermark policy and export resolution were not shown as plain text on the page when checked.",
+      note: t(msg`Monthly prices, a free plan, watermark policy and export resolution were not shown as plain text on the page when checked.`),
     },
     them: {
-      entry: "$14/mo billed yearly (Basic, 100 clips/mo)",
-      free: "No free plan listed",
+      entry: t(msg`$14/mo billed yearly (Basic, 100 clips/mo)`),
+      free: t(msg`No free plan listed`),
       watermark: notStated,
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "Klap's own models; not configurable",
-      moments: "Yes",
-      reframe: "Yes",
-      captions: "Yes",
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`Klap's own models; not configurable`),
+      moments: t(msg`Yes`),
+      reframe: t(msg`Yes`),
+      captions: t(msg`Yes`),
       fillers: notStated,
       dubbing: notStated,
-      publishing: "Yes: unlimited TikTok, Instagram and LinkedIn accounts, with analytics",
+      publishing: t(msg`Yes: unlimited TikTok, Instagram and LinkedIn accounts, with analytics`),
       agents: notStated,
-      cap: "100, 300 or 1,000 clips a month by plan",
-      accounts: "Pro+ is positioned for teams",
+      cap: t(msg`100, 300 or 1,000 clips a month by plan`),
+      accounts: t(msg`Pro+ is positioned for teams`),
     },
     betterAt: [
-      "Publishing and analytics are part of the product; Reelsaw stops at an export zip.",
-      "Predictable monthly clip budget if your output is steady.",
+      t(msg`Publishing and analytics are part of the product; Reelsaw stops at an export zip.`),
+      t(msg`Predictable monthly clip budget if your output is steady.`),
     ],
     pickThem: [
-      "You post straight from the tool and want the analytics in the same place.",
+      t(msg`You post straight from the tool and want the analytics in the same place.`),
       pickThemNoInstall,
-      "Your volume fits a 100-clip tier and yearly billing is fine.",
+      t(msg`Your volume fits a 100-clip tier and yearly billing is fine.`),
     ],
     pickReelsaw: [
       pickReelsawMeter,
-      "You want more than a fixed number of clips a month, or you batch-process back catalogues.",
-      "You need the source video to stay private.",
-      "You want an MCP server and CLI so an agent or script can drive the whole pipeline.",
-      "You want to pick the language and transcription models yourself, including fully local ones.",
+      t(msg`You want more than a fixed number of clips a month, or you batch-process back catalogues.`),
+      t(msg`You need the source video to stay private.`),
+      t(msg`You want an MCP server and CLI so an agent or script can drive the whole pipeline.`),
+      t(msg`You want to pick the language and transcription models yourself, including fully local ones.`),
     ],
     faqs: [
       {
-        q: "Does Klap have a free plan?",
-        a: "Its pricing page listed no free plan or trial length when checked on " + CHECKED + ", only Basic, Pro and Pro+ with yearly prices.",
+        q: t(msg`Does Klap have a free plan?`),
+        a: t(msg`Its pricing page listed no free plan or trial length when checked on ${{ checked: CHECKED }}, only Basic, Pro and Pro+ with yearly prices.`),
       },
       {
-        q: "Is Reelsaw really unlimited?",
-        a: "Self-hosted: yes. There is no quota in the software. Throughput is set by your hardware and, with cloud models, by their rate limits. Admins can set per-user quotas on a shared install if they want to. Hosted plans meter minutes of source video per month, never a clip count.",
+        q: t(msg`Is Reelsaw really unlimited?`),
+        a: t(
+          msg`Self-hosted: yes. There is no quota in the software. Throughput is set by your hardware and, with cloud models, by their rate limits. Admins can set per-user quotas on a shared install if they want to. Hosted plans meter minutes of source video per month, never a clip count.`,
+        ),
       },
       {
-        q: "Can Reelsaw post to TikTok or Instagram for me?",
-        a: "No. Export all gives you every clip with a paste-ready caption, a YouTube Data API body and a TikTok Content Posting API body, so a script or agent can publish; Reelsaw itself does not hold social accounts.",
+        q: t(msg`Can Reelsaw post to TikTok or Instagram for me?`),
+        a: t(
+          msg`No. Export all gives you every clip with a paste-ready caption, a YouTube Data API body and a TikTok Content Posting API body, so a script or agent can publish; Reelsaw itself does not hold social accounts.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://klap.app/pricing", label: "Klap pricing, checked " + CHECKED },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://klap.app/pricing", label: t(msg`Klap pricing, checked ${{ checked: CHECKED }}`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -192,90 +214,100 @@ export const COMPETITORS: Competitor[] = [
     site: "https://vizard.ai",
     pricingUrl: "https://vizard.ai/pricing",
     checked: CHECKED,
-    metaTitle: "Open-source Vizard AI alternative, no credits, no watermark",
-    metaDescription:
-      "Reelsaw vs Vizard AI: Vizard's free plan is 60 minutes a month at 720p, Creator $29/mo. Reelsaw is self-hosted open source, no credits, no watermark.",
-    h1: "Vizard AI alternative without the credit meter",
+    metaTitle: t(msg`Open-source Vizard AI alternative, no credits, no watermark`),
+    metaDescription: t(
+      msg`Reelsaw vs Vizard AI: Vizard's free plan is 60 minutes a month at 720p, Creator $29/mo. Reelsaw is self-hosted open source, no credits, no watermark.`,
+    ),
+    h1: t(msg`Vizard AI alternative without the credit meter`),
     intro: [
-      "Vizard is a hosted AI clipper with a free tier, scheduled posting and 4K export on paid plans. Reelsaw is the self-hosted route: the same transcribe, pick, reframe, caption pipeline, but as software you own and run.",
-      "Prices and limits below come from Vizard's public pricing page on the date shown. Where the page did not show a stable number, this page says so instead of guessing.",
+      t(
+        msg`Vizard is a hosted AI clipper with a free tier, scheduled posting and 4K export on paid plans. Reelsaw is the self-hosted route: the same transcribe, pick, reframe, caption pipeline, but as software you own and run.`,
+      ),
+      t(
+        msg`Prices and limits below come from Vizard's public pricing page on the date shown. Where the page did not show a stable number, this page says so instead of guessing.`,
+      ),
     ],
     pricing: {
-      summary: "A free plan metered in credits (one credit per upload minute) and two paid tiers that remove the watermark and raise export quality to 4K.",
+      summary: t(
+        msg`A free plan metered in credits (one credit per upload minute) and two paid tiers that remove the watermark and raise export quality to 4K.`,
+      ),
       plans: [
-        { name: "Free", price: "$0", includes: "60 upload minutes a month, 720p export, 3-day video storage, 1 social account" },
+        { name: t(msg`Free`), price: "$0", includes: t(msg`60 upload minutes a month, 720p export, 3-day video storage, 1 social account`) },
         {
-          name: "Creator",
-          price: "$29/mo, or $14.50/mo billed yearly ($174/yr)",
-          includes:
-            "From 600 upload minutes a month, 30 GB uploads, 4K export, any export length, 100 GB storage, 6 social accounts, scheduled posts, no watermark",
+          name: t(msg`Creator`),
+          price: t(msg`$29/mo, or $14.50/mo billed yearly ($174/yr)`),
+          includes: t(
+            msg`From 600 upload minutes a month, 30 GB uploads, 4K export, any export length, 100 GB storage, 6 social accounts, scheduled posts, no watermark`,
+          ),
         },
         {
-          name: "Business",
-          price: "$39/mo, or $19.50/mo billed yearly ($234/yr)",
-          includes: "Everything in Creator, shared workspace, 20 social accounts, team seats at $5/mo, brand kit, unlimited storage",
+          name: t(msg`Business`),
+          price: t(msg`$39/mo, or $19.50/mo billed yearly ($234/yr)`),
+          includes: t(msg`Everything in Creator, shared workspace, 20 social accounts, team seats at $5/mo, brand kit, unlimited storage`),
         },
       ],
-      note: "Paid minutes start at 600 a month; the page also offered larger credit bundles. Figures above are the listed Creator and Business prices when checked.",
+      note: t(
+        msg`Paid minutes start at 600 a month; the page also offered larger credit bundles. Figures above are the listed Creator and Business prices when checked.`,
+      ),
     },
     them: {
-      entry: "$29/mo, or $14.50/mo billed yearly (Creator)",
-      free: "Yes: 60 upload minutes a month, 720p export, 3-day storage",
-      watermark: "Removed on Creator and up ('No watermark' is listed as a Creator feature)",
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "Vizard's own models; not configurable",
-      moments: "Yes",
-      reframe: "Yes",
-      captions: "Yes",
+      entry: t(msg`$29/mo, or $14.50/mo billed yearly (Creator)`),
+      free: t(msg`Yes: 60 upload minutes a month, 720p export, 3-day storage`),
+      watermark: t(msg`Removed on Creator and up ('No watermark' is listed as a Creator feature)`),
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`Vizard's own models; not configurable`),
+      moments: t(msg`Yes`),
+      reframe: t(msg`Yes`),
+      captions: t(msg`Yes`),
       fillers: notStated,
       dubbing: notStated,
-      publishing: "Yes: 1 account on Free, 6 on Creator, 20 on Business, with scheduling",
-      agents: "API with rate limits by plan (1/min on Free, 10/min on Business)",
-      cap: "Credits: 60 a month free, from 600 a month paid",
-      accounts: "Business: shared workspace, invited team members, brand kit",
+      publishing: t(msg`Yes: 1 account on Free, 6 on Creator, 20 on Business, with scheduling`),
+      agents: t(msg`API with rate limits by plan (1/min on Free, 10/min on Business)`),
+      cap: t(msg`Credits: 60 a month free, from 600 a month paid`),
+      accounts: t(msg`Business: shared workspace, invited team members, brand kit`),
     },
     betterAt: [
-      "Free plan that works today for 60 minutes a month with nothing to install.",
-      "4K export and scheduled posting to several social accounts on paid plans.",
-      "Shared workspace and brand kit for a team that posts a lot.",
+      t(msg`Free plan that works today for 60 minutes a month with nothing to install.`),
+      t(msg`4K export and scheduled posting to several social accounts on paid plans.`),
+      t(msg`Shared workspace and brand kit for a team that posts a lot.`),
     ],
     pickThem: [
-      "You upload under an hour a month and the free tier covers you.",
-      "You schedule to several social accounts from the clipping tool.",
+      t(msg`You upload under an hour a month and the free tier covers you.`),
+      t(msg`You schedule to several social accounts from the clipping tool.`),
       pickThemNoInstall,
     ],
     pickReelsaw: [
       pickReelsawMeter,
-      "Your sources run past the 60-minute monthly free budget.",
-      "You want clips to exist longer than 3 days without paying for storage.",
-      "You need the video to stay on your hardware.",
-      "You want full control over which models run, including local ones, and an MCP server to drive them.",
+      t(msg`Your sources run past the 60-minute monthly free budget.`),
+      t(msg`You want clips to exist longer than 3 days without paying for storage.`),
+      t(msg`You need the video to stay on your hardware.`),
+      t(msg`You want full control over which models run, including local ones, and an MCP server to drive them.`),
     ],
     faqs: [
       {
-        q: "Does Vizard's free plan have a watermark?",
-        a:
-          "The pricing page lists 'No watermark' as a feature added by the Creator plan, which implies the free plan carries one. It also caps free exports at 720p, with 3-day storage, as of " +
-          CHECKED +
-          ".",
+        q: t(msg`Does Vizard's free plan have a watermark?`),
+        a: t(
+          msg`The pricing page lists 'No watermark' as a feature added by the Creator plan, which implies the free plan carries one. It also caps free exports at 720p, with 3-day storage, as of ${{ checked: CHECKED }}.`,
+        ),
       },
       {
-        q: "How much does Vizard cost per month?",
-        a:
-          "When checked on " +
-          CHECKED +
-          ", Creator was $29 a month or $14.50 a month billed yearly ($174/yr), and Business was $39 a month or $19.50 a month billed yearly ($234/yr). Paid minutes start at 600 a month. Verify on vizard.ai before buying.",
+        q: t(msg`How much does Vizard cost per month?`),
+        a: t(
+          msg`When checked on ${{ checked: CHECKED }}, Creator was $29 a month or $14.50 a month billed yearly ($174/yr), and Business was $39 a month or $19.50 a month billed yearly ($234/yr). Paid minutes start at 600 a month. Verify on vizard.ai before buying.`,
+        ),
       },
       {
-        q: "Is Reelsaw harder to set up than Vizard?",
-        a: "Self-hosted Reelsaw needs Docker and about 10 GB of disk; the installer writes a compose file, pulls the image and a language model sized to your RAM, and opens the app. Hosted Reelsaw needs an account, like Vizard.",
+        q: t(msg`Is Reelsaw harder to set up than Vizard?`),
+        a: t(
+          msg`Self-hosted Reelsaw needs Docker and about 10 GB of disk; the installer writes a compose file, pulls the image and a language model sized to your RAM, and opens the app. Hosted Reelsaw needs an account, like Vizard.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://vizard.ai/pricing", label: "Vizard pricing, checked " + CHECKED },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://vizard.ai/pricing", label: t(msg`Vizard pricing, checked ${{ checked: CHECKED }}`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -284,100 +316,111 @@ export const COMPETITORS: Competitor[] = [
     site: "https://www.submagic.co",
     pricingUrl: "https://www.submagic.co/pricing",
     checked: CHECKED,
-    metaTitle: "Open-source Submagic alternative for long-form clipping",
-    metaDescription:
-      "Reelsaw vs Submagic: a captions-first editor priced per video (from $19/mo) against self-hosted open source that clips hour-long sources with no quota.",
-    h1: "Submagic alternative that starts from the long video",
+    metaTitle: t(msg`Open-source Submagic alternative for long-form clipping`),
+    metaDescription: t(
+      msg`Reelsaw vs Submagic: a captions-first editor priced per video (from $19/mo) against self-hosted open source that clips hour-long sources with no quota.`,
+    ),
+    h1: t(msg`Submagic alternative that starts from the long video`),
     intro: [
-      "Submagic is a captioning and polishing tool: you bring a short video and it adds captions, zooms, B-roll and sound. Clipping long sources into shorts (its Magic Clips) is a $19/mo add-on for 10 uploads, not a headline feature of Starter, Pro or Business.",
-      "Reelsaw starts one step earlier, at the two-hour recording, and ends with captioned vertical clips. If your problem is choosing moments from long videos, that difference matters more than any price.",
+      t(
+        msg`Submagic is a captioning and polishing tool: you bring a short video and it adds captions, zooms, B-roll and sound. Clipping long sources into shorts (its Magic Clips) is a $19/mo add-on for 10 uploads, not a headline feature of Starter, Pro or Business.`,
+      ),
+      t(
+        msg`Reelsaw starts one step earlier, at the two-hour recording, and ends with captioned vertical clips. If your problem is choosing moments from long videos, that difference matters more than any price.`,
+      ),
     ],
     pricing: {
-      summary: "Three plans priced by videos per month with a cap on each video's length; no free plan was listed.",
+      summary: t(msg`Three plans priced by videos per month with a cap on each video's length; no free plan was listed.`),
       plans: [
         {
-          name: "Starter",
-          price: "$19/mo, or $12/mo billed yearly",
-          includes: "15 videos a month up to 2 minutes each, AI captions, free B-roll and audio, text-based trimming, 1080p 30 fps, no watermark",
+          name: t(msg`Starter`),
+          price: t(msg`$19/mo, or $12/mo billed yearly`),
+          includes: t(msg`15 videos a month up to 2 minutes each, AI captions, free B-roll and audio, text-based trimming, 1080p 30 fps, no watermark`),
         },
         {
-          name: "Pro",
-          price: "$39/mo, or $23/mo yearly",
-          includes:
-            "40 videos a month up to 5 minutes, Storyblocks B-roll, AI auto zooms, bad-take and silence removal, AI clean audio, publishing and analytics, brand kit",
+          name: t(msg`Pro`),
+          price: t(msg`$39/mo, or $23/mo yearly`),
+          includes: t(
+            msg`40 videos a month up to 5 minutes, Storyblocks B-roll, AI auto zooms, bad-take and silence removal, AI clean audio, publishing and analytics, brand kit`,
+          ),
         },
         {
-          name: "Business",
-          price: "$69/mo, or $41/mo yearly",
-          includes: "100 videos a month up to 30 minutes, 4K 60 fps, 10 templates, custom vocabulary, priority rendering, multi-account publishing",
+          name: t(msg`Business`),
+          price: t(msg`$69/mo, or $41/mo yearly`),
+          includes: t(msg`100 videos a month up to 30 minutes, 4K 60 fps, 10 templates, custom vocabulary, priority rendering, multi-account publishing`),
         },
-        { name: "Custom", price: "Contact sales", includes: "Usage-based, custom Magic Clips limits, custom API limits, SSO" },
+        { name: t(msg`Custom`), price: t(msg`Contact sales`), includes: t(msg`Usage-based, custom Magic Clips limits, custom API limits, SSO`) },
         {
-          name: "Magic Clips add-on",
-          price: "$19/mo, or $12/mo billed yearly",
-          includes: "10 long-video uploads a month on top of a plan (help centre, checked " + CHECKED + ")",
+          name: t(msg`Magic Clips add-on`),
+          price: t(msg`$19/mo, or $12/mo billed yearly`),
+          includes: t(msg`10 long-video uploads a month on top of a plan (help centre, checked ${{ checked: CHECKED }})`),
         },
       ],
-      note: "The pricing cards still list Magic Clips as a Custom-plan limit; Submagic's help centre sells it as a $19/mo add-on for 10 uploads. The page showed a few conflicting figures (Business videos as 100 and as unlimited; Pro export as 1080p and as 2K). Card numbers above follow the pricing cards.",
+      note: t(
+        msg`The pricing cards still list Magic Clips as a Custom-plan limit; Submagic's help centre sells it as a $19/mo add-on for 10 uploads. The page showed a few conflicting figures (Business videos as 100 and as unlimited; Pro export as 1080p and as 2K). Card numbers above follow the pricing cards.`,
+      ),
     },
     them: {
-      entry: "$19/mo, or $12/mo billed yearly (Starter)",
-      free: "No free plan listed; 'no credit card required' to sign up",
-      watermark: "No watermark on all listed plans",
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "Submagic's own models; not configurable",
-      moments: "Magic Clips: $19/mo add-on for 10 long-video uploads; Custom plans can set different limits",
+      entry: t(msg`$19/mo, or $12/mo billed yearly (Starter)`),
+      free: t(msg`No free plan listed; 'no credit card required' to sign up`),
+      watermark: t(msg`No watermark on all listed plans`),
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`Submagic's own models; not configurable`),
+      moments: t(msg`Magic Clips: $19/mo add-on for 10 long-video uploads; Custom plans can set different limits`),
       reframe: notStated,
-      captions: "Yes, the core product, with animated styles",
-      fillers: "Bad takes and silences removed on Pro and up",
+      captions: t(msg`Yes, the core product, with animated styles`),
+      fillers: t(msg`Bad takes and silences removed on Pro and up`),
       dubbing: notStated,
-      publishing: "Yes on Pro and up; multi-account on Business",
-      agents: "API credit packs from 250 minutes for $57/mo",
-      cap: "15, 40 or 100 videos a month; 2, 5 or 30 minutes per video",
-      accounts: "Multi-account publishing on Business",
+      publishing: t(msg`Yes on Pro and up; multi-account on Business`),
+      agents: t(msg`API credit packs from 250 minutes for $57/mo`),
+      cap: t(msg`15, 40 or 100 videos a month; 2, 5 or 30 minutes per video`),
+      accounts: t(msg`Multi-account publishing on Business`),
     },
     betterAt: [
-      "Caption design: animated styles, emojis, zooms and auto sound effects on a short you already cut.",
-      "B-roll and clean-audio passes on the same video.",
-      "Polish on a single short in a few clicks.",
+      t(msg`Caption design: animated styles, emojis, zooms and auto sound effects on a short you already cut.`),
+      t(msg`B-roll and clean-audio passes on the same video.`),
+      t(msg`Polish on a single short in a few clicks.`),
     ],
     pickThem: [
-      "You already have the short and want it to look like it was edited by hand.",
-      "You post from the tool and want analytics there too.",
-      "Your videos are under the plan's per-video length cap.",
+      t(msg`You already have the short and want it to look like it was edited by hand.`),
+      t(msg`You post from the tool and want analytics there too.`),
+      t(msg`Your videos are under the plan's per-video length cap.`),
     ],
     pickReelsaw: [
-      "Your input is the full episode, not a finished short.",
-      "A 30-minute per-video ceiling, even on the top plan, is too low.",
-      "You want zero per-video cost on your own machine, or hosted minutes of source instead of a per-video cap.",
-      "You want an agent to run the whole thing through MCP.",
+      t(msg`Your input is the full episode, not a finished short.`),
+      t(msg`A 30-minute per-video ceiling, even on the top plan, is too low.`),
+      t(msg`You want zero per-video cost on your own machine, or hosted minutes of source instead of a per-video cap.`),
+      t(msg`You want an agent to run the whole thing through MCP.`),
     ],
     faqs: [
       {
-        q: "Does Submagic clip long videos into shorts?",
-        a:
-          "Yes, as Magic Clips: a $19/mo add-on for 10 long-video uploads, documented in Submagic's help centre. The public pricing cards still list Magic Clips only as a Custom-plan limit. Starter, Pro and Business themselves are described by videos per month and a maximum video length of 2, 5 or 30 minutes, as of " +
-          CHECKED +
-          ".",
+        q: t(msg`Does Submagic clip long videos into shorts?`),
+        a: t(
+          msg`Yes, as Magic Clips: a $19/mo add-on for 10 long-video uploads, documented in Submagic's help centre. The public pricing cards still list Magic Clips only as a Custom-plan limit. Starter, Pro and Business themselves are described by videos per month and a maximum video length of 2, 5 or 30 minutes, as of ${{ checked: CHECKED }}.`,
+        ),
       },
       {
-        q: "Can Reelsaw do Submagic-style captions?",
-        a: "Reelsaw burns in word-level karaoke captions with AI-picked key words enlarged and coloured, boxed or outlined styles, size and uppercase options, and drag-to-place positions with platform safe zones. Punch-in zooms on the key words are a style toggle, previewed in the editor. You can overlay library or stock B-roll and music. It does not add emojis or auto-inserted matched B-roll.",
+        q: t(msg`Can Reelsaw do Submagic-style captions?`),
+        a: t(
+          msg`Reelsaw burns in word-level karaoke captions with AI-picked key words enlarged and coloured, boxed or outlined styles, size and uppercase options, and drag-to-place positions with platform safe zones. Punch-in zooms on the key words are a style toggle, previewed in the editor. You can overlay library or stock B-roll and music. It does not add emojis or auto-inserted matched B-roll.`,
+        ),
       },
       {
-        q: "Does either tool watermark the output?",
-        a: "Submagic lists 'no watermark' on every plan it sells. Reelsaw never adds one on your own machine. Hosted Reelsaw watermarks the Free plan only.",
+        q: t(msg`Does either tool watermark the output?`),
+        a: t(
+          msg`Submagic lists 'no watermark' on every plan it sells. Reelsaw never adds one on your own machine. Hosted Reelsaw watermarks the Free plan only.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://www.submagic.co/pricing", label: "Submagic pricing, checked " + CHECKED },
+      { href: "https://www.submagic.co/pricing", label: t(msg`Submagic pricing, checked ${{ checked: CHECKED }}`) },
       {
         href: "https://care.submagic.co/en/article/how-much-does-it-cost-to-use-submagic-1xm83pa/",
-        label: "Submagic help: Magic Clips add-on price, checked " + CHECKED,
+        label: t(msg`Submagic help: Magic Clips add-on price, checked ${{ checked: CHECKED }}`),
       },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -386,73 +429,80 @@ export const COMPETITORS: Competitor[] = [
     site: "https://2short.ai",
     pricingUrl: "https://2short.ai/pricing",
     checked: CHECKED,
-    metaTitle: "Open-source 2short.ai alternative with no monthly hours",
-    metaDescription:
-      "Reelsaw vs 2short.ai: 2short meters hours of analysis a month (free 30 min, paid from $9.90); Reelsaw is self-hosted open source, no cap, no watermark.",
-    h1: "2short.ai alternative with no hours-per-month meter",
+    metaTitle: t(msg`Open-source 2short.ai alternative with no monthly hours`),
+    metaDescription: t(
+      msg`Reelsaw vs 2short.ai: 2short meters hours of analysis a month (free 30 min, paid from $9.90); Reelsaw is self-hosted open source, no cap, no watermark.`,
+    ),
+    h1: t(msg`2short.ai alternative with no hours-per-month meter`),
     intro: [
-      "2short.ai is one of the cheaper hosted clippers: it meters the minutes of video it analyses and charges by the hour bucket. Reelsaw removes the meter by running on your hardware, so the comparison is mostly about convenience versus control.",
+      t(
+        msg`2short.ai is one of the cheaper hosted clippers: it meters the minutes of video it analyses and charges by the hour bucket. Reelsaw removes the meter by running on your hardware, so the comparison is mostly about convenience versus control.`,
+      ),
     ],
     pricing: {
-      summary: "A free Starter plan and three paid tiers measured in hours of AI analysis per month.",
+      summary: t(msg`A free Starter plan and three paid tiers measured in hours of AI analysis per month.`),
       plans: [
         {
-          name: "Starter",
-          price: "Free",
-          includes: "30 minutes of AI video analysis a month (one section of the page says 15), view and export generated clips",
+          name: t(msg`Starter`),
+          price: t(msg`Free`),
+          includes: t(msg`30 minutes of AI video analysis a month (one section of the page says 15), view and export generated clips`),
         },
         {
-          name: "Lite",
-          price: "$9.90/mo",
-          includes: "5 hours of analysis, 60 minutes of fast server-side exports, imports from Google Drive and public URLs, no ads",
+          name: t(msg`Lite`),
+          price: t(msg`$9.90/mo`),
+          includes: t(msg`5 hours of analysis, 60 minutes of fast server-side exports, imports from Google Drive and public URLs, no ads`),
         },
-        { name: "Pro", price: "$19.90/mo", includes: "15 hours of analysis, unlimited fast server-side exports" },
-        { name: "Premium", price: "$49.90/mo", includes: "50 hours of analysis, priority support, beta features" },
+        { name: t(msg`Pro`), price: t(msg`$19.90/mo`), includes: t(msg`15 hours of analysis, unlimited fast server-side exports`) },
+        { name: t(msg`Premium`), price: t(msg`$49.90/mo`), includes: t(msg`50 hours of analysis, priority support, beta features`) },
       ],
-      note: "Yearly prices were not listed. The page says 'goodbye to watermarks' as a general feature without tying it to a plan.",
+      note: t(msg`Yearly prices were not listed. The page says 'goodbye to watermarks' as a general feature without tying it to a plan.`),
     },
     them: {
-      entry: "$9.90/mo (Lite, 5 hours of analysis)",
-      free: "Yes: 30 minutes of analysis a month",
-      watermark: "'Say goodbye to watermarks' as a general claim; not stated per plan",
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "2short's own models; not configurable",
-      moments: "Yes",
-      reframe: "Yes",
-      captions: "Yes",
+      entry: t(msg`$9.90/mo (Lite, 5 hours of analysis)`),
+      free: t(msg`Yes: 30 minutes of analysis a month`),
+      watermark: t(msg`'Say goodbye to watermarks' as a general claim; not stated per plan`),
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`2short's own models; not configurable`),
+      moments: t(msg`Yes`),
+      reframe: t(msg`Yes`),
+      captions: t(msg`Yes`),
       fillers: notStated,
       dubbing: notStated,
       publishing: notStated,
       agents: notStated,
-      cap: "30 minutes, 5, 15 or 50 hours of analysis a month",
+      cap: t(msg`30 minutes, 5, 15 or 50 hours of analysis a month`),
       accounts: notStated,
     },
-    betterAt: ["Price for a hobbyist: $9.90 buys five hours of analysis with nothing to install.", "A free tier that produces usable clips without setup."],
-    pickThem: ["You clip a couple of videos a month and want the cheapest hosted option.", pickThemNoInstall],
+    betterAt: [
+      t(msg`Price for a hobbyist: $9.90 buys five hours of analysis with nothing to install.`),
+      t(msg`A free tier that produces usable clips without setup.`),
+    ],
+    pickThem: [t(msg`You clip a couple of videos a month and want the cheapest hosted option.`), pickThemNoInstall],
     pickReelsaw: [
       pickReelsawMeter,
-      "You process more than 50 hours a month, or in bursts (a back catalogue) that a monthly bucket punishes.",
-      "You want the source to stay local.",
-      "You want MCP and CLI access, multi-user accounts and your own choice of models.",
+      t(msg`You process more than 50 hours a month, or in bursts (a back catalogue) that a monthly bucket punishes.`),
+      t(msg`You want the source to stay local.`),
+      t(msg`You want MCP and CLI access, multi-user accounts and your own choice of models.`),
     ],
     faqs: [
       {
-        q: "Is 2short.ai free?",
-        a:
-          "It has a free Starter plan with 30 minutes of AI analysis a month (the page also mentions 15 minutes in one place) as of " +
-          CHECKED +
-          ". Paid plans start at $9.90 a month.",
+        q: t(msg`Is 2short.ai free?`),
+        a: t(
+          msg`It has a free Starter plan with 30 minutes of AI analysis a month (the page also mentions 15 minutes in one place) as of ${{ checked: CHECKED }}. Paid plans start at $9.90 a month.`,
+        ),
       },
       {
-        q: "What does Reelsaw cost for 50 hours a month?",
-        a: "Self-hosted: nothing in software. Fully local it costs electricity and time; with cloud transcription you pay that vendor's per-minute price directly, with no Reelsaw markup. Hosted Pro is $59/mo for 750 source minutes (12.5 hours); above that, self-host.",
+        q: t(msg`What does Reelsaw cost for 50 hours a month?`),
+        a: t(
+          msg`Self-hosted: nothing in software. Fully local it costs electricity and time; with cloud transcription you pay that vendor's per-minute price directly, with no Reelsaw markup. Hosted Pro is $59/mo for 750 source minutes (12.5 hours); above that, self-host.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://2short.ai/pricing", label: "2short.ai pricing, checked " + CHECKED },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://2short.ai/pricing", label: t(msg`2short.ai pricing, checked ${{ checked: CHECKED }}`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -461,78 +511,82 @@ export const COMPETITORS: Competitor[] = [
     site: "https://quso.ai",
     pricingUrl: "https://quso.ai/pricing",
     checked: CHECKED,
-    metaTitle: "Open-source quso.ai (vidyo.ai) alternative with no credits",
-    metaDescription:
-      "Reelsaw vs quso.ai (formerly vidyo.ai): quso meters credits (75 free a month, from $29/mo); Reelsaw is self-hosted open source, no credits, no watermark.",
-    h1: "quso.ai alternative with no credits to count",
+    metaTitle: t(msg`Open-source quso.ai (vidyo.ai) alternative with no credits`),
+    metaDescription: t(
+      msg`Reelsaw vs quso.ai (formerly vidyo.ai): quso meters credits (75 free a month, from $29/mo); Reelsaw is self-hosted open source, no credits, no watermark.`,
+    ),
+    h1: t(msg`quso.ai alternative with no credits to count`),
     intro: [
-      "quso.ai, formerly vidyo.ai, bundles clipping with a content planner, scheduling to seven platforms and an AI assistant, all metered in credits where one credit is roughly one processed minute. Reelsaw is a narrower, self-hosted tool: it clips, and it does not meter.",
+      t(
+        msg`quso.ai, formerly vidyo.ai, bundles clipping with a content planner, scheduling to seven platforms and an AI assistant, all metered in credits where one credit is roughly one processed minute. Reelsaw is a narrower, self-hosted tool: it clips, and it does not meter.`,
+      ),
     ],
     pricing: {
-      summary: "A free plan and three paid tiers measured in credits a month, with yearly billing at half price.",
+      summary: t(msg`A free plan and three paid tiers measured in credits a month, with yearly billing at half price.`),
       plans: [
-        { name: "Free", price: "$0", includes: "75 credits a month, 720p render, TikTok publishing, 7-day data retention" },
-        { name: "Lite", price: "$29/mo, or $174/yr", includes: "100 credits, unlimited 1080p clips, advanced editor, 10 GB storage" },
+        { name: t(msg`Free`), price: "$0", includes: t(msg`75 credits a month, 720p render, TikTok publishing, 7-day data retention`) },
+        { name: t(msg`Lite`), price: t(msg`$29/mo, or $174/yr`), includes: t(msg`100 credits, unlimited 1080p clips, advanced editor, 10 GB storage`) },
         {
-          name: "Essential",
-          price: "$39/mo, or $234/yr",
-          includes: "300 credits, scheduling to 7 platforms, AI filler and silence removal, content planner, 25 GB",
+          name: t(msg`Essential`),
+          price: t(msg`$39/mo, or $234/yr`),
+          includes: t(msg`300 credits, scheduling to 7 platforms, AI filler and silence removal, content planner, 25 GB`),
         },
         {
-          name: "Growth",
-          price: "$49/mo, or $294/yr",
-          includes: "600 credits, brand kit and templates, AI assistant, social analytics, priority support, 75 GB",
+          name: t(msg`Growth`),
+          price: t(msg`$49/mo, or $294/yr`),
+          includes: t(msg`600 credits, brand kit and templates, AI assistant, social analytics, priority support, 75 GB`),
         },
       ],
-      note: "Free exports are 720p with a quso.ai watermark. Paid plans list 1080p clips and do not mention a watermark.",
+      note: t(msg`Free exports are 720p with a quso.ai watermark. Paid plans list 1080p clips and do not mention a watermark.`),
     },
     them: {
-      entry: "$29/mo, or $174/yr (Lite, 100 credits)",
-      free: "Yes: 75 credits a month at 720p with a watermark, 7-day retention",
-      watermark: "On the free plan ('720p with a quso.ai watermark'); not listed on paid plans",
-      openSource: "No",
-      selfHost: "No, cloud only",
-      local: "No, the video is uploaded to the vendor",
-      providers: "quso's own models; not configurable",
-      moments: "Yes",
-      reframe: "Yes",
-      captions: "Yes",
-      fillers: "AI filler and silence removal on Essential and up",
+      entry: t(msg`$29/mo, or $174/yr (Lite, 100 credits)`),
+      free: t(msg`Yes: 75 credits a month at 720p with a watermark, 7-day retention`),
+      watermark: t(msg`On the free plan ('720p with a quso.ai watermark'); not listed on paid plans`),
+      openSource: t(msg`No`),
+      selfHost: t(msg`No, cloud only`),
+      local: t(msg`No, the video is uploaded to the vendor`),
+      providers: t(msg`quso's own models; not configurable`),
+      moments: t(msg`Yes`),
+      reframe: t(msg`Yes`),
+      captions: t(msg`Yes`),
+      fillers: t(msg`AI filler and silence removal on Essential and up`),
       dubbing: notStated,
-      publishing: "Yes: TikTok on Free, 7 platforms with scheduling on Essential and up",
+      publishing: t(msg`Yes: TikTok on Free, 7 platforms with scheduling on Essential and up`),
       agents: notStated,
-      cap: "75, 100, 300 or 600 credits a month (about one credit per minute)",
-      accounts: "Brand kit and templates on Growth",
+      cap: t(msg`75, 100, 300 or 600 credits a month (about one credit per minute)`),
+      accounts: t(msg`Brand kit and templates on Growth`),
     },
     betterAt: [
-      "A content planner, scheduling and analytics in one subscription.",
-      "Filler and silence removal plus clipping without running anything.",
-      "A free tier that includes TikTok publishing.",
+      t(msg`A content planner, scheduling and analytics in one subscription.`),
+      t(msg`Filler and silence removal plus clipping without running anything.`),
+      t(msg`A free tier that includes TikTok publishing.`),
     ],
-    pickThem: ["Your workflow is plan, clip, schedule and measure in one tool.", "75 to 600 processed minutes a month covers you."],
+    pickThem: [t(msg`Your workflow is plan, clip, schedule and measure in one tool.`), t(msg`75 to 600 processed minutes a month covers you.`)],
     pickReelsaw: [
       pickReelsawMeter,
-      "You process long sources and the credit-per-minute meter dominates the bill.",
-      "The video must stay on your hardware.",
-      "You want filler removal you can audit: every cut is listed with accept and reject, and verified by forced alignment.",
-      "You want an MCP server and CLI, and your own choice of models.",
+      t(msg`You process long sources and the credit-per-minute meter dominates the bill.`),
+      t(msg`The video must stay on your hardware.`),
+      t(msg`You want filler removal you can audit: every cut is listed with accept and reject, and verified by forced alignment.`),
+      t(msg`You want an MCP server and CLI, and your own choice of models.`),
     ],
     faqs: [
       {
-        q: "Is quso.ai the same as vidyo.ai?",
-        a:
-          "Yes, vidyo.ai was renamed quso.ai. Its pricing on " +
-          CHECKED +
-          " ran from a 75-credit free plan (720p with a quso.ai watermark) to a $49-a-month Growth plan with 600 credits.",
+        q: t(msg`Is quso.ai the same as vidyo.ai?`),
+        a: t(
+          msg`Yes, vidyo.ai was renamed quso.ai. Its pricing on ${{ checked: CHECKED }} ran from a 75-credit free plan (720p with a quso.ai watermark) to a $49-a-month Growth plan with 600 credits.`,
+        ),
       },
       {
-        q: "Does Reelsaw remove filler words like quso.ai?",
-        a: "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs.",
+        q: t(msg`Does Reelsaw remove filler words like quso.ai?`),
+        a: t(
+          msg`Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs.`,
+        ),
       },
     ],
     sources: [
-      { href: "https://quso.ai/pricing", label: "quso.ai pricing, checked " + CHECKED },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://quso.ai/pricing", label: t(msg`quso.ai pricing, checked ${{ checked: CHECKED }}`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
   {
@@ -541,117 +595,151 @@ export const COMPETITORS: Competitor[] = [
     site: "https://www.openshorts.app",
     pricingUrl: "https://www.openshorts.app/#/pricing",
     checked: CHECKED,
-    metaTitle: "Reelsaw vs OpenShorts: fully local, any AI provider",
-    metaDescription:
-      "Both are open-source AI clippers with MCP. Reelsaw runs fully local with no API keys or any provider; OpenShorts needs Gemini for layouts and silent videos.",
-    h1: "Reelsaw vs OpenShorts: fully local, and any model you want",
+    metaTitle: t(msg`Reelsaw vs OpenShorts: fully local, any AI provider`),
+    metaDescription: t(
+      msg`Both are open-source AI clippers with MCP. Reelsaw runs fully local with no API keys or any provider; OpenShorts needs Gemini for layouts and silent videos.`,
+    ),
+    h1: t(msg`Reelsaw vs OpenShorts: fully local, and any model you want`),
     intro: [
-      "Reelsaw exists for two reasons: the whole pipeline should run on your own hardware with no API key, and every model in it should be swappable for any vendor. OpenShorts is the other open-source clipper, and it gets most of the way there: MIT core, Docker Compose, an MCP server, and a local or OpenAI-compatible option for moment picking. Gemini is still required for layout picking and for silent videos, so a key and a Google account stay in the loop for those steps.",
-      "OpenShorts is wider: dubbing, AI UGC videos, a YouTube studio, publishing. Reelsaw is deeper on the thing both tools are for, turning long video into good clips: how moments are ranked, how filler cuts are verified, what the editor can override, and how a shared install runs. Both sell a hosted version at the same prices (Free, then $12, $29 and $59 a month, metered in minutes of source video). If the core capability and control over it are what you are choosing on, Reelsaw is the stronger pick; the rest of this page shows why, and where OpenShorts wins instead.",
+      t(
+        msg`Reelsaw exists for two reasons: the whole pipeline should run on your own hardware with no API key, and every model in it should be swappable for any vendor. OpenShorts is the other open-source clipper, and it gets most of the way there: MIT core, Docker Compose, an MCP server, and a local or OpenAI-compatible option for moment picking. Gemini is still required for layout picking and for silent videos, so a key and a Google account stay in the loop for those steps.`,
+      ),
+      t(
+        msg`OpenShorts is wider: dubbing, AI UGC videos, a YouTube studio, publishing. Reelsaw is deeper on the thing both tools are for, turning long video into good clips: how moments are ranked, how filler cuts are verified, what the editor can override, and how a shared install runs. Both sell a hosted version at the same prices (Free, then $12, $29 and $59 a month, metered in minutes of source video). If the core capability and control over it are what you are choosing on, Reelsaw is the stronger pick; the rest of this page shows why, and where OpenShorts wins instead.`,
+      ),
     ],
     pricing: {
-      summary: "Both are free to self-host, and both sell a hosted version at the same four price points, metered in minutes of source video.",
+      summary: t(msg`Both are free to self-host, and both sell a hosted version at the same four price points, metered in minutes of source video.`),
       plans: [
         {
-          name: "Reelsaw self-hosted",
+          name: t(msg`Reelsaw self-hosted`),
           price: "$0",
-          includes:
-            "AGPL-3.0, no keys needed. Docker, about 10 GB disk, 8 GB RAM with a hosted provider, more for a local language model (the installer picks one by RAM)",
+          includes: t(
+            msg`AGPL-3.0, no keys needed. Docker, about 10 GB disk, 8 GB RAM with a hosted provider, more for a local language model (the installer picks one by RAM)`,
+          ),
         },
         {
-          name: "Reelsaw hosted (app.reelsaw.com)",
-          price: "Free, then $12, $29 or $59/mo",
-          includes:
-            "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and the top of the queue. Paid plans start jobs ahead of Free. No watermark on paid plans; yearly is two months free",
+          name: t(msg`Reelsaw hosted (app.reelsaw.com)`),
+          price: t(msg`Free, then $12, $29 or $59/mo`),
+          includes: t(
+            msg`Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and the top of the queue. Paid plans start jobs ahead of Free. No watermark on paid plans; yearly is two months free`,
+          ),
         },
         {
-          name: "OpenShorts self-hosted",
-          price: "$0, plus a Gemini key for layout and silent video",
-          includes:
-            "MIT core; the cloud/ directory is source-available under a commercial licence. Docker, 8 GB+ RAM; about 5 to 8 minutes per 8-minute video on CPU, about a minute with an NVIDIA GPU. Moment picking can use a local OpenAI-compatible server.",
+          name: t(msg`OpenShorts self-hosted`),
+          price: t(msg`$0, plus a Gemini key for layout and silent video`),
+          includes: t(
+            msg`MIT core; the cloud/ directory is source-available under a commercial licence. Docker, 8 GB+ RAM; about 5 to 8 minutes per 8-minute video on CPU, about a minute with an NVIDIA GPU. Moment picking can use a local OpenAI-compatible server.`,
+          ),
         },
         {
-          name: "OpenShorts Cloud",
-          price: "Free, then $12, $29 or $59/mo",
-          includes:
-            "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark and clips kept 7 days. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. Gemini key and auto-posting included; yearly is two months free",
+          name: t(msg`OpenShorts Cloud`),
+          price: t(msg`Free, then $12, $29 or $59/mo`),
+          includes: t(
+            msg`Free: first video up to 60 minutes, then 20 minutes a month, with a watermark and clips kept 7 days. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. Gemini key and auto-posting included; yearly is two months free`,
+          ),
         },
       ],
-      note: "The hosted prices are the same on purpose: pick on the pipeline and the licence, not the bill.",
+      note: t(msg`The hosted prices are the same on purpose: pick on the pipeline and the licence, not the bill.`),
     },
     them: {
-      local:
-        "Partly. Moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and silent videos, so a Google API key stays required",
-      providers:
-        "Gemini by default for picking, layout, scripts and thumbnails; any OpenAI-compatible server for moment picking only. Transcription is faster-whisper (or Parakeet) in-process; dubbing needs ElevenLabs",
-      entry: "$0 self-hosted (Gemini still needed for layout picking and silent videos); hosted Free, then $12, $29 or $59/mo",
-      free: "Self-hosted: everything. Cloud: first video up to 60 minutes, then 20 minutes a month with a watermark, clips kept 7 days",
-      watermark: "None self-hosted; on the free cloud plan",
-      openSource: "MIT core; cloud/ directory under a commercial licence. Python and FastAPI, React frontend",
-      selfHost: "Yes, Docker Compose; optional CUDA override",
-      moments: "Gemini picks 3 to 15 moments per video in one pass",
-      reframe: "Yes: MediaPipe and YOLOv8; track, general, split and screencast modes, one layout picked per video by Gemini",
-      captions: "Yes: faster-whisper word-level subtitles, hook overlays, AI FFmpeg effects",
-      fillers: "Not listed",
-      dubbing: "Yes: ElevenLabs, 30+ languages, your own key",
-      publishing: "Yes: TikTok, Instagram Reels and YouTube Shorts, with scheduling; YouTube title and thumbnail studio",
-      agents: "MCP server, REST API with webhooks, CLI, agent skill",
-      cap: "None self-hosted; metered on Cloud",
-      accounts: "Hosted accounts with API keys; self-hosted dashboard",
+      local: t(
+        msg`Partly. Moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and silent videos, so a Google API key stays required`,
+      ),
+      providers: t(
+        msg`Gemini by default for picking, layout, scripts and thumbnails; any OpenAI-compatible server for moment picking only. Transcription is faster-whisper (or Parakeet) in-process; dubbing needs ElevenLabs`,
+      ),
+      entry: t(msg`$0 self-hosted (Gemini still needed for layout picking and silent videos); hosted Free, then $12, $29 or $59/mo`),
+      free: t(msg`Self-hosted: everything. Cloud: first video up to 60 minutes, then 20 minutes a month with a watermark, clips kept 7 days`),
+      watermark: t(msg`None self-hosted; on the free cloud plan`),
+      openSource: t(msg`MIT core; cloud/ directory under a commercial licence. Python and FastAPI, React frontend`),
+      selfHost: t(msg`Yes, Docker Compose; optional CUDA override`),
+      moments: t(msg`Gemini picks 3 to 15 moments per video in one pass`),
+      reframe: t(msg`Yes: MediaPipe and YOLOv8; track, general, split and screencast modes, one layout picked per video by Gemini`),
+      captions: t(msg`Yes: faster-whisper word-level subtitles, hook overlays, AI FFmpeg effects`),
+      fillers: t(msg`Not listed`),
+      dubbing: t(msg`Yes: ElevenLabs, 30+ languages, your own key`),
+      publishing: t(msg`Yes: TikTok, Instagram Reels and YouTube Shorts, with scheduling; YouTube title and thumbnail studio`),
+      agents: t(msg`MCP server, REST API with webhooks, CLI, agent skill`),
+      cap: t(msg`None self-hosted; metered on Cloud`),
+      accounts: t(msg`Hosted accounts with API keys; self-hosted dashboard`),
     },
     betterAt: [
-      "Breadth beyond clipping: voice dubbing, AI UGC videos with lip-synced actors, a YouTube title and thumbnail studio, and one-click publishing.",
-      "An optional Parakeet transcription backend (NVIDIA NeMo), about twice as fast as Whisper on the same card.",
-      "A larger community: about 6.8k GitHub stars when checked.",
+      t(msg`Breadth beyond clipping: voice dubbing, AI UGC videos with lip-synced actors, a YouTube title and thumbnail studio, and one-click publishing.`),
+      t(msg`An optional Parakeet transcription backend (NVIDIA NeMo), about twice as fast as Whisper on the same card.`),
+      t(msg`A larger community: about 6.8k GitHub stars when checked.`),
     ],
-    pickThem: ["You want dubbing, UGC generation or direct publishing from the same tool.", "You prefer a Python stack to extend."],
+    pickThem: [t(msg`You want dubbing, UGC generation or direct publishing from the same tool.`), t(msg`You prefer a Python stack to extend.`)],
     pickReelsaw: [
-      "No API key, ever: the one-command installer sets up Ollama and a local Whisper, and alignment and face detection run on-device. OpenShorts can pick moments locally; Gemini is still required for layout picking and silent videos.",
-      "Any provider for any model, separately: transcription from Deepgram and selection from Anthropic, or everything from one OpenAI-compatible server, switched at runtime by an admin without a restart.",
-      "Selection you can audit: every candidate is scored as the median of several samples, the top picks are compared pairwise with positions swapped to cancel judge bias, a separate judge model can do the scoring, and the rubric breakdown is one click away. OpenShorts asks Gemini for 3 to 15 moments in one pass.",
-      "Filler, repetition and false-start cuts located by forced alignment and checked by listening to the seam, each one reviewable. OpenShorts does not list this.",
-      "Framing decided per segment, not per video: face, split, stack and fit can change inside one clip at scene cuts, with active-speaker following, and any section can be overridden in the editor.",
-      "A real editor: multi-lane timeline, frame-accurate trims, layout sections, layers, layer templates, fades and crossfades, intros and outros, undo.",
-      "Built for more than one person: accounts, admin approval, per-user quotas, usage, and pg-boss jobs that resume after a crash.",
-      "AGPL-3.0, so a hosted fork has to share its changes; Reelsaw's own hosted service runs the public code with the billing module as the only addition.",
+      t(
+        msg`No API key, ever: the one-command installer sets up Ollama and a local Whisper, and alignment and face detection run on-device. OpenShorts can pick moments locally; Gemini is still required for layout picking and silent videos.`,
+      ),
+      t(
+        msg`Any provider for any model, separately: transcription from Deepgram and selection from Anthropic, or everything from one OpenAI-compatible server, switched at runtime by an admin without a restart.`,
+      ),
+      t(
+        msg`Selection you can audit: every candidate is scored as the median of several samples, the top picks are compared pairwise with positions swapped to cancel judge bias, a separate judge model can do the scoring, and the rubric breakdown is one click away. OpenShorts asks Gemini for 3 to 15 moments in one pass.`,
+      ),
+      t(
+        msg`Filler, repetition and false-start cuts located by forced alignment and checked by listening to the seam, each one reviewable. OpenShorts does not list this.`,
+      ),
+      t(
+        msg`Framing decided per segment, not per video: face, split, stack and fit can change inside one clip at scene cuts, with active-speaker following, and any section can be overridden in the editor.`,
+      ),
+      t(
+        msg`A real editor: multi-lane timeline, frame-accurate trims, layout sections, layers, layer templates, fades and crossfades, intros and outros, undo.`,
+      ),
+      t(msg`Built for more than one person: accounts, admin approval, per-user quotas, usage, and pg-boss jobs that resume after a crash.`),
+      t(
+        msg`AGPL-3.0, so a hosted fork has to share its changes; Reelsaw's own hosted service runs the public code with the billing module as the only addition.`,
+      ),
     ],
     faqs: [
       {
-        q: "Can OpenShorts run fully offline without any API key?",
-        a:
-          "Not according to its README on " +
-          CHECKED +
-          ": moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and for silent videos. Reelsaw runs the whole pipeline locally with Ollama and a local Whisper, which is what its installer sets up by default.",
+        q: t(msg`Can OpenShorts run fully offline without any API key?`),
+        a: t(
+          msg`Not according to its README on ${{ checked: CHECKED }}: moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and for silent videos. Reelsaw runs the whole pipeline locally with Ollama and a local Whisper, which is what its installer sets up by default.`,
+        ),
       },
       {
-        q: "Can I use Anthropic, OpenAI or Groq with each tool?",
-        a: "Reelsaw: yes, each of the language, transcription and alignment models is a provider:model string, so you can mix vendors or go fully local, and admins can change them at runtime. OpenShorts: an OpenAI-compatible server can replace Gemini for moment picking; the other Gemini-backed steps stay on Gemini.",
+        q: t(msg`Can I use Anthropic, OpenAI or Groq with each tool?`),
+        a: t(
+          msg`Reelsaw: yes, each of the language, transcription and alignment models is a provider:model string, so you can mix vendors or go fully local, and admins can change them at runtime. OpenShorts: an OpenAI-compatible server can replace Gemini for moment picking; the other Gemini-backed steps stay on Gemini.`,
+        ),
       },
       {
-        q: "Which one picks better clips?",
-        a: "Reelsaw does more work to find out: chunking at pauses with overlap so long videos do not lose their middle, rubric scores as a median of several samples, pairwise comparison of the top ten with swapped positions, an optional separate judge model, and a run-relative gate instead of a fixed count. OpenShorts asks Gemini for 3 to 15 moments in one pass. Neither project publishes a head-to-head benchmark, so try both on your own video.",
+        q: t(msg`Which one picks better clips?`),
+        a: t(
+          msg`Reelsaw does more work to find out: chunking at pauses with overlap so long videos do not lose their middle, rubric scores as a median of several samples, pairwise comparison of the top ten with swapped positions, an optional separate judge model, and a run-relative gate instead of a fixed count. OpenShorts asks Gemini for 3 to 15 moments in one pass. Neither project publishes a head-to-head benchmark, so try both on your own video.`,
+        ),
       },
       {
-        q: "Which is more open: MIT or AGPL-3.0?",
-        a: "MIT lets anyone, including a company, take the code private and sell it as a service. AGPL-3.0 allows everything MIT allows except that: if you run a modified Reelsaw for other people, you must publish your changes. OpenShorts' core is MIT and its cloud directory is under a separate commercial licence; all of Reelsaw is AGPL-3.0.",
+        q: t(msg`Which is more open: MIT or AGPL-3.0?`),
+        a: t(
+          msg`MIT lets anyone, including a company, take the code private and sell it as a service. AGPL-3.0 allows everything MIT allows except that: if you run a modified Reelsaw for other people, you must publish your changes. OpenShorts' core is MIT and its cloud directory is under a separate commercial licence; all of Reelsaw is AGPL-3.0.`,
+        ),
       },
       {
-        q: "Do both use an NVIDIA GPU?",
-        a: "Yes, and for the same three jobs. OpenShorts builds one image with a GPU flag: faster-whisper on CUDA, NVENC encoding, and its detection models. Reelsaw adds a Compose override (docker-compose.gpu.yml) that hands the card to the Speaches container (faster-whisper on CUDA with large-v3), to Ollama when it runs in a container, and to the app, whose ffmpeg then encodes with NVENC; its face, text and alignment models stay on the CPU by default because they are small enough that the GPU did not measure faster. Neither runs CUDA inside Docker on a Mac; there, Reelsaw's installer runs Ollama natively on Metal.",
+        q: t(msg`Do both use an NVIDIA GPU?`),
+        a: t(
+          msg`Yes, and for the same three jobs. OpenShorts builds one image with a GPU flag: faster-whisper on CUDA, NVENC encoding, and its detection models. Reelsaw adds a Compose override (docker-compose.gpu.yml) that hands the card to the Speaches container (faster-whisper on CUDA with large-v3), to Ollama when it runs in a container, and to the app, whose ffmpeg then encodes with NVENC; its face, text and alignment models stay on the CPU by default because they are small enough that the GPU did not measure faster. Neither runs CUDA inside Docker on a Mac; there, Reelsaw's installer runs Ollama natively on Metal.`,
+        ),
       },
       {
-        q: "Do both have MCP servers?",
-        a: "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser.",
+        q: t(msg`Do both have MCP servers?`),
+        a: t(
+          msg`Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser.`,
+        ),
       },
     ],
     sources: [
       {
         href: "https://github.com/mutonby/openshorts",
-        label: "OpenShorts README, checked " + CHECKED + " (Gemini requirement, providers, hardware, hosted pricing)",
+        label: t(msg`OpenShorts README, checked ${{ checked: CHECKED }} (Gemini requirement, providers, hardware, hosted pricing)`),
       },
-      { href: "https://www.openshorts.app/#/pricing", label: "OpenShorts hosted pricing, checked " + CHECKED },
-      { href: "/pricing", label: "Reelsaw hosted pricing" },
-      { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
+      { href: "https://www.openshorts.app/#/pricing", label: t(msg`OpenShorts hosted pricing, checked ${{ checked: CHECKED }}`) },
+      { href: "/pricing", label: t(msg`Reelsaw hosted pricing`) },
+      { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
   },
 ];

@@ -20,17 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { type I18n, type MessageDescriptor, setupI18n } from "@lingui/core";
 import { formatter } from "@lingui/format-po";
 import { compileMessage } from "@lingui/message-utils/compileMessage";
-import {
-  acceptLanguages,
-  DEFAULT_LOCALE,
-  isLocale,
-  isTimeZone,
-  type Locale,
-  matchLocale,
-  PSEUDO_LOCALE,
-  SHIPPED_LOCALES,
-  setFormatLocale,
-} from "@reelsaw/shared";
+import { acceptLanguages, DEFAULT_LOCALE, isLocale, isTimeZone, type Locale, matchLocale, setFormatLocale, setFormatTimeZone } from "@reelsaw/shared";
 import { TRPCError } from "@trpc/server";
 import type { MiddlewareHandler } from "hono";
 import { bundledAssetPath } from "./lib/assets.js";
@@ -58,7 +48,7 @@ export function currentLocale(): Locale {
 }
 
 /** The time zone dates render in right now: the scope's (the account's), else null (UTC in mail and jobs). */
-export function currentTimeZone(): string | null {
+function currentTimeZone(): string | null {
   return scope.getStore()?.timeZone ?? null;
 }
 
@@ -74,6 +64,8 @@ function processLocale(): Locale {
 }
 
 setFormatLocale(currentLocale);
+// days in mail, notices and messages are read in the account's zone, else UTC (never the server's own)
+setFormatTimeZone(() => currentTimeZone() ?? "UTC");
 
 /** Run `fn` with messages and dates in `locale` / `timeZone` (a job, a mail, a test). */
 export function withLocale<T>(locale: string | null | undefined, timeZone: string | null | undefined, fn: () => T): T {
@@ -146,14 +138,6 @@ function i18nFor(locale: Locale): I18n {
 export function t(descriptor: MessageDescriptor): string {
   return i18nFor(currentLocale())._(descriptor);
 }
-
-/** Render a message in a given locale (mail to someone other than the requester). */
-export function tIn(locale: string | null | undefined, descriptor: MessageDescriptor): string {
-  return i18nFor(isLocale(locale) ? locale : DEFAULT_LOCALE)._(descriptor);
-}
-
-/** Every locale with a server catalogue, for tests and the catalogue check. */
-export const SERVER_LOCALES: readonly Locale[] = [...SHIPPED_LOCALES, PSEUDO_LOCALE];
 
 // ---------- errors ----------
 

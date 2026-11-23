@@ -3,18 +3,35 @@
  * heavy jobs right now (and why not), and its specs. Admins only (the query is admin.workers.list).
  */
 import { useQuery } from "@tanstack/react-query";
+import { t } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useTRPC } from "../lib/trpc";
 import { pausedWord } from "./FleetSummary";
 import { Skeleton, SkeletonRegion } from "./ui";
-import { formatMb } from "@reelsaw/shared";
+import { formatMb, formatNumber } from "@reelsaw/shared";
 
-const ROLE: Record<string, string> = { app: "API + worker", api: "API only", worker: "worker" };
+function roleLabel(role: string): string {
+  if (role === "app") return t`API + worker`;
+  if (role === "api") return t`API only`;
+  if (role === "worker") return t`worker`;
+  return role;
+}
 
+/** How long since the last check-in, short: "just now", "12s ago", "3m ago", "2h ago". */
 function ago(sec: number) {
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
-  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
-  return `${Math.round(sec / 3600)}h ago`;
+  if (sec < 5) return t`just now`;
+  if (sec < 60) return t`${sec}s ago`;
+  const m = Math.round(sec / 60);
+  if (sec < 3600) return t`${m}m ago`;
+  const h = Math.round(sec / 3600);
+  return t`${h}h ago`;
+}
+
+/** The same span without "ago": "12s", "3m", "2h". */
+function span(sec: number) {
+  if (sec < 60) return `${formatNumber(sec)}s`;
+  if (sec < 3600) return `${formatNumber(Math.round(sec / 60))}m`;
+  return `${formatNumber(Math.round(sec / 3600))}h`;
 }
 
 function queueLabel(q: string) {
@@ -22,9 +39,11 @@ function queueLabel(q: string) {
 }
 
 function diskLine(w: { diskFreeMB: number; diskTotalMB: number; diskLeasedMB: number }) {
-  if (w.diskFreeMB < 0) return "disk n/a";
+  if (w.diskFreeMB < 0) return t`disk n/a`;
   // leased: free bytes jobs in flight on this volume have claimed for the scratch they are writing
-  return `${formatMb(w.diskFreeMB)} free${w.diskLeasedMB > 0 ? ` (${formatMb(w.diskLeasedMB)} leased)` : ""}`;
+  const free = formatMb(w.diskFreeMB);
+  const leased = formatMb(w.diskLeasedMB);
+  return w.diskLeasedMB > 0 ? t`${free} free (${leased} leased)` : t`${free} free`;
 }
 
 /** A worker process that dropped the media queues: short of disk with nothing left to evict (queue/disk-gate.ts). */
@@ -34,55 +53,80 @@ function diskPaused(w: { role: string; live: boolean; queues: string[] }) {
 
 /** cores and memory jobs in flight on this host have leased (ffmpeg threads, render memory), when there are any */
 function cpuLine(w: { cpus: number; coresLeased: number }) {
-  return `${w.cpus} CPU${w.coresLeased > 0 ? ` (${w.coresLeased} leased)` : ""}`;
+  const cpus = w.cpus;
+  const leased = w.coresLeased;
+  return w.coresLeased > 0 ? t`${cpus} CPU (${leased} leased)` : t`${cpus} CPU`;
 }
 function memLine(w: { memTotalMB: number; memLeasedMB: number }) {
-  return `${formatMb(w.memTotalMB)}${w.memLeasedMB > 0 ? ` (${formatMb(w.memLeasedMB)} leased)` : ""}`;
+  const total = formatMb(w.memTotalMB);
+  const leased = formatMb(w.memLeasedMB);
+  return w.memLeasedMB > 0 ? t`${total} (${leased} leased)` : total;
 }
 
 function gpuLine(w: { gpu: { vendor: string; devices: string[]; note: string } | null }) {
-  if (!w.gpu) return "no GPU";
+  if (!w.gpu) return t`no GPU`;
   return w.gpu.devices[0] || w.gpu.vendor;
 }
 
 type Status = { glyph: string; word: string; tone: string; title: string };
 
 function statusOf(w: { live: boolean; role: string; queues: string[]; paused: string | null; lastSeenAgoSec: number }): Status {
-  if (!w.live) return { glyph: "○", word: "Gone", tone: "text-ink3", title: `No check-in for ${ago(w.lastSeenAgoSec).replace(" ago", "")}` };
+  if (!w.live) {
+    const silent = span(w.lastSeenAgoSec);
+    return { glyph: "○", word: t`Gone`, tone: "text-ink3", title: t`No check-in for ${silent}` };
+  }
   if (diskPaused(w))
     return {
       glyph: "◷",
-      word: "Disk full",
+      word: t`Disk full`,
       tone: "text-warn",
-      title: "Not taking media jobs: disk is below the floor and nothing more can be evicted. Other workers take them; it resumes once free disk is back.",
+      title: t`Not taking media jobs: disk is below the floor and nothing more can be evicted. Other workers take them; it resumes once free disk is back.`,
     };
-  if (w.paused) return { glyph: "◷", word: "Paused", tone: "text-warn", title: `Heavy jobs wait here: ${pausedWord(w.paused)}` };
-  if (w.role === "api") return { glyph: "●", word: "Serving", tone: "text-ok", title: "Serves the app and API; runs no jobs" };
-  return { glyph: "●", word: "Online", tone: "text-ok", title: "Takes jobs" };
+  if (w.paused) {
+    const why = pausedWord(w.paused);
+    return { glyph: "◷", word: t`Paused`, tone: "text-warn", title: t`Heavy jobs wait here: ${why}` };
+  }
+  if (w.role === "api") return { glyph: "●", word: t`Serving`, tone: "text-ok", title: t`Serves the app and API; runs no jobs` };
+  return { glyph: "●", word: t`Online`, tone: "text-ok", title: t`Takes jobs` };
 }
 
 export function WorkersSection() {
+  const { t: tr } = useLingui();
   const trpc = useTRPC();
   const q = useQuery({ ...trpc.admin.workers.list.queryOptions(), refetchInterval: 5000 });
   const d = q.data;
   const version = d?.items.find((w) => w.thisProcess)?.version;
+  const liveCount = d?.live ?? 0;
+  const staleCount = d?.stale ?? 0;
 
   return (
     <section id="workers" className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-[15px] font-bold">Workers</h2>
+        <h2 className="text-[15px] font-bold">
+          <Trans>Workers</Trans>
+        </h2>
         <span className="min-h-4 text-xs text-ink3">
-          {d ? (d.items.length ? `${d.live} online${d.stale ? ` · ${d.stale} gone` : ""}` : "no process has checked in yet") : q.error ? q.error.message : ""}
+          {d
+            ? d.items.length
+              ? d.stale
+                ? tr`${liveCount} online · ${staleCount} gone`
+                : tr`${liveCount} online`
+              : tr`no process has checked in yet`
+            : q.error
+              ? q.error.message
+              : ""}
         </span>
       </div>
       <p className="text-[13px] text-ink2">
-        Each process checks in every 15 seconds with its specs, whether it has room for heavy jobs, and what it is running. One that stops checking in is gone
-        after 45 seconds and dropped after an hour.
+        <Trans>
+          Each process checks in every 15 seconds with its specs, whether it has room for heavy jobs, and what it is running. One that stops checking in is gone
+          after 45 seconds and dropped after an hour.
+        </Trans>
       </p>
       {q.error && !d ? (
         <div className="h-5 text-xs text-ink3">{q.error.message}</div>
       ) : !d ? (
-        <SkeletonRegion label="Loading workers…" className="flex flex-col">
+        <SkeletonRegion label={tr`Loading workers…`} className="flex flex-col">
           {Array.from({ length: 2 }, (_, i) => (
             <div
               key={i}
@@ -98,7 +142,9 @@ export function WorkersSection() {
           ))}
         </SkeletonRegion>
       ) : d.items.length === 0 ? (
-        <p className="text-[13px] text-ink3">Waiting for the first heartbeat. Restart the app if this stays empty.</p>
+        <p className="text-[13px] text-ink3">
+          <Trans>Waiting for the first heartbeat. Restart the app if this stays empty.</Trans>
+        </p>
       ) : (
         <ul className="flex flex-col">
           {d.items.map((w) => {
@@ -108,10 +154,13 @@ export function WorkersSection() {
               : w.role === "api"
                 ? "—"
                 : w.live
-                  ? "idle"
+                  ? tr`idle`
                   : "—";
-            const specs = `${cpuLine(w)} · ${memLine(w)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${w.renders.running}/${w.renders.max} renders`}`;
+            const running = w.renders.running;
+            const max = w.renders.max;
+            const specs = `${cpuLine(w)} · ${memLine(w)} · ${diskLine(w)} · ${gpuLine(w)}${w.role === "api" ? "" : ` · ${tr`${running}/${max} renders`}`}`;
             const otherVersion = w.live && version && w.version !== version;
+            const seen = ago(w.lastSeenAgoSec);
             return (
               <li
                 key={w.id}
@@ -125,29 +174,31 @@ export function WorkersSection() {
                     <span className="min-w-0 truncate font-mono text-xs" title={w.id}>
                       {w.id}
                     </span>
-                    <span className="chip shrink-0 bg-sunk px-2 py-0.5 text-[11px] text-ink2">{ROLE[w.role] ?? w.role}</span>
+                    <span className="chip shrink-0 bg-sunk px-2 py-0.5 text-[11px] text-ink2">{roleLabel(w.role)}</span>
                     {otherVersion ? (
-                      <span className="chip shrink-0 bg-warn-soft px-2 py-0.5 text-[11px] text-ink" title={`This page is served by ${version}`}>
+                      <span className="chip shrink-0 bg-warn-soft px-2 py-0.5 text-[11px] text-ink" title={tr`This page is served by ${version}`}>
                         {w.version}
                       </span>
                     ) : null}
-                    {w.thisProcess ? <span className="shrink-0 text-[11px] text-ink3">this page</span> : null}
+                    {w.thisProcess ? (
+                      <span className="shrink-0 text-[11px] text-ink3">
+                        <Trans>this page</Trans>
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mt-1 truncate text-xs text-ink2" title={specs}>
                     {specs}
                   </div>
                   {/* phones: what it is doing folds under the specs */}
                   <div className="mt-0.5 truncate text-xs text-ink3 sm:hidden" title={work}>
-                    {work} · {w.live ? ago(w.lastSeenAgoSec) : `gone ${ago(w.lastSeenAgoSec)}`}
+                    {work} · {w.live ? seen : tr`gone ${seen}`}
                   </div>
                 </div>
                 <div className="hidden min-w-0 text-end sm:block">
                   <div className="truncate text-xs leading-5" title={work}>
                     {work}
                   </div>
-                  <div className="truncate text-[11px] leading-4 tabular-nums text-ink3">
-                    {w.live ? `checked in ${ago(w.lastSeenAgoSec)}` : `gone ${ago(w.lastSeenAgoSec)}`}
-                  </div>
+                  <div className="truncate text-[11px] leading-4 tabular-nums text-ink3">{w.live ? tr`checked in ${seen}` : tr`gone ${seen}`}</div>
                 </div>
               </li>
             );

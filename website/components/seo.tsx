@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import { ChevronRight } from "lucide-react";
 import type { Faq, Link, Table } from "@/content/types";
 import { SITE, appLink } from "@/lib/site";
@@ -19,7 +21,7 @@ export function Breadcrumbs({ items }: { items: Link[] }) {
     itemListElement: items.map((it, i) => ({ "@type": "ListItem", position: i + 1, name: it.label, item: `${SITE.url}${it.href}` })),
   };
   return (
-    <nav aria-label="Breadcrumb" className="text-xs text-ink3">
+    <nav aria-label={t(msg`Breadcrumb`)} className="text-xs text-ink3">
       <JsonLd data={data} />
       <ol className="flex flex-wrap items-center gap-1">
         {items.map((it, i) => (
@@ -41,7 +43,7 @@ export function Breadcrumbs({ items }: { items: Link[] }) {
   );
 }
 
-export function FaqSection({ faqs, heading = "Common questions" }: { faqs: Faq[]; heading?: string }) {
+export function FaqSection({ faqs, heading = t(msg`Common questions`) }: { faqs: Faq[]; heading?: string }) {
   const data = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -124,21 +126,27 @@ export function TryIt() {
   return (
     <aside className="card flex flex-col items-start gap-3 bg-acc-soft/40 p-6 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p className="text-[16px] font-bold">Try it: paste a link, get vertical clips</p>
+        <p className="text-[16px] font-bold">{t(msg`Try it: paste a link, get vertical clips`)}</p>
         <p className="mt-1 text-sm text-ink2">
-          Your first video is free on the hosted app, up to 60 minutes, with no card and nothing to install. Or{" "}
-          <a href="/#install" className="prose-link">
-            self-host it
-          </a>{" "}
-          with one command: no plan, no meter, no watermark.
+          {rich(
+            msg`Your first video is free on the hosted app, up to 60 minutes, with no card and nothing to install. Or <0>self-host it</0> with one command: no plan, no meter, no watermark.`,
+            {
+              0: (c) => (
+                <a href="/#install" className="prose-link">
+                  {c}
+                </a>
+              ),
+            },
+          )}
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
         <a href={appLink("/signup", "seo_try_it")} className="btn-primary">
-          Clip a video free
+          {t(msg`Clip a video free`)}
         </a>
         <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost">
-          <GitHubMark /> Star on GitHub
+          <GitHubMark />
+          {t(msg` Star on GitHub`)}
         </a>
       </div>
     </aside>
@@ -157,7 +165,9 @@ export function ArticleHeader({ crumbs, eyebrow, h1, intro, checked }: { crumbs:
         ))}
       </div>
       {checked && (
-        <p className="text-xs text-ink3">Pricing checked {checked} on each vendor's public page. Vendors change plans without notice; verify before you buy.</p>
+        <p className="text-xs text-ink3">
+          {rich(msg`Pricing checked <0/> on each vendor's public page. Vendors change plans without notice; verify before you buy.`, { 0: checked })}
+        </p>
       )}
     </header>
   );

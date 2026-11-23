@@ -8,7 +8,10 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Modal, MoreButton, ProgressBar, StatusText } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
-import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
+import { msg } from "@lingui/core/macro";
+import type { MessageDescriptor } from "@lingui/core";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { formatNumber, formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
 import { ClipBumpersDialog } from "./BumperField";
@@ -52,12 +55,12 @@ export interface ClipView {
   watermark?: boolean;
 }
 
-const RUBRIC: Array<{ key: keyof ClipScores; label: string }> = [
-  { key: "hook", label: "Hook" },
-  { key: "value", label: "Value" },
-  { key: "flow", label: "Flow" },
-  { key: "shareability", label: "Shareability" },
-  { key: "relevance", label: "Relevance" },
+const RUBRIC: Array<{ key: keyof ClipScores; label: MessageDescriptor }> = [
+  { key: "hook", label: msg`Hook` },
+  { key: "value", label: msg`Value` },
+  { key: "flow", label: msg`Flow` },
+  { key: "shareability", label: msg`Shareability` },
+  { key: "relevance", label: msg`Relevance` },
 ];
 
 export function ClipCard({
@@ -92,6 +95,7 @@ export function ClipCard({
   onSeek: () => void;
   onPlay: () => void;
 }) {
+  const { t, i18n } = useLingui();
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
@@ -105,11 +109,14 @@ export function ClipCard({
     del.mutateAsync({ id: clip.id }).then(
       (r) =>
         notifyDeleted({
-          items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
+          items: [{ kind: "clip", id: clip.id, title: clip.title || t`Untitled clip` }],
           restorable: r.restorable,
           storedBytes: r.storedBytes,
         }),
-      (err: Error) => toast.error(`Couldn’t delete the clip: ${err.message.slice(0, 120)}`),
+      (err: Error) => {
+        const reason = err.message.slice(0, 120);
+        toast.error(t`Couldn’t delete the clip: ${reason}`);
+      },
     );
   const isAdmin = useMe().data?.role === "admin";
   const done = clip.status === "done";
@@ -119,22 +126,24 @@ export function ClipCard({
   const copy = (): Promise<void> =>
     navigator.clipboard
       .writeText(clipText(clip))
-      .then(() => void toast("Title, caption + hashtags copied"))
-      .catch(() => void toast.error("Couldn’t copy"));
+      .then(() => void toast(t`Title, caption + hashtags copied`))
+      .catch(() => void toast.error(t`Couldn’t copy`));
   const meta = clipMeta(clip, { modeLabel: MODE_LABEL, projectHasIntro: !!projectIntroId, projectHasOutro: !!projectOutroId });
-  const fail = clip.status === "failed" ? summarizeError(clip.error ?? "Render failed", { admin: isAdmin }) : null;
+  const fail = clip.status === "failed" ? summarizeError(clip.error ?? t`Render failed`, { admin: isAdmin }) : null;
   const detail: { text: string; cls: string; title?: string | undefined } | null = fail
     ? { text: fail.summary, cls: "bg-err-soft", title: isAdmin ? (clip.error ?? undefined) : undefined }
     : clip.status === "pending"
-      ? { text: "Waiting for a render slot.", cls: "bg-warn-soft" }
+      ? { text: t`Waiting for a render slot.`, cls: "bg-warn-soft" }
       : clip.status === "preparing"
         ? {
-            text: clip.origin === "manual-ai" ? "AI is finding the best moment in your selection." : "AI is writing the title, hook and caption.",
+            text: clip.origin === "manual-ai" ? t`AI is finding the best moment in your selection.` : t`AI is writing the title, hook and caption.`,
             cls: "bg-acc-soft",
           }
         : null;
   const statusLabel =
-    clip.status === "rendering" ? `Rendering ${pct}%` : clip.status === "failed" ? "Render failed" : clip.status === "pending" ? "Queued" : undefined;
+    clip.status === "rendering" ? t`Rendering ${pct}%` : clip.status === "failed" ? t`Render failed` : clip.status === "pending" ? t`Queued` : undefined;
+  const number = clip.index + 1;
+  const rank = clip.scores?.rank;
   const statusKey = clip.status === "pending" ? "queued" : clip.status;
   const ghost =
     "inline-flex h-8 w-[5.25rem] items-center justify-center rounded-[8px] text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
@@ -150,19 +159,13 @@ export function ClipCard({
           <span
             className={`absolute start-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
           >
-            <input
-              type="checkbox"
-              checked={selected}
-              onChange={onToggleSelect}
-              aria-label={`Select clip ${clip.index + 1}`}
-              className="h-4 w-4 accent-[var(--acc)]"
-            />
+            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={t`Select clip ${number}`} className="h-4 w-4 accent-[var(--acc)]" />
           </span>
         )}
         <button
           onClick={onPlay}
           disabled={!clip.videoUrl}
-          aria-label="Play preview"
+          aria-label={t`Play preview`}
           className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default"
           style={{ aspectRatio: "9 / 16" }}
         >
@@ -189,17 +192,17 @@ export function ClipCard({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-start gap-2">
             <span className="pt-px font-mono text-xs text-ink3">#{clip.index + 1}</span>
-            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || "Untitled clip"}</h3>
+            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || t`Untitled clip`}</h3>
             {clip.watermark && done && (
-              <span className="shrink-0 pt-px font-mono text-[11px] text-ink3" title="Rendered with the watermark; a re-render after an upgrade removes it">
-                ◇ wm
+              <span className="shrink-0 pt-px font-mono text-[11px] text-ink3" title={t`Rendered with the watermark; a re-render after an upgrade removes it`}>
+                <Trans comment="short badge: rendered with the watermark">◇ wm</Trans>
               </span>
             )}
             {clip.score > 0 && (
               <button
                 onClick={() => setBd(!bdOpen)}
                 aria-expanded={bdOpen}
-                title="Why this score"
+                title={t`Why this score`}
                 className={`shrink-0 rounded-[8px] px-2 py-0.5 font-mono text-[13px] font-semibold ${bdOpen ? "bg-acc text-acc-ink" : "bg-acc-soft text-acc-text"}`}
               >
                 {Math.round(clip.score)}
@@ -207,15 +210,15 @@ export function ClipCard({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink2">
-            <button onClick={onSeek} className="font-mono text-ink2 hover:text-acc-text" title="Seek source to this clip">
+            <button onClick={onSeek} className="font-mono text-ink2 hover:text-acc-text" title={t`Seek source to this clip`}>
               {formatTime(clip.startSec)}–{formatTime(clip.endSec)}
             </button>
-            <span>{Math.round(clip.endSec - clip.startSec)}s</span>
+            <span>{formatNumber(Math.round(clip.endSec - clip.startSec))}s</span>
             <StatusText status={statusKey as never} label={statusLabel} />
           </div>
           {clip.origin && clip.origin !== "ai" && (
             <span className="w-max rounded-full bg-sunk px-2 py-px text-[11px] font-semibold text-ink2">
-              {clip.origin === "manual" ? "Your range" : "AI pick in your range"}
+              {clip.origin === "manual" ? t`Your range` : t`AI pick in your range`}
             </span>
           )}
           {clip.hook && <p className="text-[13px] text-ink2">“{clip.hook}”</p>}
@@ -236,7 +239,7 @@ export function ClipCard({
               const v = Math.round((clip.scores![r.key] as number) * 10);
               return (
                 <div key={r.key} className="grid grid-cols-[92px_1fr_28px] items-center gap-2 text-xs">
-                  <span className="text-ink2">{r.label}</span>
+                  <span className="text-ink2">{i18n._(r.label)}</span>
                   <div className="h-1.5 rounded-full bg-line">
                     <div className="h-full rounded-full bg-acc" style={{ width: `${v}%` }} />
                   </div>
@@ -245,11 +248,15 @@ export function ClipCard({
               );
             })
           ) : (
-            <span className="text-xs text-ink2">No breakdown stored for this clip.</span>
+            <span className="text-xs text-ink2">
+              <Trans>No breakdown stored for this clip.</Trans>
+            </span>
           )}
           {clip.reasoning && <p className="mt-0.5 text-xs leading-snug text-ink2">{clip.reasoning}</p>}
           {clip.scores?.rank ? (
-            <p className="text-[11px] text-ink3">Ranked #{clip.scores.rank} in head-to-head comparisons. A rubric score, not a view prediction.</p>
+            <p className="text-[11px] text-ink3">
+              <Trans>Ranked #{rank} in head-to-head comparisons. A rubric score, not a view prediction.</Trans>
+            </p>
           ) : null}
         </div>
       )}
@@ -262,7 +269,7 @@ export function ClipCard({
       <div className="-mx-1 flex h-8 items-center gap-0.5">
         {clip.status === "failed" && (
           <button className="btn-ink me-1 h-8 px-2.5 text-xs" disabled={busy} onClick={onRerender}>
-            ↻ Retry
+            <Trans>↻ Retry</Trans>
           </button>
         )}
         <Link
@@ -270,7 +277,7 @@ export function ClipCard({
           aria-disabled={clip.status === "preparing"}
           className={`${ghost} text-acc-text hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}
         >
-          Edit
+          <Trans>Edit</Trans>
         </Link>
         {done && clip.videoUrl ? (
           <DownloadClipButton
@@ -279,93 +286,104 @@ export function ClipCard({
             className={`${ghost} text-ink hover:bg-sunk`}
           />
         ) : (
-          <button className={`${ghost} text-ink`} disabled title="Available once the clip is rendered">
-            Download
+          <button className={`${ghost} text-ink`} disabled title={t`Available once the clip is rendered`}>
+            <Trans>Download</Trans>
           </button>
         )}
         <div className="flex-1" />
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <MoreButton aria-label={`More actions for clip ${clip.index + 1}`} />
+            <MoreButton aria-label={t`More actions for clip ${number}`} />
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[220px]">
               {/* grouped: what to post (text, links), files, how it renders, then the rest */}
               <DropdownMenu.Item className="menu-item" onSelect={() => void copy()}>
-                Copy text
+                <Trans>Copy text</Trans>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" onSelect={() => setPost(true)}>
-                Caption &amp; hashtags…
+                <Trans>Caption &amp; hashtags…</Trans>
               </DropdownMenu.Item>
               {onCopyLink && (
                 <DropdownMenu.Item className="menu-item" onSelect={onCopyLink}>
-                  Copy page link
+                  <Trans>Copy page link</Trans>
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item
                 className="menu-item"
                 disabled={!done}
-                title={done ? "A link anyone can download this clip from, without signing in" : "Available once the clip is rendered"}
+                title={done ? t`A link anyone can download this clip from, without signing in` : t`Available once the clip is rendered`}
                 onSelect={() => copyShareLink({ kind: "clip", clipId: clip.id })}
               >
-                Copy share link
+                <Trans>Copy share link</Trans>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" disabled={!done} onSelect={() => setShareOpen(true)}>
-                Share link options…
+                <Trans>Share link options…</Trans>
               </DropdownMenu.Item>
               {clip.hasCaptions && <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />}
               {clip.hasCaptions &&
-                (["srt", "vtt"] as const).map((f) => (
-                  <DropdownMenu.Item key={f} className="menu-item" asChild>
-                    <a href={`/api/clips/${clip.id}/captions.${f}`} download>
-                      Download captions ({f.toUpperCase()})
-                    </a>
-                  </DropdownMenu.Item>
-                ))}
+                (["srt", "vtt"] as const).map((f) => {
+                  const format = f.toUpperCase();
+                  return (
+                    <DropdownMenu.Item key={f} className="menu-item" asChild>
+                      <a href={`/api/clips/${clip.id}/captions.${f}`} download>
+                        <Trans>Download captions ({format})</Trans>
+                      </a>
+                    </DropdownMenu.Item>
+                  );
+                })}
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               <DropdownMenu.Item className="menu-item" disabled={working || busy || clip.status === "preparing"} onSelect={onRerender}>
-                Re-render
+                <Trans>Re-render</Trans>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setBumpersOpen(true)}>
-                Intro and outro…
+                <Trans>Intro and outro…</Trans>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setTemplateOpen(true)}>
-                Layer template…
+                <Trans>Layer template…</Trans>
               </DropdownMenu.Item>
               {clip.status === "failed" && (
                 <DropdownMenu.Item className="menu-item" onSelect={() => openReport({ projectId, clipId: clip.id })}>
-                  Report an issue…
+                  <Trans>Report an issue…</Trans>
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               {/* a soft delete: it happens at once and the toast's Undo brings it back, so no dialog first */}
               <DropdownMenu.Item className="menu-item-danger" disabled={del.isPending} onSelect={deleteClip}>
-                Delete clip
+                <Trans>Delete clip</Trans>
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
 
-      <Modal open={postOpen} onOpenChange={setPost} title={`Clip ${clip.index + 1}: caption & hashtags`} width={440}>
-        <Dialog.Description className="sr-only">The caption and hashtags to post with this clip.</Dialog.Description>
+      <Modal open={postOpen} onOpenChange={setPost} title={t`Clip ${number}: caption & hashtags`} width={440}>
+        <Dialog.Description className="sr-only">
+          <Trans>The caption and hashtags to post with this clip.</Trans>
+        </Dialog.Description>
         <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
           <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-3 text-[13px] leading-snug">
             <div className="font-semibold">{clip.title}</div>
-            <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
+            <div>
+              {clip.caption || (
+                <span className="text-ink3">
+                  <Trans>No caption</Trans>
+                </span>
+              )}
+            </div>
             {tags && <div className="text-xs text-acc-text">{tags}</div>}
           </div>
         </ScrollArea>
         <div className="flex shrink-0 justify-end gap-2">
           <button className="btn-ghost" onClick={() => setPost(false)}>
-            Close
+            <Trans>Close</Trans>
           </button>
           <button className="btn-ink" onClick={() => void copy().then(() => setPost(false))}>
-            Copy
+            <Trans>Copy</Trans>
           </button>
         </div>
       </Modal>
-      {shareOpen && <ShareLinkDialog open={shareOpen} onOpenChange={setShareOpen} target={{ kind: "clip", clipId: clip.id }} what="this clip" />}
+      {shareOpen && <ShareLinkDialog open={shareOpen} onOpenChange={setShareOpen} target={{ kind: "clip", clipId: clip.id }} what={t`this clip`} />}
       <ClipBumpersDialog
         open={bumpersOpen}
         onOpenChange={setBumpersOpen}

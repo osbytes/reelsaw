@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro";
 import { Skeleton, SkeletonRegion } from "./ui";
 
 const W = ["w-11/12", "w-4/5", "w-full", "w-2/3", "w-5/6", "w-3/4"];
@@ -70,7 +71,7 @@ export function ProjectPageSkeleton({ compact, width }: { compact: boolean; widt
     </div>
   );
   return (
-    <SkeletonRegion label="Loading project…" className="flex min-h-0 flex-1 flex-col">
+    <SkeletonRegion label={t`Loading project…`} className="flex min-h-0 flex-1 flex-col">
       {header}
       {compact ? (
         <>
@@ -93,7 +94,7 @@ export function ProjectPageSkeleton({ compact, width }: { compact: boolean; widt
 /** The clip editor while it loads: video box, timeline bar and the side panel's rows. */
 export function ClipEditorSkeleton() {
   return (
-    <SkeletonRegion label="Loading clip…" className="flex min-h-0 flex-1 flex-col">
+    <SkeletonRegion label={t`Loading clip…`} className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
         <Skeleton className="h-8 w-8 rounded-[8px]" />
         <Skeleton className="h-5 w-1/3" />

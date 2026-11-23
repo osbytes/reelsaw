@@ -5,7 +5,12 @@
  * - `<file>.mp4` / `.jpg`: the first 8 s of the rendered clip (540×960) and a poster frame;
  * - `<file>-before.mp4` / `.jpg`: the same seconds of the 16:9 source (720×406), uncut.
  * website/README.md ("The demo clips") has the ffmpeg lines.
+ *
+ * The hooks (burned into the clips), the model's reasons and the detector's reasons are the run's own output and stay
+ * as it wrote them; the page's own words around them are in the catalogue.
  */
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 
 export type DemoSource = {
   /** What the video is, in a few words ("podcast", "webinar"). */
@@ -47,7 +52,7 @@ export type DemoReframe = {
 };
 
 const PODCAST: DemoSource = {
-  kind: "podcast",
+  kind: t(msg`podcast`),
   title: "We Started a Podcast with Zero Experience. Here's What 1 Year Taught Us",
   author: "Truth and Time Podcast",
   url: "https://www.youtube.com/watch?v=8-VaZrVcHXY",
@@ -56,7 +61,7 @@ const PODCAST: DemoSource = {
 };
 
 const TWO_SHOT: DemoSource = {
-  kind: "podcast",
+  kind: t(msg`podcast`),
   title: "When is it Time to Quit?",
   author: "Stand Show",
   url: "https://www.youtube.com/watch?v=6vA17_NU9ts",
@@ -65,7 +70,7 @@ const TWO_SHOT: DemoSource = {
 };
 
 const WEBINAR: DemoSource = {
-  kind: "webinar",
+  kind: t(msg`webinar`),
   title: "Webinar: Building for Builders",
   author: "Product School",
   url: "https://www.youtube.com/watch?v=6k1cHhGyH78",
@@ -119,7 +124,7 @@ export const HERO_ORDER = [2, 4, 8, 1];
 export const REFRAMES: DemoReframe[] = [
   {
     layout: "Face",
-    title: "Two people, one wide shot",
+    title: t(msg`Two people, one wide shot`),
     reason: "active speaker right, then left at 0:09",
     file: "speaker",
     source: TWO_SHOT,
@@ -133,14 +138,14 @@ export const REFRAMES: DemoReframe[] = [
   },
   {
     layout: "Face",
-    title: "A camera on each speaker",
+    title: t(msg`A camera on each speaker`),
     reason: "face in 100% of frames, 29% tall",
     file: "pick-1",
     source: PODCAST,
   },
   {
     layout: "Stack",
-    title: "Slides with a webcam tile",
+    title: t(msg`Slides with a webcam tile`),
     reason: "face too small (13% of frame height)",
     file: "stack",
     source: WEBINAR,

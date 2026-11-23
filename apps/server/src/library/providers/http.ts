@@ -4,21 +4,32 @@
  * logged without their query: several providers take the key there.
  */
 import type { Logger } from "../../log.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { type MessageDescriptor, t } from "../../i18n.js";
 
 export const REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_COOLDOWN_MS = 60_000;
 
 /** The provider asked us to stop for a while; the message is a sentence for the panel. */
 export class ProviderUnavailable extends Error {
+  readonly descriptor: MessageDescriptor;
   constructor(
     public readonly provider: string,
     public readonly until: number,
   ) {
-    super(`${provider} is rate limiting this server; try again in a minute.`);
+    const descriptor = msg({ id: "library_provider.rate_limited", message: msg`${{ provider }} is rate limiting this server; try again in a minute.` });
+    super(t(descriptor));
+    this.descriptor = descriptor;
   }
 }
-/** The provider answered, but not with success. */
-export class ProviderError extends Error {}
+/** The provider answered, but not with success: a sentence in the requester's locale, with its stable code (`descriptor`). */
+export class ProviderError extends Error {
+  readonly descriptor: MessageDescriptor;
+  constructor(descriptor: MessageDescriptor) {
+    super(t(descriptor));
+    this.descriptor = descriptor;
+  }
+}
 
 export interface ProviderHttp {
   json(provider: string, url: string | URL, init?: { headers?: Record<string, string> }): Promise<unknown>;
@@ -44,13 +55,19 @@ export function createProviderHttp(deps: { fetch?: typeof fetch | undefined; ver
       const until = unavailableUntil(provider);
       if (until) throw new ProviderUnavailable(provider, until);
       const u = new URL(url);
-      if (u.protocol !== "https:") throw new ProviderError(`${provider}: only https endpoints are used`);
+      if (u.protocol !== "https:")
+        throw new ProviderError(msg({ id: "library_provider.only_https_endpoints_used", message: msg`${{ provider }}: only https endpoints are used` }));
       const res = await doFetch(u, {
         redirect: "follow",
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: { accept: "application/json", "user-agent": `reelsaw/${deps.version}`, ...init?.headers },
       }).catch((err: unknown) => {
-        throw new ProviderError(`${provider} did not answer (${err instanceof Error ? err.message : "network error"})`);
+        throw new ProviderError(
+          msg({
+            id: "library_provider.no_answer",
+            message: msg`${{ provider }} did not answer (${{ reason: err instanceof Error ? err.message : "network error" }})`,
+          }),
+        );
       });
       const limits: Record<string, string> = {};
       res.headers.forEach((v, k) => {
@@ -74,10 +91,18 @@ export function createProviderHttp(deps: { fetch?: typeof fetch | undefined; ver
         throw new ProviderUnavailable(provider, resumeAt);
       }
       if (res.status === 401 || res.status === 403)
-        throw new ProviderError(`${provider} refused the key (HTTP ${res.status}); check it under Settings → System.`);
-      if (!res.ok) throw new ProviderError(`${provider} answered HTTP ${res.status}`);
+        throw new ProviderError(
+          msg({
+            id: "library_provider.refused_key_http_check_under",
+            message: msg`${{ provider }} refused the key (HTTP ${{ status: res.status }}); check it under Settings → System.`,
+          }),
+        );
+      if (!res.ok)
+        throw new ProviderError(msg({ id: "library_provider.answered_http", message: msg`${{ provider }} answered HTTP ${{ status: res.status }}` }));
       return res.json().catch(() => {
-        throw new ProviderError(`${provider} answered with something that is not JSON`);
+        throw new ProviderError(
+          msg({ id: "library_provider.answered_something_json", message: msg`${{ provider }} answered with something that is not JSON` }),
+        );
       });
     },
   };
@@ -103,6 +128,9 @@ export const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) 
 export const extOf = (url: string, def: string) => /\.([a-z0-9]{2,5})$/i.exec(new URL(url).pathname)?.[1]?.toLowerCase() ?? def;
 /** The key a provider needs, or a sentence saying where to set it. */
 export function needKey(v: string | undefined, name: string): string {
-  if (!v) throw new ProviderError(`${name} is not set: an admin adds it under Settings → System → Library.`);
+  if (!v)
+    throw new ProviderError(
+      msg({ id: "library_provider.set_admin_adds_under_settings", message: msg`${{ name }} is not set: an admin adds it under Settings → System → Library.` }),
+    );
   return v;
 }

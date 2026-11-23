@@ -9,12 +9,10 @@
   "a11y/useSemanticElements": 16,
   "complexity/noBannedTypes": 1,
   "correctness/useExhaustiveDependencies": 126,
-  "i18n/jsx-text": 862,
-  "i18n/string-props": 399,
   "knip/exports": 313,
   "knip/types": 218,
   "performance/noImgElement": 3,
-  "style/noNonNullAssertion": 2029,
+  "style/noNonNullAssertion": 2026,
   "suspicious/noArrayIndexKey": 58,
   "suspicious/noConfusingVoidType": 1,
   "suspicious/noExplicitAny": 10

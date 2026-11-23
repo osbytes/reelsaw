@@ -87,9 +87,9 @@ describe("generic helpers are shared, not local", () => {
     assert.equal(formatMb(1536), "1.5 GB");
     assert.equal(formatMb(512), "512 MB");
     assert.equal(formatMb(0), "0 MB");
-    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true }), "18 December 2026");
-    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true, year: false }), "18 December");
-    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true, month: "short" }), "18 Dec 2026");
+    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true }), "December 18, 2026");
+    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true, year: false }), "December 18");
+    assert.equal(formatDay("2026-12-18T23:30:00Z", { utc: true, month: "short" }), "Dec 18, 2026");
     assert.equal(utcDay("2026-12-18T23:30:00Z"), "2026-12-18");
   });
 });

@@ -5,7 +5,6 @@
  */
 import { and, asc, desc, sql, type SQL } from "drizzle-orm";
 import type { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import {
   ABUSE_FLAGS,
   type AbuseFlag,
@@ -29,6 +28,8 @@ import { decodeCursor, pageOf } from "./pagination.js";
 import { allTimeUsageSql, usageByUser } from "./quota.js";
 import type { UserFilter, UserStatus, userGroupsInput, userListInput } from "./accounts-schema.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "./search.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "./i18n.js";
 
 const U = schema.user;
 
@@ -201,7 +202,8 @@ export const USER_SORT_SQL: Record<UserSortKey, { expr: SQL; value: (v: string) 
  * on every surface (the CLI, tRPC and list_users share this).
  */
 function orderOf(input: { sort?: UserSortKey | undefined; dir?: SortDir | undefined } | undefined) {
-  if (input?.dir && !input.sort) throw new TRPCError({ code: "BAD_REQUEST", message: "dir needs sort: say which column to order by." });
+  if (input?.dir && !input.sort)
+    throw new AppError("BAD_REQUEST", msg({ id: "list.dir_needs_sort", message: "dir needs sort: say which column to order by." }));
   return input?.sort ? { key: input.sort, dir: input.dir ?? userSortFirstDir(input.sort), ...USER_SORT_SQL[input.sort] } : null;
 }
 
@@ -229,12 +231,12 @@ export async function listUsers(svc: Services, input: z.input<typeof userListInp
   if (order && input?.cursor) {
     // the cursor names its sort, so one from another order is refused instead of misread
     const c = decodeCursor(input.cursor, 4);
-    if (!c || c[0] !== order.key || c[1] !== order.dir) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
+    if (!c || c[0] !== order.key || c[1] !== order.dir) throw new AppError("BAD_REQUEST", msg({ id: "list.invalid_cursor", message: "Invalid cursor" }));
     const at = sql`(${order.value(String(c[2]))}, ${String(c[3])})`;
     after = order.dir === "asc" ? sql`(${order.expr}, ${U.id}) > ${at}` : sql`(${order.expr}, ${U.id}) < ${at}`;
   } else if (!order && !ws.length && input?.cursor) {
     const c = decodeCursor(input.cursor, 3);
-    if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
+    if (!c) throw new AppError("BAD_REQUEST", msg({ id: "list.invalid_cursor", message: "Invalid cursor" }));
     after = sql`(${approvedRank} > ${Number(c[0])} or (${approvedRank} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
   }
   // a search without a sort is its best matches, in one page; with a sort, every match pages in that order

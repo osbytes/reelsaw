@@ -8,7 +8,6 @@ import { checkManualClipQuota } from "../quota.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import {
   MAX_CLIP_LAYERS,
   MAX_CLIP_SECONDS,
@@ -31,8 +30,14 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { cleanLayers } from "../library/layers.js";
 import { syncClipRefs, syncClipsRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { byOwner, findProject, NO_CLIP, type Actor } from "../projects/service.js";
+import { byOwner, findProject, noClip, type Actor } from "../projects/service.js";
 import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/service.js";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
+
+const clipTooShort = () => msg({ id: "clip.too_short", message: msg`A clip must be at least ${{ seconds: MIN_CLIP_SECONDS }} seconds` });
+const clipTooLong = () => msg({ id: "clip.too_long", message: msg`A clip can be at most ${{ minutes: MAX_CLIP_SECONDS / 60 }} minutes` });
 
 /**
  * A clip's end must be inside what was processed: the video, or the start of a partly processed one (past it there is no
@@ -40,23 +45,34 @@ import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/serv
  * not: the transcript's covered end (`transcripts.covered_sec`) bounds it too. The one bound check for every clip edit
  * and new clip.
  */
-async function assertWithinProcessed(db: Db, p: { id: string; durationSec: number | null; sourceLimitSec: number | null }, endSec: number, pastVideo: string) {
+async function assertWithinProcessed(
+  db: Db,
+  p: { id: string; durationSec: number | null; sourceLimitSec: number | null },
+  endSec: number,
+  pastVideo: MessageDescriptor,
+) {
   const limit = processedEndSec(p);
   const [t] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   const covered = t?.coveredSec ?? null;
   const end = covered !== null && (limit === null || covered < limit) ? covered : limit;
   if (end === null || endSec <= end + 0.5) return;
   if (covered !== null && limit !== null && covered < limit && endSec <= limit + 0.5)
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: `Reelsaw is still transcribing minutes ${Math.round(covered / 60)}–${Math.round(limit / 60)} of this video. Use that part once it is done.`,
-    });
+    throw new AppError(
+      "CONFLICT",
+      msg({
+        id: "clip.still_transcribing",
+        message: msg`Reelsaw is still transcribing minutes ${{ from: Math.round(covered / 60) }}–${{ to: Math.round(limit / 60) }} of this video. Use that part once it is done.`,
+      }),
+    );
   if (p.durationSec !== null && end < p.durationSec - 0.5)
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Reelsaw has processed the first ${Math.round(end / 60)} minutes of this video so far. Clip the rest of the video to use this part.`,
-    });
-  throw new TRPCError({ code: "BAD_REQUEST", message: pastVideo });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({
+        id: "clip.processed_so_far",
+        message: msg`Reelsaw has processed the first ${{ minutes: Math.round(end / 60) }} minutes of this video so far. Clip the rest of the video to use this part.`,
+      }),
+    );
+  throw new AppError("BAD_REQUEST", pastVideo);
 }
 
 /** Every asset id is one of the owner's library (an id the clip already uses stays valid even if it was removed since). */
@@ -65,7 +81,7 @@ export async function assertOwnedBumpers(
   userId: string,
   ids: Array<string | null | undefined>,
   alreadyUsed: Array<string | null | undefined> = [],
-  what = "intro or outro",
+  what: "bumper" | "library item" = "bumper",
 ) {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
@@ -73,7 +89,13 @@ export async function assertOwnedBumpers(
     .select({ id: schema.assets.id })
     .from(schema.assets)
     .where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
-  if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
+  if (rows.length !== want.length)
+    throw new AppError(
+      "NOT_FOUND",
+      what === "bumper"
+        ? msg({ id: "library.bumper_not_found", message: "That intro or outro is not in your library" })
+        : msg({ id: "library.layer_item_not_found", message: "That library item is not in your library" }),
+    );
 }
 
 /**
@@ -91,7 +113,7 @@ export async function findClip(u: UnitOfWork, actor: Actor, clipId: string): Pro
     .from(schema.clips)
     .where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt), mine))
     .for("update");
-  if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
+  if (!clip) throw new AppError("NOT_FOUND", noClip());
   return { clip, project: await findProject(u.db, actor, clip.projectId, { deleted: false }) };
 }
 
@@ -108,7 +130,7 @@ export async function readClip(db: Db, actor: Actor, clipId: string): Promise<sc
     .select()
     .from(schema.clips)
     .where(and(eq(schema.clips.id, clipId), mine));
-  if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
+  if (!clip) throw new AppError("NOT_FOUND", noClip());
   return clip;
 }
 
@@ -154,9 +176,9 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     const endSec = input.endSec ?? c.endSec;
     const boundsChanged = startSec !== c.startSec || endSec !== c.endSec;
     if (boundsChanged) {
-      if (endSec - startSec < MIN_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip must be at least ${MIN_CLIP_SECONDS} seconds` });
-      if (endSec - startSec > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
-      await assertWithinProcessed(u.db, p, endSec, "Clip ends after the video");
+      if (endSec - startSec < MIN_CLIP_SECONDS) throw new AppError("BAD_REQUEST", clipTooShort());
+      if (endSec - startSec > MAX_CLIP_SECONDS) throw new AppError("BAD_REQUEST", clipTooLong());
+      await assertWithinProcessed(u.db, p, endSec, msg({ id: "clip.ends_after_video", message: "Clip ends after the video" }));
     }
     const titleChanged = input.title !== undefined && input.title !== c.title;
     const captionChanged = input.caption !== undefined && input.caption !== c.caption;
@@ -237,7 +259,7 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     const rerendered = needsRerender && input.rerender !== false && (await requestRender(svc, u, p.id, c.id)) !== null;
     const [fresh] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id));
     const clip = fresh ?? row;
-    if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
+    if (!clip) throw new AppError("NOT_FOUND", noClip());
     if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, clip);
     if (byOwner(actor, p)) await recordDecisions(svc, u, p, async () => [await clipEditDecision(u.db, p.id, c, clip, changed)].filter((d) => d !== null));
     return { clip, changed, needsRerender, rerendered };
@@ -257,18 +279,19 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
   const len = input.endSec - input.startSec;
   const ai = input.mode === "ai";
   if (len < (ai ? 8 : MIN_CLIP_SECONDS))
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: ai ? "Select at least 8 seconds for the AI to search" : `A clip must be at least ${MIN_CLIP_SECONDS} seconds`,
-    });
-  if (!ai && len > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
+    throw new AppError(
+      "BAD_REQUEST",
+      ai ? msg({ id: "clip.ai_selection_too_short", message: "Select at least 8 seconds for the AI to search" }) : clipTooShort(),
+    );
+  if (!ai && len > MAX_CLIP_SECONDS) throw new AppError("BAD_REQUEST", clipTooLong());
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
     // the owner's allowance of clips of their own (Free: one), under their quota lock; an admin acting on it counts too
     await checkManualClipQuota(u.db, svc.settings.get(), p.userId, svc.entitlements);
-    await assertWithinProcessed(u.db, p, input.endSec, "Selection ends after the video");
+    await assertWithinProcessed(u.db, p, input.endSec, msg({ id: "clip.selection_ends_after_video", message: "Selection ends after the video" }));
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
-    if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });
+    if (!transcript || !p.sourceKey)
+      throw new AppError("PRECONDITION_FAILED", msg({ id: "clip.needs_transcript", message: "The video must be downloaded and transcribed first" }));
     const existing = await u.db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id), columns: { index: true } });
     const index = existing.reduce((m, c) => Math.max(m, c.index + 1), 0);
     const [inserted] = await u.db
@@ -337,7 +360,8 @@ export async function setClipBumpers(svc: Services, actor: Actor, input: ClipBum
       .where(and(eq(schema.clips.projectId, p.id), inArray(schema.clips.id, input.clipIds), isNull(schema.clips.deletedAt)))
       .orderBy(schema.clips.id)
       .for("update"); // id order, like lockProjectClips; replaced clips are not edited
-    if (clips.length !== new Set(input.clipIds).size) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
+    if (clips.length !== new Set(input.clipIds).size)
+      throw new AppError("NOT_FOUND", msg({ id: "clip.some_gone", message: "Some of those clips no longer exist" }));
     await assertOwnedBumpers(
       u.db,
       p.userId,
@@ -406,7 +430,7 @@ export async function rerenderClips(svc: Services, actor: Actor, input: Rerender
       const r = await requestRenders(svc, u, p.id, input.clipIds);
       return { ok: true as const, ...r, renderQueued: r.rerendered > 0 };
     } catch (e) {
-      if (e instanceof RenderManyMissing) throw new TRPCError({ code: "NOT_FOUND", message: e.message });
+      if (e instanceof RenderManyMissing) throw new AppError("NOT_FOUND", msg({ id: "clip.some_gone", message: "Some of those clips no longer exist" }));
       throw e;
     }
   });

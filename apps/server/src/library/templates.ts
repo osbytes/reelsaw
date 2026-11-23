@@ -7,7 +7,6 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   MAX_CLIP_LAYERS,
@@ -37,6 +36,8 @@ import { syncClipsRefs } from "./refs.js";
 import { cleanLayers } from "./layers.js";
 import { LIST_LIMIT_DEFAULT, pageOf, sortedKeyset, type SortColumn } from "../pagination.js";
 import { near, setSearchThreshold, words } from "../search.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 /** Removed templates stay restorable this long; after that they drop off the list (the row remains until purge). */
 export const TEMPLATE_RESTORE_DAYS = 30;
@@ -86,10 +87,13 @@ export function publicTemplate(t: schema.LayerTemplate) {
 }
 
 const notFound = () =>
-  new TRPCError({
-    code: "NOT_FOUND",
-    message: `No such layer template. A removed template can be restored for ${RESTORE_DAYS} days (restore_layer_template).`,
-  });
+  new AppError(
+    "NOT_FOUND",
+    msg({
+      id: "template.no_such_layer_template_removed",
+      message: msg`No such layer template. A removed template can be restored for ${{ restoreDays: RESTORE_DAYS }} days (restore_layer_template).`,
+    }),
+  );
 
 /** Each sort of the Templates list as one non-null SQL value; an account's templates are few, read through `layer_templates_user_idx`. */
 const T_SORT: Record<TemplateSortKey, SortColumn> = {
@@ -167,16 +171,27 @@ async function assertTemplateAssets(db: Db, userId: string, layers: TemplateLaye
   for (const l of layers) {
     if (l.kind === "text") continue;
     const kind = kinds.get(l.assetId);
-    if (!kind) throw new TRPCError({ code: "NOT_FOUND", message: `Layer “${l.id}”: that library item is not in your library` });
+    if (!kind)
+      throw new AppError(
+        "NOT_FOUND",
+        msg({ id: "template.layer_library_item_not_library", message: msg`Layer “${{ id: l.id }}”: that library item is not in your library` }),
+      );
     if (l.kind === "audio" && kind !== "audio")
-      throw new TRPCError({ code: "BAD_REQUEST", message: `Layer “${l.id}”: a sound layer needs an audio file, not a ${kind}` });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "template.layer_sound_layer_needs_audio", message: msg`Layer “${{ id: l.id }}”: a sound layer needs an audio file, not a ${{ kind }}` }),
+      );
     if (l.kind === "asset" && kind === "audio")
-      throw new TRPCError({ code: "BAD_REQUEST", message: `Layer “${l.id}”: that library item is a sound; use an audio layer` });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "template.layer_library_item_sound_use", message: msg`Layer “${{ id: l.id }}”: that library item is a sound; use an audio layer` }),
+      );
   }
   for (const [slot, id] of slots) {
     const kind = kinds.get(id);
-    if (!kind) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
-    if (kind === "audio") throw new TRPCError({ code: "BAD_REQUEST", message: `An ${slot} is a video or an image, not a sound` });
+    if (!kind) throw new AppError("NOT_FOUND", msg({ id: "template.not_library", message: msg`That ${{ slot }} is not in your library` }));
+    if (kind === "audio")
+      throw new AppError("BAD_REQUEST", msg({ id: "template.video_image_not_sound", message: msg`An ${{ slot }} is a video or an image, not a sound` }));
   }
 }
 
@@ -187,7 +202,7 @@ const storedBumpers = (b: TemplateBumpers | null | undefined): ClipBumpers | nul
 function checkTemplateLayers(layers: TemplateLayer[]) {
   const seen = new Set<string>();
   for (const l of layers) {
-    if (seen.has(l.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Layer id “${l.id}” is used twice` });
+    if (seen.has(l.id)) throw new AppError("BAD_REQUEST", msg({ id: "template.layer_id_used_twice", message: msg`Layer id “${{ id: l.id }}” is used twice` }));
     seen.add(l.id);
   }
 }
@@ -285,9 +300,13 @@ export async function purgeLayerTemplate(svc: Services, userId: string, id: stri
       .where(and(eq(schema.layerTemplates.id, id), eq(schema.layerTemplates.userId, userId)))
       .for("update");
     if (!row) throw notFound();
-    if (!row.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only templates already in Deleted can be deleted forever." });
+    if (!row.deletedAt)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "template.remove_first_only_templates_already", message: "Remove it first. Only templates already in Deleted can be deleted forever." }),
+      );
     await u.db.delete(schema.layerTemplates).where(eq(schema.layerTemplates.id, id));
-    return { ok: true as const, message: `Deleted “${row.name}” forever.` };
+    return { ok: true as const, message: t(msg({ id: "template.purged", message: msg`Deleted “${{ name: row.name }}” forever.` })) };
   });
 }
 
@@ -311,7 +330,7 @@ export async function layerTemplateFromClip(svc: Services, userId: string, input
     .from(schema.clips)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
     .where(and(eq(schema.clips.id, input.clipId), isNull(schema.clips.deletedAt), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
-  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+  if (!row) throw new AppError("NOT_FOUND", msg({ id: "template.no_such_clip", message: "No such clip" }));
   const layers = templateFromLayers(clipLayers(row), row);
   const r = resolveClipBumpers(row.settings ?? {}, row);
   const bumpers: ClipBumpers = {
@@ -319,7 +338,10 @@ export async function layerTemplateFromClip(svc: Services, userId: string, input
     ...(r.outroId ? { outro: r.outroId, ...(r.outroSec !== undefined ? { outroSec: r.outroSec } : {}) } : {}),
   };
   if (!layers.length && !templateBumperSlots(bumpers).length)
-    throw new TRPCError({ code: "BAD_REQUEST", message: "This clip has no layers, intro or outro to save as a template" });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "template.clip_no_layers_intro_outro", message: "This clip has no layers, intro or outro to save as a template" }),
+    );
   return createLayerTemplate(svc, userId, { name: input.name, layers, bumpers });
 }
 
@@ -352,7 +374,7 @@ export async function applyLayerTemplate(
       .select({ id: schema.projects.id })
       .from(schema.projects)
       .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
-    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such project" });
+    if (!p) throw new AppError("NOT_FOUND", msg({ id: "template.no_such_project", message: "No such project" }));
     const t = await getLayerTemplate(u.db, userId, input.templateId);
     await assertTemplateAssets(u.db, userId, t.layers, t.bumpers);
     const slots = templateBumperSlots(t.bumpers);
@@ -372,7 +394,8 @@ export async function applyLayerTemplate(
       .where(and(eq(schema.clips.projectId, p.id), isNull(schema.clips.deletedAt), ids ? inArray(schema.clips.id, ids) : undefined))
       .orderBy(schema.clips.id)
       .for("update");
-    if (ids && clips.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
+    if (ids && clips.length !== ids.length)
+      throw new AppError("NOT_FOUND", msg({ id: "template.some_those_clips_no_longer", message: "Some of those clips no longer exist" }));
     const result: ApplyResult = { updated: 0, rerendered: 0, skipped: [], layersSkipped: 0, bumpers: slots };
     const touched: string[] = [];
     const now = new Date();
@@ -385,10 +408,13 @@ export async function applyLayerTemplate(
       result.layersSkipped += resolved.skipped.length;
       const next = input.mode === "add" ? [...clipLayers(c), ...resolved.layers] : resolved.layers;
       if (next.length > MAX_CLIP_LAYERS)
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Clip ${c.id} would have ${next.length} layers; a clip can have at most ${MAX_CLIP_LAYERS}. Use mode "replace" or remove some layers first.`,
-        });
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({
+            id: "template.clip_would_layers_clip_most",
+            message: msg`Clip ${{ id: c.id }} would have ${{ length: next.length }} layers; a clip can have at most ${{ maxClipLayers: MAX_CLIP_LAYERS }}. Use mode "replace" or remove some layers first.`,
+          }),
+        );
       const cleaned = cleanLayers(next, c) ?? [];
       const bumpers = slots.length ? { bumpers: mergeTemplateBumpers(c.bumpers, t.bumpers) } : {};
       await u.db

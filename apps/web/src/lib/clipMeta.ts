@@ -1,8 +1,10 @@
 /**
  * The one muted line under a clip card ("Auto · Follow speaker · intro 3 s · outro 3 s · 1.9 s trimmed") and
- * the text a clip copies to the clipboard. Pure and dependency-free so a test can load it without React.
+ * the text a clip copies to the clipboard. Pure and React-free so a test can load it without the app: the words are
+ * catalogue messages (explicit ids, marked for extraction) rendered through the runtime i18n, not the build macros.
  */
-import { plural } from "@reelsaw/shared";
+import { formatNumber } from "@reelsaw/shared";
+import { tr } from "./tr";
 
 export interface MetaClip {
   layout: string | null;
@@ -47,7 +49,7 @@ export function pieceKind(s: { layout: string; inset?: unknown; focus?: string |
 function framing(c: MetaClip, labels: Record<string, string>): string | null {
   const segs = c.layoutSegments ?? [];
   const forced = (c.layoutSections?.length ?? 0) > 0 || (!!c.layoutOverride && c.layoutOverride !== "auto");
-  const auto = forced ? "" : "Auto · ";
+  const auto = forced ? "" : `${tr(/*i18n*/ { id: "clipmeta.auto", message: "Auto" })} · `;
   if (!segs.length) return c.layout ? `${auto}${labels[c.layout] ?? c.layout}` : null;
   const names: string[] = [];
   for (const s of segs) {
@@ -55,22 +57,30 @@ function framing(c: MetaClip, labels: Record<string, string>): string | null {
     const n = labels[k] ?? k;
     if (names.at(-1) !== n) names.push(n);
   }
-  return `${auto}${names.join(" → ")}${forced ? " (set)" : ""}`;
+  return `${auto}${names.join(" → ")}${forced ? ` ${tr(/*i18n*/ { id: "clipmeta.set", message: "(set)" })}` : ""}`;
 }
 
-const secs = (n: number | undefined) => (n && n > 0 ? ` ${Number.isInteger(n) ? n : n.toFixed(1)} s` : "");
+const secs = (n: number | undefined) =>
+  n && n > 0 ? ` ${formatNumber(n, Number.isInteger(n) ? {} : { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s` : "";
+const slotWord = (slot: "intro" | "outro") =>
+  slot === "intro" ? tr(/*i18n*/ { id: "clipmeta.intro", message: "intro" }) : tr(/*i18n*/ { id: "clipmeta.outro", message: "outro" });
 
 function bumperPart(c: MetaClip, slot: "intro" | "outro", projectHas: boolean): { text: string; skipped: boolean } | null {
   const own = c.bumpers?.[slot];
   const d = c.diagnostics?.bumpers;
-  if (d?.skipped?.some((s) => s.startsWith(slot))) return { text: `▲ ${slot} skipped`, skipped: true };
+  const word = slotWord(slot);
+  if (d?.skipped?.some((s) => s.startsWith(slot)))
+    return { text: `▲ ${tr(/*i18n*/ { id: "clipmeta.skipped", message: "{word} skipped", values: { word } })}`, skipped: true };
   const rendered = slot === "intro" ? d?.introSec : d?.outroSec;
   const own_sec = slot === "intro" ? c.bumpers?.introSec : c.bumpers?.outroSec;
-  if (own === null) return projectHas ? { text: `no ${slot}`, skipped: false } : null;
-  if (typeof own === "string") return { text: `${slot}${secs(d ? rendered : own_sec)} (this clip)`, skipped: false };
+  if (own === null) return projectHas ? { text: tr(/*i18n*/ { id: "clipmeta.none", message: "no {word}", values: { word } }), skipped: false } : null;
+  if (typeof own === "string") {
+    const length = secs(d ? rendered : own_sec);
+    return { text: tr(/*i18n*/ { id: "clipmeta.own", message: "{word}{length} (this clip)", values: { word, length } }), skipped: false };
+  }
   // inherited: what the last render attached, else the project's choice (length unknown until rendered)
-  if (d) return rendered ? { text: `${slot}${secs(rendered)}`, skipped: false } : null;
-  return projectHas ? { text: slot, skipped: false } : null;
+  if (d) return rendered ? { text: `${word}${secs(rendered)}`, skipped: false } : null;
+  return projectHas ? { text: word, skipped: false } : null;
 }
 
 export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
@@ -80,7 +90,7 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
   const f = framing(c, o.modeLabel);
   if (f) {
     parts.push(f);
-    long.push(`Framing: ${f}`);
+    long.push(tr(/*i18n*/ { id: "clipmeta.framing", message: "Framing: {f}", values: { f } }));
   }
   for (const [slot, has] of [
     ["intro", o.projectHasIntro],
@@ -89,8 +99,11 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
     const b = bumperPart(c, slot, has);
     if (!b) continue;
     parts.push(b.text);
+    const text = `${b.text}${b.skipped ? ` (${c.diagnostics?.bumpers?.skipped?.filter((s) => s.startsWith(slot)).join("; ")})` : ""}`;
     long.push(
-      `${slot === "intro" ? "Intro" : "Outro"}: ${b.text}${b.skipped ? ` (${c.diagnostics?.bumpers?.skipped?.filter((s) => s.startsWith(slot)).join("; ")})` : ""}`,
+      slot === "intro"
+        ? tr(/*i18n*/ { id: "clipmeta.introLine", message: "Intro: {text}", values: { text } })
+        : tr(/*i18n*/ { id: "clipmeta.outroLine", message: "Outro: {text}", values: { text } }),
     );
     if (b.skipped) warn = true;
   }
@@ -103,24 +116,36 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
     );
     const trimmed = d.pauses?.cuts ? d.pauses.removedSec : 0;
     if (trimmed > 0) {
-      parts.push(`${trimmed.toFixed(1)} s trimmed`);
-      long.push(`Pauses: ${trimmed.toFixed(1)} s trimmed`);
+      const s = formatNumber(trimmed, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      parts.push(tr(/*i18n*/ { id: "clipmeta.trimmed", message: "{s} s trimmed", values: { s } }));
+      long.push(tr(/*i18n*/ { id: "clipmeta.pauses", message: "Pauses: {s} s trimmed", values: { s } }));
     }
     if (cuts) {
-      parts.push(`${plural(cuts, "cut")}`);
-      long.push(`Cuts: ${cuts} applied`);
+      parts.push(tr(/*i18n*/ { id: "clipmeta.cuts", message: "{cuts, plural, one {# cut} other {# cuts}}", values: { cuts } }));
+      long.push(tr(/*i18n*/ { id: "clipmeta.cutsLine", message: "Cuts: {cuts} applied", values: { cuts } }));
     }
     if (unverified.length) {
-      parts.push(`▲ ${plural(unverified.length, "cut")} unverified`);
+      const n = unverified.length;
+      parts.push(`▲ ${tr(/*i18n*/ { id: "clipmeta.unverified", message: "{n, plural, one {# cut unverified} other {# cuts unverified}}", values: { n } })}`);
       long.push(
-        `Applied where you set ${unverified.length === 1 ? "it" : "them"}, without a seam check (the audio around ${unverified.length === 1 ? "it" : "them"} couldn’t be matched):`,
+        tr(
+          /*i18n*/ {
+            id: "clipmeta.unverifiedLine",
+            message:
+              "{n, plural, one {Applied where you set it, without a seam check (the audio around it couldn’t be matched):} other {Applied where you set them, without a seam check (the audio around them couldn’t be matched):}}",
+            values: { n },
+          },
+        ),
         ...unverified.map((r) => `  ${r}`),
       );
       warn = true;
     }
     if (kept) {
-      parts.push(`▲ ${plural(kept, "cut")} kept`);
-      long.push(`Kept because removal couldn’t be verified (the audio stays; captions still drop the word):`, ...d.cuts.skipped.map((s) => `  ${s.reason}`));
+      parts.push(`▲ ${tr(/*i18n*/ { id: "clipmeta.kept", message: "{kept, plural, one {# cut kept} other {# cuts kept}}", values: { kept } })}`);
+      long.push(
+        tr(/*i18n*/ { id: "clipmeta.keptLine", message: "Kept because removal couldn’t be verified (the audio stays; captions still drop the word):" }),
+        ...d.cuts.skipped.map((s) => `  ${s.reason}`),
+      );
       warn = true;
     }
   }

@@ -11,10 +11,19 @@
 import { DEFAULT_LOCALE, intlLocale } from "./locale.js";
 
 let activeLocale: () => string = () => DEFAULT_LOCALE;
+let activeTimeZone: () => string | null | undefined = () => undefined;
 
 /** Where the active locale comes from: a getter, so a request or job scope on the server is read at format time. */
 export function setFormatLocale(source: () => string): void {
   activeLocale = source;
+}
+
+/**
+ * Where the time zone of days and times comes from when a call names none: the server points it at the request's or
+ * the recipient's account zone (UTC when unset); the web app leaves it, so a screen shows the browser's own.
+ */
+export function setFormatTimeZone(source: () => string | null | undefined): void {
+  activeTimeZone = source;
 }
 
 /** The locale formatting uses right now (`Intl` form: the pseudo-locale reads as English). */
@@ -115,7 +124,7 @@ export interface DayFormat {
 
 /** A calendar day in the active locale: "December 18, 2026" in English, "18. Dezember 2026" in German. */
 export function formatDay(d: Date | string | number, o: DayFormat = {}): string {
-  const timeZone = o.utc ? "UTC" : (o.timeZone ?? undefined);
+  const timeZone = o.utc ? "UTC" : (o.timeZone ?? activeTimeZone() ?? undefined);
   return new Date(d).toLocaleDateString(formatLocale(o.locale), {
     day: "numeric",
     month: o.month ?? "long",
@@ -126,7 +135,7 @@ export function formatDay(d: Date | string | number, o: DayFormat = {}): string 
 
 /** A moment with its time: "Dec 18, 2026, 3:04 PM" in English; the same `timeZone` / `utc` rules as `formatDay`. */
 export function formatDateTime(d: Date | string | number, o: Omit<DayFormat, "month" | "year"> & { seconds?: boolean } = {}): string {
-  const timeZone = o.utc ? "UTC" : (o.timeZone ?? undefined);
+  const timeZone = o.utc ? "UTC" : (o.timeZone ?? activeTimeZone() ?? undefined);
   return new Date(d).toLocaleString(formatLocale(o.locale), {
     dateStyle: "medium",
     timeStyle: o.seconds ? "medium" : "short",

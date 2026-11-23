@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FONT_FILE_EXTS, MAX_FONT_BYTES, formatBytes } from "@reelsaw/shared";
+import { FONT_FILE_EXTS, MAX_FONT_BYTES, formatBytes, formatNumber, formatPercent } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { ago } from "../lib/time";
 import { cssFontFamily, useFonts } from "../lib/fonts";
@@ -18,6 +19,7 @@ type Uploaded = { id: string; family: string; filename: string | null; sizeBytes
  * `list_fonts` / `add_font` / `remove_fonts` and `reelsaw fonts`.
  */
 export function FontsSection() {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const qc = useQueryClient();
   const fonts = useFonts();
@@ -30,20 +32,27 @@ export function FontsSection() {
   const remove = useMutation(
     trpc.admin.fonts.remove.mutationOptions({
       onSuccess: (r) => {
-        if (r.removed[0]) toast(`Removed ${r.removed[0].family}. Clips that used it get the default font on their next render`);
+        const family = r.removed[0]?.family;
+        if (family) toast(t`Removed ${family}. Clips that used it get the default font on their next render`);
         refresh();
       },
       onError: (e) => toast.error(e.message),
     }),
   );
 
+  const addedAgo = (at: string) => {
+    const when = ago(at);
+    return t`added ${when}`;
+  };
+
   const onFile = async (file: File) => {
-    if (file.size > MAX_FONT_BYTES) return void toast.error(`A font may be ${MAX_FONT_BYTES / 1048576} MB at most.`);
+    if (file.size > MAX_FONT_BYTES) return void toast.error(t`A font may be ${maxMb} MB at most.`);
     setUploading(0);
     try {
       const uploadId = await uploadFile(file, setUploading);
       const font = await add.mutateAsync({ uploadId });
-      toast(`Added ${font.family}. Every account can pick it now`);
+      const family = font.family;
+      toast(t`Added ${family}. Every account can pick it now`);
       refresh();
     } catch (e) {
       toast.error((e as Error).message);
@@ -53,35 +62,42 @@ export function FontsSection() {
     }
   };
 
+  const maxMb = formatNumber(MAX_FONT_BYTES / 1048576);
+  const exts = FONT_FILE_EXTS.join(", ");
+  const removingFamily = removing?.family ?? t`this font`;
+
   return (
     <InstanceSettingsGroup
       id="captions"
-      title="Captions"
-      intro="The font captions and hooks use unless a project or clip picks another; the watermark always uses it. Upload a font (your brand's, or one with the glyphs your languages need) and every account can pick it."
-      fields={[{ key: "CAPTION_FONT", label: "Default caption font", kind: "enum", options: fonts.fonts.map((f) => ({ value: f.family, label: f.label })) }]}
+      title={t`Captions`}
+      intro={t`The font captions and hooks use unless a project or clip picks another; the watermark always uses it. Upload a font (your brand's, or one with the glyphs your languages need) and every account can pick it.`}
+      fields={[{ key: "CAPTION_FONT", label: t`Default caption font`, kind: "enum", options: fonts.fonts.map((f) => ({ value: f.family, label: f.label })) }]}
     >
       <div className="flex flex-col gap-3 border-t border-line pt-4">
         <div className="flex items-center gap-3">
-          <p className="me-auto text-xs font-semibold text-ink2">Uploaded fonts</p>
+          <p className="me-auto text-xs font-semibold text-ink2">
+            <Trans>Uploaded fonts</Trans>
+          </p>
           <input
             ref={input}
             type="file"
             accept={FONT_FILE_EXTS.join(",")}
             className="hidden"
-            aria-label="Font file"
+            aria-label={t`Font file`}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void onFile(f);
             }}
           />
           <button type="button" className="btn-ghost h-8 min-w-[7.5rem] text-xs" disabled={uploading !== null} onClick={() => input.current?.click()}>
-            {uploading === null ? "Upload font…" : uploading < 1 ? `Uploading ${Math.round(uploading * 100)}%` : "Checking…"}
+            {uploading === null ? <Trans>Upload font…</Trans> : uploading < 1 ? <Trans>Uploading {formatPercent(uploading)}</Trans> : <Trans>Checking…</Trans>}
           </button>
         </div>
         {uploaded.length === 0 ? (
           <p className="text-xs text-ink3">
-            None yet. {FONT_FILE_EXTS.join(", ")} up to {MAX_FONT_BYTES / 1048576} MB; the name comes from the file. Add the bold weight if you have one:
-            captions are bold.
+            <Trans>
+              None yet. {exts} up to {maxMb} MB; the name comes from the file. Add the bold weight if you have one: captions are bold.
+            </Trans>
           </p>
         ) : (
           <ScrollArea className={SECTION_LIST_MAX_H}>
@@ -93,13 +109,13 @@ export function FontsSection() {
                       {f.family}
                     </div>
                     <div className="truncate text-xs text-ink3">
-                      {[f.filename, f.sizeBytes ? formatBytes(f.sizeBytes) : null, f.createdAt ? `added ${ago(f.createdAt)}` : null, f.createdBy]
+                      {[f.filename, f.sizeBytes ? formatBytes(f.sizeBytes) : null, f.createdAt ? addedAgo(f.createdAt) : null, f.createdBy]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
                   </div>
                   <button type="button" className="btn-ghost h-8 w-20 text-xs" disabled={remove.isPending} onClick={() => setRemoving(f)}>
-                    Remove
+                    <Trans>Remove</Trans>
                   </button>
                 </li>
               ))}
@@ -110,13 +126,13 @@ export function FontsSection() {
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}
-        title={`Remove ${removing?.family ?? "this font"}?`}
+        title={t`Remove ${removingFamily}?`}
         body={
           fonts.defaultFamily === removing?.family
-            ? "It is the default caption font: captions and the watermark go back to DejaVu Sans on their next render. Projects and clips that picked it do the same. Clips already rendered keep it. The file is deleted for good."
-            : "Projects, clips and text layers that use it get the default caption font on their next render. Clips already rendered keep it. The file is deleted for good."
+            ? t`It is the default caption font: captions and the watermark go back to DejaVu Sans on their next render. Projects and clips that picked it do the same. Clips already rendered keep it. The file is deleted for good.`
+            : t`Projects, clips and text layers that use it get the default caption font on their next render. Clips already rendered keep it. The file is deleted for good.`
         }
-        confirm="Remove font"
+        confirm={t`Remove font`}
         danger
         onConfirm={() => (removing ? remove.mutateAsync({ ids: [removing.id] }) : Promise.resolve())}
       />

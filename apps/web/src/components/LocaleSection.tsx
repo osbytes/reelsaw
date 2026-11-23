@@ -77,7 +77,7 @@ export function LocaleSection() {
         <Trans>Language and region</Trans>
       </h2>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex min-w-0 flex-col gap-1.5 text-sm">
+        <div className="flex min-w-0 flex-col gap-1.5 text-sm">
           <span className="font-semibold">
             <Trans>Language</Trans>
           </span>
@@ -88,8 +88,8 @@ export function LocaleSection() {
             disabled={q.isPending || save.isPending}
             onValueChange={(v) => save.mutate({ locale: isLocale(v) ? v : null })}
           />
-        </label>
-        <label className="flex min-w-0 flex-col gap-1.5 text-sm">
+        </div>
+        <div className="flex min-w-0 flex-col gap-1.5 text-sm">
           <span className="font-semibold">
             <Trans>Time zone</Trans>
           </span>
@@ -101,7 +101,7 @@ export function LocaleSection() {
             emptyText={t`No such time zone`}
             onValueChange={(v) => save.mutate({ timeZone: v === FOLLOW ? null : v })}
           />
-        </label>
+        </div>
       </div>
       <span className="text-[13px] text-ink2">
         <Trans>The app, emails, notices and messages to your agents use this language. Dates in email are read in this time zone.</Trans>

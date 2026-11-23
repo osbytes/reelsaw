@@ -20,6 +20,8 @@ import { retryProject } from "../projects/service.js";
 import { sourceMinutesExceeded } from "../quota.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare, requestRender } from "../pipeline/lifecycle.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "../i18n.js";
 
 export const FAILURE_PAGE = 50;
 /** Widen the fetch a little so a keyset page can merge projects + clips without going silent. */
@@ -76,7 +78,7 @@ export interface FailureActor {
 }
 
 export function errorSnippet(error: string | null | undefined, n = 120): string {
-  if (!error?.trim()) return "Failed with no reason recorded";
+  if (!error?.trim()) return t(msg({ id: "failures.no_reason", message: "Failed with no reason recorded" }));
   const one = error.replace(/\s+/g, " ").trim();
   return one.length <= n ? one : `${one.slice(0, n - 1)}…`;
 }

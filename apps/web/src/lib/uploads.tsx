@@ -8,12 +8,14 @@ import { useSession } from "./auth";
 import { useSystemStatus } from "./account";
 import { toast } from "sonner";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
-import { plural } from "@reelsaw/shared";
+import { formatNumber, formatPercent } from "@reelsaw/shared";
+import { t } from "@lingui/core/macro";
+import { Plural, Trans } from "@lingui/react/macro";
 
 /** Thrown (as the rejection) when an upload is cancelled with its AbortSignal. */
 export class UploadCancelled extends Error {
   constructor() {
-    super("Upload cancelled.");
+    super(t`Upload cancelled.`);
     this.name = "UploadCancelled";
   }
 }
@@ -21,7 +23,10 @@ export class UploadCancelled extends Error {
 /** A sentence for a file over the instance's upload limit, or null when it fits (or the limit is not known yet). */
 export function uploadSizeProblem(f: File, maxMb: number | undefined): string | null {
   if (!maxMb || f.size <= maxMb * 1024 * 1024) return null;
-  return `${f.name} is ${Math.round(f.size / 1024 / 1024).toLocaleString()} MB, and this server accepts uploads up to ${maxMb.toLocaleString()} MB.`;
+  const name = f.name;
+  const size = formatNumber(Math.round(f.size / 1024 / 1024));
+  const max = formatNumber(maxMb);
+  return t`${name} is ${size} MB, and this server accepts uploads up to ${max} MB.`;
 }
 
 /** Warns before the tab closes while `active` (an upload would be lost). */
@@ -56,9 +61,10 @@ export function uploadFile(f: File, onProgress?: (p: number) => void, signal?: A
         } catch {
           /* handled below */
         }
-        reject(new Error("The server answered with something that was not JSON; try again."));
+        reject(new Error(t`The server answered with something that was not JSON; try again.`));
       } else {
-        let msg = xhr.responseText || `upload failed (${xhr.status})`;
+        const status = xhr.status;
+        let msg = xhr.responseText || t`upload failed (${status})`;
         let quota: QuotaRefusal | undefined;
         try {
           const body = JSON.parse(xhr.responseText) as { error?: string; quota?: QuotaRefusal };
@@ -76,11 +82,11 @@ export function uploadFile(f: File, onProgress?: (p: number) => void, signal?: A
     };
     xhr.ontimeout = () => {
       done();
-      reject(new Error("The upload timed out; check your connection and try again."));
+      reject(new Error(t`The upload timed out; check your connection and try again.`));
     };
     xhr.onerror = () => {
       done();
-      reject(new Error("The upload failed; check your connection and try again."));
+      reject(new Error(t`The upload failed; check your connection and try again.`));
     };
     xhr.send(f);
   });
@@ -264,11 +270,13 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-[90] grid place-items-center bg-acc/15 p-6 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-2 rounded-[20px] border-2 border-dashed border-acc bg-panel px-10 py-8 text-center shadow-pop">
-            <b className="text-lg">{inLibrary.current ? "Drop to add to the library" : "Drop videos to start projects"}</b>
+            <b className="text-lg">{inLibrary.current ? <Trans>Drop to add to the library</Trans> : <Trans>Drop videos to start projects</Trans>}</b>
             <span className="text-sm text-ink2">
-              {inLibrary.current
-                ? "Videos and images (PNG, JPG, WebP, GIF, SVG) are added to the library."
-                : "One video opens New project. Several start a project each with the default settings."}
+              {inLibrary.current ? (
+                <Trans>Videos and images (PNG, JPG, WebP, GIF, SVG) are added to the library.</Trans>
+              ) : (
+                <Trans>One video opens New project. Several start a project each with the default settings.</Trans>
+              )}
             </span>
           </div>
         </div>
@@ -276,14 +284,14 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       {jobs.length > 0 && (
         <div className="fixed bottom-4 end-4 z-[75] flex w-[320px] max-w-[calc(100vw-32px)] flex-col gap-1.5 rounded-[14px] border border-line bg-panel p-3 shadow-pop">
           <div className="flex items-center gap-2">
-            <b className="text-[13px]">{active ? `Uploading ${plural(active, "video")}` : "Uploads"}</b>
+            <b className="text-[13px]">{active ? <Plural value={active} one="Uploading # video" other="Uploading # videos" /> : <Trans>Uploads</Trans>}</b>
             {active > 1 && (
               <button className="btn-quiet ms-auto px-2 py-0.5 text-xs" onClick={cancelAll}>
-                Cancel all
+                <Trans>Cancel all</Trans>
               </button>
             )}
             {!active && (
-              <button className="ms-auto text-ink3 hover:text-ink" onClick={() => setJobs([])} aria-label="Dismiss uploads">
+              <button className="ms-auto text-ink3 hover:text-ink" onClick={() => setJobs([])} aria-label={t`Dismiss uploads`}>
                 <X className="h-4 w-4" />
               </button>
             )}
@@ -298,22 +306,27 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
                 )}
                 <span className="min-w-0 flex-1 truncate">{j.name}</span>
                 {j.state === "uploading" && (
-                  <button className="text-ink3 hover:text-ink" onClick={() => cancel(j.key)} aria-label={`Cancel upload of ${j.name}`} title="Cancel upload">
+                  <button
+                    className="text-ink3 hover:text-ink"
+                    onClick={() => cancel(j.key)}
+                    aria-label={t`Cancel upload of ${j.name}`}
+                    title={t`Cancel upload`}
+                  >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
                 {j.state === "failed" && (
-                  <button className="text-ink3 hover:text-ink" onClick={() => dismiss(j.key)} aria-label={`Dismiss ${j.name}`} title="Dismiss">
+                  <button className="text-ink3 hover:text-ink" onClick={() => dismiss(j.key)} aria-label={t`Dismiss ${j.name}`} title={t`Dismiss`}>
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
                 {j.state === "done" && j.projectId ? (
                   <Link to={`/p/${j.projectId}`} className="font-semibold text-acc-text no-underline">
-                    Open
+                    <Trans>Open</Trans>
                   </Link>
                 ) : (
                   <span className="font-mono text-ink3">
-                    {j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "creating" ? "starting" : "failed"}
+                    {j.state === "uploading" ? formatPercent(j.pct) : j.state === "creating" ? t`starting` : t`failed`}
                   </span>
                 )}
               </div>

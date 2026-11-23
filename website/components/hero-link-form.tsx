@@ -1,5 +1,7 @@
 "use client";
 
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 // The hero's call to action: paste a link, land on sign-up, and find the link waiting on the New project
 // page after the first sign-in (the app's Login.tsx remembers `?url=`). A plain GET form, so it works before
 // hydration and without JavaScript; with it, the link is tidied ("youtube.com/…" gets https://) and an empty
@@ -59,31 +61,30 @@ export function HeroLinkForm() {
               setValue(e.target.value);
               setInvalid(false);
             }}
-            placeholder="Paste a YouTube link"
-            aria-label="Link to a video"
+            placeholder={t(msg`Paste a YouTube link`)}
+            aria-label={t(msg`Link to a video`)}
             aria-invalid={invalid}
             aria-describedby="hero-link-hint"
             className="h-full min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink3"
           />
           <button type="submit" className="btn-primary h-full shrink-0 px-4 text-[15px]">
-            <span className="sm:hidden">Clip it</span>
-            <span className="hidden sm:inline">Clip it free</span>
+            <span className="sm:hidden">{t(msg`Clip it`)}</span>
+            <span className="hidden sm:inline">{t(msg`Clip it free`)}</span>
             <ArrowRight className="h-4 w-4" aria-hidden />
           </button>
         </div>
       </form>
       {/* One line, always there: the error takes the hint's place, so nothing below moves */}
       <p id="hero-link-hint" aria-live="polite" className={`text-center text-sm lg:text-left ${invalid ? "text-err" : "text-ink3"}`}>
-        {invalid ? (
-          "Not a link yet: paste the video's address, like youtube.com/watch?v=…"
-        ) : (
-          <>
-            Your first video free, up to 60 minutes. No card.{" "}
-            <a href={appLink("/signup", "home_hero_upload")} className="prose-link">
-              Or upload a file
-            </a>
-          </>
-        )}
+        {invalid
+          ? t(msg`Not a link yet: paste the video's address, like youtube.com/watch?v=…`)
+          : rich(msg`Your first video free, up to 60 minutes. No card. <0>Or upload a file</0>`, {
+              0: (c) => (
+                <a href={appLink("/signup", "home_hero_upload")} className="prose-link">
+                  {c}
+                </a>
+              ),
+            })}
       </p>
     </div>
   );

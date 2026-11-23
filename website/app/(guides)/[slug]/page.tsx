@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ARTICLES, articleBySlug } from "@/content/articles";
@@ -41,7 +43,7 @@ export default async function GuidePage({ params }: Props) {
   const crumbs = isUseCase
     ? [
         { href: "/", label: SITE.name },
-        { href: "/use-cases", label: "Use cases" },
+        { href: "/use-cases", label: t(msg`Use cases`) },
         { href: path, label: navLabel },
       ]
     : [
@@ -53,7 +55,7 @@ export default async function GuidePage({ params }: Props) {
     <>
       <Header />
       <main id="main" className="container-page flex max-w-[880px] flex-col gap-14 py-12 sm:py-16">
-        <ArticleHeader crumbs={crumbs} eyebrow={isUseCase ? "Use case" : "Guide"} h1={g.h1} intro={g.intro} />
+        <ArticleHeader crumbs={crumbs} eyebrow={isUseCase ? t(msg`Use case`) : t(msg`Guide`)} h1={g.h1} intro={g.intro} />
         {g.sections.map((s) => (
           <section key={s.heading} className="flex flex-col gap-4" aria-label={s.heading}>
             <h2 className="text-[24px] font-bold tracking-tight">{s.heading}</h2>
@@ -86,10 +88,10 @@ export default async function GuidePage({ params }: Props) {
         ))}
         <TryIt />
         <FaqSection faqs={g.faqs} />
-        <LinkList heading="Related" links={related.filter((l) => l.href !== path)} />
-        <LinkList heading="Sources" links={g.sources} external />
+        <LinkList heading={t(msg`Related`)} links={related.filter((l) => l.href !== path)} />
+        <LinkList heading={t(msg`Sources`)} links={g.sources} external />
         <div className="flex flex-col gap-1 text-xs text-ink3">
-          <p>Last updated {g.updated ?? CHECKED}.</p>
+          <p>{rich(msg`Last updated <0/>.`, { 0: g.updated ?? CHECKED })}</p>
           {g.disclaimer && <p>{g.disclaimer}</p>}
         </div>
       </main>

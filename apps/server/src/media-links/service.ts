@@ -9,14 +9,14 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { createSecretBox } from "../ai/crypto.js";
 import { schema, type Db } from "../db/index.js";
 import { MEDIA_LINK_KINDS, type MediaLinkKind, type MediaLinkRow, type MediaLinkSource } from "../db/schema.js";
 import { exportPlan, slugify } from "../export.js";
 import { takeTxLock, txLock } from "../locks.js";
 import type { Services } from "../services.js";
-import { plural } from "@reelsaw/shared";
+import { msg, plural as icuPlural } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 export { MEDIA_LINK_KINDS };
 export type { MediaLinkKind };
@@ -100,7 +100,10 @@ export function expiryFor(svc: Pick<Services, "settings">, ttlDays: number | nul
   const s = svc.settings.get();
   if (ttlDays === null) {
     if (!s.MEDIA_LINK_ALLOW_NEVER)
-      throw new TRPCError({ code: "BAD_REQUEST", message: `Share links on this instance expire after at most ${s.MEDIA_LINK_TTL_DAYS} days.` });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "share_link.ttl_too_long", message: msg`Share links on this instance expire after at most ${{ days: s.MEDIA_LINK_TTL_DAYS }} days.` }),
+      );
     return null;
   }
   const days = Math.min(ttlDays ?? s.MEDIA_LINK_TTL_DAYS, s.MEDIA_LINK_TTL_DAYS);
@@ -131,17 +134,16 @@ async function resolveTarget(svc: Services, userId: string, target: LinkTarget):
     .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
     .where(and(eq(schema.clips.id, target.clipId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt), isNull(schema.clips.deletedAt)))
     .limit(1);
-  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+  if (!row) throw new AppError("NOT_FOUND", msg({ id: "clip.no_such", message: "No such clip" }));
   const c = row.clip;
   const ready = target.kind === "clip" ? !!c.outputKey : target.kind === "thumb" ? !!c.thumbnailKey : !!c.captions;
   if (!ready)
-    throw new TRPCError({
-      code: "CONFLICT",
-      message:
-        target.kind === "srt" || target.kind === "vtt"
-          ? "This clip has no caption file yet: it needs a render first."
-          : "This clip is not rendered yet. Wait for it to finish, then share it.",
-    });
+    throw new AppError(
+      "CONFLICT",
+      target.kind === "srt" || target.kind === "vtt"
+        ? msg({ id: "share_link.no_caption_file", message: "This clip has no caption file yet: it needs a render first." })
+        : msg({ id: "share_link.clip_not_rendered", message: "This clip is not rendered yet. Wait for it to finish, then share it." }),
+    );
   return { projectId: c.projectId, projectTitle: row.projectTitle, clipId: c.id, clipIndex: c.index, clipTitle: c.title, clipIds: null };
 }
 
@@ -325,7 +327,7 @@ export async function revokeLinks(svc: Services, userId: string, scope: RevokeSc
     .returning({ id: m.id });
   if ("linkId" in scope && !rows.length) {
     const exists = await db.query.mediaLinks.findFirst({ where: and(eq(m.id, scope.linkId), eq(m.userId, userId)), columns: { id: true } });
-    if (!exists) throw new TRPCError({ code: "NOT_FOUND", message: "No such share link" });
+    if (!exists) throw new AppError("NOT_FOUND", msg({ id: "share_link.not_found", message: "No such share link" }));
   }
   svc.log.child({ module: "media-links" }).info({ userId, scope: Object.keys(scope)[0], revoked: rows.length }, "media link revoked");
   return rows.length;
@@ -346,10 +348,15 @@ export async function clearStoppedLinks(svc: Services, userId: string): Promise<
   return rows.length;
 }
 
-export const clearMessage = (n: number) => (n ? `Cleared ${plural(n, "revoked or expired share link")}.` : "No revoked or expired share links to clear.");
+export const clearMessage = (n: number) =>
+  n
+    ? t(msg({ message: icuPlural({ n }, { one: "Cleared # revoked or expired share link.", other: "Cleared # revoked or expired share links." }) }))
+    : t(msg`No revoked or expired share links to clear.`);
 
 export const revokeMessage = (n: number) =>
-  n ? `Revoked ${plural(n, "share link")}; ${n === 1 ? "it stops" : "they stop"} working now.` : "No active share links to revoke.";
+  n
+    ? t(msg({ message: icuPlural({ n }, { one: "Revoked # share link; it stops working now.", other: "Revoked # share links; they stop working now." }) }))
+    : t(msg`No active share links to revoke.`);
 
 /** What a share-link request resolves to: a file to send, or the status and sentence to answer with. */
 export type LinkHit =
@@ -363,7 +370,12 @@ export const LINK_NOT_FOUND = "This link is invalid, expired or was turned off."
  * owner) gets the same 404, so a guess learns nothing. A clip being re-rendered or whose files retention removed says so.
  */
 export async function resolveToken(svc: Services, token: string, ext: string, now = Date.now()): Promise<LinkHit> {
-  const miss = { ok: false as const, status: 404 as const, message: LINK_NOT_FOUND };
+  // LINK_NOT_FOUND is the same sentence in English, for the share-link route's own fallback (http.ts)
+  const miss = {
+    ok: false as const,
+    status: 404 as const,
+    message: t(msg({ id: "share_link.invalid", message: "This link is invalid, expired or was turned off." })),
+  };
   if (!/^[\w-]{43}$/.test(token)) return miss;
   const db = svc.database.db;
   const [row] = await db
@@ -389,10 +401,10 @@ export async function resolveToken(svc: Services, token: string, ext: string, no
         ok: false,
         status: 410,
         message: svc.settings.get().CLIP_RETENTION_DAYS
-          ? `This clip's files were removed after ${svc.settings.get().CLIP_RETENTION_DAYS} days; re-render it to bring the link back.`
-          : "This clip has no rendered file; re-render it to bring the link back.",
+          ? t(msg`This clip's files were removed after ${{ days: svc.settings.get().CLIP_RETENTION_DAYS }} days; re-render it to bring the link back.`)
+          : t(msg`This clip has no rendered file; re-render it to bring the link back.`),
       };
-    return { ok: false, status: 409, message: "This clip is being rendered; try again in a few minutes." };
+    return { ok: false, status: 409, message: t(msg`This clip is being rendered; try again in a few minutes.`) };
   }
   return { ok: true, link, kind: link.kind, ownerId: link.userId, key, fileName, clip: { id: clip.id } };
 }

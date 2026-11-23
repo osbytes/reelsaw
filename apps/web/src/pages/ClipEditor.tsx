@@ -1,3 +1,4 @@
+import { Trans } from "@lingui/react/macro";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useProjectEvents } from "../lib/projectEvents";
@@ -42,10 +43,14 @@ export function ClipEditorPage() {
           <span className="font-mono text-2xl leading-8 text-ink3" aria-hidden>
             ∅
           </span>
-          <b className="text-lg">This clip doesn’t exist</b>
-          <p className="text-[13px] leading-relaxed text-ink2">It may have been deleted or replaced when moments were re-picked.</p>
+          <b className="text-lg">
+            <Trans>This clip doesn’t exist</Trans>
+          </b>
+          <p className="text-[13px] leading-relaxed text-ink2">
+            <Trans>It may have been deleted or replaced when moments were re-picked.</Trans>
+          </p>
           <Link to={`/p/${p.id}`} className="btn-primary mt-1 py-2 no-underline">
-            Back to the project
+            <Trans>Back to the project</Trans>
           </Link>
         </div>
       </div>
@@ -53,7 +58,9 @@ export function ClipEditorPage() {
   if (!t || !p.sourceVideoUrl)
     return (
       <div className="p-6 text-ink2">
-        The source video or transcript isn’t ready yet. <Link to={`/p/${p.id}`}>Back to the project</Link>
+        <Trans>
+          The source video or transcript isn’t ready yet. <Link to={`/p/${p.id}`}>Back to the project</Link>
+        </Trans>
       </div>
     );
 

@@ -27,6 +27,8 @@ import {
   type CatalogSearchResult,
   type ProviderRegistry,
 } from "./providers/index.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
 
 interface Parts {
   catalog: Catalog;
@@ -49,8 +51,9 @@ export function libraryProviders(svc: Services, deps: { fetch?: typeof fetch; bu
 /** Providers and catalog errors become sentences the panel, the tools and the CLI can show as they are. */
 export function asTrpc(err: unknown): never {
   if (err instanceof TRPCError) throw err;
-  if (err instanceof ProviderUnavailable) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: err.message });
-  if (err instanceof ProviderError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+  if (err instanceof ProviderUnavailable) throw new AppError("TOO_MANY_REQUESTS", err.descriptor);
+  if (err instanceof ProviderError) throw new AppError("BAD_REQUEST", err.descriptor);
+  // anything else already reads as a sentence (a download or file check, library/service.ts), in the requester's locale
   throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : String(err) });
 }
 
@@ -148,7 +151,9 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
     let upload: { uploadId: string; filename: string };
     if (r.localPath) {
       if (r.sha256 && (await sha256File(r.localPath)) !== r.sha256)
-        throw new ProviderError("The bundled file does not match the catalog (corrupted install?).");
+        throw new ProviderError(
+          msg({ id: "library_import.bundled_file_does_match_catalog", message: "The bundled file does not match the catalog (corrupted install?)." }),
+        );
       upload = await localAsUpload(svc, userId, r.localPath, r.name, r.ext);
     } else {
       upload = await downloadAsUpload(svc, userId, r.url, { ...deps, name: r.name, ext: r.ext });
@@ -159,7 +164,12 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
           await svc.storage.ensureLocal(keys.upload(upload.uploadId, `.${r.ext}`), tmp);
           if ((await sha256File(tmp)) !== r.sha256) {
             await svc.storage.delete(keys.upload(upload.uploadId, `.${r.ext}`)).catch(() => {});
-            throw new ProviderError("The downloaded file does not match the catalog's checksum; nothing was added.");
+            throw new ProviderError(
+              msg({
+                id: "library_import.downloaded_file_does_match_catalog",
+                message: "The downloaded file does not match the catalog's checksum; nothing was added.",
+              }),
+            );
           }
         } finally {
           await fs.rm(tmp, { force: true }).catch(() => {});

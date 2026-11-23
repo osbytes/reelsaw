@@ -6,6 +6,7 @@
  */
 import { ProviderError, arr, clip, httpsUrl, needKey, num, obj, str } from "./http.js";
 import type { ItemLicense, Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://freesound.org/apiv2";
 const FIELDS = "id,name,username,license,duration,previews,url,tags";
@@ -64,13 +65,16 @@ export function freesound({ settings, http }: ProviderDeps): Provider {
       return { items: arr(r["results"]).flatMap((s) => item(obj(s)) ?? []), ...(r["next"] ? { nextCursor: String(page + 1) } : {}) };
     },
     async resolve(externalId): Promise<Resolved> {
-      if (!/^\d+$/.test(externalId)) throw new ProviderError("That is not a Freesound id (a number).");
+      if (!/^\d+$/.test(externalId))
+        throw new ProviderError(msg({ id: "library_provider.freesound_id_number", message: "That is not a Freesound id (a number)." }));
       const s = obj(await http.json("freesound", url(`/sounds/${externalId}/`, { fields: FIELDS })));
       const license = freesoundLicense(str(s["license"]));
-      if (!license) throw new ProviderError("That sound's license (not CC0 or CC-BY) cannot be imported.");
+      if (!license)
+        throw new ProviderError(msg({ id: "library_provider.sound_s_license_cc0_cc", message: "That sound's license (not CC0 or CC-BY) cannot be imported." }));
       const file = httpsUrl(obj(s["previews"])["preview-hq-mp3"]);
       const name = str(s["name"]);
-      if (!file || !name) throw new ProviderError("Freesound returned no preview for that sound.");
+      if (!file || !name)
+        throw new ProviderError(msg({ id: "library_provider.freesound_returned_no_preview_sound", message: "Freesound returned no preview for that sound." }));
       const tags = arr(s["tags"])
         .flatMap((t) => (typeof t === "string" ? [t.toLowerCase()] : []))
         .slice(0, 12);

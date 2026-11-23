@@ -8,14 +8,7 @@ import { and, asc, eq, gt, inArray, isNotNull, ne, sql, type SQL } from "drizzle
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
-import {
-  MUST_CHANGE_PASSWORD_REUSE,
-  passwordLengthError,
-  QUEUE_PRIORITY_MAX,
-  QUEUE_PRIORITY_MIN,
-  RESOURCE_CEILING_MAX_CORES,
-  RESOURCE_CEILING_MAX_MEM_MB,
-} from "@reelsaw/shared";
+import { passwordLengthError, QUEUE_PRIORITY_MAX, QUEUE_PRIORITY_MIN, RESOURCE_CEILING_MAX_CORES, RESOURCE_CEILING_MAX_MEM_MB } from "@reelsaw/shared";
 import type { ResourceCeiling } from "./quota.js";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
@@ -25,10 +18,12 @@ import type { UserRole } from "./db/schema.js";
 import { statusOf, userFilterWhere } from "./accounts-list.js";
 import { BULK_USERS, type BulkUserAction, type BulkUsersInput, type UserStatus } from "./accounts-schema.js";
 import { setSearchThreshold, userMatch, words } from "./search.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError, t } from "./i18n.js";
 
 async function lockedUser(u: UnitOfWork, id: string) {
   const [row] = await u.db.select().from(schema.user).where(eq(schema.user.id, id)).for("update");
-  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
+  if (!row) throw new AppError("NOT_FOUND", msg({ id: "account.no_such_user", message: "No such user" }));
   return row;
 }
 
@@ -61,8 +56,13 @@ export async function holdUser(svc: Services, actorId: string | null, userId: st
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     if (!user.approvedAt) return { ok: true, changed: false };
-    if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot send your own account back to approval." });
-    if (user.role === "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "Admins cannot be sent back to approval. Remove the admin role first." });
+    if (userId === actorId)
+      throw new AppError("BAD_REQUEST", msg({ id: "account.cannot_send_own_account_back", message: "You cannot send your own account back to approval." }));
+    if (user.role === "admin")
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "account.admins_cannot_sent_back_approval", message: "Admins cannot be sent back to approval. Remove the admin role first." }),
+      );
     await u.db.update(schema.user).set({ approvedAt: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.emit("user.held", { userId, email: user.email }, { actorId });
     return { ok: true, changed: true };
@@ -74,9 +74,15 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
     const user = await lockedUser(u, userId);
     if (user.role === role) return { ok: true, changed: false };
     if (role !== "admin" && userId === actorId)
-      throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own admin role. Ask another admin." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "account.cannot_remove_own_admin_role", message: "You cannot remove your own admin role. Ask another admin." }),
+      );
     if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0)
-      throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "account.only_admin_make_someone_else", message: "This is the only admin. Make someone else an admin first." }),
+      );
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.emit("user.role_changed", { userId, email: user.email, from: user.role, to: role }, { actorId });
     return { ok: true, changed: true };
@@ -86,8 +92,9 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
 export async function banUser(svc: Services, actorId: string | null, userId: string, reason: string | null) {
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
-    if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot suspend yourself." });
-    if (user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin." });
+    if (userId === actorId) throw new AppError("BAD_REQUEST", msg({ id: "account.cannot_suspend_yourself", message: "You cannot suspend yourself." }));
+    if (user.role === "admin" && (await otherAdmins(u, userId)) === 0)
+      throw new AppError("BAD_REQUEST", msg({ id: "account.only_admin", message: "This is the only admin." }));
     await u.db.update(schema.user).set({ banned: true, banReason: reason, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     // their browser sessions end now; API keys fail at the next request (requester reads the row)
     await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
@@ -109,8 +116,10 @@ export async function unbanUser(svc: Services, actorId: string | null, userId: s
 export async function removeUser(svc: Services, actorId: string | null, userId: string) {
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
-    if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own account from here." });
-    if (user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin." });
+    if (userId === actorId)
+      throw new AppError("BAD_REQUEST", msg({ id: "account.cannot_remove_own_account_here", message: "You cannot remove your own account from here." }));
+    if (user.role === "admin" && (await otherAdmins(u, userId)) === 0)
+      throw new AppError("BAD_REQUEST", msg({ id: "account.only_admin", message: "This is the only admin." }));
     const projects = await u.db.query.projects.findMany({ where: eq(schema.projects.userId, userId), columns: { id: true } });
     // hosted: the Stripe subscription must stop billing too. Read what to cancel before the rows cascade away;
     // the cancel is a handler on the `billing.detached` event this commits (ee/event-handlers.ts)
@@ -148,7 +157,13 @@ export async function setUserWatermark(svc: Services, actorId: string | null, us
  */
 export async function setUserQueuePriority(svc: Services, actorId: string | null, userId: string, priority: number | null) {
   if (priority !== null && (!Number.isInteger(priority) || priority < QUEUE_PRIORITY_MIN || priority > QUEUE_PRIORITY_MAX))
-    throw new TRPCError({ code: "BAD_REQUEST", message: `Queue priority is a whole number from ${QUEUE_PRIORITY_MIN} to ${QUEUE_PRIORITY_MAX}.` });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({
+        id: "account.queue_priority_whole_number",
+        message: msg`Queue priority is a whole number from ${{ queuePriorityMin: QUEUE_PRIORITY_MIN }} to ${{ queuePriorityMax: QUEUE_PRIORITY_MAX }}.`,
+      }),
+    );
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     await u.db
@@ -167,10 +182,13 @@ export async function setUserQueuePriority(svc: Services, actorId: string | null
  */
 export async function setUserResources(svc: Services, actorId: string | null, userId: string, resources: ResourceCeiling | null) {
   if (!svc.entitlements)
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "Resource ceilings come with hosted plans (REELSAW_EE); here the host's capacity is the only limit.",
-    });
+    throw new AppError(
+      "PRECONDITION_FAILED",
+      msg({
+        id: "account.resource_ceilings_come_hosted_plans",
+        message: "Resource ceilings come with hosted plans (REELSAW_EE); here the host's capacity is the only limit.",
+      }),
+    );
   if (
     resources !== null &&
     (!Number.isInteger(resources.maxCores) ||
@@ -180,10 +198,13 @@ export async function setUserResources(svc: Services, actorId: string | null, us
       resources.maxMemMB < 1 ||
       resources.maxMemMB > RESOURCE_CEILING_MAX_MEM_MB)
   )
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `A resource ceiling is 1 to ${RESOURCE_CEILING_MAX_CORES} cores and 1 to ${RESOURCE_CEILING_MAX_MEM_MB} MB of memory, in whole numbers.`,
-    });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({
+        id: "account.resource_ceiling_1_cores_1",
+        message: msg`A resource ceiling is 1 to ${{ resourceCeilingMaxCores: RESOURCE_CEILING_MAX_CORES }} cores and 1 to ${{ resourceCeilingMaxMemMb: RESOURCE_CEILING_MAX_MEM_MB }} MB of memory, in whole numbers.`,
+      }),
+    );
   const value = resources && { maxCores: resources.maxCores, maxMemMB: resources.maxMemMB };
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
@@ -261,9 +282,11 @@ export async function setUserPassword(
     const user = await lockedUser(u, userId);
     const cred = await credentialAccount(u, userId);
     if (opts.rejectReuse) {
-      if (!user.mustChangePassword) throw new TRPCError({ code: "BAD_REQUEST", message: "This account does not need a new password." });
+      if (!user.mustChangePassword)
+        throw new AppError("BAD_REQUEST", msg({ id: "account.account_does_not_need_new", message: "This account does not need a new password." }));
       if (cred?.password && (await verifyPassword({ hash: cred.password, password }))) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: MUST_CHANGE_PASSWORD_REUSE });
+        // the same sentence as MUST_CHANGE_PASSWORD_REUSE (@reelsaw/shared), from the catalogue
+        throw new AppError("BAD_REQUEST", msg({ id: "account.password_reuse", message: "Choose a different password from the temporary one." }));
       }
     }
     if (cred) await u.db.update(schema.account).set({ password: hash, updatedAt: new Date() }).where(eq(schema.account.id, cred.id));
@@ -352,7 +375,7 @@ export async function bulkUsers(svc: Services, actorId: string | null, input: Bu
       }
     } catch (err) {
       // a guard (yourself, the last admin) or a row removed meanwhile: skip it, say why, go on
-      const message = err instanceof TRPCError ? err.message : "Something went wrong";
+      const message = err instanceof TRPCError ? err.message : t(msg({ id: "account.bulk_failed", message: "Something went wrong" }));
       if (!(err instanceof TRPCError)) log.warn({ err, userId: r.id, action: input.action }, "bulk account action skipped");
       skipped.push({ id: r.id, email: r.email, reason: message });
     }

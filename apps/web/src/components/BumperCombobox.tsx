@@ -2,6 +2,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Check, ChevronsUpDown, Music } from "lucide-react";
+import { select } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { formatNumber } from "@reelsaw/shared";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { formatTag } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
@@ -30,8 +33,17 @@ export interface FixedOption {
   icon: ReactNode;
 }
 
-export const durationText = (sec: number) => `${sec.toFixed(sec % 1 ? 1 : 0)} s`;
-export const assetFacts = (a: PickerAsset) => `${a.kind} · ${durationText(a.durationSec)} · ${a.width}×${a.height}`;
+export const durationText = (sec: number) => `${formatNumber(Number(sec.toFixed(sec % 1 ? 1 : 0)))} s`;
+
+/** An asset's kind as a word: "video", "image", "audio". */
+export const kindText = (kind: PickerAsset["kind"]) => select(kind, { video: "video", image: "image", audio: "audio", other: "file" });
+
+export const assetFacts = (a: PickerAsset) => `${kindText(a.kind)} · ${durationText(a.durationSec)} · ${a.width}×${a.height}`;
+
+/** The default badge for what is being picked ("default intro"). */
+const defaultBadge = (slot: string) => select(slot, { intro: "default intro", outro: "default outro", overlay: "default overlay", other: "default" });
+/** The search box's placeholder for what is being picked ("Search intros…"). */
+const searchPlaceholder = (slot: string) => select(slot, { intro: "Search intros…", outro: "Search outros…", overlay: "Search overlays…", other: "Search…" });
 
 /** The 9:16 thumbnail in a fixed box, so nothing moves while the image loads. */
 export function Thumb({
@@ -62,18 +74,22 @@ const Badge = ({ children, tone = "plain" }: { children: ReactNode; tone?: "plai
 
 /** Facts and badges of one asset, shared by the combobox rows. */
 function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean; slot: string }) {
+  const { t } = useLingui();
+  const size = `${a.width}×${a.height}`;
+  const shows = `${durationText(a.durationSec)} · ${size}`;
+  const usedBy = a.usedBy;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
-      <Badge>{formatTag(a.mime) ?? a.kind}</Badge>
+      <Badge>{formatTag(a.mime) ?? kindText(a.kind)}</Badge>
       <span className="font-mono">
-        {a.kind === "audio"
-          ? clockText(a.durationSec)
-          : a.kind === "image"
-            ? `shows ${durationText(a.durationSec)} · ${a.width}×${a.height}`
-            : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}
+        {a.kind === "audio" ? clockText(a.durationSec) : a.kind === "image" ? t`shows ${shows}` : `${durationText(a.durationSec)} · ${size}`}
       </span>
-      {isDefault && <Badge tone="acc">default {slot}</Badge>}
-      {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
+      {isDefault && <Badge tone="acc">{defaultBadge(slot)}</Badge>}
+      {a.usedBy > 0 && (
+        <span>
+          <Trans>used by {usedBy}</Trans>
+        </span>
+      )}
     </span>
   );
 }
@@ -108,6 +124,7 @@ export function BumperCombobox({
   label: string;
   className?: string;
 }) {
+  const { t: tr } = useLingui();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const fuzzy = useMemo(
@@ -154,11 +171,17 @@ export function BumperCombobox({
             {pickedFixed ? (
               pickedFixed.label
             ) : pickedAsset ? (
-              `${pickedAsset.name}${removed ? " (deleted)" : ""}`
+              removed ? (
+                tr`${pickedAsset.name} (deleted)`
+              ) : (
+                pickedAsset.name
+              )
             ) : loading ? (
               <Skeleton className="h-3.5 w-28" />
             ) : (
-              <span className="text-ink3">Choose…</span>
+              <span className="text-ink3">
+                <Trans>Choose…</Trans>
+              </span>
             )}
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
@@ -178,12 +201,16 @@ export function BumperCombobox({
             <Command.Input
               value={q}
               onValueChange={setQ}
-              placeholder={`Search ${slot}s…`}
+              placeholder={searchPlaceholder(slot)}
               className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
             />
             <ScrollArea className="max-h-[min(320px,calc(var(--radix-popover-content-available-height)-60px))]">
               <Command.List className="p-1">
-                {!loading && <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">No matches</Command.Empty>}
+                {!loading && (
+                  <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">
+                    <Trans>No matches</Trans>
+                  </Command.Empty>
+                )}
                 {shownFixed.map((f) => (
                   <Command.Item key={`f-${f.value}`} value={`f-${f.value}`} onSelect={() => pick(f.value)} className={row}>
                     <span className="grid h-9 w-5 shrink-0 place-items-center text-ink2">{f.icon}</span>
@@ -209,7 +236,9 @@ export function BumperCombobox({
                 ))}
                 {loading && (
                   <div role="status" aria-busy="true">
-                    <span className="sr-only">Loading library…</span>
+                    <span className="sr-only">
+                      <Trans>Loading library…</Trans>
+                    </span>
                     {["w-2/3", "w-1/2", "w-3/5"].map((w, i) => (
                       <div key={i} className="flex items-center gap-2 px-2 py-1.5">
                         <Skeleton className="h-9 w-5 shrink-0" />

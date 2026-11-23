@@ -1,5 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { t } from "@lingui/core/macro";
+import { formatNumber } from "@reelsaw/shared";
 import { ScrollArea } from "./scroll-area";
 
 /**
@@ -112,7 +114,7 @@ export function ListTable({
       aria-busy={loading || undefined}
       className="overflow-clip rounded-[16px] border border-line bg-panel text-[13px]"
     >
-      {loading && <span className="sr-only">{loadingLabel ?? "Loading…"}</span>}
+      {loading && <span className="sr-only">{loadingLabel ?? t`Loading…`}</span>}
       <table className="w-full table-fixed border-separate border-spacing-0">
         <caption className="sr-only">{caption}</caption>
         <colgroup>
@@ -211,12 +213,15 @@ export function ListCell({
 /** The count, and room for a "Load more", in a line that keeps its height so nothing below moves. */
 /**
  * A list's count line: "Showing 50 of 1,204 projects" while more are left to load, and just "3 projects" once
- * everything is on screen ("Showing 1 of 1" read as noise).
+ * everything is on screen ("Showing 1 of 1" read as noise). `noun` is best a function giving the word for a count
+ * from a catalogue plural (`(n) => plural(n, { one: "project", other: "projects" })`), since languages pluralise differently;
+ * an English word (and its plural) still works.
  */
-export function showingCount(shown: number, total: number, noun: string, nounPlural = `${noun}s`): string {
-  const n = (x: number) => x.toLocaleString();
-  const word = (x: number) => (x === 1 ? noun : nounPlural);
-  return shown < total ? `Showing ${n(shown)} of ${n(total)} ${word(total)}` : `${n(total)} ${word(total)}`;
+export function showingCount(shown: number, total: number, noun: string | ((count: number) => string), nounPlural?: string): string {
+  const word = typeof noun === "function" ? noun(total) : total === 1 ? noun : (nounPlural ?? `${noun}s`);
+  const shownN = formatNumber(shown);
+  const totalN = formatNumber(total);
+  return shown < total ? t`Showing ${shownN} of ${totalN} ${word}` : t`${totalN} ${word}`;
 }
 
 export function ListFooter({ children, action }: { children?: ReactNode; action?: ReactNode }) {

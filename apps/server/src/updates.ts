@@ -14,6 +14,8 @@ import semver from "semver";
 import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "./i18n.js";
 
 export { REPO_URL };
 export const UPGRADE_DOCS_URL = `${REPO_URL}/blob/main/deploy/README.md#upgrade`;
@@ -60,9 +62,15 @@ export function upgradeHowTo(current: string): UpdateState["upgrade"] {
   return {
     docsUrl: UPGRADE_DOCS_URL,
     command: source ? "git pull && docker compose up -d --build" : "docker compose pull && docker compose up -d",
-    note: source
-      ? "Running from source: pull the repository and rebuild in the checkout."
-      : "Run it in the install directory (~/reelsaw when the installer set it up). Data stays in the Docker volumes; the database migrates on boot.",
+    note: t(
+      source
+        ? msg({ id: "updates.from_source", message: "Running from source: pull the repository and rebuild in the checkout." })
+        : msg({
+            id: "updates.from_image",
+            message:
+              "Run it in the install directory (~/reelsaw when the installer set it up). Data stays in the Docker volumes; the database migrates on boot.",
+          }),
+    ),
   };
 }
 

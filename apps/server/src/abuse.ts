@@ -14,7 +14,6 @@
  * Every refusal is a sentence. Nothing here reads the request body or the video.
  */
 import { and, eq, gte, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { ACCOUNT_EXISTS_MESSAGE, type AbuseFlag } from "@reelsaw/shared";
 import disposable from "disposable-email-domains/index.json" with { type: "json" };
 import { schema, type Db } from "./db/index.js";
@@ -23,6 +22,8 @@ import type { RuntimeSettings } from "./instance-settings.js";
 import { limitsFor, type Entitlements, type InstanceLimits } from "./quota.js";
 import type { Logger } from "./log.js";
 import type { Config } from "./config.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "./i18n.js";
 
 const DISPOSABLE = new Set<string>(disposable);
 
@@ -154,12 +155,21 @@ export async function checkRequestRate(db: Db, instance: InstanceLimits, userId:
   const minute = Number(row?.minute ?? 0);
   const hour = Number(row?.hour ?? 0);
   if (s.MAX_REQUESTS_PER_MINUTE > 0 && minute > s.MAX_REQUESTS_PER_MINUTE)
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: `More than ${s.MAX_REQUESTS_PER_MINUTE} changes in a minute from this account. Slow down and try again shortly.`,
-    });
+    throw new AppError(
+      "TOO_MANY_REQUESTS",
+      msg({
+        id: "rate_limit.more_than_changes_minute_account",
+        message: msg`More than ${{ maxRequestsPerMinute: s.MAX_REQUESTS_PER_MINUTE }} changes in a minute from this account. Slow down and try again shortly.`,
+      }),
+    );
   if (s.MAX_REQUESTS_PER_HOUR > 0 && hour > s.MAX_REQUESTS_PER_HOUR)
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `More than ${s.MAX_REQUESTS_PER_HOUR} changes in an hour from this account. Try again later.` });
+    throw new AppError(
+      "TOO_MANY_REQUESTS",
+      msg({
+        id: "rate_limit.more_than_changes_hour_account",
+        message: msg`More than ${{ maxRequestsPerHour: s.MAX_REQUESTS_PER_HOUR }} changes in an hour from this account. Try again later.`,
+      }),
+    );
 }
 
 /** Buckets older than two hours are never read again. */

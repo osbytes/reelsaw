@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { COMPETITORS, competitorBySlug } from "@/content/competitors";
 import { defaultOgAlt, defaultOgDescription, defaultOgTitle, ogBlurb, ogContentType, ogSize, renderOgImage } from "@/lib/og";
 
@@ -16,7 +18,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
     return renderOgImage({ title: defaultOgTitle, description: defaultOgDescription });
   }
   return renderOgImage({
-    eyebrow: `Reelsaw vs ${c.name}`,
+    eyebrow: t(msg`Reelsaw vs ${{ name: c.name }}`),
     title: c.h1,
     description: ogBlurb(c.metaDescription),
   });

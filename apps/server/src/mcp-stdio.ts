@@ -10,6 +10,8 @@
  *
  * stdout is the protocol channel, so nothing else may write to it; logs go to stderr.
  */
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "./i18n.js";
 import { objectEntries } from "ts-extras";
 import { McpServer, type CallToolResult, type ServerContext, type ToolAnnotations } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -66,12 +68,16 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
   const client = () => {
     if (!apiKey)
       throw new Error(
-        `REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${url.origin} and pass it in the environment of this command.`,
+        t(
+          msg`REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${{ origin: url.origin }} and pass it in the environment of this command.`,
+        ),
       );
     remote ??= connect(url, apiKey).catch((err) => {
       remote = undefined; // the next call tries again (the instance may still be starting)
       throw new Error(
-        `Cannot reach Reelsaw at ${url} (${err instanceof Error ? err.message : String(err)}). Set REELSAW_URL to the address of a running instance.`,
+        t(
+          msg`Cannot reach Reelsaw at ${{ url: String(url) }} (${{ reason: err instanceof Error ? err.message : String(err) }}). Set REELSAW_URL to the address of a running instance.`,
+        ),
       );
     });
     return remote;

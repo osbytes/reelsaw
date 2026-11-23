@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { AssetFinder } from "../components/AssetFinder";
@@ -11,7 +12,8 @@ import { pageTitle, useDocumentTitle } from "../lib/title";
  * Deep links: `#asset=<id>` highlights a tile, `?upload=1` opens the file picker, `?kind=audio&q=boom` filters.
  */
 export function LibraryPage() {
-  useDocumentTitle(pageTitle("Library"));
+  const { t } = useLingui();
+  useDocumentTitle(pageTitle(t`Library`));
   const nav = useNavigate();
   const loc = useLocation();
   const input = useRef<HTMLInputElement>(null);
@@ -42,8 +44,12 @@ export function LibraryPage() {
     <ScrollArea className="min-h-0 flex-1">
       <main className="mx-auto flex max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
         <div className="min-w-0">
-          <h1 className="text-[28px] font-bold tracking-tight">Library</h1>
-          <p className="mt-1 min-h-5 text-sm text-ink2">Intros, overlays, stickers, b-roll and sounds for your clips</p>
+          <h1 className="text-[28px] font-bold tracking-tight">
+            <Trans>Library</Trans>
+          </h1>
+          <p className="mt-1 min-h-5 text-sm text-ink2">
+            <Trans>Intros, overlays, stickers, b-roll and sounds for your clips</Trans>
+          </p>
         </div>
         <UploadInput inputRef={input} actions={actions} />
         <AssetFinder mode="library" actions={actions} onUpload={() => input.current?.click()} />

@@ -1,5 +1,7 @@
 "use client";
 
+import { msg, plural } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 // One source, the clips it became: the 16:9 video on the left, its picks on the right, in the model's order.
 // Only one clip plays at a time (the one under the pointer or keyboard focus; on a phone, the one scrolled
 // into the middle of the row), so the section is calm and light.
@@ -41,7 +43,10 @@ export function ClipStrip() {
           <span className="absolute right-2 bottom-2 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-xs text-white">{source.length}</span>
         </div>
         <figcaption className="text-xs leading-snug text-ink3">
-          The whole {source.kind}, 16:9. <span className="text-ink2">{DEMO_RUN.clips} clips</span> came out of it.
+          {rich(msg`The whole <0/>, 16:9. <1/> came out of it.`, {
+            0: source.kind,
+            1: <span className="text-ink2">{t(msg`${plural({ clips: DEMO_RUN.clips }, { one: "# clip", other: "# clips" })}`)}</span>,
+          })}
         </figcaption>
       </figure>
 
@@ -49,7 +54,7 @@ export function ClipStrip() {
 
       <ol
         ref={row}
-        aria-label="Clips Reelsaw picked from it, in its own order"
+        aria-label={t(msg`Clips Reelsaw picked from it, in its own order`)}
         className="-mx-5 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-2 [scrollbar-width:none] sm:-mx-8 sm:px-8 lg:mx-0 lg:grid lg:grid-cols-4 lg:overflow-visible lg:px-0 lg:pb-0"
       >
         {picks.map((p, k) => (
@@ -63,7 +68,7 @@ export function ClipStrip() {
               type="button"
               onClick={() => setActive(k)}
               aria-pressed={k === active}
-              aria-label={`Play pick #${p.rank}: ${p.hook}`}
+              aria-label={t(msg`Play pick #${{ rank: p.rank }}: ${{ hook: p.hook }}`)}
               className={`relative block aspect-[9/16] w-full overflow-hidden rounded-[14px] border bg-film transition ${k === active ? "border-acc shadow-pop" : "border-line"}`}
             >
               <LoopVideo src={clipVideo(p.file)} poster={clipPoster(p.file)} play={k === active} className="block h-full w-full object-cover" />

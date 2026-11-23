@@ -1,3 +1,5 @@
+import { plural, t } from "@lingui/core/macro";
+
 export interface SlotAsset {
   assetId: string;
   name: string;
@@ -25,10 +27,16 @@ const MAX_CARDS = 3;
 
 /** "Intro copia-qr · all 9 clips" / "Outro promo · 3 of 9 clips · 6 none" */
 export function cardText(slot: "intro" | "outro", a: SlotAsset, s: SlotSummary) {
-  const label = slot === "intro" ? "Intro" : "Outro";
-  const all = a.withCount === s.total;
-  const none = s.noneCount && !all ? ` · ${s.noneCount} none` : "";
-  return `${label} ${a.name} · ${all ? `all ${s.total} clips` : `${a.withCount} of ${s.total} clips`}${none}`;
+  const name = a.name;
+  const total = s.total;
+  const withCount = a.withCount;
+  const all = withCount === total;
+  const coverage = all
+    ? plural(total, { one: "all # clip", other: "all # clips" })
+    : plural(total, { one: `${withCount} of # clip`, other: `${withCount} of # clips` });
+  const head = slot === "intro" ? t`Intro ${name} · ${coverage}` : t`Outro ${name} · ${coverage}`;
+  const noneCount = s.noneCount;
+  return noneCount && !all ? t`${head} · ${noneCount} none` : head;
 }
 
 /** The same fan as the clip stack, at about a quarter of its size (17% of the poster), mirrored for the outro side. */
@@ -40,7 +48,7 @@ function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary 
   return (
     <div
       role="img"
-      aria-label={`${text}${more > 0 ? `; ${more} more` : ""}`}
+      aria-label={more > 0 ? t`${text}; ${more} more` : text}
       title={text}
       className={`absolute top-2 flex h-[17%] items-start ${outro ? "end-2 flex-row-reverse" : "start-2"}`}
     >

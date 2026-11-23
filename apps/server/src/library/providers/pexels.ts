@@ -6,6 +6,7 @@
  */
 import { ProviderError, arr, clip, extOf, httpsUrl, needKey, num, obj, str } from "./http.js";
 import type { Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://api.pexels.com";
 const LICENSE = { id: "pexels", name: "Pexels License", url: "https://www.pexels.com/license/" };
@@ -103,12 +104,13 @@ export function pexels({ settings, http }: ProviderDeps): Provider {
     },
     async resolve(externalId): Promise<Resolved> {
       const [type, id] = externalId.split(":");
-      if (!id || !/^\d+$/.test(id)) throw new ProviderError("That is not a Pexels id (photo:<id> or video:<id>).");
+      if (!id || !/^\d+$/.test(id))
+        throw new ProviderError(msg({ id: "library_provider.pexels_id_photo_id_video", message: "That is not a Pexels id (photo:<id> or video:<id>)." }));
       if (type === "photo") {
         const p = obj(await http.json("pexels", `${API}/v1/photos/${id}`, { headers: headers() }));
         const src = obj(p["src"]);
         const url = httpsUrl(src["large2x"]) ?? httpsUrl(src["large"]) ?? httpsUrl(src["original"]);
-        if (!url) throw new ProviderError("Pexels returned no file for that photo.");
+        if (!url) throw new ProviderError(msg({ id: "library_provider.pexels_returned_no_file_photo", message: "Pexels returned no file for that photo." }));
         const who = str(p["photographer"]);
         return {
           url,
@@ -128,7 +130,7 @@ export function pexels({ settings, http }: ProviderDeps): Provider {
       if (type === "video") {
         const v = obj(await http.json("pexels", `${API}/v1/videos/videos/${id}`, { headers: headers() }));
         const file = pickVideo(videoFiles(v));
-        if (!file) throw new ProviderError("Pexels returned no file for that video.");
+        if (!file) throw new ProviderError(msg({ id: "library_provider.pexels_returned_no_file_video", message: "Pexels returned no file for that video." }));
         const who = str(obj(v["user"])["name"]);
         return {
           url: file.link,
@@ -145,7 +147,7 @@ export function pexels({ settings, http }: ProviderDeps): Provider {
           },
         };
       }
-      throw new ProviderError("That is not a Pexels id (photo:<id> or video:<id>).");
+      throw new ProviderError(msg({ id: "library_provider.pexels_id_photo_id_video", message: "That is not a Pexels id (photo:<id> or video:<id>)." }));
     },
   };
 }

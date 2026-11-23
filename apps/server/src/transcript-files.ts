@@ -19,6 +19,8 @@ import { releaseUpload } from "./storage/uploads.js";
 import { bodyChunks, fetchPublic, TooManyRedirectsError, UnsafeUrlError } from "./lib/safe-url.js";
 import type { Actor } from "./projects/service.js";
 import { languageCode } from "./pipeline/language.js";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError, t } from "./i18n.js";
 
 export type CaptionFormat = "srt" | "vtt";
 
@@ -45,7 +47,7 @@ async function projectOf(svc: Services, actor: Actor, projectId: string) {
     where: and(eq(schema.projects.id, projectId), actor && !actor.admin ? eq(schema.projects.userId, actor.id) : undefined, isNull(schema.projects.deletedAt)),
     columns: { id: true, title: true },
   });
-  if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such project" });
+  if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.no_such", message: "No such project" }));
   return p;
 }
 
@@ -60,13 +62,16 @@ export async function clipCaptionsFile(
     where: and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt)),
     columns: { projectId: true, index: true, title: true, captions: true },
   });
-  if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+  if (!clip) throw new AppError("NOT_FOUND", msg({ id: "clip.no_such", message: "No such clip" }));
   await projectOf(svc, actor, clip.projectId);
   if (!clip.captions)
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: "This clip has not been rendered since caption files were added. Re-render it, then export its captions.",
-    });
+    throw new AppError(
+      "NOT_FOUND",
+      msg({
+        id: "captions.not_rendered_since",
+        message: "This clip has not been rendered since caption files were added. Re-render it, then export its captions.",
+      }),
+    );
   const out = render(clip.captions.lines, o.format, !!o.words, clip.captions.language);
   return { format: o.format, ...out, filename: `${String(clip.index + 1).padStart(2, "0")}-${slugify(clip.title)}.${o.format}` };
 }
@@ -83,7 +88,11 @@ export async function projectTranscriptFile(
     where: eq(schema.transcripts.projectId, projectId),
     columns: { segments: true, words: true, language: true },
   });
-  if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "This project has no transcript yet. Export it once the project has been transcribed." });
+  if (!t)
+    throw new AppError(
+      "NOT_FOUND",
+      msg({ id: "transcript.export_not_ready", message: "This project has no transcript yet. Export it once the project has been transcribed." }),
+    );
   const out = render(linesFromTranscript(t.segments, t.words), o.format, !!o.words, t.language);
   return { format: o.format, ...out, filename: `${slugify(project.title, 80)}-transcript.${o.format}` };
 }
@@ -95,13 +104,17 @@ async function uploadText(svc: Services, actor: Actor, uploadId: string): Promis
   const row = await svc.database.db.query.uploads.findFirst({
     where: and(eq(schema.uploads.id, uploadId), actor ? eq(schema.uploads.userId, actor.id) : undefined),
   });
-  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
-  if (!SUBTITLE_EXTS.includes(path.extname(row.filename).toLowerCase())) throw new TRPCError({ code: "BAD_REQUEST", message: "Upload an .srt or .vtt file." });
+  if (!row) throw new AppError("NOT_FOUND", msg({ id: "upload.not_found", message: "Upload not found" }));
+  if (!SUBTITLE_EXTS.includes(path.extname(row.filename).toLowerCase()))
+    throw new AppError("BAD_REQUEST", msg({ id: "subtitle.wrong_type", message: "Upload an .srt or .vtt file." }));
   if (row.sizeBytes > MAX_SUBTITLE_BYTES)
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `That file is ${Math.ceil(row.sizeBytes / 1024 / 1024)} MB; subtitle files are read up to ${MAX_SUBTITLE_BYTES / 1024 / 1024} MB.`,
-    });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({
+        id: "subtitle.file_too_large",
+        message: msg`That file is ${{ size: Math.ceil(row.sizeBytes / 1024 / 1024) }} MB; subtitle files are read up to ${{ max: MAX_SUBTITLE_BYTES / 1024 / 1024 }} MB.`,
+      }),
+    );
   const loc = await svc.storage.resolve(row.storageKey);
   if ("file" in loc) return fs.readFile(loc.file, "utf8");
   const tmp = path.join(svc.paths.tmp, `subtitle-${randomUUID()}`);
@@ -122,12 +135,17 @@ export async function fetchSubtitleText(
   try {
     // resolved once, checked, and connected to at that address, hop by hop (lib/safe-url.ts)
     const { res } = await fetchPublic(url, { lookup: deps.lookup, maxRedirects: 3, signal, fetch: deps.fetch ? (u, init) => deps.fetch!(u, init) : undefined });
-    if (!res.ok || !res.body) throw new TRPCError({ code: "BAD_REQUEST", message: `Download failed (HTTP ${res.status})` });
+    if (!res.ok || !res.body)
+      throw new AppError("BAD_REQUEST", msg({ id: "subtitle.download_failed", message: msg`Download failed (HTTP ${{ status: res.status }})` }));
     const chunks: Buffer[] = [];
     let seen = 0;
     for await (const chunk of bodyChunks(res)) {
       seen += chunk.length;
-      if (seen > MAX_SUBTITLE_BYTES) throw new TRPCError({ code: "BAD_REQUEST", message: `The file is larger than ${MAX_SUBTITLE_BYTES / 1024 / 1024} MB` });
+      if (seen > MAX_SUBTITLE_BYTES)
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({ id: "subtitle.larger_than", message: msg`The file is larger than ${{ max: MAX_SUBTITLE_BYTES / 1024 / 1024 }} MB` }),
+        );
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks).toString("utf8");
@@ -163,20 +181,30 @@ export interface ImportTranscriptResult {
  * (see `cuesToTranscript`); refine and the render's forced alignment work from those.
  */
 export async function importTranscript(svc: Services, actor: Actor, projectId: string, input: ImportTranscriptInput): Promise<ImportTranscriptResult> {
-  if (!!input.text === !!input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Give exactly one of text or uploadId" });
+  if (!!input.text === !!input.uploadId) throw new AppError("BAD_REQUEST", msg({ id: "subtitle.one_source", message: "Give exactly one of text or uploadId" }));
   await projectOf(svc, actor, projectId);
   const raw = input.text ?? (await uploadText(svc, actor, input.uploadId!));
   if (Buffer.byteLength(raw) > MAX_SUBTITLE_BYTES)
-    throw new TRPCError({ code: "BAD_REQUEST", message: `Subtitle files are read up to ${MAX_SUBTITLE_BYTES / 1024 / 1024} MB.` });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "subtitle.max_size", message: msg`Subtitle files are read up to ${{ max: MAX_SUBTITLE_BYTES / 1024 / 1024 }} MB.` }),
+    );
   let parsed: ReturnType<typeof parseCaptions>;
   try {
     parsed = parseCaptions(raw, input.format ?? "auto");
   } catch (err) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Could not read that subtitle file" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: err instanceof Error ? err.message : t(msg({ id: "subtitle.unreadable", message: "Could not read that subtitle file" })),
+    });
   }
   const language = languageCode(input.language);
   const { words, segments } = cuesToTranscript(parsed.cues, { language });
-  if (!words.length) throw new TRPCError({ code: "BAD_REQUEST", message: parsed.warnings[0] ?? "That file has no text to use as a transcript." });
+  if (!words.length)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: parsed.warnings[0] ?? t(msg({ id: "subtitle.no_text", message: "That file has no text to use as a transcript." })),
+    });
   const log = svc.log.child({ module: "transcript", projectId });
 
   const restarted = await svc.tx(async (u) => {
@@ -184,14 +212,17 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .select({ status: schema.projects.status, settings: schema.projects.settings })
       .from(schema.projects)
       .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
-    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such project" });
+    if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.no_such", message: "No such project" }));
     const idle = p.status === "done" || p.status === "failed";
     const fresh = p.status === "queued" || p.status === "ingesting";
     if (!idle && !fresh)
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: `The project is ${p.status} right now. Import a transcript when it is done or failed, or right after you create it.`,
-      });
+      throw new AppError(
+        "CONFLICT",
+        msg({
+          id: "transcript.import_busy",
+          message: msg`The project is ${{ status: p.status }} right now. Import a transcript when it is done or failed, or right after you create it.`,
+        }),
+      );
     // transcript first, then the project row (lock order)
     const [prev] = await u.db
       .select({ language: schema.transcripts.language })
@@ -217,7 +248,7 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .values({ projectId, ...values, sceneCuts: null })
       .onConflictDoUpdate({ target: schema.transcripts.projectId, set: values });
     if (idle && (await startRun(u, projectId, { reason: "refine", status: "refining", stage: "refine" })) === null)
-      throw new TRPCError({ code: "CONFLICT", message: "The project started working again. Try once more when it is done." });
+      throw new AppError("CONFLICT", msg({ id: "transcript.import_restarted", message: "The project started working again. Try once more when it is done." }));
     await u.emit("transcript.imported", {
       projectId: projectId,
       ...(input.uploadId ? { uploadId: input.uploadId } : {}),

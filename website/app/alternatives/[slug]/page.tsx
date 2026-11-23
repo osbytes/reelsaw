@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t, rich } from "@/lib/i18n";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { COMPETITORS, competitorBySlug } from "@/content/competitors";
@@ -41,10 +43,10 @@ export default async function AlternativePage({ params }: Props) {
         <ArticleHeader
           crumbs={[
             { href: "/", label: SITE.name },
-            { href: "/alternatives", label: "Alternatives" },
+            { href: "/alternatives", label: t(msg`Alternatives`) },
             { href: `/alternatives/${c.slug}`, label: c.name },
           ]}
-          eyebrow={`Reelsaw vs ${c.name}`}
+          eyebrow={t(msg`Reelsaw vs ${{ name: c.name }}`)}
           h1={c.h1}
           intro={c.intro}
           checked={c.checked}
@@ -52,12 +54,12 @@ export default async function AlternativePage({ params }: Props) {
 
         <section className="flex flex-col gap-4" aria-labelledby="them-cost">
           <h2 id="them-cost" className="text-[24px] font-bold tracking-tight">
-            What {c.name} costs
+            {rich(msg`What <0/> costs`, { 0: c.name })}
           </h2>
           <p className="text-[15px] leading-relaxed text-ink2">{c.pricing.summary}</p>
           <DataTable
-            caption={`${c.name} plans`}
-            table={{ columns: ["Plan", "Price", "What it includes"], rows: c.pricing.plans.map((p) => [p.name, p.price, p.includes]) }}
+            caption={t(msg`${{ name: c.name }} plans`)}
+            table={{ columns: [t(msg`Plan`), t(msg`Price`), t(msg`What it includes`)], rows: c.pricing.plans.map((p) => [p.name, p.price, p.includes]) }}
           />
           {c.pricing.note && <p className="text-xs leading-relaxed text-ink3">{c.pricing.note}</p>}
         </section>
@@ -75,17 +77,17 @@ export default async function AlternativePage({ params }: Props) {
 
         <section className="flex flex-col gap-4" aria-labelledby="features">
           <h2 id="features" className="text-[24px] font-bold tracking-tight">
-            {c.name} vs Reelsaw, feature by feature
+            {rich(msg`<0/> vs Reelsaw, feature by feature`, { 0: c.name })}
           </h2>
           <DataTable
-            caption={`${c.name} and Reelsaw compared`}
+            caption={t(msg`${{ name: c.name }} and Reelsaw compared`)}
             table={{ columns: ["", "Reelsaw", c.name], rows: FEATURES.map((f) => [f.label, f.reelsaw, c.them[f.key]]) }}
           />
         </section>
 
         <section className="flex flex-col gap-4" aria-labelledby="better">
           <h2 id="better" className="text-[24px] font-bold tracking-tight">
-            What {c.name} does better
+            {rich(msg`What <0/> does better`, { 0: c.name })}
           </h2>
           <ul className="grid gap-2 text-[15px] leading-relaxed text-ink2">
             {c.betterAt.map((b) => (
@@ -99,11 +101,11 @@ export default async function AlternativePage({ params }: Props) {
 
         <section className="flex flex-col gap-5" aria-labelledby="pick">
           <h2 id="pick" className="text-[24px] font-bold tracking-tight">
-            Which one should you pick?
+            {t(msg`Which one should you pick?`)}
           </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="card flex flex-col gap-3 p-5">
-              <h3 className="text-[16px] font-bold">Pick {c.name} if</h3>
+              <h3 className="text-[16px] font-bold">{rich(msg`Pick <0/> if`, { 0: c.name })}</h3>
               <ul className="grid gap-2 text-sm leading-relaxed text-ink2">
                 {c.pickThem.map((b) => (
                   <li key={b}>{b}</li>
@@ -111,7 +113,7 @@ export default async function AlternativePage({ params }: Props) {
               </ul>
             </div>
             <div className="card flex flex-col gap-3 border-acc/40 p-5">
-              <h3 className="text-[16px] font-bold">Pick Reelsaw if</h3>
+              <h3 className="text-[16px] font-bold">{t(msg`Pick Reelsaw if`)}</h3>
               <ul className="grid gap-2 text-sm leading-relaxed text-ink2">
                 {c.pickReelsaw.map((b) => (
                   <li key={b}>{b}</li>
@@ -123,9 +125,9 @@ export default async function AlternativePage({ params }: Props) {
 
         <TryIt />
         <FaqSection faqs={c.faqs} />
-        <LinkList heading="Related comparisons" links={[...related, ...GUIDE_NAV]} />
-        <LinkList heading="Sources" links={c.sources} external />
-        <p className="text-xs text-ink3">Last updated {c.checked}.</p>
+        <LinkList heading={t(msg`Related comparisons`)} links={[...related, ...GUIDE_NAV]} />
+        <LinkList heading={t(msg`Sources`)} links={c.sources} external />
+        <p className="text-xs text-ink3">{rich(msg`Last updated <0/>.`, { 0: c.checked })}</p>
       </main>
       <Footer />
     </>

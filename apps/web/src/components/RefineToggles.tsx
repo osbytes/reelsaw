@@ -3,27 +3,30 @@
  * when a gate is off, the control is disabled and explains that the server has it off.
  */
 import type { ProjectSettings } from "@reelsaw/shared";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useMe } from "../lib/account";
 import { Select } from "./ui";
 
 type RefineKey = "refineEntities" | "refineDisfluency" | "disfluencyLlm" | "refineScenes";
 type GateKey = "entities" | "disfluency" | "disfluencyLlm" | "scenes";
 
-const ROWS: Array<{ key: RefineKey; gate: GateKey; label: string; help: string; needs?: RefineKey }> = [
-  { key: "refineEntities", gate: "entities", label: "Fix misheard names", help: "Language-model pass after transcription. On by default." },
-  { key: "refineDisfluency", gate: "disfluency", label: "Remove fillers and repeats", help: "Find ums, stutters and false starts. Off by default." },
+const ROWS: Array<{ key: RefineKey; gate: GateKey; label: MessageDescriptor; help: MessageDescriptor; needs?: RefineKey }> = [
+  { key: "refineEntities", gate: "entities", label: msg`Fix misheard names`, help: msg`Language-model pass after transcription. On by default.` },
+  { key: "refineDisfluency", gate: "disfluency", label: msg`Remove fillers and repeats`, help: msg`Find ums, stutters and false starts. Off by default.` },
   {
     key: "disfluencyLlm",
     gate: "disfluencyLlm",
-    label: "Model pass for fillers",
-    help: "Extra model check on top of rules. Off by default (rules only when filler removal is on).",
+    label: msg`Model pass for fillers`,
+    help: msg`Extra model check on top of rules. Off by default (rules only when filler removal is on).`,
     needs: "refineDisfluency",
   },
   {
     key: "refineScenes",
     gate: "scenes",
-    label: "On-screen text scan",
-    help: "Find burned-in captions, watermarks and slides so captions avoid them. Shot changes are always detected. On by default.",
+    label: msg`On-screen text scan`,
+    help: msg`Find burned-in captions, watermarks and slides so captions avoid them. Shot changes are always detected. On by default.`,
   },
 ];
 
@@ -35,17 +38,22 @@ type Props = {
 };
 
 export function RefineToggles({ value, onChange, compact }: Props) {
+  const { t } = useLingui();
   const me = useMe();
   const gates = me.data?.refineGates;
   return (
     <div className={`flex flex-col ${compact ? "gap-2.5" : "gap-3"}`}>
-      {!compact && <span className="text-[13px] font-semibold text-ink2">Refine after transcription</span>}
+      {!compact && (
+        <span className="text-[13px] font-semibold text-ink2">
+          <Trans>Refine after transcription</Trans>
+        </span>
+      )}
       {ROWS.map((r) => {
         const gateOn = gates?.[r.gate] !== false;
         const parentOn = !r.needs || value[r.needs] === true;
         const disabled = !gateOn || !parentOn;
         const checked = value[r.key] === true;
-        const why = !gateOn ? "Off on this server (Settings → System → Pipeline)." : !parentOn ? "Turn on filler removal first." : undefined;
+        const why = !gateOn ? t`Off on this server (Settings → System → Pipeline).` : !parentOn ? t`Turn on filler removal first.` : undefined;
         return (
           <label key={r.key} className={`flex items-start gap-2.5 text-sm ${disabled ? "opacity-60" : "cursor-pointer"}`} title={why}>
             <input
@@ -56,9 +64,9 @@ export function RefineToggles({ value, onChange, compact }: Props) {
               onChange={(e) => onChange({ [r.key]: e.target.checked })}
             />
             <span>
-              <b className="font-semibold">{r.label}</b>
+              <b className="font-semibold">{t(r.label)}</b>
               <br />
-              <span className="text-[13px] font-normal text-ink2">{why ?? r.help}</span>
+              <span className="text-[13px] font-normal text-ink2">{why ?? t(r.help)}</span>
             </span>
           </label>
         );
@@ -77,15 +85,20 @@ export function RefineDefaultsFields({
   onChange: (key: RefineKey, v: boolean | undefined) => void;
   builtIn?: Partial<Record<RefineKey, boolean>> | undefined;
 }) {
+  const { t } = useLingui();
   const me = useMe();
   const gates = me.data?.refineGates;
   return (
     <div className="flex flex-col gap-3 sm:col-span-2">
       <div>
-        <h3 className="text-[13px] font-bold">Refine after transcription</h3>
+        <h3 className="text-[13px] font-bold">
+          <Trans>Refine after transcription</Trans>
+        </h3>
         <p className="mt-0.5 text-[13px] text-ink2">
-          Name fixes and the on-screen text scan are on by default; filler removal is off for speed and cost. Empty = built-in. The server must allow a step
-          under Settings → System → Pipeline before a project can run it.
+          <Trans>
+            Name fixes and the on-screen text scan are on by default; filler removal is off for speed and cost. Empty = built-in. The server must allow a step
+            under Settings → System → Pipeline before a project can run it.
+          </Trans>
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -95,20 +108,20 @@ export function RefineDefaultsFields({
           const selectVal = cur === undefined ? "" : cur ? "yes" : "no";
           return (
             <label key={r.key} className={`flex flex-col gap-1 text-xs text-ink2 ${gateOn ? "" : "opacity-60"}`}>
-              {r.label}
+              {t(r.label)}
               <Select
-                ariaLabel={r.label}
+                ariaLabel={t(r.label)}
                 disabled={!gateOn}
                 value={gateOn ? selectVal : "no"}
                 onValueChange={(v) => onChange(r.key, v === "" ? undefined : v === "yes")}
                 options={
                   gateOn
                     ? [
-                        { value: "", label: `built-in (${builtIn?.[r.key] ? "on" : "off"})` },
-                        { value: "yes", label: "on" },
-                        { value: "no", label: "off" },
+                        { value: "", label: builtIn?.[r.key] ? t`built-in (on)` : t`built-in (off)` },
+                        { value: "yes", label: t`on` },
+                        { value: "no", label: t`off` },
                       ]
-                    : [{ value: "no", label: "off on this server" }]
+                    : [{ value: "no", label: t`off on this server` }]
                 }
               />
             </label>

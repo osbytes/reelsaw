@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { i18n, type MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { pieceKind } from "../lib/clipMeta";
 import * as Popover from "@radix-ui/react-popover";
@@ -6,8 +9,9 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, LayoutTemplate } from "lucide-react";
 import {
   formatTime,
-  contentLabel,
+  contentSide,
   hasAdjust,
+  isFullFrame,
   regionLabel,
   type ContentRegion,
   type DetectedSegment,
@@ -72,19 +76,42 @@ export function packLayerRows(blocks: LayerBlock[]): Map<string, number> {
   return out;
 }
 
-export const MODE_LABEL: Record<string, string> = {
-  auto: "Auto",
-  face: "Follow speaker",
-  split: "Two stacked",
-  stack: "Screen + speaker",
-  fit: "Whole frame",
-  center: "Centre crop",
-  none: "Original",
+const MODE_MESSAGES: Record<string, MessageDescriptor> = {
+  auto: msg`Auto`,
+  face: msg`Follow speaker`,
+  split: msg`Two stacked`,
+  stack: msg`Screen + speaker`,
+  fit: msg`Whole frame`,
+  center: msg`Centre crop`,
+  none: msg`Original`,
   /** not a mode: what an automatic Whole frame showed when it found a picture inset between bars */
-  inset: "Inset video",
+  inset: msg`Inset video`,
   /** not a mode: an automatic crop that follows the moving subject of a shot without a face */
-  subject: "Follow subject",
+  subject: msg`Follow subject`,
 };
+/**
+ * A record of labels read in the active locale: each key is a getter over its message, so a module-level table of
+ * names (modes, shapes) is rendered in the language shown now, not the one active when the module loaded.
+ */
+export function labelsOf<K extends string>(messages: Record<K, MessageDescriptor>): Record<K, string> {
+  return Object.defineProperties(
+    {} as Record<K, string>,
+    Object.fromEntries(Object.entries<MessageDescriptor>(messages).map(([k, d]) => [k, { enumerable: true, get: () => i18n._(d) }])),
+  );
+}
+/** A framing mode's name in the active locale. */
+export const MODE_LABEL: Record<string, string> = labelsOf(MODE_MESSAGES);
+
+/** "Stack" for the whole frame, "Stack · content left 50%" for a region (the web copy of `contentLabel` in @reelsaw/shared). */
+function stackLabel(c: ContentRegion | undefined | null, tile?: ContentRegion | null): string {
+  const cam = tile ? i18n._(msg` · webcam`) : "";
+  if (!c || isFullFrame(c)) return i18n._(msg`Stack${cam}`);
+  const side = contentSide(c);
+  const pct = Math.round((c.x2 - c.x1) * 100);
+  if (side === "left") return i18n._(msg`Stack · content left ${pct}%${cam}`);
+  if (side === "right") return i18n._(msg`Stack · content right ${pct}%${cam}`);
+  return i18n._(msg`Stack · content inset ${pct}%${cam}`);
+}
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"), a fit whether it showed an inset picture. */
 export const layoutLabel = (d: {
   layout: string;
@@ -92,7 +119,7 @@ export const layoutLabel = (d: {
   tile?: ContentRegion;
   inset?: ContentRegion | undefined;
   focus?: string | undefined;
-}) => (d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[pieceKind(d)]);
+}) => (d.layout === "stack" ? stackLabel(d.content, d.tile) : MODE_LABEL[pieceKind(d)]);
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;
@@ -233,6 +260,7 @@ export function Timeline({
   onBumperSeconds,
   renderBumperEditor,
 }: Props) {
+  const { t } = useLingui();
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const lyRows = useMemo(() => packLayerRows(layers), [layers]);
@@ -441,7 +469,7 @@ export function Timeline({
     const open = selectedBumper === slot;
     const left = slot === "intro" ? (b ? x(range[0] - b.sec) : x(range[0]) - 68) : x(range[1]) + (b ? 0 : 4);
     const width = b ? Math.max(28, slot === "intro" ? x(range[0]) - x(range[0] - b.sec) : x(range[1] + b.sec) - x(range[1])) : 64;
-    const label = slot === "intro" ? "Intro" : "Outro";
+    const label = slot === "intro" ? t`Intro` : t`Outro`;
     const node = b ? (
       <div
         className={`absolute inset-y-0 flex cursor-pointer items-center gap-1.5 overflow-hidden border-2 border-dashed px-1.5 ${slot === "intro" ? "rounded-s-[8px] border-e-0" : "rounded-e-[8px] border-s-0"} ${open ? "border-acc bg-acc-soft" : "border-line2 bg-panel hover:bg-sunk"}`}
@@ -451,7 +479,11 @@ export function Timeline({
           e.stopPropagation();
           onBumperSelect?.(open ? null : slot);
         }}
-        title={`${label}: ${b.name} · ${b.sec} s${b.source === "project" ? " (project default)" : ""} · click to change`}
+        title={
+          b.source === "project"
+            ? t`${label}: ${b.name} · ${b.sec} s (project default) · click to change`
+            : t`${label}: ${b.name} · ${b.sec} s · click to change`
+        }
       >
         {b.thumbnailUrl ? (
           <img src={b.thumbnailUrl} alt="" className="h-[26px] w-[15px] shrink-0 rounded-[3px] object-cover" />
@@ -467,7 +499,7 @@ export function Timeline({
             </span>
             <span className="block truncate text-[10px] text-ink3">
               {b.name}
-              {b.source === "project" ? " · project" : ""}
+              {b.source === "project" ? t` · project` : ""}
             </span>
           </span>
         )}
@@ -479,7 +511,7 @@ export function Timeline({
         style={{ left }}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => onBumperSelect?.(open ? null : slot)}
-        title={`Add an ${slot}`}
+        title={slot === "intro" ? t`Add an intro` : t`Add an outro`}
       >
         <Plus className="h-3 w-3" /> {label}
       </button>
@@ -492,7 +524,11 @@ export function Timeline({
             className="absolute inset-y-0 z-[3] w-3 cursor-ew-resize"
             style={{ left: slot === "intro" ? left - 6 : left + width - 6 }}
             onPointerDown={(e) => begin(e, { kind: "bumper", slot })}
-            title={`Drag to change how long the ${slot} shows (${BUMPER_SEC.min}–${BUMPER_SEC.max} s)`}
+            title={
+              slot === "intro"
+                ? t`Drag to change how long the intro shows (${BUMPER_SEC.min}–${BUMPER_SEC.max} s)`
+                : t`Drag to change how long the outro shows (${BUMPER_SEC.min}–${BUMPER_SEC.max} s)`
+            }
           />
         )}
         <Popover.Portal>
@@ -538,11 +574,13 @@ export function Timeline({
             className={`min-w-[7.5rem] rounded-full px-2.5 py-[3px] text-center font-mono text-[11px] whitespace-nowrap ${snapHit && drag ? "bg-acc text-acc-ink" : snap ? "bg-sunk text-ink2 hover:text-ink" : "border border-dashed border-line2 text-ink3 hover:text-ink"}`}
             aria-pressed={snap}
             onClick={() => onSnap?.(!snap)}
-            title={snap ? "Snapping to words, scene changes, the playhead and the clip edges (S toggles; hold Alt for one drag)" : "Snapping off (S toggles)"}
+            title={snap ? t`Snapping to words, scene changes, the playhead and the clip edges (S toggles; hold Alt for one drag)` : t`Snapping off (S toggles)`}
           >
-            {snapHit && drag ? `snap: ${snapHit.kind}` : snap ? "snap on" : "snap off"}
+            {snapHit && drag ? t`snap: ${snapHit.kind}` : snap ? t`snap on` : t`snap off`}
           </button>
-          <span>Zoom</span>
+          <span>
+            <Trans>Zoom</Trans>
+          </span>
           <input
             type="range"
             min={0}
@@ -554,10 +592,10 @@ export function Timeline({
               setSpan(next, next < len ? current : (view[0] + view[1]) / 2);
             }}
             className="w-28 accent-[var(--acc)]"
-            aria-label="Zoom timeline"
+            aria-label={t`Zoom timeline`}
           />
-          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setView(fitView())} title="Fit the clip">
-            Fit
+          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setView(fitView())} title={t`Fit the clip`}>
+            <Trans>Fit</Trans>
           </button>
         </div>
       </div>
@@ -565,17 +603,19 @@ export function Timeline({
         {/* lane labels */}
         <div className="shrink-0" style={{ width: LABEL_W }}>
           <div className="h-6" />
-          <div className={`${label} h-[26px]`}>Words</div>
+          <div className={`${label} h-[26px]`}>
+            <Trans>Words</Trans>
+          </div>
           <div className={`${label} mt-1.5 justify-between pe-2`} style={{ height: lyLaneH }}>
-            Layers
+            <Trans>Layers</Trans>
             {onLayerAdd && (
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
                   <button
                     type="button"
                     className="grid h-5 w-5 shrink-0 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink"
-                    aria-label="Add a layer at the playhead"
-                    title="Add a layer at the playhead"
+                    aria-label={t`Add a layer at the playhead`}
+                    title={t`Add a layer at the playhead`}
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -583,17 +623,17 @@ export function Timeline({
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content side="top" align="start" sideOffset={6} className="menu z-[80] w-[200px]">
                     <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "asset")}>
-                      <ImageIcon className="h-3.5 w-3.5" /> Image or video…
+                      <ImageIcon className="h-3.5 w-3.5" /> <Trans>Image or video…</Trans>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "text")}>
-                      <Type className="h-3.5 w-3.5" /> Text
+                      <Type className="h-3.5 w-3.5" /> <Trans>Text</Trans>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "audio")}>
-                      <Music className="h-3.5 w-3.5" /> Sound…
+                      <Music className="h-3.5 w-3.5" /> <Trans>Sound…</Trans>
                     </DropdownMenu.Item>
                     {onLayerTemplate && (
                       <DropdownMenu.Item className="menu-item" onSelect={onLayerTemplate}>
-                        <LayoutTemplate className="h-3.5 w-3.5" /> Template…
+                        <LayoutTemplate className="h-3.5 w-3.5" /> <Trans>Template…</Trans>
                       </DropdownMenu.Item>
                     )}
                   </DropdownMenu.Content>
@@ -601,8 +641,12 @@ export function Timeline({
               </DropdownMenu.Root>
             )}
           </div>
-          <div className={`${label} mt-1.5 h-[34px]`}>Clip</div>
-          <div className={`${label} mt-1.5 h-[38px]`}>Framing</div>
+          <div className={`${label} mt-1.5 h-[34px]`}>
+            <Trans>Clip</Trans>
+          </div>
+          <div className={`${label} mt-1.5 h-[38px]`}>
+            <Trans>Framing</Trans>
+          </div>
         </div>
 
         <ContextMenu.Root modal={false}>
@@ -664,7 +708,7 @@ export function Timeline({
                   const t = tAt(e.clientX);
                   if (inClip(t)) onLayerAdd?.(Number(t.toFixed(2)), "asset");
                 }}
-                title={onLayerAdd ? "Double-click to add an image or video here; + for text or a sound" : undefined}
+                title={onLayerAdd ? t`Double-click to add an image or video here; + for text or a sound` : undefined}
               >
                 {layers.map((o) => {
                   const left = x(o.start);
@@ -683,7 +727,7 @@ export function Timeline({
                         onLayerSelect?.(o.id);
                         begin(e, { kind: "ly-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
                       }}
-                      title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim (min ${min} s)`}
+                      title={t`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim (min ${min} s)`}
                     >
                       {o.kind === "text" ? (
                         <Type className="h-3 w-3 shrink-0 text-ink3" />
@@ -720,7 +764,7 @@ export function Timeline({
                   className="absolute inset-y-0 z-[2] flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
                   style={{ left: x(range[0]), width: Math.max(4, x(range[1]) - x(range[0])) }}
                   onPointerDown={(e) => begin(e, { kind: "move", grabT: tAt(e.clientX), orig: range })}
-                  title="Drag to slide the whole clip"
+                  title={t`Drag to slide the whole clip`}
                 >
                   {renderClipEditor ? (
                     <Popover.Root open={clipEditorOpen} onOpenChange={setClipEditorOpen}>
@@ -729,8 +773,8 @@ export function Timeline({
                           type="button"
                           className={`rounded-[6px] px-1.5 font-mono text-[11px] font-semibold text-acc-text hover:bg-acc/20 ${clipEditorOpen ? "bg-acc/20" : ""}`}
                           onPointerDown={(e) => e.stopPropagation()}
-                          title="Clip length · click to edit the in and out points"
-                          aria-label="Edit the in and out points"
+                          title={t`Clip length · click to edit the in and out points`}
+                          aria-label={t`Edit the in and out points`}
                         >
                           {len.toFixed(1)}s
                         </button>
@@ -758,7 +802,7 @@ export function Timeline({
                     className={`absolute inset-y-0 z-[3] grid w-3.5 -translate-x-1/2 cursor-ew-resize place-items-center rounded-[6px] bg-acc ${drag?.kind === k ? "brightness-110" : ""}`}
                     style={{ left: x(range[k === "start" ? 0 : 1]) }}
                     onPointerDown={(e) => begin(e, { kind: k })}
-                    title={k === "start" ? "Drag to set the in point (I)" : "Drag to set the out point (O)"}
+                    title={k === "start" ? t`Drag to set the in point (I)` : t`Drag to set the out point (O)`}
                   >
                     <span className="h-3.5 w-[3px] rounded-full bg-acc-ink/70" />
                   </div>
@@ -794,7 +838,7 @@ export function Timeline({
                       {width > 44 && <span className="truncate text-[11px] font-bold leading-tight">{MODE_LABEL[s.mode]}</span>}
                       {width > 70 && (
                         <span className="truncate text-[10px] leading-tight opacity-75">
-                          {auto ? (chose ? `→ ${chose}` : "→ decided at render") : hasAdjust(s) ? adjustLabel(s) : "forced"}
+                          {auto ? (chose ? `→ ${chose}` : t`→ decided at render`) : hasAdjust(s) ? adjustLabel(s) : t`forced`}
                           {auto && hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}
                         </span>
                       )}
@@ -814,7 +858,7 @@ export function Timeline({
                       e.stopPropagation();
                       onMerge(k + 1, "left");
                     }}
-                    title="Drag to move this transition · double-click to remove it"
+                    title={t`Drag to move this transition · double-click to remove it`}
                   >
                     <div
                       className={`h-6 w-1 rounded-full ${drag?.kind === "boundary" && drag.index === k + 1 ? "bg-acc" : "bg-ink"} shadow-[0_0_0_2px_var(--panel)]`}
@@ -831,7 +875,7 @@ export function Timeline({
                     key={c}
                     className="pointer-events-none absolute bottom-0 top-6 border-s-2 border-dashed border-warn opacity-60"
                     style={{ left: x(c) }}
-                    title={`Scene change ${formatTime(c)}`}
+                    title={t`Scene change ${formatTime(c)}`}
                   />
                 ))}
               {/* snap target while dragging */}
@@ -875,9 +919,15 @@ export function Timeline({
       </div>
       {!compactHints && (
         <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pe-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
-          <span>Drag the handles to trim; drag the clip to slide it · click the intro or outro to change it</span>
-          <span>Snaps to words, scene changes and the playhead · hold Alt to drag freely</span>
-          <span>{MOD} + scroll zooms · right-click for framing and layers</span>
+          <span>
+            <Trans>Drag the handles to trim; drag the clip to slide it · click the intro or outro to change it</Trans>
+          </span>
+          <span>
+            <Trans>Snaps to words, scene changes and the playhead · hold Alt to drag freely</Trans>
+          </span>
+          <span>
+            <Trans>{MOD} + scroll zooms · right-click for framing and layers</Trans>
+          </span>
         </div>
       )}
     </div>
@@ -887,13 +937,18 @@ export function Timeline({
 /** "x +12% · y −5% · bottom x +3% · follows 72%" for a section's per-pane adjustments; a fixed crop reads "at 10–60% × 0–100%". */
 export function adjustLabel(s: SectionAdjustFields): string {
   const pct = (v: number) => `${v > 0 ? "+" : "−"}${Math.round(Math.abs(v) * 100)}%`;
-  const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined, crop: ContentRegion | undefined) =>
-    crop
-      ? `at ${regionLabel(crop)}`
-      : [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
+  const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined, crop: ContentRegion | undefined) => {
+    if (crop) {
+      const region = regionLabel(crop);
+      return i18n._(msg`at ${region}`);
+    }
+    const follows = sub !== undefined ? Math.round(sub * 100) : undefined;
+    return [...(follows !== undefined ? [i18n._(msg`follows ${follows}%`)] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
+  };
   const a = pane(s.offsetX, s.offsetY, s.subjectX, s.crop);
   const b = pane(s.offsetX2, s.offsetY2, s.subjectX2, s.crop2);
-  return [s.contentCrop ? `top at ${regionLabel(s.contentCrop)}` : "", a, b ? `bottom ${b}` : ""].filter(Boolean).join(" · ");
+  const top = s.contentCrop ? regionLabel(s.contentCrop) : "";
+  return [top ? i18n._(msg`top at ${top}`) : "", a, b ? i18n._(msg`bottom ${b}`) : ""].filter(Boolean).join(" · ");
 }
 
 const MENU_MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
@@ -924,6 +979,7 @@ function TimelineMenu(p: {
   canUndo: boolean;
   canRedo: boolean;
 }) {
+  const { t } = useLingui();
   const at = p.at;
   if (!at) return null;
   const sec = at.section >= 0 ? p.sections[at.section] : undefined;
@@ -932,34 +988,39 @@ function TimelineMenu(p: {
     <ContextMenu.Content className="menu z-[60] w-[240px]" collisionPadding={8}>
       <ContextMenu.Label className="px-2.5 py-1 font-mono text-[10px] text-ink3">{formatTime(at.t)}</ContextMenu.Label>
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
-        <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ms-auto">{SPLIT_SHORTCUT}</span>
+        <Scissors className="h-3.5 w-3.5" /> <Trans>Split here</Trans> <span className="kbd ms-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
       {p.layer && p.onLayerRemove ? (
         <ContextMenu.Item className={item} onSelect={() => p.onLayerRemove!(p.layer!.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ms-auto">Delete</span>
+          <Trash2 className="h-3.5 w-3.5" /> <Trans>Remove layer “{p.layer.name}”</Trans>{" "}
+          <span className="kbd ms-auto">
+            <Trans>Delete</Trans>
+          </span>
         </ContextMenu.Item>
       ) : p.onLayerAdd ? (
         <>
           <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "asset")}>
-            <ImageIcon className="h-3.5 w-3.5" /> Add image or video here
+            <ImageIcon className="h-3.5 w-3.5" /> <Trans>Add image or video here</Trans>
           </ContextMenu.Item>
           <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "text")}>
-            <Type className="h-3.5 w-3.5" /> Add text here
+            <Type className="h-3.5 w-3.5" /> <Trans>Add text here</Trans>
           </ContextMenu.Item>
           <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "audio")}>
-            <Music className="h-3.5 w-3.5" /> Add sound here
+            <Music className="h-3.5 w-3.5" /> <Trans>Add sound here</Trans>
           </ContextMenu.Item>
         </>
       ) : null}
       {p.onLayerTemplate && (
         <ContextMenu.Item className={item} onSelect={p.onLayerTemplate}>
-          <LayoutTemplate className="h-3.5 w-3.5" /> Template…
+          <LayoutTemplate className="h-3.5 w-3.5" /> <Trans>Template…</Trans>
         </ContextMenu.Item>
       )}
       {sec && (
         <>
           <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-          <ContextMenu.Label className="px-2.5 pb-0.5 pt-1 text-[11px] font-semibold text-ink3">Framing</ContextMenu.Label>
+          <ContextMenu.Label className="px-2.5 pb-0.5 pt-1 text-[11px] font-semibold text-ink3">
+            <Trans>Framing</Trans>
+          </ContextMenu.Label>
           <ContextMenu.RadioGroup value={sec.mode} onValueChange={(m) => p.onSetMode(at.section, m as SectionMode)}>
             {MENU_MODES.map((m) => (
               <ContextMenu.RadioItem key={m} value={m} className={item}>
@@ -968,16 +1029,16 @@ function TimelineMenu(p: {
                     <Check className="h-3.5 w-3.5" />
                   </ContextMenu.ItemIndicator>
                 </span>
-                {m === "auto" ? `Auto${autoChose ? ` (${autoChose})` : ""}` : MODE_LABEL[m]}
+                {m === "auto" ? (autoChose ? t`Auto (${autoChose})` : t`Auto`) : MODE_LABEL[m]}
               </ContextMenu.RadioItem>
             ))}
           </ContextMenu.RadioGroup>
           <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
           <ContextMenu.Item className={item} disabled={at.section === 0} onSelect={() => p.onMerge(at.section, "left")}>
-            Merge with previous
+            <Trans>Merge with previous</Trans>
           </ContextMenu.Item>
           <ContextMenu.Item className={item} disabled={at.section >= p.sections.length - 1} onSelect={() => p.onMerge(at.section, "right")}>
-            Merge with next
+            <Trans>Merge with next</Trans>
           </ContextMenu.Item>
           {p.onSetCrop && (
             <ContextMenu.Item
@@ -985,32 +1046,32 @@ function TimelineMenu(p: {
               disabled={sec.mode === "auto" && !p.detected.some((d) => d.end > sec.start && d.start < sec.end)}
               onSelect={() => p.onSetCrop!(at.section)}
             >
-              Set crop…
+              <Trans>Set crop…</Trans>
             </ContextMenu.Item>
           )}
           {p.onResetOffset && (
             <ContextMenu.Item className={item} disabled={!hasAdjust(sec)} onSelect={() => p.onResetOffset!(at.section)}>
-              Reset re-centring and crops
+              <Trans>Reset re-centring and crops</Trans>
             </ContextMenu.Item>
           )}
         </>
       )}
       <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} onSelect={() => p.onSetIn(at.t)} disabled={at.t >= p.range[1] - MIN_CLIP}>
-        Set in point here
+        <Trans>Set in point here</Trans>
       </ContextMenu.Item>
       <ContextMenu.Item className={item} onSelect={() => p.onSetOut(at.t)} disabled={at.t <= p.range[0] + MIN_CLIP}>
-        Set out point here
+        <Trans>Set out point here</Trans>
       </ContextMenu.Item>
       <ContextMenu.Item className={item} onSelect={() => p.onSeek(at.t)}>
-        Move playhead here
+        <Trans>Move playhead here</Trans>
       </ContextMenu.Item>
       <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} disabled={!p.canUndo} onSelect={p.onUndo}>
-        <Undo2 className="h-3.5 w-3.5" /> Undo <span className="kbd ms-auto">{MOD}Z</span>
+        <Undo2 className="h-3.5 w-3.5" /> <Trans>Undo</Trans> <span className="kbd ms-auto">{MOD}Z</span>
       </ContextMenu.Item>
       <ContextMenu.Item className={item} disabled={!p.canRedo} onSelect={p.onRedo}>
-        <Redo2 className="h-3.5 w-3.5" /> Redo <span className="kbd ms-auto">{MOD}⇧Z</span>
+        <Redo2 className="h-3.5 w-3.5" /> <Trans>Redo</Trans> <span className="kbd ms-auto">{MOD}⇧Z</span>
       </ContextMenu.Item>
     </ContextMenu.Content>
   );

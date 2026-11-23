@@ -3,7 +3,6 @@
  * (sounds), defaults left out, numbers rounded, ordered by start. `clips.update`, the layer-template apply and the
  * CLI all write through `cleanLayers`, so one rule decides what a stored layer looks like.
  */
-import { TRPCError } from "@trpc/server";
 import {
   ASSET_OVERLAY_DEFAULT_W,
   CLIP_AUDIO_DEFAULTS,
@@ -15,6 +14,8 @@ import {
   type ClipLayer,
   type ClipOverlay,
 } from "@reelsaw/shared";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "../i18n.js";
 
 type ClipRange = { startSec: number; endSec: number };
 
@@ -24,11 +25,16 @@ export function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: Clip
   const seen = new Set<string>();
   const out: ClipOverlay[] = [];
   for (const o of list) {
-    if (seen.has(o.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay id “${o.id}” is used twice` });
+    if (seen.has(o.id))
+      throw new AppError("BAD_REQUEST", msg({ id: "layers.overlay_id_used_twice", message: msg`Overlay id “${{ id: o.id }}” is used twice` }));
     seen.add(o.id);
     const start = Math.max(clip.startSec, o.start);
     const end = Math.min(clip.endSec, o.end);
-    if (end - start < 0.1) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay “${o.id}” lies outside the clip or lasts under 0.1 s` });
+    if (end - start < 0.1)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "layers.overlay_lies_outside_clip_lasts", message: msg`Overlay “${{ id: o.id }}” lies outside the clip or lasts under 0.1 s` }),
+      );
     const r3 = (n: number) => Number(n.toFixed(3));
     const kind = overlayKind(o);
     const base = {
@@ -63,10 +69,14 @@ export function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: Clip
  */
 export function cleanLayers(list: ClipLayer[] | null | undefined, clip: ClipRange): ClipLayer[] | null {
   if (!list?.length) return null;
-  if (list.length > MAX_CLIP_LAYERS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can have at most ${MAX_CLIP_LAYERS} layers` });
+  if (list.length > MAX_CLIP_LAYERS)
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "layers.clip_most_layers", message: msg`A clip can have at most ${{ maxClipLayers: MAX_CLIP_LAYERS }} layers` }),
+    );
   const ids = new Set<string>();
   for (const l of list) {
-    if (ids.has(l.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Layer id “${l.id}” is used twice` });
+    if (ids.has(l.id)) throw new AppError("BAD_REQUEST", msg({ id: "layers.layer_id_used_twice", message: msg`Layer id “${{ id: l.id }}” is used twice` }));
     ids.add(l.id);
   }
   const { overlays, audio } = layersToLegacy(list);
@@ -91,11 +101,16 @@ export function cleanAudio(list: ClipAudio[] | null | undefined, clip: ClipRange
   const r2 = (n: number) => Number(n.toFixed(2));
   const out: ClipAudio[] = [];
   for (const a of list) {
-    if (seen.has(a.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Music track id “${a.id}” is used twice` });
+    if (seen.has(a.id))
+      throw new AppError("BAD_REQUEST", msg({ id: "layers.music_track_id_used_twice", message: msg`Music track id “${{ id: a.id }}” is used twice` }));
     seen.add(a.id);
     const start = Math.max(clip.startSec, a.start);
     const end = Math.min(clip.endSec, a.end);
-    if (end - start < 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: `Music track “${a.id}” lies outside the clip or lasts under 0.5 s` });
+    if (end - start < 0.5)
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "layers.music_track_lies_outside_clip", message: msg`Music track “${{ id: a.id }}” lies outside the clip or lasts under 0.5 s` }),
+      );
     out.push({
       id: a.id,
       assetId: a.assetId,

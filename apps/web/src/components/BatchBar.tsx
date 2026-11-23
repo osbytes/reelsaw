@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { plural } from "@lingui/core/macro";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
@@ -10,7 +11,7 @@ import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
 import { MoreButton } from "./ui";
 import { useCopyShareLink } from "./ShareLinks";
-import { plural } from "@reelsaw/shared";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 interface BatchClip {
   id: string;
@@ -41,6 +42,7 @@ export function BatchBar({
   onClear: () => void;
   onChanged: () => void;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
@@ -53,7 +55,7 @@ export function BatchBar({
         onClear();
         onChanged();
         if (!r.deleted) {
-          toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
+          toast(r.skipped ? t`Those clips were already deleted` : t`Nothing deleted`);
           return;
         }
         notifyDeleted({
@@ -62,7 +64,10 @@ export function BatchBar({
           storedBytes: r.storedBytes,
         });
       },
-      (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
+      (err: Error) => {
+        const reason = err.message.slice(0, 120);
+        toast.error(t`Couldn’t delete: ${reason}`);
+      },
     );
   };
   const [bumpersOpen, setBumpersOpen] = useState(false);
@@ -70,13 +75,19 @@ export function BatchBar({
   const done = selected.filter((c) => c.status === "done");
   const failed = selected.filter((c) => c.status === "failed");
   const renderable = selected.filter((c) => c.status === "done" || c.status === "failed");
-  const run = (clips: BatchClip[], what: string) =>
+  const run = (clips: BatchClip[], what: "rerender" | "retry") =>
     many.mutate(
       { projectId, clipIds: clips.map((c) => c.id) },
       {
         onSuccess: (r) => {
           onChanged();
-          toast(`${what} ${plural(r.rerendered, "clip")}${r.skipped ? ` · ${r.skipped} skipped (still rendering)` : ""}`);
+          const count = r.rerendered;
+          const skipped = r.skipped;
+          const head =
+            what === "retry"
+              ? t`Retrying ${plural(count, { one: "# clip", other: "# clips" })}`
+              : t`Re-rendering ${plural(count, { one: "# clip", other: "# clips" })}`;
+          toast(skipped ? t`${head} · ${skipped} skipped (still rendering)` : head);
         },
         onError: (e) => toast.error(e.message),
       },
@@ -84,63 +95,80 @@ export function BatchBar({
   const copyAll = () =>
     navigator.clipboard
       .writeText(clipsText(selected))
-      .then(() => toast(`Title, caption + hashtags of ${plural(selected.length, "clip")} copied`))
-      .catch(() => toast.error("Couldn’t copy"));
-  const n = (k: number) => `${plural(k, "clip")}`;
+      .then(() => toast(plural(selected.length, { one: "Title, caption + hashtags of # clip copied", other: "Title, caption + hashtags of # clips copied" })))
+      .catch(() => toast.error(t`Couldn’t copy`));
   const copyShareLink = useCopyShareLink();
   const exportHref = `/api/projects/${projectId}/export.zip?clips=${done.map((c) => c.id).join(",")}`;
   const later = (fn: () => void) => window.setTimeout(fn, 0);
 
   return (
-    <SelectionBar label="Selected clips" count={selected.length} busy={many.isPending || delMany.isPending} onClear={onClear}>
+    <SelectionBar label={t`Selected clips`} count={selected.length} busy={many.isPending || delMany.isPending} onClear={onClear}>
       <button
         className="btn-ghost"
         disabled={!renderable.length || many.isPending}
-        title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"}
-        onClick={() => run(renderable, "Re-rendering")}
+        title={
+          renderable.length
+            ? plural(renderable.length, { one: "Re-render # clip", other: "Re-render # clips" })
+            : t`None of the selected clips is rendered or failed`
+        }
+        onClick={() => run(renderable, "rerender")}
       >
-        Re-render
+        <Trans>Re-render</Trans>
       </button>
       {done.length ? (
-        <a className="btn-ghost" href={exportHref} title={`Download a zip of ${n(done.length)} with YouTube and TikTok metadata`}>
-          Export
+        <a
+          className="btn-ghost"
+          href={exportHref}
+          title={plural(done.length, {
+            one: "Download a zip of # clip with YouTube and TikTok metadata",
+            other: "Download a zip of # clips with YouTube and TikTok metadata",
+          })}
+        >
+          <Trans>Export</Trans>
         </a>
       ) : (
-        <button className="btn-ghost" disabled title="None of the selected clips is rendered yet">
-          Export
+        <button className="btn-ghost" disabled title={t`None of the selected clips is rendered yet`}>
+          <Trans>Export</Trans>
         </button>
       )}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <MoreButton aria-label="More actions for the selection" />
+          <MoreButton aria-label={t`More actions for the selection`} />
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
             <DropdownMenu.Item className="menu-item" onSelect={() => void copyAll()}>
-              Copy text
+              <Trans>Copy text</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Item
               className="menu-item"
               disabled={!done.length}
-              title={done.length ? "A link anyone can download the zip of these clips from, without signing in" : "None of the selected clips is rendered yet"}
-              onSelect={() => copyShareLink({ kind: "export", projectId, clipIds: done.map((c) => c.id) }, `a zip of ${n(done.length)}`)}
+              title={
+                done.length ? t`A link anyone can download the zip of these clips from, without signing in` : t`None of the selected clips is rendered yet`
+              }
+              onSelect={() =>
+                copyShareLink(
+                  { kind: "export", projectId, clipIds: done.map((c) => c.id) },
+                  plural(done.length, { one: "a zip of # clip", other: "a zip of # clips" }),
+                )
+              }
             >
-              Copy link to zip
+              <Trans>Copy link to zip</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setBumpersOpen(true))}>
-              Intro / outro…
+              <Trans>Intro / outro…</Trans>
             </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setTemplateOpen(true))}>
-              Layer template…
+              <Trans>Layer template…</Trans>
             </DropdownMenu.Item>
             {failed.length > 0 && (
-              <DropdownMenu.Item className="menu-item" disabled={many.isPending} onSelect={() => run(failed, "Retrying")}>
-                Retry failed ({failed.length})
+              <DropdownMenu.Item className="menu-item" disabled={many.isPending} onSelect={() => run(failed, "retry")}>
+                <Trans>Retry failed ({failed.length})</Trans>
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
             <DropdownMenu.Item className="menu-item-danger" disabled={delMany.isPending} onSelect={() => later(deleteSelected)}>
-              Delete
+              <Trans>Delete</Trans>
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>

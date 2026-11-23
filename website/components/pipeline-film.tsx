@@ -1,5 +1,7 @@
 "use client";
 
+import { msg } from "@lingui/core/runtime-macro";
+import { INTL_LOCALE, rich, t as tr } from "@/lib/i18n";
 // The pipeline film: a 1920×1080 animation of one video going through the five queues (ingest,
 // transcribe, refine ×3, pick moments, render) with a worker restart that resumes from the last
 // checkpoint. It is ONE element tree rendered as a pure function of authored time T, so every
@@ -93,11 +95,11 @@ type P = { T: number };
 
 /* ---------- Rail: the five queues ---------- */
 const NODES: { q: string; t: string; s: Scene; e: Scene }[] = [
-  { q: "project.ingest", t: "Ingest", s: "Ingest", e: "Transcribe" },
-  { q: "project.transcribe", t: "Transcribe", s: "Transcribe", e: "Refine" },
-  { q: "refine.* ×3", t: "Refine", s: "Refine", e: "Analyze" },
-  { q: "project.analyze", t: "Pick moments", s: "Analyze", e: "Render" },
-  { q: "clip.render ×N", t: "Render", s: "Render", e: "Outro" },
+  { q: "project.ingest", t: tr(msg`Ingest`), s: "Ingest", e: "Transcribe" },
+  { q: "project.transcribe", t: tr(msg`Transcribe`), s: "Transcribe", e: "Refine" },
+  { q: "refine.* ×3", t: tr(msg`Refine`), s: "Refine", e: "Analyze" },
+  { q: "project.analyze", t: tr(msg`Pick moments`), s: "Analyze", e: "Render" },
+  { q: "clip.render ×N", t: tr(msg`Render`), s: "Render", e: "Outro" },
 ];
 const NX = [205, 520, 835, 1150, 1465];
 const NW = 250;
@@ -173,17 +175,15 @@ function Titles({ T }: P) {
     <>
       <div style={abs(0, 420 - up * 40, { width: W, textAlign: "center", opacity: a })}>
         <div style={{ fontSize: 84, fontWeight: 800, letterSpacing: "-0.02em" }}>
-          One long video in.
-          <br />
-          <span style={{ color: C.acc }}>Clips out.</span>
+          {rich(msg`One long video in.<0/><1>Clips out.</1>`, { 0: <br />, 1: (c) => <span style={{ color: C.acc }}>{c}</span> })}
         </div>
-        <div style={{ fontSize: 30, color: C.ink2, marginTop: 22 }}>Five queues, and each one saves its work.</div>
+        <div style={{ fontSize: 30, color: C.ink2, marginTop: 22 }}>{tr(msg`Five queues, and each one saves its work.`)}</div>
       </div>
       <div style={abs(0, 270 + (1 - enter(T, CUES.Outro + 0.3)) * 20, { width: W, textAlign: "center", opacity: o })}>
         <span style={{ fontSize: 56, fontWeight: 800, letterSpacing: "-0.02em" }}>
-          <span style={{ color: C.ok }}>✓</span> 5 clips ready
+          {rich(msg`<0>✓</0> 5 clips ready`, { 0: (c) => <span style={{ color: C.ok }}>{c}</span> })}
         </span>
-        <span style={{ fontSize: 28, color: C.ink3, marginLeft: 20 }}>from 58:12 of source</span>
+        <span style={{ fontSize: 28, color: C.ink3, marginLeft: 20 }}>{tr(msg`from 58:12 of source`)}</span>
       </div>
     </>
   );
@@ -207,15 +207,15 @@ function Source({ T }: P) {
   const gap = enter(T, Tr + 0.1, 0.7) * 12 * (1 - up);
   const cw = (BW - 11 * gap) / 12;
   const doneN = Array.from({ length: 12 }, (_, i) => k01(T, chunkStart(i, Tr), 1.3) >= 1).filter(Boolean).length;
-  const words = Math.round((9812 * doneN) / 12).toLocaleString("en-US");
+  const words = Math.round((9812 * doneN) / 12).toLocaleString(INTL_LOCALE);
   const lab = enter(T, Tr + 0.6) * (1 - up);
   return (
     <div style={{ opacity: out }}>
       <div
         style={abs(BX, y - lerp(96, 52, up), { width: BW, display: "flex", alignItems: "baseline", fontSize: 22, color: C.ink2, opacity: Math.max(lab, up) })}
       >
-        <span style={{ fontFamily: MONO, color: C.ink3, flex: 1 }}>{up > 0.5 ? "transcript" : "audio → 12 chunks · 4 in parallel"}</span>
-        <span style={{ fontFamily: MONO }}>{up > 0.5 ? "9,812 words · 2 speakers" : words + " words"}</span>
+        <span style={{ fontFamily: MONO, color: C.ink3, flex: 1 }}>{up > 0.5 ? tr(msg`transcript`) : tr(msg`audio → 12 chunks · 4 in parallel`)}</span>
+        <span style={{ fontFamily: MONO }}>{up > 0.5 ? tr(msg`9,812 words · 2 speakers`) : tr(msg`${{ words: words }} words`)}</span>
       </div>
       <div style={abs(BX, y, { width: BW * grow, height: h + 60, overflow: "hidden" })}>
         {Array.from({ length: 12 }, (_, i) => {
@@ -278,7 +278,7 @@ function Source({ T }: P) {
                 display: lab > 0.01 ? "block" : "none",
               })}
             >
-              ✓ saved
+              {tr(msg`✓ saved`)}
             </div>
           </div>
         );
@@ -311,12 +311,12 @@ function Ingest({ T }: P) {
           fontSize: 24,
         })}
       >
-        <span style={{ fontFamily: MONO, color: C.acc }}>yt-dlp</span>
-        <span style={{ fontFamily: MONO, color: C.ink3, flex: 1, whiteSpace: "nowrap", overflow: "hidden" }}>youtube.com/watch?v=Qx7f…</span>
-        <b style={{ whiteSpace: "nowrap" }}>Founders Pod #42</b>
+        <span style={{ fontFamily: MONO, color: C.acc }}>{"yt-dlp"}</span>
+        <span style={{ fontFamily: MONO, color: C.ink3, flex: 1, whiteSpace: "nowrap", overflow: "hidden" }}>{"youtube.com/watch?v=Qx7f…"}</span>
+        <b style={{ whiteSpace: "nowrap" }}>{tr(msg`Founders Pod #42`)}</b>
       </div>
       <div style={abs(BX, 590, { width: BW, display: "flex", gap: 14, alignItems: "center", opacity: chipOut })}>
-        <span style={{ fontFamily: MONO, fontSize: 20, color: C.acc, opacity: enter(T, I + 1.9), marginRight: 4 }}>ffprobe</span>
+        <span style={{ fontFamily: MONO, fontSize: 20, color: C.acc, opacity: enter(T, I + 1.9), marginRight: 4 }}>{"ffprobe"}</span>
         {chips.map((c, i) => {
           const a = pop(T, I + 2.0 + i * 0.18, 0.45);
           return (
@@ -350,8 +350,7 @@ function Ingest({ T }: P) {
             padding: "7px 16px",
           }}
         >
-          <span style={{ width: 10, height: 10, borderRadius: 5, background: C.ok }} />
-          source stored once
+          {rich(msg`<0/>source stored once`, { 0: <span style={{ width: 10, height: 10, borderRadius: 5, background: C.ok }} /> })}
         </span>
       </div>
     </>
@@ -364,9 +363,9 @@ const LH = 135;
 const LX = 400;
 const LW = 1260;
 const LANES = [
-  { q: "refine.entities", d: "names from your vocabulary", fin: 3.2, done: "1 name fixed · 0.94 confidence" },
-  { q: "refine.disfluency", d: "fillers → verified jump cuts", fin: 6.0, done: "3 jump cuts, each verified" },
-  { q: "refine.scenes", d: "scene cuts and face presence", fin: 4.4, done: "23 scene cuts · faces in 96%" },
+  { q: "refine.entities", d: tr(msg`names from your vocabulary`), fin: 3.2, done: tr(msg`1 name fixed · 0.94 confidence`) },
+  { q: "refine.disfluency", d: tr(msg`fillers → verified jump cuts`), fin: 6.0, done: tr(msg`3 jump cuts, each verified`) },
+  { q: "refine.scenes", d: tr(msg`scene cuts and face presence`), fin: 4.4, done: tr(msg`23 scene cuts · faces in 96%`) },
 ];
 
 function Word({ w, cut = 0, add, cutMark = 0 }: { w: string; cut?: number; add?: { w: string; a: number } | null; cutMark?: number }) {
@@ -447,9 +446,7 @@ function Refine({ T }: P) {
           color: C.ink,
         })}
       >
-        enqueue
-        <br />
-        <span style={{ color: C.acc }}>analyze</span>
+        {rich(msg`enqueue<0/><1>analyze</1>`, { 0: <br />, 1: (c) => <span style={{ color: C.acc }}>{c}</span> })}
       </div>
       {LANES.map((l, i) => {
         const p = prog[i]!;
@@ -473,7 +470,13 @@ function Refine({ T }: P) {
               <span style={{ fontFamily: MONO, fontSize: 20, color: C.acc }}>{l.q}</span>
               <span style={{ fontSize: 22, color: C.ink2 }}>{l.d}</span>
               <span style={{ fontFamily: MONO, fontSize: 17, color: done ? C.ok : C.ink3 }}>
-                {done ? (i === 1 ? "✓ done · finished last" : "✓ done") : p > 0 ? "running · " + Math.round(p * 100) + "%" : "waiting"}
+                {done
+                  ? i === 1
+                    ? tr(msg`✓ done · finished last`)
+                    : tr(msg`✓ done`)
+                  : p > 0
+                    ? tr(msg`running · ${{ round: Math.round(p * 100) }}%`)
+                    : tr(msg`waiting`)}
               </span>
             </div>
             <div style={abs(360, 0, { width: LW - 390, height: LH, display: "flex", alignItems: "center", gap: 14, fontSize: 28 })}>
@@ -534,18 +537,18 @@ function Refine({ T }: P) {
 
 /* ---------- Candidates → ranked → rendered frames ---------- */
 const CANDS: [string, number, number][] = [
-  ["Why we killed the roadmap", 62, 7.4],
-  ["The hiring mistake", 88, 11.2],
-  ["Copia’s first customer", 71, 15.8],
-  ["Pricing by accident", 54, 19.9],
-  ["The 2am outage", 91, 24.1],
-  ["Remote vs office", 67, 28.6],
-  ["What investors miss", 79, 32.0],
-  ["Our worst launch", 48, 36.5],
-  ["Saying no to a big deal", 84, 41.3],
-  ["Burnout, honestly", 58, 45.0],
-  ["The one metric", 73, 49.7],
-  ["Firing a friend", 95, 54.2],
+  [tr(msg`Why we killed the roadmap`), 62, 7.4],
+  [tr(msg`The hiring mistake`), 88, 11.2],
+  [tr(msg`Copia’s first customer`), 71, 15.8],
+  [tr(msg`Pricing by accident`), 54, 19.9],
+  [tr(msg`The 2am outage`), 91, 24.1],
+  [tr(msg`Remote vs office`), 67, 28.6],
+  [tr(msg`What investors miss`), 79, 32.0],
+  [tr(msg`Our worst launch`), 48, 36.5],
+  [tr(msg`Saying no to a big deal`), 84, 41.3],
+  [tr(msg`Burnout, honestly`), 58, 45.0],
+  [tr(msg`The one metric`), 73, 49.7],
+  [tr(msg`Firing a friend`), 95, 54.2],
 ];
 const RANK = CANDS.map((_, i) => i)
   .sort((a, b) => CANDS[b]![1] - CANDS[a]![1])
@@ -591,7 +594,18 @@ function renderState(r: number, T: number): { p: number; st: RenderSt } {
   const p = lerp(0.4, 1, k01(T, Rs + 2.3, 1.3));
   return { p, st: p >= 1 ? "done" : "resume" };
 }
-const STEP = (p: number) => (p >= 1 ? "ready" : p < 0.2 ? "layout" : p < 0.4 ? "captions" : p < 0.6 ? "hook" : p < 0.8 ? "intro · outro" : "encode");
+const STEP = (p: number) =>
+  p >= 1
+    ? tr(msg`ready`)
+    : p < 0.2
+      ? tr(msg`layout`)
+      : p < 0.4
+        ? tr(msg`captions`)
+        : p < 0.6
+          ? tr(msg`hook`)
+          : p < 0.8
+            ? tr(msg`intro · outro`)
+            : tr(msg`encode`);
 const BAR_COL: Record<RenderSt, string> = { done: C.ok, crash: C.err, resume: C.warn, run: C.acc, queued: C.line };
 
 function Cands({ T }: P) {
@@ -610,7 +624,7 @@ function Cands({ T }: P) {
   return (
     <>
       <div style={abs(BX, 370, { fontFamily: MONO, fontSize: 20, color: C.ink3, opacity: win(T, A + 1.0, A + 3.6) })}>
-        map: transcript windows → 12 candidates
+        {tr(msg`map: transcript windows → 12 candidates`)}
       </div>
       <div
         style={abs(1340, 470, {
@@ -626,15 +640,17 @@ function Cands({ T }: P) {
           gap: 10,
         })}
       >
-        <span style={{ fontFamily: MONO, fontSize: 18, color: C.acc }}>judge model</span>
-        <span style={{ fontSize: 24, fontWeight: 700 }}>Pairwise ranking</span>
+        <span style={{ fontFamily: MONO, fontSize: 18, color: C.acc }}>{tr(msg`judge model`)}</span>
+        <span style={{ fontSize: 24, fontWeight: 700 }}>{tr(msg`Pairwise ranking`)}</span>
         <span style={{ fontFamily: MONO, fontSize: 20, color: C.ink2 }}>
-          {cmp < 1 ? `#${pr[0] + 1} vs #${pr[1] + 1} → #${(CANDS[pr[0]]![1] > CANDS[pr[1]]![1] ? pr[0] : pr[1]) + 1}` : "ranking settled"}
+          {cmp < 1
+            ? tr(msg`#${{ value: pr[0] + 1 }} vs #${{ value2: pr[1] + 1 }} → #${{ value3: (CANDS[pr[0]]![1] > CANDS[pr[1]]![1] ? pr[0] : pr[1]) + 1 }}`)
+            : tr(msg`ranking settled`)}
         </span>
-        <span style={{ fontFamily: MONO, fontSize: 17, color: C.ink3 }}>{Math.max(nCmp, cmp >= 1 ? 18 : 0)} comparisons</span>
+        <span style={{ fontFamily: MONO, fontSize: 17, color: C.ink3 }}>{rich(msg`<0/> comparisons`, { 0: Math.max(nCmp, cmp >= 1 ? 18 : 0) })}</span>
       </div>
       <div style={abs(640, 360 + 5 * 48 + 8, { width: 640, textAlign: "center", fontSize: 22, color: C.ink3, opacity: win(T, A + 6.3, Rn + 0.4, 0.4) })}>
-        7 weaker moments dropped
+        {tr(msg`7 weaker moments dropped`)}
       </div>
       {CANDS.map((c, i) => {
         const r = RANK[i]!;
@@ -685,7 +701,7 @@ function Cands({ T }: P) {
             >
               <div style={abs(14, 12, { width: 172, opacity: p1 * (1 - p3), display: "flex", flexDirection: "column", gap: 10 })}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 16 }}>
-                  <span style={{ color: C.ink3 }}>cand {String(i + 1).padStart(2, "0")}</span>
+                  <span style={{ color: C.ink3 }}>{rich(msg`cand <0/>`, { 0: String(i + 1).padStart(2, "0") })}</span>
                   <span style={{ color: C.acc }}>{fmt(c[2] * 60)}</span>
                 </div>
                 <div style={{ height: 8, borderRadius: 4, background: C.line, width: "92%" }} />
@@ -780,12 +796,14 @@ function Cands({ T }: P) {
                     color: rs.st === "done" ? C.ok : rs.st === "crash" ? C.err : rs.st === "resume" ? C.warn : C.ink2,
                   }}
                 >
-                  <span>{rs.st === "queued" ? "queued" : rs.st === "crash" ? "interrupted" : rs.st === "done" ? "✓ ready" : STEP(rs.p)}</span>
+                  <span>
+                    {rs.st === "queued" ? tr(msg`queued`) : rs.st === "crash" ? tr(msg`interrupted`) : rs.st === "done" ? tr(msg`✓ ready`) : STEP(rs.p)}
+                  </span>
                   <span>{rs.st === "done" || rs.st === "queued" ? "" : Math.round(rs.p * 100) + "%"}</span>
                 </div>
                 {stuck && (
                   <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 15, color: C.warn }}>
-                    {rs.st === "crash" ? "last save: captions" : "↺ from captions"}
+                    {rs.st === "crash" ? tr(msg`last save: captions`) : tr(msg`↺ from captions`)}
                   </div>
                 )}
               </div>
@@ -821,15 +839,9 @@ function ResumeBanner({ T }: P) {
     >
       <span style={{ fontFamily: MONO, fontWeight: 600, color: back ? C.ok : C.err }}>{back ? "↺" : "▲"}</span>
       <span>
-        {back ? (
-          <>
-            Picked up from the last save. <span style={{ color: C.ink2 }}>Captions aren’t redone.</span>
-          </>
-        ) : (
-          <>
-            Worker restarted mid-render. <span style={{ color: C.ink2 }}>Job stays in the queue.</span>
-          </>
-        )}
+        {back
+          ? rich(msg`Picked up from the last save. <0>Captions aren’t redone.</0>`, { 0: (c) => <span style={{ color: C.ink2 }}>{c}</span> })
+          : rich(msg`Worker restarted mid-render. <0>Job stays in the queue.</0>`, { 0: (c) => <span style={{ color: C.ink2 }}>{c}</span> })}
       </span>
     </div>
   );
@@ -837,13 +849,13 @@ function ResumeBanner({ T }: P) {
 
 /* ---------- Caption ---------- */
 const CAPTIONS: [number, string | null][] = [
-  [CUES.Ingest + 0.4, "Ingest fetches the video with yt-dlp (or takes an upload), probes it, and stores the source once."],
-  [CUES.Transcribe + 0.3, "Transcribe splits the audio into chunks that run in parallel. Each chunk saves when it’s done."],
-  [CUES.Refine + 0.4, "Refine fans out into three jobs on the same transcript."],
-  [CUES.Refine + 5.9, "Whichever refine job finishes last enqueues the next stage."],
-  [CUES.Analyze + 0.5, "Pick moments: map the transcript into candidates, pool them, then rank them pairwise with a judge model."],
-  [CUES.Render + 0.5, "Render builds each clip (layout, captions, hook, intro and outro) in a single encode."],
-  [CUES.Resume + 0.5, "Every box is a queue in Postgres, and every stage saves its output, so a restart resumes instead of starting over."],
+  [CUES.Ingest + 0.4, tr(msg`Ingest fetches the video with yt-dlp (or takes an upload), probes it, and stores the source once.`)],
+  [CUES.Transcribe + 0.3, tr(msg`Transcribe splits the audio into chunks that run in parallel. Each chunk saves when it’s done.`)],
+  [CUES.Refine + 0.4, tr(msg`Refine fans out into three jobs on the same transcript.`)],
+  [CUES.Refine + 5.9, tr(msg`Whichever refine job finishes last enqueues the next stage.`)],
+  [CUES.Analyze + 0.5, tr(msg`Pick moments: map the transcript into candidates, pool them, then rank them pairwise with a judge model.`)],
+  [CUES.Render + 0.5, tr(msg`Render builds each clip (layout, captions, hook, intro and outro) in a single encode.`)],
+  [CUES.Resume + 0.5, tr(msg`Every box is a queue in Postgres, and every stage saves its output, so a restart resumes instead of starting over.`)],
   [CUES.Outro + 0.3, null],
 ];
 
@@ -893,8 +905,9 @@ declare global {
   }
 }
 
-const FILM_LABEL =
-  "Animated walkthrough of the Reelsaw pipeline: a video is ingested, transcribed in parallel chunks, refined by three jobs (entities, disfluency, scenes), its best moments are picked and ranked pairwise, and five vertical clips are rendered. A worker restarts mid-render and resumes from its last checkpoint.";
+const FILM_LABEL = tr(
+  msg`Animated walkthrough of the Reelsaw pipeline: a video is ingested, transcribed in parallel chunks, refined by three jobs (entities, disfluency, scenes), its best moments are picked and ranked pairwise, and five vertical clips are rendered. A worker restarts mid-render and resumes from its last checkpoint.`,
+);
 
 const fmtClock = (s: number) => fmt(Math.floor(s));
 
@@ -1021,7 +1034,7 @@ export function PipelineFilm({ capture = false, className }: { capture?: boolean
         )}
       </div>
       <div className="flex items-center gap-2 px-2 py-1.5 sm:gap-3 sm:px-3" style={{ borderTop: `1px solid ${C.line}` }}>
-        <IconButton label={playing ? "Pause" : "Play"} pressed={!playing} onClick={toggle}>
+        <IconButton label={playing ? tr(msg`Pause`) : tr(msg`Play`)} pressed={!playing} onClick={toggle}>
           {playing ? <Pause className="h-3.5 w-3.5" aria-hidden /> : <Play className="ml-px h-3.5 w-3.5" aria-hidden />}
         </IconButton>
         <Scrub t={t} onSeek={(v) => setT(v)} />
@@ -1029,7 +1042,7 @@ export function PipelineFilm({ capture = false, className }: { capture?: boolean
           {fmtClock(t)} / {fmtClock(TOTAL)}
         </span>
         {canFullscreen && (
-          <IconButton label={fullscreen ? "Exit fullscreen" : "Fullscreen"} pressed={fullscreen} onClick={toggleFullscreen}>
+          <IconButton label={fullscreen ? tr(msg`Exit fullscreen`) : tr(msg`Fullscreen`)} pressed={fullscreen} onClick={toggleFullscreen}>
             {fullscreen ? <Minimize2 className="h-3.5 w-3.5" aria-hidden /> : <Maximize2 className="h-3.5 w-3.5" aria-hidden />}
           </IconButton>
         )}
@@ -1066,11 +1079,11 @@ function Scrub({ t, onSeek }: { t: number; onSeek: (t: number) => void }) {
       ref={bar}
       role="slider"
       tabIndex={0}
-      aria-label="Position in the animation"
+      aria-label={tr(msg`Position in the animation`)}
       aria-valuemin={0}
       aria-valuemax={Math.round(TOTAL)}
       aria-valuenow={Math.round(t)}
-      aria-valuetext={`${fmtClock(t)} of ${fmtClock(TOTAL)}`}
+      aria-valuetext={tr(msg`${{ position: fmtClock(t) }} of ${{ total: fmtClock(TOTAL) }}`)}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         at(e);

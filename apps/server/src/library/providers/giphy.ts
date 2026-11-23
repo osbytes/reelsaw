@@ -7,6 +7,7 @@
  */
 import { ProviderError, arr, clip, httpsUrl, needKey, num, obj, str } from "./http.js";
 import type { Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://api.giphy.com/v1";
 const LICENSE = { id: "giphy", name: "GIPHY terms", url: "https://support.giphy.com/hc/en-us/articles/360020027752-GIPHY-User-Terms-of-Service" };
@@ -78,10 +79,10 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
     async resolve(externalId): Promise<Resolved> {
       const [type, id] = externalId.split(":");
       if ((type !== "gif" && type !== "sticker") || !id || !/^[A-Za-z0-9]+$/.test(id))
-        throw new ProviderError("That is not a Giphy id (gif:<id> or sticker:<id>).");
+        throw new ProviderError(msg({ id: "library_provider.giphy_id_gif_id_sticker", message: "That is not a Giphy id (gif:<id> or sticker:<id>)." }));
       const g = obj(obj(await http.json("giphy", url(`/${type}s/${id}`)))["data"]);
       const f = file(g, type === "sticker");
-      if (!f.url) throw new ProviderError("Giphy returned no file for that item.");
+      if (!f.url) throw new ProviderError(msg({ id: "library_provider.giphy_returned_no_file_item", message: "Giphy returned no file for that item." }));
       const user = str(obj(g["user"])["display_name"]) ?? str(g["username"]);
       return {
         url: f.url,

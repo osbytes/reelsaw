@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import type { Metadata } from "next";
 import { ArrowRight } from "lucide-react";
 import { GUIDE_NAV } from "@/content/links";
@@ -8,9 +10,10 @@ import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
 import { socialMeta } from "@/lib/social-meta";
 
-const title = "AI clips by use case: GTA 6, Twitch, Kick and clipping campaigns";
-const description =
-  "What Reelsaw, the open-source AI clipper, does with GTA 6 and GTA RP streams, Twitch and Kick VODs, paid clipping campaigns and podcasts, and what it does not.";
+const title = t(msg`AI clips by use case: GTA 6, Twitch, Kick and clipping campaigns`);
+const description = t(
+  msg`What Reelsaw, the open-source AI clipper, does with GTA 6 and GTA RP streams, Twitch and Kick VODs, paid clipping campaigns and podcasts, and what it does not.`,
+);
 
 export const metadata: Metadata = {
   title,
@@ -28,17 +31,17 @@ export default function UseCasesIndex() {
           <Breadcrumbs
             items={[
               { href: "/", label: SITE.name },
-              { href: "/use-cases", label: "Use cases" },
+              { href: "/use-cases", label: t(msg`Use cases`) },
             ]}
           />
-          <p className="eyebrow">Use cases</p>
+          <p className="eyebrow">{t(msg`Use cases`)}</p>
           <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">
-            AI clips for streams, gaming and clipping campaigns
+            {t(msg`AI clips for streams, gaming and clipping campaigns`)}
           </h1>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">
-            The pipeline is the same for every source: transcribe, pick the moments that stand on their own, frame for a phone, caption word by word. What
-            changes is the footage. Each page says how Reelsaw handles that kind of video, and where it is the wrong tool: it picks moments from speech, so
-            footage with nobody talking is not a fit.
+            {t(
+              msg`The pipeline is the same for every source: transcribe, pick the moments that stand on their own, frame for a phone, caption word by word. What changes is the footage. Each page says how Reelsaw handles that kind of video, and where it is the wrong tool: it picks moments from speech, so footage with nobody talking is not a fit.`,
+            )}
           </p>
         </header>
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -49,14 +52,15 @@ export default function UseCasesIndex() {
                 <span className="text-[17px] font-bold tracking-tight">{u.h1}</span>
                 <span className="text-sm leading-relaxed text-ink2">{u.metaDescription}</span>
                 <span className="mt-auto flex items-center gap-1 pt-2 text-sm font-semibold text-acc-text">
-                  Read more <ArrowRight className="h-4 w-4" aria-hidden />
+                  {t(msg`Read more `)}
+                  <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </a>
             </li>
           ))}
         </ul>
         <TryIt />
-        <LinkList heading="Guides" links={GUIDE_NAV} />
+        <LinkList heading={t(msg`Guides`)} links={GUIDE_NAV} />
       </main>
       <Footer />
     </>

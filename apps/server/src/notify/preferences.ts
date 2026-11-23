@@ -13,10 +13,11 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { DEFAULT_EMAIL_PREFERENCES, EMAIL_TOPIC_NAMES, type EmailPreferences, type EmailPrefSource, type EmailTopic, isEmailTopic } from "@reelsaw/shared";
-import { TRPCError } from "@trpc/server";
+import { msg } from "@lingui/core/runtime-macro";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
+import { AppError } from "../i18n.js";
 
 export async function emailPreferences(db: Db, userId: string): Promise<EmailPreferences> {
   const rows = await db
@@ -43,7 +44,7 @@ export async function setEmailPreferences(
   return svc.tx(async (u) => {
     // the account is locked against deletion while its rows go in: a deleted account is a clear "not found", not a foreign-key error
     const [owner] = await u.db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.id, userId)).for("key share");
-    if (!owner) throw new TRPCError({ code: "NOT_FOUND", message: "no such account" });
+    if (!owner) throw new AppError("NOT_FOUND", msg({ id: "account.not_found", message: "No such account" }));
     for (const topic of EMAIL_TOPIC_NAMES) {
       const enabled = patch[topic];
       if (enabled === undefined) continue;

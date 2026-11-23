@@ -8,7 +8,8 @@ import { useRestoreWindow } from "../lib/retention";
 import { ForgetDecisionsOption } from "./ForgetDecisionsOption";
 import { SelectionBar } from "./SelectionBar";
 import { ConfirmDialog, MoreButton } from "./ui";
-import { plural } from "@reelsaw/shared";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 interface BarProject {
   id: string;
@@ -46,6 +47,7 @@ export function ProjectsBar({
   onClear: () => void;
   onChanged: () => void;
 }) {
+  const { t } = useLingui();
   const trpc = useTRPC();
   const del = useMutation(trpc.projects.deleteMany.mutationOptions());
   const retry = useMutation(trpc.projects.retryMany.mutationOptions());
@@ -62,40 +64,89 @@ export function ProjectsBar({
   const ids = (ps: BarProject[]) => ps.map((p) => p.id);
   const later = (fn: () => void) => window.setTimeout(fn, 0);
   const one = selected.length === 1 ? selected[0] : undefined;
+  const others = selected.length - failed.length;
+  const retryBody = [
+    failed.length === 1
+      ? t`“${failed[0]?.title}” resumes from the last stage that didn’t finish; finished clips, transcripts and sources are kept.`
+      : plural(failed.length, {
+          one: "# failed project resumes from the last stage that didn’t finish; finished clips, transcripts and sources are kept.",
+          other: "# failed projects resume from the last stage that didn’t finish; finished clips, transcripts and sources are kept.",
+        }),
+    others === 1
+      ? t`The other selected project didn’t fail and is left as it is.`
+      : others > 1
+        ? t`The other ${others} projects didn’t fail and are left as they are.`
+        : "",
+    t`Processing counts toward your minutes as usual.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const rerenderBody = [
+    withClips.length === 1
+      ? t`Every finished or failed clip of “${withClips[0]?.title}” renders again with its current settings (style, intro and outro, template); each new video replaces the old one when done.`
+      : t`Every finished or failed clip of ${withClips.length} projects renders again with its current settings (style, intro and outro, template); each new video replaces the old one when done.`,
+    t`Clips still preparing or rendering are left alone.`,
+    working ? plural(working, { one: "# project is still processing.", other: "# projects are still processing." }) : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const keepHint = keepWindow.hint(selected.length > 1);
+  const deleteBody = [
+    one
+      ? t`“${one.title}”: the project, its transcript and every clip are hidden.`
+      : t`${selected.length} projects, with their transcripts and clips, are hidden.`,
+    working ? t`Work in progress stops.` : "",
+    keepHint,
+    one ? t`Storage still counts until you delete it forever.` : t`Storage still counts until you delete them forever.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <SelectionBar label="Selected projects" count={selected.length} busy={busy} onClear={onClear}>
+    <SelectionBar label={t`Selected projects`} count={selected.length} busy={busy} onClear={onClear}>
       <button
         type="button"
         className="btn-ghost"
         disabled={busy || !failed.length}
-        title={failed.length ? `Resume ${plural(failed.length, "failed project")} where each stopped` : "None of the selected projects failed"}
+        title={
+          failed.length
+            ? plural(failed.length, { one: "Resume # failed project where each stopped", other: "Resume # failed projects where each stopped" })
+            : t`None of the selected projects failed`
+        }
         onClick={() => setAsk("retry")}
       >
-        <span className="sm:hidden">Retry…</span>
-        <span className="max-sm:hidden">Retry failed…</span>
+        <span className="sm:hidden">
+          <Trans>Retry…</Trans>
+        </span>
+        <span className="max-sm:hidden">
+          <Trans>Retry failed…</Trans>
+        </span>
       </button>
       <button
         type="button"
         className="btn-ghost"
         disabled={busy || !withClips.length}
-        title={withClips.length ? `Re-render the clips of ${plural(withClips.length, "project")}` : "None of the selected projects has clips yet"}
+        title={
+          withClips.length
+            ? plural(withClips.length, { one: "Re-render the clips of # project", other: "Re-render the clips of # projects" })
+            : t`None of the selected projects has clips yet`
+        }
         onClick={() => setAsk("rerender")}
       >
-        Re-render…
+        <Trans>Re-render…</Trans>
       </button>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <MoreButton aria-label="More actions for the selection" />
+          <MoreButton aria-label={t`More actions for the selection`} />
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
             <DropdownMenu.Item className="menu-item" disabled={selected.length >= total} onSelect={onSelectAll}>
-              Select all {total > selected.length ? `(${total})` : ""}
+              {total > selected.length ? t`Select all (${total})` : t`Select all`}
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
             <DropdownMenu.Item className="menu-item-danger" disabled={busy} onSelect={() => later(() => setAsk("delete"))}>
-              Delete…
+              <Trans>Delete…</Trans>
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -104,16 +155,24 @@ export function ProjectsBar({
       <ConfirmDialog
         open={ask === "retry"}
         onOpenChange={(o) => !o && setAsk(null)}
-        title={failed.length === 1 ? "Retry this failed project?" : `Retry ${failed.length} failed projects?`}
-        body={`${failed.length === 1 ? `“${failed[0]?.title}” resumes` : `${plural(failed.length, "failed project")} resume`} from the last stage that didn’t finish; finished clips, transcripts and sources are kept.${selected.length - failed.length === 1 ? " The other selected project didn’t fail and is left as it is." : selected.length > failed.length ? ` The other ${plural(selected.length - failed.length, "project")} didn’t fail and are left as they are.` : ""} Processing counts toward your minutes as usual.`}
-        confirm={failed.length === 1 ? "Retry project" : "Retry projects"}
+        title={failed.length === 1 ? t`Retry this failed project?` : t`Retry ${failed.length} failed projects?`}
+        body={retryBody}
+        confirm={failed.length === 1 ? t`Retry project` : t`Retry projects`}
         onConfirm={() =>
           retry.mutateAsync({ ids: ids(failed) }).then((r) => {
             onChanged();
+            const why = firstError(r.results);
+            const notRetried = r.failed;
+            const skipped = r.skipped;
             toast(
               r.failed
-                ? `Retrying ${plural(r.retried, "project")} · ${r.failed} couldn’t be retried${firstError(r.results)}`
-                : `Retrying ${plural(r.retried, "project")}${r.skipped ? ` · ${r.skipped} no longer failed` : ""}`,
+                ? plural(r.retried, {
+                    one: `Retrying # project · ${notRetried} couldn’t be retried${why}`,
+                    other: `Retrying # projects · ${notRetried} couldn’t be retried${why}`,
+                  })
+                : r.skipped
+                  ? plural(r.retried, { one: `Retrying # project · ${skipped} no longer failed`, other: `Retrying # projects · ${skipped} no longer failed` })
+                  : plural(r.retried, { one: "Retrying # project", other: "Retrying # projects" }),
             );
           })
         }
@@ -121,17 +180,17 @@ export function ProjectsBar({
       <ConfirmDialog
         open={ask === "rerender"}
         onOpenChange={(o) => !o && setAsk(null)}
-        title={withClips.length === 1 ? "Re-render this project’s clips?" : `Re-render the clips of ${withClips.length} projects?`}
-        body={`Every finished or failed clip of ${withClips.length === 1 ? `“${withClips[0]?.title}”` : plural(withClips.length, "project")} renders again with its current settings (style, intro and outro, template); each new video replaces the old one when done. Clips still preparing or rendering are left alone.${working ? ` ${plural(working, "project")} ${working === 1 ? "is" : "are"} still processing.` : ""}`}
-        confirm="Re-render clips"
+        title={withClips.length === 1 ? t`Re-render this project’s clips?` : t`Re-render the clips of ${withClips.length} projects?`}
+        body={rerenderBody}
+        confirm={t`Re-render clips`}
         onConfirm={() =>
           rerender.mutateAsync({ ids: ids(withClips) }).then((r) => {
             onChanged();
-            toast(
-              r.failed
-                ? `Re-rendering ${plural(r.rerendered, "clip")} · ${plural(r.failed, "project")} couldn’t be queued${firstError(r.results)}`
-                : `Re-rendering ${plural(r.rerendered, "clip")}${r.skipped ? ` · ${r.skipped} still busy, left alone` : ""}`,
-            );
+            const why = firstError(r.results);
+            const clips = plural(r.rerendered, { one: "Re-rendering # clip", other: "Re-rendering # clips" });
+            const notQueued = plural(r.failed, { one: `# project couldn’t be queued${why}`, other: `# projects couldn’t be queued${why}` });
+            const skipped = r.skipped;
+            toast(r.failed ? `${clips} · ${notQueued}` : r.skipped ? t`${clips} · ${skipped} still busy, left alone` : clips);
           })
         }
       />
@@ -141,16 +200,17 @@ export function ProjectsBar({
           if (!o) setAsk(null);
           setForget(false);
         }}
-        title={one ? "Delete this project?" : `Delete ${selected.length} projects?`}
-        body={`${one ? `“${one.title}”: the project, its transcript and every clip are` : `${plural(selected.length, "project")}, with their transcripts and clips, are`} hidden.${working ? " Work in progress stops." : ""} ${keepWindow.hint(selected.length > 1)} Storage still counts until you delete ${one ? "it" : "them"} forever.`}
-        confirm={one ? "Delete project" : "Delete projects"}
+        title={one ? t`Delete this project?` : t`Delete ${selected.length} projects?`}
+        body={deleteBody}
+        confirm={one ? t`Delete project` : t`Delete projects`}
         danger
         onConfirm={() => {
           const ps = selected;
           return del.mutateAsync({ ids: ids(ps), forgetDecisions: forget }).then((r) => {
             onClear();
             onChanged();
-            if (r.failed) toast.error(`${r.failed} couldn’t be deleted${firstError(r.results)}`);
+            const why = firstError(r.results);
+            if (r.failed) toast.error(t`${r.failed} couldn’t be deleted${why}`);
             const gone = new Set(r.results.filter((x) => x.ok && "changed" in x && x.changed).map((x) => x.id));
             if (!gone.size) return;
             notifyDeleted({

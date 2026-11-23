@@ -1,3 +1,6 @@
+import { i18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { cssFontFamily, useFonts } from "../lib/fonts";
@@ -370,9 +373,9 @@ export const SAFE_ZONES: Record<Platform, { top: number; bottom: number; rail: {
 export function safeZoneWarning(platform: Platform, x: number, y: number) {
   const z = SAFE_ZONES[platform];
   const n = PLATFORM_NAME[platform];
-  if (y > 1 - z.bottom) return `Caption sits under the ${n} description area. Move it up to keep it readable.`;
-  if (x > 1 - z.rail.width - 0.2 && y > z.rail.top && y < 1 - z.rail.bottom) return `Caption overlaps the ${n} buttons.`;
-  if (y < z.top) return `Caption sits under the ${n} top bar.`;
+  if (y > 1 - z.bottom) return i18n._(msg`Caption sits under the ${n} description area. Move it up to keep it readable.`);
+  if (x > 1 - z.rail.width - 0.2 && y > z.rail.top && y < 1 - z.rail.bottom) return i18n._(msg`Caption overlaps the ${n} buttons.`);
+  if (y < z.top) return i18n._(msg`Caption sits under the ${n} top bar.`);
   return "";
 }
 
@@ -414,6 +417,7 @@ export function VerticalPreview({
   zoom,
   className = "",
 }: Props) {
+  const { t } = useLingui();
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
@@ -642,19 +646,23 @@ export function VerticalPreview({
   const capPx = unitH * CAPTION_FONT_FRAC * style.captionSize;
   const hookPx = unitH * HOOK_FONT_FRAC;
   const draggable = !!onStyleChange;
-  const hookHint = draggable ? `Drag to move the hook${onHookChange ? ", double-click to edit" : ""}, end-click for more` : undefined;
+  const hookHint = draggable
+    ? onHookChange
+      ? t`Drag to move the hook, double-click to edit, end-click for more`
+      : t`Drag to move the hook, end-click for more`
+    : undefined;
   /** the hook's right-click menu: retype it, put it back in the middle, or hide it (the editor's style keeps the change) */
   const hookMenu = (
     <>
-      {onHookChange && <OverlayMenuItem label="Edit text" kbd="dbl-click" onSelect={() => setEditingHook(true)} />}
-      <OverlayMenuItem label="Centre left / right" disabled={style.hookX === 0.5} onSelect={() => onStyleChange?.({ hookX: 0.5 })} />
+      {onHookChange && <OverlayMenuItem label={t`Edit text`} kbd={t`dbl-click`} onSelect={() => setEditingHook(true)} />}
+      <OverlayMenuItem label={t`Centre left / right`} disabled={style.hookX === 0.5} onSelect={() => onStyleChange?.({ hookX: 0.5 })} />
       <OverlayMenuItem
-        label="Reset position"
+        label={t`Reset position`}
         disabled={style.hookX === defaultStyle.hookX && style.hookY === defaultStyle.hookY}
         onSelect={() => onStyleChange?.({ hookX: defaultStyle.hookX, hookY: defaultStyle.hookY })}
       />
       <OverlayMenuSeparator />
-      <OverlayMenuItem label="Hide the hook" onSelect={() => onStyleChange?.({ showHook: false })} />
+      <OverlayMenuItem label={t`Hide the hook`} onSelect={() => onStyleChange?.({ showHook: false })} />
     </>
   );
   /** the picture's right-click menu wraps the frame; a layer or the hook under the pointer opens its own menu instead (they stop the event) */
@@ -680,12 +688,12 @@ export function VerticalPreview({
       title={
         pannable
           ? framing.layout === "split"
-            ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them"
+            ? t`Drag either speaker to re-centre that pane; drop it on someone else to follow them`
             : framing.crop
-              ? "Drag the picture to move the crop; end-click to set it exactly"
-              : "Drag the picture to re-centre the crop; end-click to set it exactly"
+              ? t`Drag the picture to move the crop; end-click to set it exactly`
+              : t`Drag the picture to re-centre the crop; end-click to set it exactly`
           : paneMenu
-            ? "Right-click to fix the crop"
+            ? t`Right-click to fix the crop`
             : undefined
       }
       onPointerDown={onPanStart}
@@ -709,13 +717,19 @@ export function VerticalPreview({
           <span
             className="absolute bottom-0.5 end-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc"
             onPointerDown={(e) => onOverlayStart(o, "size", e)}
-            aria-label={`Resize ${name}`}
+            aria-label={t`Resize ${name}`}
           />
         );
         const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${isEditing ? "cursor-text" : onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
-        const hint = onOverlayChange
-          ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", end-click for more" : ""}`
-          : name;
+        const how =
+          o.kind === "text"
+            ? overlayMenu
+              ? t`drag to move, corner to resize, double-click to edit, end-click for more`
+              : t`drag to move, corner to resize, double-click to edit`
+            : overlayMenu
+              ? t`drag to move, corner to resize, end-click for more`
+              : t`drag to move, corner to resize`;
+        const hint = onOverlayChange ? `${name} · ${how}` : name;
         // the editor's right-click menu around the block; right-clicking selects the layer first
         const withMenu = (node: ReactNode) =>
           overlayMenu ? (
@@ -886,7 +900,9 @@ export function VerticalPreview({
               <ContextMenu.Trigger asChild>{node}</ContextMenu.Trigger>
               <ContextMenu.Portal>
                 <ContextMenu.Content className="menu z-[60] w-[220px]" collisionPadding={8}>
-                  <ContextMenu.Label className="truncate px-2.5 py-1 text-[11px] font-semibold text-ink3">Hook</ContextMenu.Label>
+                  <ContextMenu.Label className="truncate px-2.5 py-1 text-[11px] font-semibold text-ink3">
+                    <Trans>Hook</Trans>
+                  </ContextMenu.Label>
                   {hookMenu}
                 </ContextMenu.Content>
               </ContextMenu.Portal>
@@ -917,7 +933,7 @@ export function VerticalPreview({
           }}
           dir={language ? languageProfile(language).direction : undefined}
           onPointerDown={(e) => onPointerDown("caption", e)}
-          title={draggable ? "Drag to move captions (hold Alt to skip centre snapping)" : undefined}
+          title={draggable ? t`Drag to move captions (hold Alt to skip centre snapping)` : undefined}
         >
           {line.map((w, i) => {
             const t = style.uppercase ? upperCase(w.text, language) : w.text;
@@ -952,10 +968,10 @@ function SafeZones({ platform }: { platform: Platform }) {
       <div className={zone} style={{ left: 0, right: 0, bottom: 0, height: `${z.bottom * 100}%` }} />
       <div className={zone} style={{ right: 0, top: `${z.rail.top * 100}%`, bottom: `${z.rail.bottom * 100}%`, width: `${z.rail.width * 100}%` }} />
       <span className={lab} style={{ left: 6, bottom: `calc(${z.bottom * 100}% - 14px)` }}>
-        {n} username + description
+        <Trans>{n} username + description</Trans>
       </span>
       <span className={`${lab} [writing-mode:vertical-rl]`} style={{ right: 4, top: `${z.rail.top * 100 + 1}%` }}>
-        {n} buttons
+        <Trans>{n} buttons</Trans>
       </span>
     </>
   );

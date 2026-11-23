@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { formatBytes, formatDay, type DeletedKind, plural } from "@reelsaw/shared";
+import { formatBytes, formatDay, type DeletedKind } from "@reelsaw/shared";
+import { plural, t } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useTRPC } from "../lib/trpc";
 import { useHashParams } from "../lib/hash";
 import { ago } from "../lib/time";
@@ -32,7 +34,9 @@ import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 import { pageTitle, useDocumentTitle } from "../lib/title";
 
-const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
+function kindLabel(kind: DeletedKind): string {
+  return { project: t`Project`, clip: t`Clip`, asset: t`Library item`, template: t`Template` }[kind];
+}
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
 /** The first per-item reason of a partly failed bulk restore / delete forever, so the toast says why. */
 const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
@@ -45,14 +49,16 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
  * "in 3 days" reads faster than a date. The date itself is the cell's tooltip (`foreverDate`).
  */
 function foreverWhen(purgeAt: string | null) {
-  if (!purgeAt) return "when you choose";
+  if (!purgeAt) return t`when you choose`;
   const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
-  if (days <= 0) return "within the hour";
-  return days === 1 ? "within a day" : `in ${days} days`;
+  if (days <= 0) return t`within the hour`;
+  return days === 1 ? t`within a day` : t`in ${days} days`;
 }
 
 function foreverDate(purgeAt: string | null) {
-  return purgeAt ? `Deleted forever on ${formatDay(purgeAt, { month: "short" })}` : undefined;
+  if (!purgeAt) return undefined;
+  const day = formatDay(purgeAt, { month: "short" });
+  return t`Deleted forever on ${day}`;
 }
 
 type Row = {
@@ -72,24 +78,34 @@ type Row = {
   forgetDecisions?: boolean;
 };
 
-function whyHeld(r: Row) {
-  if (r.canPurge) return undefined;
-  if (r.usedByTemplates) return "A layer template still names this item";
-  return "A project or clip still names this item";
+/** " (12 MB freed)" after a sentence about deleting forever; nothing when no files are stored. */
+function freed(bytes: number) {
+  if (!bytes) return "";
+  const size = formatBytes(bytes);
+  return t` (${size} freed)`;
 }
 
-const sizeOf = (r: Row) => (r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files");
+function whyHeld(r: Row) {
+  if (r.canPurge) return undefined;
+  if (r.usedByTemplates) return t`A layer template still names this item`;
+  return t`A project or clip still names this item`;
+}
+
+const sizeOf = (r: Row) =>
+  r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, { one: "# layer", other: "# layers" }) : t`no files`;
 
 /** The line under the title: what the columns have no place for. */
 function noteOf(r: Row) {
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
-  return [extra, whyHeld(r), r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined].filter(Boolean).join(" · ");
+  return [extra, whyHeld(r), r.forgetDecisions ? t`forgets what Reelsaw learned from it` : undefined].filter(Boolean).join(" · ");
 }
 
 /** Below the fold width the columns go on that line too. */
 function foldedLine(r: Row) {
-  const forever = r.purgeAt ? `deleted forever ${foreverWhen(r.purgeAt)}` : "kept until you delete it forever";
-  return [KIND_LABEL[r.kind], noteOf(r), sizeOf(r), `deleted ${ago(r.deletedAt)}`, forever].filter(Boolean).join(" · ");
+  const when = foreverWhen(r.purgeAt);
+  const forever = r.purgeAt ? t`deleted forever ${when}` : t`kept until you delete it forever`;
+  const deletedAgo = ago(r.deletedAt);
+  return [kindLabel(r.kind), noteOf(r), sizeOf(r), t`deleted ${deletedAgo}`, forever].filter(Boolean).join(" · ");
 }
 
 /**
@@ -99,7 +115,8 @@ function foldedLine(r: Row) {
  * checkbox, and its hit target fills the whole cell. Deep links: `#project=id` (also clip, asset, template).
  */
 export function DeletedPage() {
-  useDocumentTitle(pageTitle("Deleted"));
+  const { t } = useLingui();
+  useDocumentTitle(pageTitle(t`Deleted`));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const hash = useHashParams();
@@ -144,12 +161,15 @@ export function DeletedPage() {
         onSuccess: (r) => {
           refresh();
           setSel([]);
+          const why = firstError(r.results);
+          const title = rows[0]!.title;
+          const count = rows.length;
           toast(
             r.failed
-              ? `Restored ${r.restored} · ${r.failed} couldn’t be restored${firstError(r.results)}`
+              ? t`Restored ${r.restored} · ${r.failed} couldn’t be restored${why}`
               : rows.length === 1
-                ? `Restored “${rows[0]!.title}”`
-                : `Restored ${rows.length} items`,
+                ? t`Restored “${title}”`
+                : t`Restored ${count} items`,
           );
         },
         onError: (err) => {
@@ -177,45 +197,48 @@ export function DeletedPage() {
             checked={allOn}
             disabled={!allKeys.length}
             onChange={() => setSel(allOn ? [] : allKeys)}
-            aria-label={allOn ? "Clear selection" : "Select all"}
+            aria-label={allOn ? t`Clear selection` : t`Select all`}
           />
         </label>
       ),
       width: "w-11",
     },
-    { label: "Name" },
-    { label: "Kind", width: "min-[1040px]:w-[6.5rem]", full: true },
-    { label: "Size", width: "min-[1040px]:w-[5.5rem]", full: true, right: true },
-    { label: "Deleted", width: "min-[1040px]:w-[6.5rem]", full: true },
-    { label: "Deleted forever", width: "min-[1040px]:w-32", full: true },
-    { label: null, srLabel: "Actions", width: LIST_ACTIONS_WIDTH },
+    { label: t`Name` },
+    { label: t`Kind`, width: "min-[1040px]:w-[6.5rem]", full: true },
+    { label: t`Size`, width: "min-[1040px]:w-[5.5rem]", full: true, right: true },
+    { label: t`Deleted`, width: "min-[1040px]:w-[6.5rem]", full: true },
+    { label: t`Deleted forever`, width: "min-[1040px]:w-32", full: true },
+    { label: null, srLabel: t`Actions`, width: LIST_ACTIONS_WIDTH },
   ];
   const total = data?.total ?? items.length;
 
   return (
     <ListPage
-      title="Deleted"
+      title={t`Deleted`}
       subtitle={
-        <>
-          Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
-          {data && data.keepDays > 0
-            ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})`
-            : ""}
-          .
-        </>
+        data && data.keepDays > 0 ? (
+          <Trans>
+            Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever (projects and clips after{" "}
+            <Plural value={data.keepDays} one="# day" other="# days" />, library and templates after{" "}
+            <Plural value={data.libraryDays} one="# day" other="# days" />
+            ).
+          </Trans>
+        ) : (
+          <Trans>Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever.</Trans>
+        )
       }
     >
       {list.error && <ListError message={list.error.message} />}
 
       {data && empty && (
-        <ListEmpty icon={Trash2} title="Nothing waiting">
-          Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.
+        <ListEmpty icon={Trash2} title={t`Nothing waiting`}>
+          <Trans>Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.</Trans>
         </ListEmpty>
       )}
 
       {(items.length > 0 || (list.isPending && !list.error)) && (
         <section className="flex flex-col gap-2">
-          <ListTable caption="Deleted items you can restore" columns={columns} loading={list.isPending} loadingLabel="Loading deleted items…">
+          <ListTable caption={t`Deleted items you can restore`} columns={columns} loading={list.isPending} loadingLabel={t`Loading deleted items…`}>
             {list.isPending &&
               Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
                 <ListRow key={i} skeleton>
@@ -258,7 +281,7 @@ export function DeletedPage() {
                         className="h-4 w-4 accent-[var(--acc)]"
                         checked={checked}
                         onChange={() => toggle(r)}
-                        aria-label={`Select ${r.title}`}
+                        aria-label={t`Select ${r.title}`}
                       />
                     </label>
                   </ListCell>
@@ -270,7 +293,7 @@ export function DeletedPage() {
                     </div>
                   </ListCell>
                   <ListCell full variant="muted">
-                    {KIND_LABEL[r.kind]}
+                    {kindLabel(r.kind)}
                   </ListCell>
                   <ListCell full variant="num">
                     {sizeOf(r)}
@@ -284,16 +307,16 @@ export function DeletedPage() {
                   <ListCell variant="actions">
                     <div className="flex items-center justify-end gap-1.5">
                       <button type="button" className={`btn-ghost w-[5.5rem] ${LIST_ACTION}`} disabled={busy} onClick={() => onRestore([r])}>
-                        Restore
+                        <Trans>Restore</Trans>
                       </button>
                       <DropdownMenu.Root>
                         <DropdownMenu.Trigger asChild>
-                          <MoreButton aria-label={`More actions for ${r.title}`} />
+                          <MoreButton aria-label={t`More actions for ${r.title}`} />
                         </DropdownMenu.Trigger>
                         <DropdownMenu.Portal>
                           <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
                             <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} disabled={busy} onSelect={() => onRestore([r])}>
-                              Restore
+                              <Trans>Restore</Trans>
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
                               className="menu-item-danger"
@@ -301,7 +324,7 @@ export function DeletedPage() {
                               title={whyHeld(r)}
                               onSelect={() => r.canPurge && setPending([r])}
                             >
-                              Delete forever…
+                              <Trans>Delete forever…</Trans>
                             </DropdownMenu.Item>
                           </DropdownMenu.Content>
                         </DropdownMenu.Portal>
@@ -312,15 +335,17 @@ export function DeletedPage() {
               );
             })}
           </ListTable>
-          <ListFooter>{list.isPending ? <Skeleton className="h-3 w-40" /> : showingCount(items.length, total, "item")}</ListFooter>
+          <ListFooter>
+            {list.isPending ? <Skeleton className="h-3 w-40" /> : showingCount(items.length, total, (n) => plural(n, { one: "item", other: "items" }))}
+          </ListFooter>
           {selected.length > 0 && (
-            <SelectionBar label="Selected deletions" count={selected.length} busy={busy} onClear={() => setSel([])}>
+            <SelectionBar label={t`Selected deletions`} count={selected.length} busy={busy} onClear={() => setSel([])}>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>
-                Restore
+                <Trans>Restore</Trans>
               </button>
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
-                  <MoreButton aria-label="More actions for the selection" />
+                  <MoreButton aria-label={t`More actions for the selection`} />
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content side="top" align="end" sideOffset={8} className={LIST_MENU}>
@@ -329,14 +354,14 @@ export function DeletedPage() {
                       disabled={busy || held.length === selected.length}
                       title={
                         held.length === selected.length
-                          ? "None of the selected items can be deleted forever yet"
+                          ? t`None of the selected items can be deleted forever yet`
                           : held.length
-                            ? `${plural(held.length, "item")} still in use will be skipped`
+                            ? plural(held.length, { one: "# item still in use will be skipped", other: "# items still in use will be skipped" })
                             : undefined
                       }
                       onSelect={() => setPending(selected.filter((r) => r.canPurge))}
                     >
-                      Delete forever…
+                      <Trans>Delete forever…</Trans>
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
@@ -351,34 +376,33 @@ export function DeletedPage() {
           if (!o) setPending(null);
           setForgetDecisions(false);
         }}
-        title={pending && pending.length > 1 ? `Delete ${pending.length} items forever?` : "Delete forever?"}
+        title={pending && pending.length > 1 ? t`Delete ${pending.length} items forever?` : t`Delete forever?`}
         body={
           pending && pending.length > 1 ? (
-            <>
-              {plural(pending.length, "item")} and their files are deleted permanently
-              {pending.reduce((n, r) => n + r.storedBytes, 0) ? ` (${formatBytes(pending.reduce((n, r) => n + r.storedBytes, 0))} freed)` : ""}. This cannot be
-              undone.
-            </>
+            <Trans>
+              <Plural value={pending.length} one="# item" other="# items" /> and their files are deleted permanently
+              {freed(pending.reduce((n, r) => n + r.storedBytes, 0))}. This cannot be undone.
+            </Trans>
           ) : pending?.[0]?.kind === "project" ? (
-            <>
+            <Trans>
               “{pending[0].title}” and its files are deleted permanently
-              {pending[0].storedBytes ? ` (${formatBytes(pending[0].storedBytes)} freed)` : ""}. Minutes already used stay counted. This cannot be undone.
-            </>
+              {freed(pending[0].storedBytes)}. Minutes already used stay counted. This cannot be undone.
+            </Trans>
           ) : pending?.[0]?.kind === "clip" ? (
-            <>
+            <Trans>
               “{pending[0].title}” and its rendered file are deleted permanently
-              {pending[0].storedBytes ? ` (${formatBytes(pending[0].storedBytes)} freed)` : ""}. This cannot be undone.
-            </>
+              {freed(pending[0].storedBytes)}. This cannot be undone.
+            </Trans>
           ) : pending?.[0]?.kind === "asset" ? (
-            <>
+            <Trans>
               “{pending[0].title}” and its files are deleted permanently
-              {pending[0].storedBytes ? ` (${formatBytes(pending[0].storedBytes)} freed)` : ""}. This cannot be undone.
-            </>
+              {freed(pending[0].storedBytes)}. This cannot be undone.
+            </Trans>
           ) : (
-            <>“{pending?.[0]?.title}” is deleted permanently. Clips that already have its layers keep them. This cannot be undone.</>
+            <Trans>“{pending?.[0]?.title}” is deleted permanently. Clips that already have its layers keep them. This cannot be undone.</Trans>
           )
         }
-        confirm="Delete forever"
+        confirm={t`Delete forever`}
         danger
         onConfirm={() => {
           const rows = pending;
@@ -392,14 +416,18 @@ export function DeletedPage() {
               setPending(null);
               setSel([]);
               refresh();
+              const why = firstError(r.results);
+              const size = formatBytes(r.storedBytes);
+              const title = rows[0]!.title;
+              const count = rows.length;
               toast(
                 r.failed
-                  ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}`
+                  ? t`Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${why}`
                   : r.storedBytes
-                    ? `Deleted forever · ${formatBytes(r.storedBytes)} freed`
+                    ? t`Deleted forever · ${size} freed`
                     : rows.length === 1
-                      ? `Deleted “${rows[0]!.title}” forever`
-                      : `Deleted ${rows.length} items forever`,
+                      ? t`Deleted “${title}” forever`
+                      : t`Deleted ${count} items forever`,
               );
             });
         }}

@@ -1,5 +1,7 @@
 "use client";
 
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { useEffect, type ReactNode } from "react";
 import type { ReleasesFeed } from "@/lib/releases-data";
 import { ShippingChart } from "./shipping-chart";
@@ -27,7 +29,7 @@ export function ReleasesView({ feed, heading, children }: { feed: ReleasesFeed; 
           <ShippingChart feed={feed} onSelectRelease={jump} />
         </section>
       </div>
-      <section aria-label="Release notes" className="mt-4">
+      <section aria-label={t(msg`Release notes`)} className="mt-4">
         {children}
       </section>
     </>

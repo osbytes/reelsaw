@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // PostHog's API paths end in a slash (`/decide/`, `/e/`); Next would otherwise redirect them.
   skipTrailingSlashRedirect: true,
+  // the site's language for this build (lib/i18n.ts), inlined into server and client bundles alike so they render the same
+  env: { SITE_LOCALE: process.env.SITE_LOCALE ?? "en" },
   async rewrites() {
     if (!posthogKey) return [];
     return [

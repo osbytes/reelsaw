@@ -9,6 +9,7 @@
  */
 import { ProviderError, arr, clip, httpsUrl, needKey, num, obj, str } from "./http.js";
 import type { Provider, ProviderDeps, ProviderItem, Resolved } from "./types.js";
+import { msg } from "@lingui/core/runtime-macro";
 
 const API = "https://api.klipy.com/api/v1";
 const LICENSE = { id: "klipy", name: "Klipy terms", url: "https://klipy.com/terms" };
@@ -91,7 +92,7 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       return { items, ...(hasNext && items.length ? { nextCursor: String(page + 1) } : {}) };
     },
     async resolve(externalId): Promise<Resolved> {
-      if (!/^[A-Za-z0-9_-]{1,100}$/.test(externalId)) throw new ProviderError("That is not a Klipy id.");
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(externalId)) throw new ProviderError(msg({ id: "library_provider.klipy_id", message: "That is not a Klipy id." }));
       // no single-item endpoint is confirmed: search by the id and take the exact match
       const r = await http.json("klipy", url("/gifs/search", { q: externalId, per_page: "20", customer_id: "reelsaw" }));
       const g = rows(r)
@@ -99,7 +100,10 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
         .find((x) => (str(x["id"]) ?? str(x["slug"])) === externalId);
       const f = g ? formats(g) : undefined;
       const file = f?.mp4 ?? f?.gif;
-      if (!g || !f || !file) throw new ProviderError("Klipy no longer returns that item; search for it again.");
+      if (!g || !f || !file)
+        throw new ProviderError(
+          msg({ id: "library_provider.klipy_no_longer_returns_item", message: "Klipy no longer returns that item; search for it again." }),
+        );
       return {
         url: file,
         ext: f.mp4 ? "mp4" : "gif",

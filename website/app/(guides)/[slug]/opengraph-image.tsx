@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { ARTICLES, articleBySlug } from "@/content/articles";
 import { defaultOgAlt, defaultOgDescription, defaultOgTitle, ogBlurb, ogContentType, ogSize, renderOgImage } from "@/lib/og";
 
@@ -16,7 +18,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
     return renderOgImage({ title: defaultOgTitle, description: defaultOgDescription });
   }
   return renderOgImage({
-    eyebrow: a.kind === "useCase" ? "Use case" : "Guide",
+    eyebrow: a.kind === "useCase" ? t(msg`Use case`) : t(msg`Guide`),
     title: a.page.h1,
     description: ogBlurb(a.page.metaDescription),
   });

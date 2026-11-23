@@ -36,7 +36,6 @@ import {
   DECISION_KINDS,
   emailPreferencesPatchSchema,
   localePrefsPatchSchema,
-  plural,
   QUEUE_PRIORITY_MAX,
   QUEUE_PRIORITY_MIN,
   withSpokenLanguage,
@@ -182,6 +181,8 @@ import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.
 import { providerOf } from "../ai/registry.js";
 import { testModel } from "../ai/model-test.js";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
+import { msg, plural as icuPlural } from "@lingui/core/runtime-macro";
+import { AppError, t } from "../i18n.js";
 
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
@@ -291,12 +292,15 @@ async function addManualFix(
   return withTranscript(svc, userId, input.projectId, async (u, p, t) => {
     const raw = t.rawWords ?? t.words;
     const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
-    if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
+    if (!idx.length) throw new AppError("BAD_REQUEST", msg({ id: "transcript.select_whole_word", message: "Select at least one whole word" }));
     let from = idx[0]!.i;
     let to = idx.at(-1)!.i;
     const hits = (f: TranscriptFlag) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
     if (what.kind === "disfluency" && t.flags.some((f) => f.kind === "entity" && hits(f)))
-      throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a correction. Delete that first, or select around it." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "transcript.selection_overlaps_correction", message: "The selection overlaps a correction. Delete that first, or select around it." }),
+      );
     // cuts grow to cover overlapping cuts; a correction replaces exactly the words you selected
     const merged = t.flags.filter(hits);
     if (what.kind === "disfluency")
@@ -305,7 +309,10 @@ async function addManualFix(
         to = Math.max(to, f.wordIndex + f.span - 1);
       }
     else if (merged.some((f) => f.wordIndex < from || f.wordIndex + f.span - 1 > to))
-      throw new TRPCError({ code: "BAD_REQUEST", message: "The selection cuts through another fix. Select all of its words, or delete it first." });
+      throw new AppError(
+        "BAD_REQUEST",
+        msg({ id: "transcript.selection_cuts_fix", message: "The selection cuts through another fix. Select all of its words, or delete it first." }),
+      );
     const span = raw.slice(from, to + 1);
     const flag: TranscriptFlag = {
       id: randomUUID(),
@@ -357,7 +364,7 @@ async function withTranscript<T>(
   return svc.tx(async (u) => {
     const p = await ownedProject(u.db, userId, projectId);
     const [t] = await u.db.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
-    if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+    if (!t) throw new AppError("NOT_FOUND", msg({ id: "transcript.missing", message: "No transcript" }));
     return fn(u, p, t);
   });
 }
@@ -447,7 +454,8 @@ function ownedProject(db: Db, userId: string, projectId: string) {
 const actorOf = (user: { id: string; role?: string | null }): { id: string; admin: boolean } => ({ id: user.id, admin: user.role === "admin" });
 /** The billing service, or the sentence a self-hosted instance answers with. */
 function billingOf(svc: Services) {
-  if (!svc.ee) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Billing is not enabled on this Reelsaw (REELSAW_EE is off)." });
+  if (!svc.ee)
+    throw new AppError("PRECONDITION_FAILED", msg({ id: "billing.not_enabled", message: "Billing is not enabled on this Reelsaw (REELSAW_EE is off)." }));
   return svc.ee.billing;
 }
 const periodOf = (g: Parameters<typeof periodFor>[0]) => {
@@ -556,7 +564,7 @@ const headRouter = router({
      */
     completePasswordChange: signedInProcedure.input(z.object({ password: z.string().min(1).max(PASSWORD_MAX_LENGTH) })).mutation(async ({ ctx, input }) => {
       if (ctx.who.via !== "session" || !ctx.who.session) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Choose the new password in the browser after signing in." });
+        throw new AppError("BAD_REQUEST", msg({ id: "auth.password_change_in_browser", message: "Choose the new password in the browser after signing in." }));
       }
       return setUserPassword(ctx.svc, ctx.user.id, ctx.user.id, input.password, {
         mustChange: false,
@@ -593,9 +601,10 @@ const headRouter = router({
     createApiKey: protectedProcedure
       .input(z.object({ name: z.string().trim().min(1).max(32), admin: z.boolean().default(false) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.who.via !== "session") throw new TRPCError({ code: "FORBIDDEN", message: "Create keys from the Settings page after signing in." });
+        if (ctx.who.via !== "session")
+          throw new AppError("FORBIDDEN", msg({ id: "api_key.create_in_browser", message: "Create keys from the Settings page after signing in." }));
         if (input.admin && ctx.user.role !== "admin")
-          throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can create a key that administers the instance." });
+          throw new AppError("FORBIDDEN", msg({ id: "api_key.admin_only", message: "Only admins can create a key that administers the instance." }));
         const created = await ctx.svc.auth.api.createApiKey({
           body: { name: input.name, userId: ctx.user.id, permissions: { admin: input.admin ? ["write"] : [] } },
         });
@@ -813,7 +822,7 @@ const libraryRouter = router({
       .select({ id: schema.assets.id })
       .from(schema.assets)
       .where(and(eq(schema.assets.id, input.id), assetVisibleTo(ctx.user.id)));
-    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    if (!asset) throw new AppError("NOT_FOUND", msg({ id: "library.item_not_found", message: "That item is not in your library" }));
     return bumperAssetUsage(db, ctx.user.id, input.id);
   }),
   /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
@@ -855,7 +864,13 @@ const libraryRouter = router({
       }
       if (input.provider) {
         if (input.setDefault || input.imageSeconds)
-          throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
+          throw new AppError(
+            "BAD_REQUEST",
+            msg({
+              id: "library.import_options_own_files",
+              message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault",
+            }),
+          );
         const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
         return addedAsset(r, "shared");
       }
@@ -929,7 +944,7 @@ const libraryRouter = router({
         .set({ deletedAt: new Date() })
         .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
         .returning({ id: schema.assets.id });
-      if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+      if (!gone.length) throw new AppError("NOT_FOUND", msg({ id: "library.item_not_found", message: "That item is not in your library" }));
       for (const key of ["introAssetId", "outroAssetId"]) {
         await u.db.execute(
           sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`,
@@ -1106,7 +1121,7 @@ const restRouter = router({
           }),
           db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } }),
         ]);
-        if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
+        if (!user) throw new AppError("NOT_FOUND", msg({ id: "users.not_found", message: "No such user" }));
         const d = await limitsDetail(db, ctx.svc.settings.get(), input.id, ctx.svc.entitlements);
         const wm = await watermarkFor(db, ctx.svc.settings.get(), user, ctx.svc.entitlements);
         return {
@@ -1182,10 +1197,11 @@ const restRouter = router({
         )
         .mutation(async ({ ctx, input }) => {
           const known = ctx.svc.providers.describe().find((d) => d.provider === input.provider);
-          if (!known) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown provider "${input.provider}"` });
-          if (input.baseUrl !== undefined && !known.baseUrlEnv) throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} has no base URL to set` });
+          if (!known) throw new AppError("BAD_REQUEST", msg({ id: "provider.unknown", message: msg`Unknown provider "${{ provider: input.provider }}"` }));
+          if (input.baseUrl !== undefined && !known.baseUrlEnv)
+            throw new AppError("BAD_REQUEST", msg({ id: "provider.no_base_url", message: msg`${{ provider: known.title }} has no base URL to set` }));
           if (input.apiKey && known.keyEnv.length === 0 && input.provider !== ctx.svc.config.OPENAI_COMPATIBLE_NAME)
-            throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} takes no API key` });
+            throw new AppError("BAD_REQUEST", msg({ id: "provider.no_api_key", message: msg`${{ provider: known.title }} takes no API key` }));
           const now = ctx.svc.providers.get(input.provider);
           const next = {
             ...now,
@@ -1195,7 +1211,11 @@ const restRouter = router({
           // try before saving, unless this clears everything
           if (next.apiKey || next.baseUrl) {
             const probe = await ctx.svc.catalog.probe(input.provider, next);
-            if (!probe.ok) throw new TRPCError({ code: "BAD_REQUEST", message: probe.error ?? "The provider did not answer" });
+            if (!probe.ok)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: probe.error ?? t(msg({ id: "provider.no_answer", message: "The provider did not answer" })),
+              });
           }
           await ctx.svc.providers.set(input.provider, input, { id: ctx.user.id, email: ctx.user.email });
           return ctx.svc.providers.state().find((p) => p.provider === input.provider)!;
@@ -1255,7 +1275,8 @@ const restRouter = router({
       set: adminProcedure
         .input(z.object({ language: modelId.nullable().optional(), transcription: modelId.nullable().optional(), align: modelId.nullable().optional() }))
         .mutation(async ({ ctx, input }) => {
-          if (!MODEL_KINDS.some((k) => input[k] !== undefined)) throw new TRPCError({ code: "BAD_REQUEST", message: "Nothing to change" });
+          if (!MODEL_KINDS.some((k) => input[k] !== undefined))
+            throw new AppError("BAD_REQUEST", msg({ id: "model.nothing_to_change", message: "Nothing to change" }));
           try {
             return await ctx.svc.models.set(input, { id: ctx.user.id, email: ctx.user.email });
           } catch (err) {
@@ -1414,7 +1435,13 @@ const restRouter = router({
     forget: protectedProcedure.input(z.object({ projectId: z.string().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
       const forgotten = await ctx.svc.tx((u) => forgetDecisions(u.db, ctx.user.id, input));
       ctx.log.info({ projectId: input.projectId ?? null, forgotten }, "decisions forgotten");
-      return { ok: true as const, forgotten, message: forgotten ? `Forgot ${plural(forgotten, "decision")}.` : "Nothing to forget." };
+      return {
+        ok: true as const,
+        forgotten,
+        message: forgotten
+          ? t(msg({ message: icuPlural({ forgotten }, { one: "Forgot # decision.", other: "Forgot # decisions." }) }))
+          : t(msg`Nothing to forget.`),
+      };
     }),
     /** Turn recording on or off; what is already kept stays until forgotten. */
     setLearning: protectedProcedure
@@ -1820,7 +1847,7 @@ const restRouter = router({
       .mutation(async ({ ctx, input }) =>
         withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
           const f = t.flags.find((x) => x.id === input.flagId);
-          if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
+          if (!f) throw new AppError("NOT_FOUND", msg({ id: "transcript.fix_not_found", message: "Fix not found" }));
           const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
           const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
           await recordDecisions(ctx.svc, u, p, () =>
@@ -1837,7 +1864,7 @@ const restRouter = router({
           const svc = ctx.svc;
           // past the live cap (200) deleted fixes live in the archive (stage_artifacts); taking one from there removes it from there
           const d = t.deletedFlags?.find((x) => x.id === input.flagId) ?? (await takeArchivedFlag<DeletedFlag>(u.db, p.id, input.flagId));
-          if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
+          if (!d) throw new AppError("NOT_FOUND", msg({ id: "transcript.deleted_fix_not_found", message: "Deleted fix not found" }));
           const { deletedAt: _deletedAt, ...flag } = d;
           void _deletedAt;
           const hits = (x: TranscriptFlag) => x.wordIndex <= flag.wordIndex + flag.span - 1 && x.wordIndex + x.span - 1 >= flag.wordIndex;
@@ -1845,16 +1872,24 @@ const restRouter = router({
           let live = t.flags;
           if (flag.subkind === "manual") {
             if (overlapping.some((x) => x.kind === "entity"))
-              throw new TRPCError({ code: "BAD_REQUEST", message: "A name fix now overlaps this cut. Delete it first." });
+              throw new AppError("BAD_REQUEST", msg({ id: "transcript.name_fix_overlaps_cut", message: "A name fix now overlaps this cut. Delete it first." }));
             if (overlapping.some((x) => x.subkind === "manual"))
-              throw new TRPCError({ code: "BAD_REQUEST", message: "Another of your cuts now overlaps this one." });
+              throw new AppError("BAD_REQUEST", msg({ id: "transcript.cut_overlaps_cut", message: "Another of your cuts now overlaps this one." }));
             flag.absorbed = overlapping as unknown as Array<Record<string, unknown>>;
             live = t.flags.filter((x) => !overlapping.includes(x));
           } else if (overlapping.length) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `It overlaps ${overlapping[0]!.subkind === "manual" ? "one of your cuts" : "another fix"} (“${overlapping[0]!.heard}”). Delete that first.`,
-            });
+            throw new AppError(
+              "BAD_REQUEST",
+              overlapping[0]!.subkind === "manual"
+                ? msg({
+                    id: "transcript.restore_overlaps_own_cut",
+                    message: msg`It overlaps one of your cuts (“${{ heard: overlapping[0]!.heard }}”). Delete that first.`,
+                  })
+                : msg({
+                    id: "transcript.restore_overlaps_fix",
+                    message: msg`It overlaps another fix (“${{ heard: overlapping[0]!.heard }}”). Delete that first.`,
+                  }),
+            );
           }
           live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
           const rerendered = await saveFlags(

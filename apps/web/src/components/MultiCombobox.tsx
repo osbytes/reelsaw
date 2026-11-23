@@ -3,6 +3,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Check, ChevronsUpDown, Plus, X } from "lucide-react";
 import { ScrollArea } from "./scroll-area";
+import { Trans, useLingui } from "@lingui/react/macro";
 
 export interface ComboOption {
   value: string;
@@ -36,8 +37,8 @@ export function MultiCombobox({
   value,
   onChange,
   placeholder,
-  searchPlaceholder = "Search…",
-  empty = "No matches",
+  searchPlaceholder: searchPlaceholderProp,
+  empty: emptyProp,
   label,
   creatable,
   footerHint,
@@ -57,6 +58,9 @@ export function MultiCombobox({
   disabled?: boolean;
   trigger?: ReactNode;
 }) {
+  const { t } = useLingui();
+  const searchPlaceholder = searchPlaceholderProp ?? t`Search…`;
+  const empty = emptyProp ?? t`No matches`;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [pinned, setPinned] = useState<string[]>([]);
@@ -122,7 +126,7 @@ export function MultiCombobox({
                   <span
                     role="button"
                     tabIndex={-1}
-                    aria-label={`Remove ${o.label}`}
+                    aria-label={t`Remove ${o.label}`}
                     className="grid h-4 w-4 shrink-0 place-items-center rounded-[4px] hover:bg-acc/20"
                     onPointerDown={(e) => {
                       // remove without opening the list
@@ -181,22 +185,30 @@ export function MultiCombobox({
                   >
                     <Plus className="h-4 w-4 shrink-0 text-ink3" />
                     <span className="min-w-0 flex-1 truncate">
-                      Create {create?.noun ?? "new"}: <span className="text-ink3">“{draft}”</span>
+                      {create?.noun ? (
+                        <Trans>
+                          Create {create.noun}: <span className="text-ink3">“{draft}”</span>
+                        </Trans>
+                      ) : (
+                        <Trans>
+                          Create new: <span className="text-ink3">“{draft}”</span>
+                        </Trans>
+                      )}
                     </span>
                   </Command.Item>
                 )}
               </Command.List>
             </ScrollArea>
             <div className="flex min-h-[36px] items-center justify-between border-t border-line px-3 py-1.5 text-xs text-ink2">
-              <span>{value.length ? `${value.length} selected` : (footerHint ?? "None selected")}</span>
+              <span>{value.length ? t`${value.length} selected` : (footerHint ?? t`None selected`)}</span>
               <span className="flex gap-1">
                 {value.length > 0 && (
                   <button type="button" className="rounded-[6px] px-2 py-1 hover:bg-sunk" onClick={() => onChange([])}>
-                    Clear
+                    <Trans>Clear</Trans>
                   </button>
                 )}
                 <button type="button" className="rounded-[6px] px-2 py-1 font-semibold hover:bg-sunk" onClick={() => onOpenChange(false)}>
-                  Done
+                  <Trans>Done</Trans>
                 </button>
               </span>
             </div>

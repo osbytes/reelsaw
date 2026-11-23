@@ -1,3 +1,5 @@
+import { msg } from "@lingui/core/runtime-macro";
+import { t } from "@/lib/i18n";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
@@ -6,10 +8,11 @@ import { SITE } from "@/lib/site";
 export const ogSize = { width: 1200, height: 630 } as const;
 export const ogContentType = "image/png";
 
-export const defaultOgAlt = `${SITE.name}: AI video clipper you self-host or run hosted`;
-export const defaultOgTitle = "Long videos in. Vertical clips out. On your hardware, or hosted.";
-export const defaultOgDescription =
-  "Open-source AI clipper: transcribe, pick moments, reframe to 9:16, caption. Self-host with no meter, or use app.reelsaw.com. Fully local with no API keys, or any AI provider.";
+export const defaultOgAlt = t(msg`${{ name: SITE.name }}: AI video clipper you self-host or run hosted`);
+export const defaultOgTitle = t(msg`Long videos in. Vertical clips out. On your hardware, or hosted.`);
+export const defaultOgDescription = t(
+  msg`Open-source AI clipper: transcribe, pick moments, reframe to 9:16, caption. Self-host with no meter, or use app.reelsaw.com. Fully local with no API keys, or any AI provider.`,
+);
 
 type OgCard = {
   /** Large headline on the card. Prefer a short h1 over a long meta title. */

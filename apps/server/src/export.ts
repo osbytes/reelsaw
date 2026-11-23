@@ -15,12 +15,13 @@ import type { Readable } from "node:stream";
 import type { Storage } from "./storage/index.js";
 import type { Paths } from "./config.js";
 import { and, eq, isNull } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { schema } from "./db/index.js";
 import type { Clip, Project } from "./db/schema.js";
 import type { Services } from "./services.js";
 import { findProject, type Actor } from "./projects/service.js";
 import { formatTime, toSrt, toVtt, plural, resolveStyle } from "@reelsaw/shared";
+import { msg } from "@lingui/core/runtime-macro";
+import { AppError } from "./i18n.js";
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
@@ -115,7 +116,10 @@ export function pickExportClips(clips: Clip[], ids: string[]): { clips: Clip[]; 
 export async function exportPlan(svc: Services, actor: Actor, projectId: string, clipIds: string[] | null = []) {
   const ids = clipIds === null ? null : [...new Set(clipIds)];
   if (!ids || ids.length > EXPORT_CLIP_IDS_MAX || ids.some((x) => !/^[\w-]{1,64}$/.test(x)))
-    throw new TRPCError({ code: "BAD_REQUEST", message: `The clip list is not valid: give up to ${EXPORT_CLIP_IDS_MAX} clip ids of this project.` });
+    throw new AppError(
+      "BAD_REQUEST",
+      msg({ id: "export.invalid_clip_list", message: msg`The clip list is not valid: give up to ${{ max: EXPORT_CLIP_IDS_MAX }} clip ids of this project.` }),
+    );
   const db = svc.database.db;
   const project = await findProject(db, actor, projectId, { deleted: false });
   const [clips, transcript] = await Promise.all([
@@ -124,15 +128,21 @@ export async function exportPlan(svc: Services, actor: Actor, projectId: string,
   ]);
   const picked = pickExportClips(clips, ids);
   if (picked.unknown.length)
-    throw new TRPCError({ code: "NOT_FOUND", message: `Not clips of this project: ${picked.unknown.join(", ")}. get_project lists its clips.` });
+    throw new AppError(
+      "NOT_FOUND",
+      msg({ id: "export.unknown_clips", message: msg`Not clips of this project: ${{ ids: picked.unknown.join(", ") }}. get_project lists its clips.` }),
+    );
   const rendered = picked.clips.filter((c) => c.status === "done" && c.outputKey).length;
   if (!rendered)
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: ids.length
-        ? "None of those clips is rendered yet. Wait for them to finish (or re-render failed ones), then export."
-        : "No clip is rendered yet. Wait for the project to finish (wait_for_project), then export.",
-    });
+    throw new AppError(
+      "CONFLICT",
+      ids.length
+        ? msg({
+            id: "export.selection_not_rendered",
+            message: "None of those clips is rendered yet. Wait for them to finish (or re-render failed ones), then export.",
+          })
+        : msg({ id: "export.nothing_rendered", message: "No clip is rendered yet. Wait for the project to finish (wait_for_project), then export." }),
+    );
   return { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset, rendered, notRendered: picked.clips.length - rendered };
 }
 
