@@ -178,3 +178,12 @@ export function formatSeconds(sec: number | null | undefined): string {
 export function formatPriority(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
+
+/** `h:mm:ss` (or `m:ss` under an hour) for a time in seconds. */
+export function formatTime(sec: number): string {
+  const s = Math.max(0, sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = Math.floor(s % 60);
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+}

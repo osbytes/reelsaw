@@ -431,7 +431,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 
   **Clip windows need an HTTP proxy.** On a plan with a source cap (hosted Free: `sourceHeight` 240 in
   `ee/billing/plans.ts`) a link is downloaded as a small preview, and each clip renders from a 1080p window of the
-  link (`--download-sections`, `pipeline/sections.ts`), stored and reused by later rerenders. Windows are fetched
+  link (`--download-sections`, `pipeline/windows.ts`), stored and reused by later rerenders. Windows are fetched
   one at a time per project (a session lock), so parallel renders reuse each other's download. The first fetch
   covers every not-yet-covered clip within 15 s of the one rendering (up to 10 minutes), and a clip that later
   reaches past its window fetches only the missing stretch, joined to the stored part locally (a short re-encode,

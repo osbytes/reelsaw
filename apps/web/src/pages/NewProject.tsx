@@ -12,7 +12,7 @@ import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
   CLEARABLE_SETTINGS,
   defaultProjectSettings,
@@ -24,8 +24,12 @@ import {
   type ClearableSetting,
   type ProjectSettings,
   type QuotaRefusal,
+  type RangeChange,
+  type ReplayPeak,
   type Style,
+  formatTime,
 } from "@reelsaw/shared";
+import { PeakChips, RangeList, RangeTimeline, type DraftRange } from "../components/RangeTimeline";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
 import { LanguageCombobox } from "../components/LanguageCombobox";
@@ -69,10 +73,18 @@ export function NewProjectPage() {
       file?: File;
       settings: ProjectSettings;
       clear: ClearableSetting[];
+      ranges?: Array<{ startSec: number; endSec: number; mode: "find" | "clip" }> | undefined;
     }) => {
       uploadCtrl.current = new AbortController();
       const uploadId = input.file ? await postUpload(input.file, setUploadPct, uploadCtrl.current.signal) : undefined;
-      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings, clear: input.clear });
+      return client.projects.create.mutate({
+        title: input.title,
+        sourceUrl: input.sourceUrl,
+        uploadId,
+        settings: input.settings,
+        clear: input.clear,
+        ...(input.ranges ? { ranges: input.ranges } : {}),
+      });
     },
     onSettled: () => setUploadPct(null),
   });
@@ -110,6 +122,15 @@ export function NewProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.key]);
   const [title, setTitle] = useState("");
+  // the whole video, or only the ranges drawn on the shadow timeline (docs/specs/range-clipping.md)
+  const [scope, setScope] = useState<"whole" | "ranges">("whole");
+  const [ranges, setRanges] = useState<DraftRange[]>([]);
+  /** in source order, the order the list numbers them in, so the server's "ranges 1 and 2" are the ones shown as 1 and 2 */
+  const ordered = useMemo(
+    () => [...ranges].sort((a, b) => a.startSec - b.startSec).map((r) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode })),
+    [ranges],
+  );
+  const debouncedRanges = useDebounced(ordered, 400);
   const [s, setS] = useState<ProjectSettings>(defaultProjectSettings);
   // the user's saved defaults fill the form once, before they touch it
   const [prefilledFor, setPrefilledFor] = useState<string | null>(null);
@@ -197,16 +218,35 @@ export function NewProjectPage() {
 
   // Would this source be accepted? The same checks creating it runs (minutes, projects, storage), asked before submit, so a
   // video the plan cannot cover is said up front with the upgrade offer instead of failing after the click (or the upload).
-  const checkInput = mode === "url" ? (validUrl ? { sourceUrl: debouncedUrl } : null) : fileSec ? { durationSec: Math.ceil(fileSec) } : null;
+  // with ranges the length is looked up whatever the plan (the timeline is drawn from it) and the ranges are priced
+  const rangesInput = scope === "ranges" && debouncedRanges.length ? { ranges: debouncedRanges } : {};
+  const sourceInput: { sourceUrl?: string; durationSec?: number } | null =
+    mode === "url" ? (validUrl ? { sourceUrl: debouncedUrl } : null) : fileSec ? { durationSec: Math.ceil(fileSec) } : null;
+  // ranges are drawn on one video: another link or file starts with none
+  const sourceKey = mode === "url" ? `url:${debouncedUrl}` : `file:${file?.name ?? ""}:${file?.size ?? 0}`;
+  const [rangesFor, setRangesFor] = useState(sourceKey);
+  if (rangesFor !== sourceKey) {
+    setRangesFor(sourceKey);
+    setRanges([]);
+  }
+  const checkInput = sourceInput ? { ...sourceInput, ...(scope === "ranges" ? { lookupLength: true } : {}), ...rangesInput } : null;
   const check = useQuery({
     ...trpc.projects.checkSource.queryOptions(checkInput ?? { durationSec: 1 }),
     enabled: !!checkInput,
     staleTime: 60_000,
     retry: false,
+    // a range moved is priced again: keep the last answer meanwhile, so nothing under the timeline jumps; never the
+    // answer about another video (a new link or file starts from nothing)
+    placeholderData: (prev, prevQuery) => {
+      const was = (prevQuery?.queryKey[1] as { input?: { sourceUrl?: string; durationSec?: number } } | undefined)?.input;
+      return was && was.sourceUrl === sourceInput?.sourceUrl && was.durationSec === sourceInput?.durationSec ? prev : undefined;
+    },
   });
+  /** the video's length, for the timeline: the file's own, or what the link's site says */
+  const lengthSec = mode === "upload" ? fileSec : (check.data?.durationSec ?? null);
   // a link still being typed has not been checked yet; neither has a file whose length is not read yet
   const fit = checkInput && (mode === "upload" || debouncedUrl === url) ? check.data : undefined;
-  const blocked = fit?.fits === false;
+  const blocked = fit?.fits === false || (scope === "ranges" && !ranges.length);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -223,6 +263,7 @@ export function NewProjectPage() {
         // the form starts from the saved defaults, so an optional setting left empty here was cleared on purpose
         // ("Detect automatically", no focus): without this the server would fill it back in from the defaults
         clear: CLEARABLE_SETTINGS.filter((k) => s[k] === undefined),
+        ranges: scope === "ranges" ? ordered : undefined,
       },
       {
         onSuccess: (p) => {
@@ -378,7 +419,7 @@ export function NewProjectPage() {
                   <Trans>Checking the video’s length against your plan…</Trans>
                 </div>
               )}
-              {fit && <SourceFit fit={fit} />}
+              {fit && scope === "whole" && <SourceFit fit={fit} />}
               <input
                 className="input"
                 value={title}
@@ -387,6 +428,55 @@ export function NewProjectPage() {
                 aria-label={t`Title`}
               />
             </section>
+
+            {canStart && (
+              <section className={sec} aria-labelledby="what-to-clip">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 id="what-to-clip" className={h2}>
+                    <Trans>What to clip</Trans>
+                  </h2>
+                  <Segmented
+                    size="sm"
+                    ariaLabel={t`What to clip`}
+                    value={scope}
+                    onChange={setScope}
+                    options={[
+                      { value: "whole", label: t`Whole video` },
+                      { value: "ranges", label: t`Ranges` },
+                    ]}
+                  />
+                </div>
+                {lengthSec ? (
+                  <>
+                    {scope === "ranges" && <PeakChips peaks={check.data?.mostReplayed ?? []} ranges={ranges} onChange={setRanges} />}
+                    <RangeTimeline
+                      durationSec={lengthSec}
+                      ranges={ranges}
+                      onChange={setRanges}
+                      peaks={scope === "ranges" ? (check.data?.mostReplayed ?? []) : []}
+                      coverSec={scope === "whole" ? (fit?.partial ? fit.partial.minutes * 60 : lengthSec) : undefined}
+                    />
+                    {scope === "ranges" && (
+                      <>
+                        <RangeList durationSec={lengthSec} ranges={ranges} onChange={setRanges} />
+                        <RangesFit fit={fit} lengthSec={lengthSec} pending={check.isFetching} />
+                      </>
+                    )}
+                  </>
+                ) : checkInput && check.isFetching ? (
+                  // the timeline's own height, so nothing moves when the length arrives
+                  <Skeleton className="h-[110px] w-full rounded-[10px]" />
+                ) : scope === "ranges" ? (
+                  <p className="text-[13px] text-ink2">
+                    {mode === "upload" ? (
+                      <Trans>Reading the file’s length…</Trans>
+                    ) : (
+                      <Trans>This site does not say how long the video is, so there is no timeline. Clip the whole video, or try the link again.</Trans>
+                    )}
+                  </p>
+                ) : null}
+              </section>
+            )}
 
             <section className={sec}>
               <h2 className={h2}>
@@ -749,9 +839,23 @@ export function NewProjectPage() {
           <button
             className="btn-primary px-5 py-2.5 text-sm"
             disabled={busy || !canStart || blocked}
-            title={blocked ? t`This video doesn’t fit your plan’s minutes; see the note under the source` : undefined}
+            title={
+              scope === "ranges" && !ranges.length
+                ? t`Add a range on the timeline first`
+                : blocked
+                  ? scope === "ranges"
+                    ? t`These ranges don’t fit your plan’s minutes; see the note under them`
+                    : t`This video doesn’t fit your plan’s minutes; see the note under the source`
+                  : undefined
+            }
           >
-            {busy ? t`Starting…` : t`Find clips`}
+            {busy ? (
+              t`Starting…`
+            ) : scope === "ranges" && ranges.length ? (
+              <Plural value={ranges.length} one="Clip # range" other="Clip # ranges" />
+            ) : (
+              t`Find clips`
+            )}
           </button>
         </div>
       </div>
@@ -761,6 +865,9 @@ export function NewProjectPage() {
 
 type SourceCheck = {
   minutes: number | null;
+  durationSec: number | null;
+  mostReplayed: ReplayPeak[];
+  ranges: { seconds: number; minutes: number; changes: RangeChange[]; problems: string[] } | null;
   /** accepted, but only the first `minutes` are processed now (the server's SourcePartial) */
   partial: { minutes: number; totalMinutes: number; firstVideo: boolean; sentence: string; upgrade: { label: string; href: string } | null } | null;
   fits: boolean | null;
@@ -784,6 +891,80 @@ function SourceFit({ fit }: { fit: SourceCheck }) {
     ? t`Your first video is free up to ${free} minutes, then ${perMonth} minutes a month.`
     : t`${left} of your ${perMonth} minutes left this month.`;
   return <div className="text-xs text-ink3">{minutes !== null ? t`${minutes}-minute video. ${plan}` : plan}</div>;
+}
+
+/** What the planner said back about a change, in a line. */
+function ChangeLine({ c }: { c: RangeChange }) {
+  switch (c.kind) {
+    case "merged": {
+      const which = c.inputs.map((i) => i + 1).join(", ");
+      const from = formatTime(c.startSec);
+      const to = formatTime(c.endSec);
+      return (
+        <Trans>
+          Ranges {which} overlap: they are clipped as one, {from}–{to}.
+        </Trans>
+      );
+    }
+    case "clamped": {
+      const n = c.input + 1;
+      const end = formatTime(c.endSec);
+      return (
+        <Trans>
+          Range {n} ends at the end of the video, {end}.
+        </Trans>
+      );
+    }
+    case "exact_too_long": {
+      const which = c.inputs.map((i) => i + 1).join(", ");
+      const max = formatTime(c.maxClipSec);
+      return (
+        <Trans>
+          Range {which} is longer than your longest clip ({max}), so moments are found inside it.
+        </Trans>
+      );
+    }
+    case "already_processed":
+      return <Trans>That time was clipped already.</Trans>;
+  }
+}
+
+/**
+ * Under the ranges: what they count against the plan and how much of the video they skip, what the planner changed,
+ * and the refusal (with the upgrade offer) when they need more minutes than are left. Keeps its place while repricing.
+ */
+function RangesFit({ fit, lengthSec, pending }: { fit: SourceCheck | undefined; lengthSec: number; pending: boolean }) {
+  const r = fit?.ranges;
+  const counted = formatTime(r?.seconds ?? 0);
+  const total = formatTime(lengthSec);
+  const skipped = Math.max(0, Math.round(100 - ((r?.seconds ?? 0) / lengthSec) * 100));
+  return (
+    <div className="flex min-h-[44px] flex-col gap-1.5 rounded-[12px] bg-sunk p-3 text-[13px]" aria-live="polite">
+      {r ? (
+        <>
+          <div className={pending ? "text-ink3" : "text-ink"}>
+            <Trans>
+              <b>{counted}</b> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not
+              counted.
+            </Trans>
+          </div>
+          {r.changes.map((c) => (
+            <div key={JSON.stringify(c)} className="text-ink2">
+              <ChangeLine c={c} />
+            </div>
+          ))}
+          {r.problems.map((p) => (
+            <div key={p} className="text-err">
+              {p}
+            </div>
+          ))}
+          {fit?.fits === false && fit.message && !r.problems.length && <QuotaNotice message={fit.message} quota={fit.quota} placement="precheck" />}
+        </>
+      ) : (
+        <div className="text-ink3">{pending ? <Trans>Pricing the ranges…</Trans> : <Trans>Add a range to see what it counts against your plan.</Trans>}</div>
+      )}
+    </div>
+  );
 }
 
 /**

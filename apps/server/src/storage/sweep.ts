@@ -63,7 +63,7 @@ export interface DbView {
 export type CacheKind = "cache-source" | "cache-clip" | "cache-section";
 export const CACHE_KINDS: ReadonlySet<Removal["kind"]> = new Set<Removal["kind"]>(["cache-source", "cache-clip", "cache-section"]);
 export interface Removal {
-  /** `section-scratch`: a downloaded piece or a stitch output of a full-quality window (pipeline/sections.ts), done with */
+  /** `section-scratch`: a downloaded piece or a stitch output of a full-quality window (pipeline/windows.ts), done with */
   kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp" | "section-scratch" | CacheKind;
   /** Relative to DATA_DIR. */
   path: string;
@@ -433,7 +433,7 @@ export async function removeScratchClip(svc: Services, projectId: string, key: s
 }
 
 /** Delete the scratch copies of a project's full-quality windows (`sections/`), when the windows themselves go. */
-export async function removeScratchSections(svc: Services, projectId: string) {
+export async function removeScratchWindows(svc: Services, projectId: string) {
   await fs.rm(path.join(svc.paths.project(projectId), "sections"), { recursive: true, force: true }).catch(() => {});
 }
 

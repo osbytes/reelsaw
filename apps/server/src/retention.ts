@@ -8,7 +8,7 @@ import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import { removeScratchClip, removeScratchSource } from "./storage/sweep.js";
-import { dropSections } from "./pipeline/sections.js";
+import { dropWindows } from "./pipeline/windows.js";
 import { deadlineIn, keysetLoop } from "./lib/batch.js";
 
 export const RETENTION_BATCH = 200;
@@ -58,7 +58,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
             u.afterCommit(async () => {
               await svc.storage.delete(p.sourceKey).catch((err) => log.warn({ err, projectId: p.id }, "source delete failed"));
               await removeScratchSource(svc, p.id); // the local store hardlinks it: without this no disk is freed
-              await dropSections(svc, p.id).catch((err) => log.warn({ err, projectId: p.id }, "section delete failed")); // full-quality windows of a preview source
+              await dropWindows(svc, p.id).catch((err) => log.warn({ err, projectId: p.id }, "section delete failed")); // full-quality windows of a preview source
             });
             sources++;
           });

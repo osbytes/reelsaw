@@ -393,6 +393,11 @@ msgstr "{count} projects started in the last hour, the most allowed ({max}). Try
 msgid "quota.rerenders_per_hour"
 msgstr "{count} re-renders and re-runs requested in the last hour, the most allowed ({max}). Try again in a while."
 
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.too_many"
+msgstr "{count} ranges were given; at most {max} fit one request."
+
 #: src/cli.ts
 msgid "{cpus} ({leased} leased)"
 msgstr "{cpus} ({leased} leased)"
@@ -768,6 +773,11 @@ msgstr "{running} running, up to {max} (RENDER_CONCURRENCY=auto)"
 #: src/cli.ts
 msgid "{s}s ago"
 msgstr "{s}s ago"
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.refused"
+msgstr "{sentences}"
 
 #: src/cli.ts
 msgid "{shown} of {total}"
@@ -1508,6 +1518,11 @@ msgid "project.source_required"
 msgstr "Give a sourceUrl (a link to the video) or an uploadId."
 
 #. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.none"
+msgstr "Give at least one range."
+
+#. js-lingui-explicit-id
 #: src/mcp.ts
 msgid "mcp.revoke_media_link.one_target"
 msgstr "Give exactly one of linkId, clipId, projectId or all: true"
@@ -1734,6 +1749,11 @@ msgstr "More than {maxRequestsPerMinute} changes in a minute from this account. 
 #: src/cli.ts
 msgid "more: reelsaw users {take} [same filter flags] --cursor {cursor}"
 msgstr "more: reelsaw users {take} [same filter flags] --cursor {cursor}"
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.most_replayed_upload"
+msgstr "Most replayed needs a link to the video, not an upload."
 
 #. js-lingui-explicit-id
 #: src/library/layers.ts
@@ -2441,6 +2461,29 @@ msgstr "Queued to send again."
 msgid "Queued. The new video replaces the old when done; poll get_clip."
 msgstr "Queued. The new video replaces the old when done; poll get_clip."
 
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.end_before_start"
+msgstr "Range {n} ends before it starts."
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.too_short"
+msgstr "Range {n} is shorter than {min} seconds."
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.past_end"
+msgstr "Range {n} starts after the video ends ({end})."
+
+#: src/cli.ts
+msgid "ranges added: {minutes} minutes counted"
+msgstr "ranges added: {minutes} minutes counted"
+
+#: src/cli.ts
+msgid "ranges: {minutes} minutes counted"
+msgstr "ranges: {minutes} minutes counted"
+
 #: src/cli.ts
 msgid "re-render requested"
 msgstr "re-render requested"
@@ -2474,19 +2517,24 @@ msgid "Reelsaw clips the rest when your minutes reset."
 msgstr "Reelsaw clips the rest when your minutes reset."
 
 #. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.length_unknown"
+msgstr "Reelsaw does not know this video's length yet. Add ranges once it is downloaded."
+
+#. js-lingui-explicit-id
 #: src/clips/service.ts
 msgid "clip.processed_so_far"
 msgstr "Reelsaw has processed the first {minutes} minutes of this video so far. Clip the rest of the video to use this part."
 
 #. js-lingui-explicit-id
-#: src/clips/service.ts
-msgid "clip.still_transcribing"
-msgstr "Reelsaw is still transcribing minutes {from}–{to} of this video. Use that part once it is done."
-
-#. js-lingui-explicit-id
 #: src/projects/service.ts
 msgid "project.still_transcribing_rest"
 msgstr "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done."
+
+#. js-lingui-explicit-id
+#: src/clips/service.ts
+msgid "clip.still_transcribing_part"
+msgstr "Reelsaw is still transcribing this part of the video. Use it once it is done."
 
 #: src/email.ts
 msgid "Reelsaw stopped sending events to <0>{endpoint}</0>."
@@ -3017,6 +3065,11 @@ msgid "list.invalid_page_link"
 msgstr "That page link is not valid. Start again from the first page."
 
 #. js-lingui-explicit-id
+#: src/clips/service.ts
+msgid "clip.outside_ranges"
+msgstr "That part of the video is outside this project's ranges. Add a range that covers it to use it."
+
+#. js-lingui-explicit-id
 #: src/signup-rules.ts
 msgid "signup_rule.email_matches_all"
 msgstr "That pattern matches every address. Change SIGNUP_MODE instead."
@@ -3194,6 +3247,21 @@ msgid "These finished while you were away."
 msgstr "These finished while you were away."
 
 #. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_day"
+msgstr "These ranges are {length, plural, other {#}} minutes and you have {rest, plural, other {#}} of your {max, plural, other {#}} minutes a day left. Resets at {at}."
+
+#. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_month"
+msgstr "These ranges are {length, plural, other {#}} minutes and you have {rest, plural, other {#}} of your {max, plural, other {#}} minutes left this period. Resets on {on}."
+
+#. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_first"
+msgstr "These ranges are {length, plural, other {#}} minutes. Your first video is free up to {free, plural, other {#}} minutes, and after that your plan covers {max, plural, other {#}} minutes a month. Choose ranges under {fits, plural, other {#}} minutes."
+
+#. js-lingui-explicit-id
 #: src/accounts.ts
 msgid "account.account_does_not_need_new"
 msgstr "This account does not need a new password."
@@ -3343,6 +3411,11 @@ msgid "project.already_whole"
 msgstr "This project already covers the whole video."
 
 #. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "project.clips_ranges"
+msgstr "This project clips ranges of its video: give the ranges to clip next."
+
+#. js-lingui-explicit-id
 #: src/transcript-files.ts
 msgid "transcript.export_not_ready"
 msgstr "This project has no transcript yet. Export it once the project has been transcribed."
@@ -3355,6 +3428,11 @@ msgstr "this server's IP (set YTDLP_PROXY)"
 #: src/library/service.ts
 msgid "library.svg_links_other_files_embed"
 msgstr "This SVG links to other files. Embed its images, or export it as a PNG."
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.no_heatmap"
+msgstr "This video has no Most replayed heatmap (new or small videos, and most sites other than YouTube, have none). Give ranges instead."
 
 #. js-lingui-explicit-id
 #: src/quota.ts
@@ -3384,6 +3462,11 @@ msgstr "This webhook is turned off. Turn it on to send a test."
 #: src/webhooks/service.ts
 msgid "webhook.webhook_turned_off_turn_then"
 msgstr "This webhook is turned off. Turn it on, then resend."
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.already_clipped"
+msgstr "Those ranges were clipped already."
 
 #: src/mcp.ts
 msgid "Those words are cut from the transcript; {rerendered, plural, one {# clip} other {# clips}} re-rendering."

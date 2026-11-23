@@ -359,6 +359,11 @@ msgstr ""
 msgid "{0, plural, one {Apply a layer template to # clip} other {Apply a layer template to # clips}}"
 msgstr ""
 
+#. placeholder {0}: ranges.length
+#: src/pages/NewProject.tsx
+msgid "{0, plural, one {Clip # range} other {Clip # ranges}}"
+msgstr ""
+
 #. placeholder {0}: done.length
 #: src/components/BatchBar.tsx
 msgid "{0, plural, one {Download a zip of # clip with YouTube and TikTok metadata} other {Download a zip of # clips with YouTube and TikTok metadata}}"
@@ -585,6 +590,11 @@ msgstr ""
 #. placeholder {1}: d.total
 #: src/lib/stage-detail.ts
 msgid "{0} of {1} parts"
+msgstr ""
+
+#. placeholder {0}: formatTime(billed)
+#: src/components/ProjectRanges.tsx
+msgid "{0} of new video counted. Clips, fixes and settings already here stay."
 msgstr ""
 
 #. placeholder {0}: formatMb(p.limits.MAX_STORAGE_MB)
@@ -1083,6 +1093,10 @@ msgstr ""
 
 #: src/pages/AdminUsers.tsx
 msgid "{n, plural, one {Approved # account} other {Approved # accounts}}"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "{n, plural, one {Clip # range} other {Clip # ranges}}"
 msgstr ""
 
 #: src/pages/AdminUsers.tsx
@@ -1647,6 +1661,10 @@ msgstr ""
 msgid "<0>{0}</0>{1} wants to use Reelsaw as <1>{2}</1>: create projects, read transcripts, edit and download clips."
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+msgstr ""
+
 #: src/components/CommandPaletteDialog.tsx
 msgid "<0>←</0> back"
 msgstr ""
@@ -1872,6 +1890,10 @@ msgstr ""
 msgid "A project or clip still names this item"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "A range needs at least {min} seconds."
+msgstr ""
+
 #: src/components/ClipEditor.tsx
 msgid "A saved set of layers, fitted to this clip's length"
 msgstr ""
@@ -2041,6 +2063,18 @@ msgstr ""
 msgid "Add a layer at the playhead"
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
+msgid "Add a range"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Add a range on the timeline first"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Add a range to see what it counts against your plan."
+msgstr ""
+
 #: src/components/ClipEditor.tsx
 #: src/components/TemplateEditor.tsx
 msgid "Add a sound"
@@ -2076,6 +2110,14 @@ msgstr ""
 
 #: src/components/LogLevelSection.tsx
 msgid "Add override"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Add range"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+msgid "Add ranges once this run is done"
 msgstr ""
 
 #: src/pages/AdminUsers.tsx
@@ -2919,6 +2961,7 @@ msgstr ""
 #: src/components/ClipEditor.tsx
 #: src/components/CropDialog.tsx
 #: src/components/ModelsSection.tsx
+#: src/components/ProjectRanges.tsx
 #: src/components/ReportDialog.tsx
 #: src/components/ShareLinks.tsx
 #: src/components/SignupRules.tsx
@@ -3264,6 +3307,10 @@ msgstr ""
 msgid "CLI"
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
+msgid "Click the hatched time to add a range."
+msgstr ""
+
 #: src/components/QueueSection.tsx
 msgid "clip"
 msgstr ""
@@ -3365,6 +3412,11 @@ msgstr ""
 
 #: src/components/BumperField.tsx
 msgid "Clip’s own"
+msgstr ""
+
+#. placeholder {0}: formatTime(coverSec)
+#: src/components/RangeTimeline.tsx
+msgid "Clipped now: 0:00–{0}"
 msgstr ""
 
 #. placeholder {0}: m(open.processedSec)
@@ -4752,6 +4804,18 @@ msgstr ""
 msgid "Email verification"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "End"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "End of range {n}"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "End of the new range"
+msgstr ""
+
 #: src/components/TemplateEditor.tsx
 msgid "End, percent of the clip"
 msgstr ""
@@ -4868,6 +4932,11 @@ msgstr ""
 
 #: src/App.tsx
 msgid "Everywhere"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+#: src/components/RangeTimeline.tsx
+msgid "Exact clip"
 msgstr ""
 
 #: src/components/TranscriptPanel.tsx
@@ -5084,6 +5153,8 @@ msgstr ""
 msgid "Find burned-in captions, watermarks and slides so captions avoid them. Shot changes are always detected. On by default."
 msgstr ""
 
+#: src/components/ProjectRanges.tsx
+#: src/components/RangeTimeline.tsx
 #: src/pages/NewProject.tsx
 msgid "Find clips"
 msgstr ""
@@ -6919,6 +6990,14 @@ msgstr ""
 msgid "Most recent first"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "Most replayed"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Most replayed #{n}"
+msgstr ""
+
 #: src/components/Timeline.tsx
 msgid "Move playhead here"
 msgstr ""
@@ -7409,6 +7488,10 @@ msgstr ""
 
 #: src/components/ModelPicker.tsx
 msgid "No providers"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "No ranges yet. Click the timeline to add one, or type a start and end below."
 msgstr ""
 
 #: src/components/ClipEditor.tsx
@@ -8367,6 +8450,10 @@ msgstr ""
 msgid "Prices in USD; tax is added at checkout where it applies. Yearly is ten months for twelve. Changing plans is prorated by Stripe."
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "Pricing the ranges…"
+msgstr ""
+
 #: src/components/QueueSection.tsx
 msgid "Priority"
 msgstr ""
@@ -8574,12 +8661,33 @@ msgstr ""
 msgid "Quick"
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "Range {n} ends at the end of the video, {end}."
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Range {n} mode"
+msgstr ""
+
 #: src/components/SignupRules.tsx
 msgid "Range {range}"
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "Range {which} is longer than your longest clip ({max}), so moments are found inside it."
+msgstr ""
+
 #: src/components/ClipEditor.tsx
 msgid "Range set from transcript"
+msgstr ""
+
+#: src/components/ProjectRanges.tsx
+#: src/pages/NewProject.tsx
+msgid "Ranges"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Ranges {which} overlap: they are clipped as one, {from}–{to}."
 msgstr ""
 
 #: src/components/ClipCard.tsx
@@ -8670,6 +8778,10 @@ msgstr ""
 
 #: src/components/CommandPaletteDialog.tsx
 msgid "Re-running refine"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Reading the file’s length…"
 msgstr ""
 
 #: src/components/ui.tsx
@@ -8871,6 +8983,10 @@ msgstr ""
 
 #: src/components/LogLevelSection.tsx
 msgid "Remove override"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Remove range {n}"
 msgstr ""
 
 #: src/components/SignupRules.tsx
@@ -10637,7 +10753,16 @@ msgid "Standard"
 msgstr ""
 
 #: src/components/CommandPaletteDialog.tsx
+#: src/components/RangeTimeline.tsx
 msgid "Start"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of range {n}"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "Start of the new range"
 msgstr ""
 
 #: src/components/TemplateEditor.tsx
@@ -10979,6 +11104,10 @@ msgstr ""
 msgid "Thanks! Your plan updates as soon as Stripe confirms the payment"
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "That time was clipped already."
+msgstr ""
+
 #: src/components/SignupRules.tsx
 msgid "The 256 addresses around it, for a network that rotates addresses"
 msgstr ""
@@ -11005,6 +11134,10 @@ msgstr ""
 
 #: src/pages/AdminUsers.tsx
 msgid "The email domain is a known temporary-address service"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "The end has to come after the start."
 msgstr ""
 
 #: src/components/TranscriptFileModal.tsx
@@ -11158,12 +11291,20 @@ msgstr ""
 msgid "The upload timed out; check your connection and try again."
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "The video ends at {ends}."
+msgstr ""
+
 #: src/components/QueueSection.tsx
 msgid "The video, link or settings: retrying the same thing fails the same way"
 msgstr ""
 
 #: src/components/ClipEditor.tsx
 msgid "the whole frame"
+msgstr ""
+
+#: src/components/RangeTimeline.tsx
+msgid "The whole video"
 msgstr ""
 
 #: src/pages/Project.tsx
@@ -11176,6 +11317,10 @@ msgstr ""
 
 #: src/components/SignupRules.tsx
 msgid "Then"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "These ranges don’t fit your plan’s minutes; see the note under them"
 msgstr ""
 
 #: src/components/SignupRules.tsx
@@ -11360,6 +11505,10 @@ msgstr ""
 
 #: src/components/ClipEditor.tsx
 msgid "This section shows the source as it is; pick a framing first"
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "This site does not say how long the video is, so there is no timeline. Clip the whole video, or try the link again."
 msgstr ""
 
 #: src/components/HeaderAlerts.tsx
@@ -11912,6 +12061,10 @@ msgstr ""
 msgid "Use for all clips"
 msgstr ""
 
+#: src/components/RangeTimeline.tsx
+msgid "Use h:mm:ss or m:ss, like 1:15:00."
+msgstr ""
+
 #: src/components/ClipEditor.tsx
 msgid "Use the project framing"
 msgstr ""
@@ -12169,6 +12322,10 @@ msgstr ""
 msgid "What this instance runs and the settings that change without a restart; the rest comes from .env."
 msgstr ""
 
+#: src/pages/NewProject.tsx
+msgid "What to clip"
+msgstr ""
+
 #: src/components/ReportDialog.tsx
 msgid "What went wrong?"
 msgstr ""
@@ -12268,6 +12425,10 @@ msgstr ""
 
 #: src/components/ClipEditor.tsx
 msgid "Whole frame over a blurred background. For slides, b-roll and wide shots."
+msgstr ""
+
+#: src/pages/NewProject.tsx
+msgid "Whole video"
 msgstr ""
 
 #: src/components/ClipCard.tsx

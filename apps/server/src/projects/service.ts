@@ -10,7 +10,7 @@
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   REFINE_STEPS,
@@ -31,8 +31,19 @@ import {
   type PartialSource,
   formatDay,
   processedEndSec,
+  spansCover,
+  transcriptSpans,
+  replayPeaks,
+  type HeatBin,
+  type ReplayPeak,
+  type RangeChange,
+  type SourceRangeInput,
+  MAX_RANGES,
+  planRanges,
+  rangeSchema,
 } from "@reelsaw/shared";
 import {
+  admitRanges,
   checkAnnouncedMinutes,
   checkProjectQuota,
   checkRestoreQuota,
@@ -61,14 +72,15 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { transcriptCovers } from "../pipeline/transcribe.js";
+import { coverageOf, projectNeededSpans } from "../pipeline/transcribe.js";
+import { rangeProblemsText, rangesRefused } from "./ranges.js";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, peekUrlMeta } from "./peek.js";
+import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, announcedHeatmap, peekUrlMeta } from "./peek.js";
 import { failedRow, runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
@@ -150,12 +162,13 @@ export async function retryProject(
       status: schema.projects.status,
       sourceLimitSec: schema.projects.sourceLimitSec,
       extendFromSec: schema.projects.extendFromSec,
+      durationSec: schema.projects.durationSec,
     })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p || (opts.onlyIfFailed && p.status !== "failed")) return null;
   const [transcript] = await u.db
-    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine, coveredSec: schema.transcripts.coveredSec })
+    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine, covered: schema.transcripts.covered })
     .from(schema.transcripts)
     .where(eq(schema.transcripts.projectId, p.id))
     .for("update");
@@ -168,6 +181,7 @@ export async function retryProject(
     .for("no key update");
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
+  const covers = !transcript || spansCover(coverageOf(transcript.covered), await projectNeededSpans(u.db, p));
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
   const queue = retryQueueFor({
     clips,
@@ -176,7 +190,7 @@ export async function retryProject(
     stage: p.stage,
     sourceKey: p.sourceKey,
     sourceExpired: !!p.sourceExpiredAt,
-    transcriptCovers: !transcript || transcriptCovers(transcript.coveredSec, p.sourceLimitSec),
+    transcriptCovers: covers,
     extending: p.extendFromSec !== null,
   });
 
@@ -534,12 +548,12 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const transcript = await u.db.query.transcripts.findFirst({
       where: eq(schema.transcripts.projectId, p.id),
-      columns: { projectId: true, coveredSec: true },
+      columns: { projectId: true, covered: true },
     });
     if (!transcript) throw new AppError("BAD_REQUEST", msg({ id: "project.no_transcript_yet", message: "Project has no transcript yet" }));
     // picking again before the rest of the video's words are in would pick from the old part only, and its picks
     // would be replaced again by the extension's
-    if (!transcriptCovers(transcript.coveredSec, p.sourceLimitSec))
+    if (!spansCover(coverageOf(transcript.covered), await projectNeededSpans(u.db, p)))
       throw new AppError(
         "CONFLICT",
         msg({ id: "project.still_transcribing_rest", message: "Reelsaw is still transcribing the rest of this video. Pick moments again when it is done." }),
@@ -579,7 +593,8 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
             replaced.map((c) => c.id),
           ),
         );
-    // a re-pick covers everything processed, so an extension waiting for its picks is folded into it
+    // a re-pick covers everything processed (every range is picked from again), so an extension waiting for its picks is folded into it
+    await u.db.update(schema.projectRanges).set({ pickedAt: null }).where(eq(schema.projectRanges.projectId, p.id));
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings, extendFromSec: null }, continueActive: true });
     await u.emit("stage.started", {
       projectId: p.id,
@@ -953,7 +968,24 @@ export async function rerenderProjectClips(
  * the first (ingest) job commit together, so there is never a "queued" project with no job behind it.
  * tRPC `projects.create`, the MCP create_project tool and `reelsaw create-project` call this.
  */
-export async function createProject(svc: Services, userId: string, input: CreateProjectInput): Promise<typeof schema.projects.$inferSelect> {
+/** What creating a project with ranges planned: the billed seconds and what the planner changed (merges, clamps). */
+interface CreatedRanges {
+  billedSec: number;
+  changes: RangeChange[];
+}
+
+/**
+ * Start a project. With `ranges` (docs/specs/range-clipping.md) only those parts are processed: they are planned
+ * (`planRanges`: checked, clamped to the announced length, merged, priced) and admitted whole against the minutes, or
+ * refused with the upgrade offer; ingest settles them again on the file. `rangeOrigin` says who chose them: a person
+ * (the web timeline) or a caller (MCP, API, CLI).
+ */
+export async function createProject(
+  svc: Services,
+  userId: string,
+  input: CreateProjectInput,
+  o: { rangeOrigin?: "user" | "api" } = {},
+): Promise<typeof schema.projects.$inferSelect & { ranges?: CreatedRanges }> {
   const db = svc.database.db;
   const log = svc.log.child({ module: "projects", userId });
   if (!input.sourceUrl && !input.uploadId)
@@ -966,6 +998,12 @@ export async function createProject(svc: Services, userId: string, input: Create
   await checkProjectQuota(db, svc.settings.get(), userId, { ent: svc.entitlements }).catch(quotaReached);
   let sourceMeta: (typeof schema.projects.$inferSelect)["sourceMeta"] = null;
   let title = input.title?.trim() || "";
+  /** the length the site announced; null for a file (ingest settles ranges on it) or a site that does not say */
+  let announcedSec: number | null = null;
+  /** ranges from the video's Most replayed peaks (`rangesFrom`), added to the caller's */
+  let peakRanges: SourceRangeInput[] = [];
+  if (input.rangesFrom && !input.sourceUrl)
+    throw new AppError("BAD_REQUEST", msg({ id: "ranges.most_replayed_upload", message: "Most replayed needs a link to the video, not an upload." }));
   if (input.uploadId) {
     const up = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, userId)) });
     if (!up) throw new AppError("NOT_FOUND", msg({ id: "upload.not_in_account", message: "No upload with that id in your account." }));
@@ -974,13 +1012,31 @@ export async function createProject(svc: Services, userId: string, input: Create
   } else if (input.sourceUrl) {
     const [peek, announced] = await Promise.all([
       peekUrlMeta(input.sourceUrl),
-      announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
-        if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        throw err;
-      }),
+      // ranges are planned against the video's length, so it is looked up for them whatever the account's limits
+      (input.ranges || input.rangesFrom ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch(
+        (err: unknown) => {
+          if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+          throw err;
+        },
+      ),
     ]);
+    announcedSec = announced;
+    if (input.rangesFrom?.mostReplayed) {
+      const heat = await announcedHeatmapFor(svc, input.sourceUrl);
+      const peaks = replayPeaks(heat, { top: input.rangesFrom.mostReplayed });
+      if (!peaks.length)
+        throw new AppError(
+          "BAD_REQUEST",
+          msg({
+            id: "ranges.no_heatmap",
+            message: "This video has no Most replayed heatmap (new or small videos, and most sites other than YouTube, have none). Give ranges instead.",
+          }),
+        );
+      peakRanges = peaks.map((p, i) => ({ startSec: p.startSec, endSec: p.endSec, mode: "clip" as const, label: `Most replayed #${i + 1}` }));
+    }
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
-    if (announced)
+    // (ranges are admitted whole below instead, once the project's settings say how long a clip may be)
+    if (announced && !input.ranges && !input.rangesFrom)
       await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
     title ||= peek.title ?? "";
@@ -994,6 +1050,12 @@ export async function createProject(svc: Services, userId: string, input: Create
     const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new AppError("BAD_REQUEST", msg({ id: "project.min_below_max", message: "minClipSeconds must be below maxClipSeconds" }));
+    const given = input.ranges ?? [];
+    const asked = [...given, ...peakRanges];
+    const plan = asked.length ? planRanges(asked, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
+    if (plan && !plan.ok) throw rangesRefused(plan.problems);
+    // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock
+    if (plan) await admitRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
     const [row] = await u.db
       .insert(schema.projects)
       .values({
@@ -1010,11 +1072,36 @@ export async function createProject(svc: Services, userId: string, input: Create
       .returning();
     if (!row) throw new Error("the project row was not returned");
     await recordProjectCreated(u.db, userId, id, row.createdAt);
+    if (plan?.ok && plan.ranges.length)
+      await u.db.insert(schema.projectRanges).values(
+        plan.ranges.map((r) => ({
+          id: randomUUID(),
+          projectId: id,
+          startSec: r.startSec,
+          endSec: r.endSec,
+          mode: r.mode,
+          // a range merged from a Most replayed peak and one of the caller's is the caller's
+          origin: r.inputs.every((i) => i >= given.length) ? ("most_replayed" as const) : (o.rangeOrigin ?? "api"),
+          label: r.label ?? null,
+          ref: r.ref ?? null,
+          billedSec: r.billedSec,
+        })),
+      );
     await syncProjectRefs(u.db, row); // the defaults' intro/outro
     await u.emit("project.created", { projectId: id, title, sourceType: row.sourceType });
     await startRun(u, id, { reason: "created", status: "queued" });
     await u.enqueue(QUEUES.ingest, { projectId: id });
-    return row;
+    if (plan?.ok)
+      // the funnel: how many ranges, from where, and how much of the video they cover (no per-user detail)
+      svc.telemetry.capture("project.ranges", userId, {
+        projectId: id,
+        ranges: plan.ranges.length,
+        billedMinutes: Math.round(plan.billedSec / 60),
+        share: announcedSec ? Math.round((plan.billedSec / announcedSec) * 100) / 100 : null,
+        mostReplayed: peakRanges.length,
+        surface: o.rangeOrigin ?? "api",
+      });
+    return plan?.ok ? { ...row, ranges: { billedSec: plan.billedSec, changes: plan.changes } } : row;
   });
 }
 
@@ -1025,6 +1112,24 @@ export async function createProject(svc: Services, userId: string, input: Create
  */
 async function announcedMinutesFor(svc: Services, userId: string, url: string, log: Services["log"]): Promise<number | null> {
   if (!(await hasMinuteLimits(svc.database.db, svc.settings.get(), userId, svc.entitlements))) return null;
+  return announcedLengthFor(svc, url, log);
+}
+
+/** The length a link announces, looked up whatever the account's limits (ranges are planned against it); as above. */
+/**
+ * A link's replay heatmap (Most replayed), behind the same public-address check as its length: an internal or
+ * private address is never looked up, and anything that fails reads as no heatmap.
+ */
+async function announcedHeatmapFor(svc: Services, url: string): Promise<HeatBin[]> {
+  try {
+    await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
+    return await announcedHeatmap(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
+  } catch {
+    return [];
+  }
+}
+
+async function announcedLengthFor(svc: Services, url: string, log: Services["log"]): Promise<number | null> {
   try {
     await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
     return await announcedDuration(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
@@ -1041,6 +1146,16 @@ export const checkSourceInput = z
   .object({
     sourceUrl: z.url().optional().describe("Link to the video you are about to add; its length is looked up without downloading it"),
     durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you are about to upload, in seconds (instead of sourceUrl)"),
+    ranges: z
+      .array(rangeSchema)
+      .min(1)
+      .max(MAX_RANGES)
+      .optional()
+      .describe("The parts you would clip (as create_project takes them): priced and checked against your minutes instead of the whole video"),
+    lookupLength: z
+      .boolean()
+      .optional()
+      .describe("Look the link's length up even without a minutes limit (the range timeline needs it); durationSec in the answer"),
   })
   .refine((v) => !!v.sourceUrl !== (v.durationSec !== undefined), { message: "Give sourceUrl or durationSec, not both" });
 
@@ -1061,6 +1176,10 @@ export interface SourcePartial {
 export interface SourceCheck {
   /** the video's length in minutes, when it is known (a link whose site does not say has none) */
   minutes: number | null;
+  /** the same length in seconds (the range timeline is drawn from it) */
+  durationSec: number | null;
+  /** the video's Most replayed peaks, hottest first, when the length was looked up for ranges and the site has them */
+  mostReplayed: ReplayPeak[];
   /** the video is accepted, but only its start is processed now; null when all of it is (or it is refused) */
   partial: SourcePartial | null;
   /** false: creating the project now would be refused (message and quota say why and what to do; no quota for a live stream); null: the length is unknown, so ingest decides */
@@ -1069,6 +1188,11 @@ export interface SourceCheck {
   quota: QuotaRefusal | null;
   /** the monthly minutes this account has, when a minutes limit applies */
   allowance: MinutesAllowance | null;
+  /**
+   * With `ranges`: what they cost and what the planner changed; `fits` and `message` are then about the ranges (no
+   * partial: ranges are admitted whole or refused). `problems`: ranges that cannot be ranges (each in a sentence).
+   */
+  ranges: { seconds: number; minutes: number; changes: RangeChange[]; problems: string[] } | null;
 }
 
 /**
@@ -1086,17 +1210,43 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutesAllowance(db, s, userId, svc.entitlements),
     input.durationSec ??
       (input.sourceUrl
-        ? announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
-            if (err instanceof LiveSourceError) return "live" as const;
-            throw err;
-          })
+        ? (input.ranges || input.lookupLength ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch(
+            (err: unknown) => {
+              if (err instanceof LiveSourceError) return "live" as const;
+              throw err;
+            },
+          )
         : null),
   ]);
-  if (durationSec === "live") return { minutes: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance };
+  if (durationSec === "live")
+    return {
+      minutes: null,
+      durationSec: null,
+      mostReplayed: [],
+      partial: null,
+      fits: false,
+      message: LIVE_SOURCE_MESSAGE,
+      quota: null,
+      allowance,
+      ranges: null,
+    };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
+  const lengthSec = durationSec || null;
+  // the peaks come with the length lookup (the same yt-dlp answer, remembered): only when it ran for ranges
+  const mostReplayed = input.sourceUrl && (input.ranges || input.lookupLength) ? replayPeaks(await announcedHeatmapFor(svc, input.sourceUrl)) : [];
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
-    return { minutes, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance };
+    return {
+      minutes,
+      durationSec: lengthSec,
+      mostReplayed,
+      partial: null,
+      fits: false,
+      message: err.message,
+      quota: err.quota ?? null,
+      allowance,
+      ranges: null,
+    };
   };
   try {
     await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
@@ -1104,11 +1254,38 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     if (err instanceof QuotaError) return refused(err);
     throw err;
   }
-  if (!durationSec) return { minutes, partial: null, fits: null, message: null, quota: null, allowance };
+  if (input.ranges) {
+    // priced the way createProject plans them: the account's default longest clip, the length when it is known
+    const settings = await resolveProjectSettings(db, userId, undefined, undefined);
+    const plan = planRanges(input.ranges, { durationSec: durationSec || null, maxClipSec: settings.maxClipSeconds });
+    if (!plan.ok) {
+      const problems = rangeProblemsText(plan.problems);
+      return {
+        minutes,
+        durationSec: lengthSec,
+        mostReplayed,
+        partial: null,
+        fits: false,
+        message: problems.join(" "),
+        quota: null,
+        allowance,
+        ranges: { seconds: 0, minutes: 0, changes: [], problems },
+      };
+    }
+    const priced = { seconds: plan.billedSec, minutes: Math.round((plan.billedSec / 60) * 10) / 10, changes: plan.changes, problems: [] };
+    try {
+      await admitRanges(db, s, userId, null, plan.billedSec, svc.entitlements);
+    } catch (err) {
+      if (err instanceof QuotaError) return { ...refused(err), ranges: priced };
+      throw err;
+    }
+    return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
+  }
+  if (!durationSec) return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
   const r = await predictAdmission(db, s, userId, durationSec, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
   if ("refused" in r) return refused(r.refused);
   const until = r.admission.until;
-  if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance };
+  if (until === null) return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
   const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
   const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
   const partial: SourcePartial = {
@@ -1130,7 +1307,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutes: partial.minutes,
     totalMinutes: partial.totalMinutes,
   });
-  return { minutes, partial, fits: true, message: null, quota: null, allowance };
+  return { minutes, durationSec: lengthSec, mostReplayed, partial, fits: true, message: null, quota: null, allowance, ranges: null };
 }
 
 /**
@@ -1167,10 +1344,10 @@ export async function partialSourceOf(
   const s = svc.settings.get();
   // from the state, not the run's reason (a retry or re-pick of an extension has another): the rest's words are not in
   // yet, or its picks are not made yet, while the project works
-  const [tr] = await db.select({ coveredSec: schema.transcripts.coveredSec }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
+  const [tr] = await db.select({ covered: schema.transcripts.covered }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id));
   const extending =
     (WORKING as readonly string[]).includes(p.status) &&
-    (p.runReason === "extend" || p.extendFromSec !== null || (!!tr && !transcriptCovers(tr.coveredSec, p.sourceLimitSec)));
+    (p.runReason === "extend" || p.extendFromSec !== null || (!!tr && !spansCover(coverageOf(tr.covered), await projectNeededSpans(db, p))));
   const room = await minutesRoomSec(db, s, p.userId, { extension: true, ent: svc.entitlements });
   const plan = partialUntil(p.durationSec, processedSec, room.sec, svc.config.TRANSCRIBE_CHUNK_SECONDS);
   const extendableSec = plan === "none" ? null : (plan.until ?? p.durationSec) - processedSec;
@@ -1212,6 +1389,8 @@ export interface ExtendResult {
   durationSec: number;
   /** the rest of the video is covered: nothing will be left after this run */
   whole: boolean;
+  /** ranges added (extendProject with ranges): what they count and what the planner changed */
+  ranges?: CreatedRanges;
 }
 
 /**
@@ -1224,7 +1403,13 @@ export interface ExtendResult {
  * transcription with the new limit. tRPC `projects.extend`, MCP `extend_project`, `reelsaw extend-project` and the
  * handler that follows an upgrade for the project it started from (after-upgrade.ts `finishPartialWork`) call this.
  */
-export async function extendProject(svc: Services, actor: Actor, projectId: string, o: { automatic?: boolean } = {}): Promise<ExtendResult> {
+export async function extendProject(
+  svc: Services,
+  actor: Actor,
+  projectId: string,
+  o: { automatic?: boolean; ranges?: SourceRangeInput[] | undefined; rangeOrigin?: "user" | "api" } = {},
+): Promise<ExtendResult> {
+  if (o.ranges?.length) return addRanges(svc, actor, projectId, o.ranges, o.rangeOrigin ?? "api");
   const chunkSec = svc.config.TRANSCRIBE_CHUNK_SECONDS;
   const result = await svc.tx(async (u) => {
     const owner = await findProject(u.db, actor, projectId, { deleted: false });
@@ -1239,8 +1424,19 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
       .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
       .for("no key update");
     if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.missing", message: "Project not found" }));
-    if (p.sourceLimitSec === null || p.durationSec === null)
-      throw new AppError("BAD_REQUEST", msg({ id: "project.already_whole", message: "This project already covers the whole video." }));
+    if (p.sourceLimitSec === null || p.durationSec === null) {
+      const [chosen] = await u.db
+        .select({ id: schema.projectRanges.id })
+        .from(schema.projectRanges)
+        .where(and(eq(schema.projectRanges.projectId, p.id), ne(schema.projectRanges.origin, "whole")))
+        .limit(1);
+      throw new AppError(
+        "BAD_REQUEST",
+        chosen
+          ? msg({ id: "project.clips_ranges", message: "This project clips ranges of its video: give the ranges to clip next." })
+          : msg({ id: "project.already_whole", message: "This project already covers the whole video." }),
+      );
+    }
     const fromSec = Math.min(p.durationSec, p.sourceLimitSec);
     const room = await minutesRoomSec(u.db, svc.settings.get(), p.userId, { extension: true, ent: svc.entitlements });
     const plan = partialUntil(p.durationSec, fromSec, room.sec, chunkSec);
@@ -1248,6 +1444,10 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
       throw await extensionRefusal(u.db, svc.settings.get(), p.userId, p.durationSec - fromSec, room.sec ?? 0, svc.entitlements, room.binding);
     const untilSec = plan.until ?? p.durationSec;
     await recordSourceExtension(u.db, p.userId, p.id, untilSec - fromSec);
+    // the part added is a range of its own (docs/specs/range-clipping.md), picked from by the run this starts
+    await u.db
+      .insert(schema.projectRanges)
+      .values({ id: randomUUID(), projectId: p.id, startSec: fromSec, endSec: untilSec, mode: "find", origin: "whole", billedSec: untilSec - fromSec });
     // moments picked before (even ones deleted since) mean the old part is done: the new picks go only in the new part.
     // None picked yet (the first run had not got that far): the whole processed video is picked from.
     const [picked] = await u.db
@@ -1279,6 +1479,91 @@ export async function extendProject(svc: Services, actor: Actor, projectId: stri
     automatic: !!o.automatic,
     addedMinutes: Math.round((result.untilSec - result.fromSec) / 60),
     whole: result.whole,
+  });
+  const { userId: _u, ...out } = result;
+  return out;
+}
+
+/**
+ * Clip more of a project by ranges (docs/specs/range-clipping.md): only time no range of the project covers yet is
+ * fetched, transcribed and counted; the ranges are admitted whole or refused with the upgrade offer, never cut short.
+ * Picks up where the project stands: its clips, fixes and decisions stay, and new clips are picked only in the new
+ * ranges (around every clip there). The project may be idle or rendering; one still in its first run is restarted from
+ * transcription with the new ranges. tRPC `projects.extend`, MCP `extend_project` and `reelsaw extend-project --range`.
+ */
+async function addRanges(svc: Services, actor: Actor, projectId: string, input: SourceRangeInput[], origin: "user" | "api"): Promise<ExtendResult> {
+  const result = await svc.tx(async (u) => {
+    const owner = await findProject(u.db, actor, projectId, { deleted: false });
+    // advisory locks first (the account's minutes, then this project's retries), then transcript → clips → project
+    await takeTxLock(u.db, txLock.quota(owner.userId));
+    await takeTxLock(u.db, txLock.retry(owner.id));
+    await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, owner.id)).for("update");
+    await lockProjectClips(u, owner.id);
+    const [p] = await u.db
+      .select()
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, owner.id), isNull(schema.projects.deletedAt)))
+      .for("no key update");
+    if (!p) throw new AppError("NOT_FOUND", msg({ id: "project.missing", message: "Project not found" }));
+    if (p.durationSec === null)
+      throw new AppError(
+        "CONFLICT",
+        msg({ id: "ranges.length_unknown", message: "Reelsaw does not know this video's length yet. Add ranges once it is downloaded." }),
+      );
+    const existing = await u.db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, p.id)).for("update");
+    const plan = planRanges(input, {
+      durationSec: p.durationSec,
+      maxClipSec: p.settings.maxClipSeconds,
+      processed: existing.map((r): [number, number] => [r.startSec, r.endSec]),
+    });
+    if (!plan.ok) throw rangesRefused(plan.problems);
+    if (plan.billedSec <= 0) throw new AppError("BAD_REQUEST", msg({ id: "ranges.already_clipped", message: "Those ranges were clipped already." }));
+    // counted against every project's minutes, this one's too: only the new time is billed
+    await admitRanges(u.db, svc.settings.get(), p.userId, null, plan.billedSec, svc.entitlements);
+    await recordSourceExtension(u.db, p.userId, p.id, plan.billedSec);
+    await u.db.insert(schema.projectRanges).values(
+      plan.ranges
+        .filter((r) => r.billedSec > 0)
+        .map((r) => ({
+          id: randomUUID(),
+          projectId: p.id,
+          startSec: r.startSec,
+          endSec: r.endSec,
+          mode: r.mode,
+          origin,
+          label: r.label ?? null,
+          ref: r.ref ?? null,
+          billedSec: r.billedSec,
+        })),
+    );
+    // a sparse source (a link that downloaded only its ranges) holds none of the new time: download again first
+    const held = (p.sourceMeta?.["sparse"] as { spans?: [number, number][] } | undefined)?.spans;
+    const all = [...existing, ...plan.ranges.map((r) => ({ ...r, origin }))];
+    const fetch = !!p.sourceExpiredAt || !p.sourceKey || (!!held && !spansCover(held, transcriptSpans(all, p.durationSec)));
+    for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await supersedeStages(u, p.id); // a stage still running for the old ranges commits nothing
+    await startRun(u, p.id, { reason: "extend", status: "queued", stage: fetch ? "ingest" : "transcribe", continueActive: true });
+    const fromSec = Math.min(...plan.ranges.map((r) => r.startSec));
+    const untilSec = Math.max(...plan.ranges.map((r) => r.endSec));
+    await u.emit("project.extended", { projectId: p.id, fromSec, untilSec, durationSec: p.durationSec });
+    // ingest keeps what the video was admitted as and hands on to transcribe
+    await u.enqueue(fetch ? QUEUES.ingest : QUEUES.transcribe, { projectId: p.id });
+    return {
+      fromSec,
+      untilSec,
+      durationSec: p.durationSec,
+      whole: false,
+      ranges: { billedSec: plan.billedSec, changes: plan.changes },
+      userId: p.userId,
+    };
+  });
+  svc.log.child({ module: "projects", projectId }).info({ billedSec: result.ranges.billedSec, ranges: input.length }, "ranges added to a project");
+  svc.telemetry.capture("project.extended", result.userId, {
+    projectId,
+    automatic: false,
+    addedMinutes: Math.round(result.ranges.billedSec / 60),
+    whole: false,
+    ranges: input.length,
   });
   const { userId: _u, ...out } = result;
   return out;

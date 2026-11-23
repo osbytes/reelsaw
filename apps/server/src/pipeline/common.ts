@@ -232,11 +232,29 @@ export class StageContext {
   }
 
   /**
+   * The local file holding source seconds `[startSec, endSec]`, and the source second at its first frame: a frame at
+   * source time `t` is at `t - offsetSec` in `path`. Today every project stores the whole video (offset 0); a project
+   * that fetched only its sections (docs/specs/range-clipping.md) answers with the piece covering the span. Every stage
+   * that seeks into source media by time goes through here.
+   */
+  async sourceAt(project: Project, _span: readonly [startSec: number, endSec: number]): Promise<{ path: string; offsetSec: number }> {
+    return { path: await this.ensureSource(project), offsetSec: 0 };
+  }
+
+  /**
+   * The whole video as one local file, for the scans that read all of it (scene cuts, the text scan, transcription).
+   * A project that fetched only its sections has no such file: those scans move to its pieces (range-clipping plan 3.3).
+   */
+  async wholeSource(project: Project): Promise<string> {
+    return this.ensureSource(project);
+  }
+
+  /**
    * Local scratch path for the source video, pulled from storage if missing on this node. With an S3 store
    * that pull is the biggest write a transcribe or render makes (the whole source), so it is leased like an
    * ingest's download and given back once the bytes are on disk; the local store hardlinks and writes nothing.
    */
-  async ensureSource(project: Project): Promise<string> {
+  private async ensureSource(project: Project): Promise<string> {
     if (project.sourceExpiredAt) throw new SourceExpiredError(this.svc.settings.get().SOURCE_RETENTION_DAYS);
     if (!project.sourceKey) throw new Error("Project has no source; ingest must run first");
     const local = path.join(await this.dir(), path.posix.basename(project.sourceKey));

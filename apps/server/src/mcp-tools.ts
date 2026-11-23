@@ -21,6 +21,8 @@ import {
   MAX_CLIP_LAYERS,
   REFINE_STEPS,
   projectMetadataSchema,
+  MAX_RANGES,
+  rangeSchema,
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
@@ -42,7 +44,7 @@ import { listSignupRulesShape, manageSignupRulesShape, MAX_SIGNUP_RULES } from "
 import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
-Workflow: (check_source when the account may have a minutes limit) → create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
+Workflow: (check_source when the account may have a minutes limit) → create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links. Only parts of a long video: create_project ranges [{ startSec, endSec, mode: find|clip, ref }] or rangesFrom { mostReplayed: n } (check_source prices them and lists the peaks); only they are downloaded, transcribed and counted, and every clip carries its rangeId and ref; extend_project ranges adds more.
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
@@ -130,10 +132,16 @@ export const TOOLS = {
   check_source: {
     title: "Check source",
     description:
-      "Before create_project: would this video be accepted now? Give sourceUrl (its length is looked up, nothing is downloaded) or durationSec for a file. Returns { minutes, partial, fits, message, quota, allowance }; fits false means create_project would be refused, message says why, quota.primary is the upgrade offer (a link for a person). fits null: the length is unknown. partial: accepted, but only its first partial.minutes are processed now (extend_project later).",
+      "Before create_project: would this video be accepted now? Give sourceUrl (length looked up, nothing downloaded) or durationSec for a file, plus ranges if you clip only parts. Returns { minutes, partial, fits, message, quota, allowance, ranges }: fits false = create_project would be refused (message says why; quota.primary is the upgrade offer); fits null = length unknown; partial = only the first partial.minutes are processed now. ranges: { minutes } they count, changes, problems. mostReplayed: the heatmap's peaks.",
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or durationSec"),
       durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you will upload, in seconds; give this or sourceUrl"),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe("The parts you would clip, as create_project takes them: priced and checked against your minutes instead of the whole video"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -141,7 +149,7 @@ export const TOOLS = {
     title: "Create project",
     annotations: { destructiveHint: false },
     description:
-      'Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: "queued", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.',
+      'Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: "queued", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise. ranges: only those parts.',
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or uploadId"),
       uploadId: z
@@ -155,6 +163,18 @@ export const TOOLS = {
         .optional()
         .describe('Your own key/value strings (≤20 keys, 1 KB), returned by get_project and sent in every webhook for this project, e.g. { runId: "n8n-123" }'),
       settings: settingsInput.optional(),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe(
+          'Clip only these parts, in seconds of the source video: [{ startSec, endSec, mode?: "find" (pick moments inside it, default) | "clip" (the range is the clip), label?, ref? }]. Only they are fetched, transcribed, picked from and counted (check_source prices them). The response adds ranges, rangeChanges and billedSec; each clip from a range carries rangeId and your ref (get_project, clip.done / clip.failed webhooks). Omit for the whole video.',
+        ),
+      rangesFrom: z
+        .object({ mostReplayed: z.number().int().min(1).max(MAX_RANGES).describe("How many of the hottest stretches") })
+        .optional()
+        .describe("Add the video's Most replayed peaks (YouTube's replay heatmap; check_source lists them) as exact-clip ranges; refused when it has none"),
       introAssetId: z
         .string()
         .min(1)
@@ -538,8 +558,16 @@ export const TOOLS = {
     title: "Clip the rest of a video",
     annotations: { destructiveHint: false },
     description:
-      "Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). Takes as much of the rest as the minutes cover now, all of it or whole 10-minute parts, and picks up where it stopped: your clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when no minutes are left; an upgrade via billing_checkout_url fromProjectId does it itself. Returns { fromSec, untilSec, durationSec, whole }; then wait_for_project.",
-    inputSchema: { id: projectId() },
+      "Process more of a video. Without ranges: the rest of a video only the start of which was processed (get_project partial), as much as the minutes cover, in whole 10-minute parts. With ranges: those parts too (only time no range covers yet is counted). Clips, fixes and decisions stay; new clips come only from the new part. Refused with the upgrade offer when the minutes do not cover it. Returns { fromSec, untilSec, durationSec, whole, ranges? }; then wait_for_project.",
+    inputSchema: {
+      id: projectId(),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe("More parts to clip, as create_project takes them: [{ startSec, endSec, mode?, label?, ref? }]"),
+    },
   },
   list_upgrade_work: {
     title: "List work an upgrade unlocks",

@@ -132,6 +132,7 @@ import {
   type SeamRun,
   type ContentRegion,
   type SectionMode,
+  parseClock,
   type SourceOverlay,
   type Style,
   type StyleOverride,
@@ -327,13 +328,6 @@ function initialSections(clip: EditorClip, range: [number, number], settings: Pr
   return [projectDefaultSection(settings, range[0], range[1])];
 }
 
-function parseTime(v: string): number | null {
-  const t = v.trim();
-  if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
-  const m = /^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/.exec(t);
-  if (!m) return null;
-  return Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]);
-}
 function fmtPrecise(t: number) {
   const m = Math.floor(t / 60);
   const s = t - m * 60;
@@ -347,7 +341,7 @@ function TimeField({ value, onCommit, label }: { value: number; onCommit: (t: nu
     if (!focused) setText(fmtPrecise(value));
   }, [value, focused]);
   const commit = () => {
-    const t = parseTime(text);
+    const t = parseClock(text);
     if (t !== null) onCommit(t);
     else setText(fmtPrecise(value));
   };

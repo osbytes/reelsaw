@@ -33,6 +33,8 @@ import type {
   TextProfile,
   DecisionKind,
   SourceRef,
+  RangeMode,
+  RangeOrigin,
 } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
@@ -581,7 +583,7 @@ export const projects = pgTable(
 
 /**
  * Full-quality windows of a link whose stored source is a small preview (a plan's `sourceHeight`, see
- * pipeline/sections.ts): a clip renders from the window that covers it, fetched once and reused by every
+ * pipeline/windows.ts): a clip renders from the window that covers it, fetched once and reused by every
  * rerender. `offsetSec` is the source time at the file's first frame, measured against the preview's audio.
  */
 export const sourceSections = pgTable(
@@ -603,6 +605,35 @@ export const sourceSections = pgTable(
   (t) => [index("source_sections_project_idx").on(t.projectId, t.startSec)],
 );
 export type SourceSection = typeof sourceSections.$inferSelect;
+
+/**
+ * The parts of the video a project processes (docs/specs/range-clipping.md): one `whole` range for a video processed
+ * whole (or the start a partly processed one covers, plus one per part added since), or the ranges a person or a
+ * caller chose. Only their time is fetched, transcribed, picked from and counted (`billed_sec`: what was new when the
+ * range was added). `picked_at` is set once moments were picked (or the exact clip made) in it, so a later run picks
+ * only in ranges added since.
+ */
+export const projectRanges = pgTable(
+  "project_ranges",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    startSec: real("start_sec").notNull(),
+    endSec: real("end_sec").notNull(),
+    mode: text("mode").$type<RangeMode>().notNull().default("find"),
+    origin: text("origin").$type<RangeOrigin>().notNull(),
+    label: text("label"),
+    /** the caller's own id for the range, returned on every clip from it */
+    ref: text("ref"),
+    billedSec: real("billed_sec").notNull(),
+    pickedAt: timestamp("picked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("project_ranges_project_idx").on(t.projectId, t.startSec)],
+);
+export type ProjectRange = typeof projectRanges.$inferSelect;
 
 export const transcriptChunks = pgTable(
   "transcript_chunks",
@@ -661,7 +692,18 @@ export const transcripts = pgTable("transcripts", {
   words: jsonb("words").$type<Word[]>().notNull(),
   /** words exactly as the transcriber returned them; `words` is this with accepted flags applied */
   rawWords: jsonb("raw_words").$type<Word[]>(),
-  /** the transcript covers [0, covered_sec) of the source (a partly processed video); null = all of it. Transcribe appends the rest when the project's limit moves past it */
+  /**
+   * The source time the words cover, as sorted, disjoint `[start, end]` spans: the whole video, the start a partly
+   * processed one covers, or its ranges with their padding (docs/specs/range-clipping.md). Transcribe adds the words
+   * of whatever a project's ranges need past it (`transcriptSpans`), merged in time order. Null = all of it (a transcript
+   * written whole: an imported SRT / VTT, a seeded scenario, a row from before spans); read it through `coverageOf`.
+   */
+  covered: jsonb("covered").$type<[number, number][]>(),
+  /**
+   * Deprecated: the covered end before spans (null = all of it). Still written for one release (`legacyCoveredSec`) so
+   * a process of the previous version mid-rollout reads what it expects; dropped with source_limit_sec (range-clipping
+   * plan 2.4).
+   */
   coveredSec: real("covered_sec"),
   flags: jsonb("flags").$type<TranscriptFlag[]>().notNull().default([]),
   /** soft-deleted fixes, newest last; kept out of `flags` so nothing downstream applies them. Restorable. */
@@ -701,6 +743,8 @@ export const clips = pgTable(
     layoutOverride: text("layout_override").$type<ReframeMode>(),
     status: text("status").$type<ClipStatus>().notNull().default("pending"),
     origin: text("origin").$type<ClipOrigin>().notNull().default("ai"),
+    /** the project range the clip came from (docs/specs/range-clipping.md); null for clips older than ranges or made by hand outside one */
+    rangeId: text("range_id").references(() => projectRanges.id, { onDelete: "set null" }),
     error: text("error"),
     /** as projects.failure_cause */
     failureCause: text("failure_cause").$type<FailureCause>(),

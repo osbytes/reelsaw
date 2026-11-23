@@ -270,7 +270,9 @@ export const GUIDES: Guide[] = [
       {
         heading: t(msg`What happens after you paste the link`),
         bullets: [
-          t(msg`Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it.`),
+          t(
+            msg`Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long stream, pick only the parts worth clipping on a timeline (or take YouTube's Most replayed peaks): only those are downloaded, transcribed and counted.`,
+          ),
           t(
             msg`Transcribe: audio is split into chunks and transcribed in parallel with word timestamps, then names are fixed from your vocabulary and fillers are cut with verified jump cuts.`,
           ),
@@ -323,6 +325,12 @@ export const GUIDES: Guide[] = [
         q: t(msg`Does it upload the Shorts to YouTube for me?`),
         a: t(
           msg`Not directly. Export all includes a YouTube Data API v3 videos.insert body per clip, set to private, so a script or an agent on the MCP server can upload with your credentials.`,
+        ),
+      },
+      {
+        q: t(msg`Can I clip only part of a long stream?`),
+        a: t(
+          msg`Yes. Pick ranges on the timeline before anything downloads, take the video's Most replayed peaks, or send ranges from a script through the MCP server or the CLI. Only the ranges are downloaded, transcribed and counted against your minutes, and each range either finds clips inside it or is the clip.`,
         ),
       },
       {

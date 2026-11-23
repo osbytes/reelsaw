@@ -49,10 +49,20 @@ export interface ProbeInfo {
    * Rendered as is, a clip's seek lands past that frame and ffmpeg writes sound alone (pipeline/ingest.ts stillAsVideo).
    */
   still?: boolean | undefined;
+  /** what a stream-copy join needs to match (pipeline/sparse.ts): codecs, the audio's rate and channels, the video's timescale */
+  videoCodec?: string | undefined;
+  audioCodec?: string | undefined;
+  sampleRate?: number | undefined;
+  channels?: number | undefined;
+  videoTimescale?: number | undefined;
 }
 
 type ProbeStream = {
   codec_type?: string;
+  codec_name?: string;
+  sample_rate?: string;
+  channels?: number;
+  time_base?: string;
   width?: number;
   height?: number;
   duration?: string;
@@ -81,6 +91,11 @@ export function probeInfo(json: { format?: { duration?: string }; streams?: Prob
     fps,
     ...(frames > 0 ? { frames } : {}),
     ...(video && (video.disposition?.attached_pic || frames === 1) ? { still: true } : {}),
+    ...(video?.codec_name ? { videoCodec: video.codec_name } : {}),
+    ...(audio?.codec_name ? { audioCodec: audio.codec_name } : {}),
+    ...(audio?.sample_rate ? { sampleRate: Number(audio.sample_rate) } : {}),
+    ...(audio?.channels ? { channels: audio.channels } : {}),
+    ...(video?.time_base?.includes("/") ? { videoTimescale: Number(video.time_base.split("/")[1]) } : {}),
   };
 }
 
@@ -229,8 +244,11 @@ export interface MediaTools {
   ytdlp(args: string[], opts?: RunOptions & { sections?: boolean }): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
-  /** Mono 16 kHz MP3 of the source's audio; `untilSec` stops it there (a partly processed video transcribes only its start). */
-  extractAudio(input: string, output: string, signal?: AbortSignal, untilSec?: number | null): Promise<void>;
+  /**
+   * Mono 16 kHz MP3 of the file's audio from `span.fromSec` (seconds into the file) for `span.durationSec` (null: to the
+   * end); no span is all of it. A project's ranges each transcribe their own stretch (pipeline/transcribe.ts).
+   */
+  extractAudio(input: string, output: string, signal?: AbortSignal, span?: { fromSec: number; durationSec: number | null }): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
   /**
    * Shot-cut times in seconds. `floor` = minimum scene score; cuts must also stand out from local motion. With `range`,
@@ -451,9 +469,11 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       return probeInfo(JSON.parse(stdout) as Parameters<typeof probeInfo>[0]);
     },
 
-    async extractAudio(input, output, signal, untilSec) {
-      const until = untilSec != null ? ["-t", untilSec.toFixed(3)] : [];
-      await ffmpeg(["-i", input, "-vn", ...until, "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal, threads: "light" });
+    async extractAudio(input, output, signal, span) {
+      // -ss before -i seeks the input (exact for audio, and fast on a long file); -t after it bounds the output
+      const from = span && span.fromSec > 0 ? ["-ss", span.fromSec.toFixed(3)] : [];
+      const until = span?.durationSec != null ? ["-t", span.durationSec.toFixed(3)] : [];
+      await ffmpeg([...from, "-i", input, "-vn", ...until, "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", output], { signal, threads: "light" });
     },
 
     async segmentAudio(input, outPattern, chunkSeconds, signal) {

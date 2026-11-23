@@ -26,6 +26,7 @@ import { ShortcutSheet } from "../components/ShortcutSheet";
 import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { UpgradeNotice } from "../components/UpgradeNotice";
+import { ProjectRanges, RangeHeading, showsRanges } from "../components/ProjectRanges";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { ProjectTemplateModal } from "../components/TemplatePicker";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
@@ -238,6 +239,20 @@ export function ProjectPage() {
   const stageIdx = p ? (p.status === "failed" && p.stage ? (STAGE_REACHED[p.stage] ?? -1) : (STAGE_INDEX[p.status] ?? -1)) : -1;
   const active = !!p && ACTIVE.has(p.status);
   const sortedClips = useMemo(() => (p?.clips ?? []).slice().sort((a, b) => a.index - b.index), [p]);
+  // clips under the range they came from, in source order, when the project chose ranges; the rest after them
+  const clipGroups = useMemo(() => {
+    const chosen = (p?.ranges ?? []).filter((r) => r.origin !== "whole").sort((a, b) => a.startSec - b.startSec);
+    if (!chosen.length) return [{ range: null, index: 0, clips: sortedClips }];
+    const ids = new Set(chosen.map((r) => r.id));
+    const groups = chosen.map((range, index) => ({ range, index, clips: sortedClips.filter((c) => c.rangeId === range.id) }));
+    const rest = sortedClips.filter((c) => !c.rangeId || !ids.has(c.rangeId));
+    return [...groups.filter((g) => g.clips.length), ...(rest.length ? [{ range: null, index: 0, clips: rest }] : [])];
+  }, [p, sortedClips]);
+  // #range=<id> opens the page at that range's clips
+  const rangeHash = typeof window !== "undefined" ? /^#range=([\w-]+)$/.exec(window.location.hash)?.[1] : undefined;
+  useEffect(() => {
+    if (rangeHash && clipGroups.some((g) => g.range?.id === rangeHash)) document.getElementById(`range-${rangeHash}`)?.scrollIntoView({ block: "start" });
+  }, [rangeHash, clipGroups]);
   const capacityWaiting = sortedClips.filter((c) => capacityClips.has(c.id) && c.status !== "done" && c.status !== "failed").length;
   // clips the owner deleted (or a re-pick replaced) and can still restore
   const deletedCount = p?.replacedClips?.length ?? 0;
@@ -1115,27 +1130,43 @@ export function ProjectPage() {
           projectId={p.id}
           onExtended={() => void invalidate()}
         />
-        {sortedClips.map((c) => (
-          <ClipCard
-            key={c.id}
-            clip={c as ClipView}
-            projectIntroId={p.settings.introAssetId}
-            projectOutroId={p.settings.outroAssetId}
-            selected={sel.includes(c.id)}
-            selecting={sel.length > 0}
-            onToggleSelect={() => toggleSel(c.id)}
+        {showsRanges(p) && p.durationSec && (
+          <ProjectRanges
             projectId={p.id}
-            progress={clipProgress[c.id]}
-            active={activeClip === c.id}
-            busy={rerender.isPending}
-            onRerender={() => orToast(rerender.mutateAsync({ id: c.id }).then(invalidate), t`Couldn’t retry the clip`)}
-            onSeek={() => {
-              seekSource(c.startSec, c.id);
-              if (compact) setMtab("transcript");
-            }}
-            onPlay={() => setPreview(c as ClipView)}
-            onCopyLink={() => copyLink({ clip: c.id })}
+            durationSec={p.durationSec}
+            ranges={p.ranges ?? []}
+            clips={sortedClips}
+            maxClipSec={p.settings.maxClipSeconds}
+            busy={active}
+            onExtended={() => void invalidate()}
           />
+        )}
+        {clipGroups.map((g) => (
+          <div key={g.range?.id ?? "rest"} className="flex flex-col gap-3">
+            {g.range && <RangeHeading index={g.index} range={g.range} />}
+            {g.clips.map((c) => (
+              <ClipCard
+                key={c.id}
+                clip={c as ClipView}
+                projectIntroId={p.settings.introAssetId}
+                projectOutroId={p.settings.outroAssetId}
+                selected={sel.includes(c.id)}
+                selecting={sel.length > 0}
+                onToggleSelect={() => toggleSel(c.id)}
+                projectId={p.id}
+                progress={clipProgress[c.id]}
+                active={activeClip === c.id}
+                busy={rerender.isPending}
+                onRerender={() => orToast(rerender.mutateAsync({ id: c.id }).then(invalidate), t`Couldn’t retry the clip`)}
+                onSeek={() => {
+                  seekSource(c.startSec, c.id);
+                  if (compact) setMtab("transcript");
+                }}
+                onPlay={() => setPreview(c as ClipView)}
+                onCopyLink={() => copyLink({ clip: c.id })}
+              />
+            ))}
+          </div>
         ))}
       </div>
       {sel.length > 0 && (

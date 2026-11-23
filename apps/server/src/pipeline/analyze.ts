@@ -36,7 +36,7 @@ import {
 } from "./select.js";
 import { isAbortError } from "./steps.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
-import { clipCandidateSchema, plural, processedEndSec } from "@reelsaw/shared";
+import { RANGE_PAD_SEC, clipCandidateSchema, formatTime, plural, processedEndSec, spansSec } from "@reelsaw/shared";
 import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import type { ClipCandidate, ProjectSettings, TranscriptSegment, Word } from "@reelsaw/shared";
@@ -175,6 +175,66 @@ export function padWithinGaps(
   const prev = words.findLast((w) => w.end <= speech.start + 0.01);
   if (prev && prev.end > start - GAP_MARGIN) start = Math.min(speech.start, prev.end + GAP_MARGIN);
   return { start, end };
+}
+
+/** A range's sentences with the padding around it (docs/specs/range-clipping.md): a clip snapped to them stays inside. */
+function rangeSegments(segments: TranscriptSegment[], r: { startSec: number; endSec: number }): TranscriptSegment[] {
+  return segments.filter((sg) => sg.start >= r.startSec - RANGE_PAD_SEC - 0.05 && sg.end <= r.endSec + RANGE_PAD_SEC + 0.05);
+}
+
+/**
+ * The range a candidate belongs to: the one it overlaps most (a range shorter than the shortest clip holds a clip that
+ * runs on into its padding, so its middle can be past the range's end). Undefined when it overlaps none.
+ */
+function rangeOverlapping<R extends { startSec: number; endSec: number }>(ranges: readonly R[], c: { startSec: number; endSec: number }): R | undefined {
+  let best: R | undefined;
+  let most = 0;
+  for (const r of ranges) {
+    const o = Math.min(c.endSec, r.endSec) - Math.max(c.startSec, r.startSec);
+    if (o > most) [best, most] = [r, o];
+  }
+  return best;
+}
+
+/**
+ * A candidate picked in a project's find ranges, snapped to the sentences of the range it overlaps most (with its
+ * padding), so it never reaches into time no range asked for; null when it overlaps no range or does not fit one.
+ */
+export function snapInRanges<R extends { startSec: number; endSec: number }>(
+  c: ClipCandidate,
+  ranges: readonly R[],
+  segments: TranscriptSegment[],
+  sceneCuts: number[],
+  settings: ProjectSettings,
+  endSec: number,
+  thought: Parameters<typeof snapCandidate>[5] = {},
+): { c: ClipCandidate; range: R } | null {
+  const range = rangeOverlapping(ranges, c);
+  if (!range) return null;
+  // the snapper keeps a start it finds no sentence near, so a proposal that only grazes the range is cut to it (and its
+  // padding) first, and whatever still reaches past the padding after snapping is dropped
+  const lo = Math.max(0, range.startSec - RANGE_PAD_SEC);
+  const hi = Math.min(endSec, range.endSec + RANGE_PAD_SEC);
+  const within = { ...c, startSec: Math.max(c.startSec, lo), endSec: Math.min(c.endSec, hi) };
+  const snapped = snapCandidate(within, rangeSegments(segments, range), sceneCuts, settings, hi, thought);
+  return snapped && snapped.startSec >= lo - 0.3 && snapped.endSec <= hi + 0.4 ? { c: snapped, range } : null;
+}
+
+/**
+ * An exact clip range's bounds: its ends snapped to the nearest sentences inside its padding (any length: the range is
+ * the clip), or the range as given when its padding holds no sentence to snap to.
+ */
+export function exactRangeBounds(
+  r: { startSec: number; endSec: number },
+  segments: TranscriptSegment[],
+  sceneCuts: number[],
+  settings: ProjectSettings,
+  endSec: number,
+  words?: Word[],
+): ClipCandidate {
+  const raw: ClipCandidate = { title: "", hook: "", startSec: r.startSec, endSec: r.endSec, score: 50, reasoning: "", caption: "", hashtags: [] };
+  const lenient = { ...settings, minClipSeconds: 1, maxClipSeconds: Math.max(settings.maxClipSeconds, r.endSec - r.startSec + 2 * RANGE_PAD_SEC) };
+  return snapCandidate(raw, rangeSegments(segments, r), sceneCuts, lenient, Math.min(endSec, r.endSec + RANGE_PAD_SEC), words ? { words } : {}) ?? raw;
 }
 
 export function snapCandidate(
@@ -329,7 +389,7 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
   if (!project.width || !project.sourceKey) return [];
   if (ctx.stage === "analyze") await ctx.progress(0.01, "Detecting shot changes"); // the refine stage reports its own steps
   const detect = async (signal: AbortSignal): Promise<number> => {
-    const sourcePath = await ctx.ensureSource(project);
+    const sourcePath = await ctx.wholeSource(project);
     const cuts = await ctx.svc.resources.withCpu(
       {
         kind: "scene-scan",
@@ -384,8 +444,19 @@ export async function analyze(ctx: StageContext) {
   // Untouched AI picks mean this analysis already committed (a re-analyze replaces every one of them before it
   // queues this job): converge instead of re-picking. Clips the user made or edited were kept: new picks go around them.
   const live = await db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) });
-  const existingClips = extendFrom === null ? live.filter((c) => !keepReason(c)) : [];
-  const kept = extendFrom === null ? live.filter((c) => keepReason(c)) : live;
+  // A project's ranges (docs/specs/range-clipping.md): this run picks only in the ranges not picked from yet, a find
+  // range by today's picker inside it, an exact clip range by becoming the clip (prepare writes its title and scores
+  // it). A project of whole ranges only (the video, or a partly processed one's parts) keeps the extension path.
+  const ranges = await db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, projectId)).orderBy(asc(schema.projectRanges.startSec));
+  const hasChosenRanges = ranges.some((r) => r.origin !== "whole");
+  const toPick = ranges.filter((r) => !r.pickedAt);
+  const findRanges = hasChosenRanges ? toPick.filter((r) => r.mode === "find") : [];
+  const exactRanges = hasChosenRanges ? toPick.filter((r) => r.mode === "clip") : [];
+  /** ranges added to a project picked from before: like an extension, new picks go around every clip there */
+  const addingRanges = hasChosenRanges && ranges.some((r) => r.pickedAt);
+  const incremental = extendFrom !== null || addingRanges;
+  const existingClips = incremental ? [] : live.filter((c) => !keepReason(c));
+  const kept = incremental ? live : live.filter((c) => keepReason(c));
   if (existingClips.length) {
     log.info(
       { clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length },
@@ -398,6 +469,7 @@ export async function analyze(ctx: StageContext) {
     });
     return;
   }
+  if (hasChosenRanges && !toPick.length) return finishExtensionWithoutPicks(ctx, "Every range was picked from already.", []);
 
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   if (!transcript) throw new Error("Transcript missing; transcribe must run first");
@@ -406,8 +478,108 @@ export async function analyze(ctx: StageContext) {
 
   /** where the processed part ends (a partly processed video's limit, else the whole video) */
   const endSec = processedEndSec(project) ?? transcript.words.at(-1)?.end ?? 0;
-  /** the stretch this run picks in: everything processed, or only the new part of an extension */
-  const durationSec = Math.max(0, endSec - (extendFrom ?? 0));
+  /** the stretch this run picks in: everything processed, only the new part of an extension, or the find ranges */
+  const durationSec = hasChosenRanges ? spansSec(findRanges.map((r) => [r.startSec, r.endSec])) : Math.max(0, endSec - (extendFrom ?? 0));
+  const findRangeOf = (c: { startSec: number; endSec: number }) => rangeOverlapping(findRanges, c);
+  /** the range a clip from this run belongs to, for `clips.range_id` */
+  const rangeIdOf = (startSec: number) => (toPick.find((r) => startSec >= r.startSec - RANGE_PAD_SEC && startSec < r.endSec) ?? null)?.id ?? null;
+  const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
+  /** exact clip ranges as clips, their ends snapped to sentences inside the padding; titled and scored by prepare */
+  const exactRows = exactRanges.map((r, index) => {
+    const c = exactRangeBounds(r, transcript.segments, sceneCuts, settings, endSec, transcript.words);
+    return {
+      id: randomUUID(),
+      projectId,
+      index,
+      title: (r.label ?? `${formatTime(r.startSec)}–${formatTime(r.endSec)}`).slice(0, 120),
+      hook: "",
+      startSec: c.startSec,
+      endSec: c.endSec,
+      layers: layersForNewClip(template, c),
+      bumpers: bumpersForNewClip(template),
+      score: 0,
+      scores: null,
+      emphasis: null,
+      reasoning: "",
+      caption: "",
+      hashtags: [],
+      status: "pending" as const,
+      rangeId: r.id,
+    };
+  });
+  /** in the commit that adds this run's clips: the ranges it picked from are done, so a later run picks only in new ones */
+  const markPicked = async (u: UnitOfWork) => {
+    if (toPick.length)
+      await u.db
+        .update(schema.projectRanges)
+        .set({ pickedAt: new Date() })
+        .where(
+          inArray(
+            schema.projectRanges.id,
+            toPick.map((r) => r.id),
+          ),
+        );
+  };
+  /** the exact clips, placed after `firstIndex`, each handed to prepare (title, hook, caption, scores), which renders it */
+  const insertExact = async (u: UnitOfWork, firstIndex: number) => {
+    const placed = exactRows.map((r) => ({ ...r, index: firstIndex + r.index }));
+    if (!placed.length) return placed;
+    await u.db.insert(schema.clips).values(placed);
+    if (template) await syncClipsRefs(u.db, projectId, placed);
+    for (const r of placed) await u.emit("clip.created", { projectId, clipId: r.id, index: r.index, title: r.title });
+    for (const r of placed) await requestPrepare(svc, u, projectId, r.id, { mode: "exact" });
+    return placed;
+  };
+  /** another run of this job committed this run's ranges already (they are picked now): converge on its clips */
+  const rangesTaken = async (u: UnitOfWork) => {
+    if (!toPick.length) return false;
+    const now = await u.db
+      .select({ pickedAt: schema.projectRanges.pickedAt })
+      .from(schema.projectRanges)
+      .where(
+        inArray(
+          schema.projectRanges.id,
+          toPick.map((r) => r.id),
+        ),
+      );
+    return now.some((r) => r.pickedAt !== null);
+  };
+  /** nothing to pick (no speech, no usable or strong enough moment): the exact clips still land, else the run ends soft */
+  const endWithoutPicks = async (message: string): Promise<void> => {
+    if (!exactRows.length)
+      return finishExtensionWithoutPicks(
+        ctx,
+        message,
+        toPick.map((r) => r.id),
+      );
+    let converged = false;
+    await ctx.complete(
+      async (u) => {
+        converged = await rangesTaken(u);
+        return { clips: converged ? 0 : exactRows.length, exact: exactRows.length, nothing: message };
+      },
+      async (u) => {
+        if (converged) {
+          await convergeOnExistingClips(svc, u, projectId);
+          return;
+        }
+        const liveNow = await u.db
+          .select({ index: schema.clips.index })
+          .from(schema.clips)
+          .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+        await insertExact(
+          u,
+          liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0),
+        );
+        await markPicked(u);
+        await u.db
+          .update(schema.projects)
+          .set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, extendFromSec: null, updatedAt: new Date() })
+          .where(eq(schema.projects.id, projectId));
+      },
+    );
+  };
+  if (hasChosenRanges && !findRanges.length) return endWithoutPicks("Every range is an exact clip.");
   const languageId = svc.models.get().language;
   const selfHosted = isSelfHostedModel({ AI_MODEL: languageId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
@@ -439,8 +611,14 @@ export async function analyze(ctx: StageContext) {
   // the pairwise pass is not checkpointed; each of its calls still has a limit
   judge.timeoutMs = scoreUnitMs;
   // an extension reads only the new part, so the windows (and their saved steps) are the rest of the video's
-  const segments = extendFrom === null ? transcript.segments : transcript.segments.filter((sg) => sg.end > extendFrom + 0.5);
-  if (extendFrom !== null && !segments.length) return finishExtensionWithoutPicks(ctx, "No speech in the rest of the video.");
+  const segments = hasChosenRanges
+    ? transcript.segments.filter((sg) => findRanges.some((r) => sg.end > r.startSec + 0.5 && sg.start < r.endSec - 0.5))
+    : extendFrom === null
+      ? transcript.segments
+      : transcript.segments.filter((sg) => sg.end > extendFrom + 0.5);
+  /** a run that may end without new picks instead of failing: an extension, ranges added later, or exact clips to make */
+  const soft = incremental || exactRows.length > 0;
+  if (soft && !segments.length) return endWithoutPicks(hasChosenRanges ? "No speech in the ranges." : "No speech in the rest of the video.");
   log.info(
     {
       durationSec,
@@ -520,7 +698,11 @@ export async function analyze(ctx: StageContext) {
   const rules = sentenceRules(transcript.words, transcript.language);
   if (!rules.punctuated) await unpunctuatedEvent(svc, projectId, transcript.language, rules, log);
   const snappedIdx = candidates
-    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules }), i }))
+    .map((c, i) => {
+      if (!hasChosenRanges) return { c: snapCandidate(c, segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules }), i };
+      // inside a find range only: snapped to its own sentences, so it never reaches into time no range asked for
+      return { c: snapInRanges(c, findRanges, transcript.segments, sceneCuts, settings, endSec, { words: transcript.words, log, rules })?.c ?? null, i };
+    })
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);
   const snapped = snappedIdx.map((x) => x.c);
@@ -585,7 +767,7 @@ export async function analyze(ctx: StageContext) {
     throw gleanFailed ? new Error(message) : new NonRetryableError(message, "platform");
   };
   if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
-  if (!pooled.length && extendFrom !== null) return finishExtensionWithoutPicks(ctx, "No usable moments in the rest of the video.");
+  if (!pooled.length && soft) return endWithoutPicks(hasChosenRanges ? "No usable moments in the ranges." : "No usable moments in the rest of the video.");
   if (!pooled.length) await failWithCandidates("The model did not return any usable clips. Try widening the clip duration range.");
 
   // 4. rubric scoring
@@ -662,7 +844,10 @@ export async function analyze(ctx: StageContext) {
       { rule: gate.rule, threshold: gate.threshold, n: gate.n, median: gate.median, mad: gate.mad, dropped: gate.dropped, unscored: gate.unscored },
       `score gate: dropped ${gate.dropped} below ${gate.threshold} (${gate.rule})`,
     );
-  if (!chosen.length && extendFrom !== null) return finishExtensionWithoutPicks(ctx, "No moments in the rest of the video were strong enough to clip.");
+  if (!chosen.length && soft)
+    return endWithoutPicks(
+      hasChosenRanges ? "No moments in the ranges were strong enough to clip." : "No moments in the rest of the video were strong enough to clip.",
+    );
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
@@ -691,7 +876,6 @@ export async function analyze(ctx: StageContext) {
       "new picks avoid the clips the user kept",
     );
   // the project's layer template (brand overlays, music bed, CTA, intro / outro), materialised on every new clip against its own length
-  const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const picks = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
     projectId,
@@ -709,6 +893,7 @@ export async function analyze(ctx: StageContext) {
     caption: (c.caption ?? "").slice(0, 300),
     hashtags: c.hashtags.map((h) => h.replace(/^#/, "")),
     status: "pending" as const,
+    rangeId: hasChosenRanges ? (findRangeOf(c)?.id ?? null) : rangeIdOf(c.startSec),
   }));
   const rows = distinctTitles(
     picks,
@@ -736,14 +921,15 @@ export async function analyze(ctx: StageContext) {
         .select()
         .from(schema.clips)
         .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
-      if (extendFrom === null) converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+      if (addingRanges) converged = await rangesTaken(u);
+      else if (extendFrom === null) converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
       else {
         // the project row is locked: an extension whose picks another run of this job committed has no extend_from_sec now
         const [p] = await u.db.select({ from: schema.projects.extendFromSec }).from(schema.projects).where(eq(schema.projects.id, projectId));
         converged = p?.from == null;
       }
       // when we converge, another run's picks stand and this run inserted none
-      return { clips: converged ? 0 : rows.length, ...stageExtra };
+      return { clips: converged ? 0 : rows.length + exactRows.length, ...(exactRows.length ? { exact: exactRows.length } : {}), ...stageExtra };
     },
     async (u) => {
       if (converged) {
@@ -759,6 +945,8 @@ export async function analyze(ctx: StageContext) {
       );
       if (placed.length) await u.db.insert(schema.clips).values(placed);
       if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
+      await insertExact(u, firstIndex + placed.length);
+      await markPicked(u);
       await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
       for (const r of placed) await u.emit("clip.created", { projectId: projectId, clipId: r.id, index: r.index, title: r.title });
       await u.db
@@ -776,7 +964,7 @@ export async function analyze(ctx: StageContext) {
  * extension is over (`extend_from_sec` cleared) and the project goes back to rendering what it has (done when it is
  * all done). Never a failure: the video was processed; it just had nothing more.
  */
-async function finishExtensionWithoutPicks(ctx: StageContext, message: string): Promise<void> {
+async function finishExtensionWithoutPicks(ctx: StageContext, message: string, rangeIds: string[] = []): Promise<void> {
   const { svc, projectId } = ctx;
   ctx.log.info({ reason: message }, "extension found no new clips");
   // clips first, then the project row (the stage fence), as everywhere that touches several clips and the project
@@ -788,6 +976,8 @@ async function finishExtensionWithoutPicks(ctx: StageContext, message: string): 
       .update(schema.projects)
       .set({ extendFromSec: null, stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
+    // the ranges looked at are done: a later run picks only in ranges added after this one
+    if (rangeIds.length) await u.db.update(schema.projectRanges).set({ pickedAt: new Date() }).where(inArray(schema.projectRanges.id, rangeIds));
     await u.emit("stage.completed", {
       projectId,
       stage: "analyze",

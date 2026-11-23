@@ -9,7 +9,8 @@ import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { errorKind, failedRow, type StageContext } from "./common.js";
-import { renderSource } from "./sections.js";
+import { renderSource } from "./windows.js";
+import { rangeTag } from "../projects/ranges.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";
@@ -349,7 +350,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     return;
   }
   await ctx.acquire("render", 512, { clipId });
-  // a preview-sized source (a plan's sourceHeight) renders from a full-quality window of the clip (sections.ts)
+  // a preview-sized source (a plan's sourceHeight) renders from a full-quality window of the clip (windows.ts)
   const src = await renderSource(ctx, project, clip);
   const sourcePath = src.path;
   /** the clip's start on the render file's clock: everything that reads pixels or sound from `sourcePath` uses it */
@@ -1300,7 +1301,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // commit only if this is still the clip's current generation; a newer request wins and our files go
   const committed = await svc.tx(async (u) => {
     const [cur] = await u.db
-      .select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey })
+      .select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey, rangeId: schema.clips.rangeId })
       .from(schema.clips)
       .where(eq(schema.clips.id, clipId))
       .for("update");
@@ -1311,7 +1312,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .update(schema.clips)
       .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermarkShown, error: null, diagnostics, captions, updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
-    await u.emit("clip.done", { projectId: projectId, clipId, index: clip.index, renderSec: Math.round((Date.now() - renderStarted) / 1000) });
+    // the range it came from and the caller's ref for it, so a webhook joins the clip to the caller's own records
+    await u.emit("clip.done", {
+      projectId: projectId,
+      clipId,
+      index: clip.index,
+      renderSec: Math.round((Date.now() - renderStarted) / 1000),
+      ...(await rangeTag(u.db, cur.rangeId)),
+    });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
     for (const k of [cur.outputKey, cur.thumbnailKey]) {
@@ -1782,13 +1790,19 @@ export async function markClipFailed(
   await svc.tx(async (u) => {
     // a failing stale render must not mark the newer, pending version as failed
     const [cur] = await u.db
-      .select({ gen: schema.clips.renderGen, status: schema.clips.status })
+      .select({ gen: schema.clips.renderGen, status: schema.clips.status, rangeId: schema.clips.rangeId })
       .from(schema.clips)
       .where(eq(schema.clips.id, clipId))
       .for("update");
     if (!cur || (gen !== undefined && cur.gen !== gen) || (o.ifStatus !== undefined && cur.status !== o.ifStatus)) return;
     await u.db.update(schema.clips).set(failedRow(err)).where(eq(schema.clips.id, clipId));
-    await u.emit("clip.failed", { projectId: projectId, clipId, error: message.slice(0, 1000), errorKind: errorKind(err) });
+    await u.emit("clip.failed", {
+      projectId: projectId,
+      clipId,
+      error: message.slice(0, 1000),
+      errorKind: errorKind(err),
+      ...(await rangeTag(u.db, cur.rangeId)),
+    });
     await finalizeInTx(svc, u, projectId);
   });
 }
@@ -1815,7 +1829,7 @@ export async function planClipCuts(
   signal?: AbortSignal,
   log?: Logger,
   onProgress?: (cut: number, total: number, attempt: number) => void,
-  /** source seconds at `sourcePath`'s first frame (a full-quality window, sections.ts); 0 for the whole source */
+  /** source seconds at `sourcePath`'s first frame (a full-quality window, windows.ts); 0 for the whole source */
   sourceOffsetSec = 0,
 ): Promise<ClipCutPlan> {
   const duration = clip.endSec - clip.startSec;

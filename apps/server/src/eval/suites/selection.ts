@@ -12,7 +12,16 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { defaultProjectSettings, endsSentence, languageProfile, plural, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
+import {
+  RANGE_PAD_SEC,
+  defaultProjectSettings,
+  endsSentence,
+  languageProfile,
+  plural,
+  type ClipCandidate,
+  type TranscriptSegment,
+  type Word,
+} from "@reelsaw/shared";
 import { fixedSentenceRules, sentenceEndAfter, sentenceRules, type SentenceRules } from "../../pipeline/thought.js";
 import { toSentences } from "../../pipeline/transcript.js";
 import {
@@ -35,7 +44,7 @@ import {
   type ScoreResult,
   type SelectContext,
 } from "../../pipeline/select.js";
-import { clipCap, scoreGate, snapCandidate, type ScoreGateOpts } from "../../pipeline/analyze.js";
+import { clipCap, exactRangeBounds, scoreGate, snapCandidate, snapInRanges, type ScoreGateOpts } from "../../pipeline/analyze.js";
 import { isUnavailable, type CaseResult, type Suite, type SummaryMetric, type EvalContext } from "../framework.js";
 import { evalAi } from "../asr.js";
 
@@ -141,6 +150,63 @@ async function fixtures(ctx: EvalContext) {
       /* not a transcript fixture */
     }
   }
+  return out;
+}
+
+/**
+ * Range clipping (docs/specs/range-clipping.md) on a real transcript. Wherever the model proposes a moment, a pick kept in
+ * a project with find ranges lies inside one of them plus its padding, and a proposal overlapping no range is dropped;
+ * an exact clip range snaps to sentences inside its own padding. Model-free: the bound is the snapper's, not the model's.
+ */
+function rangeCases(name: string, t: TranscriptFixture): CaseResult[] {
+  const D = t.durationSec;
+  const settings = defaultProjectSettings;
+  const words = t.words;
+  const thought = words ? { words, rules: sentenceRules(words, t.language) } : {};
+  const ranges = [
+    { startSec: Math.round(D * 0.2), endSec: Math.round(Math.min(D * 0.2 + 120, D * 0.4)) },
+    { startSec: Math.round(D * 0.6), endSec: Math.round(Math.min(D * 0.6 + 90, D * 0.8)) },
+  ];
+  const inside = (c: { startSec: number; endSec: number }, r: { startSec: number; endSec: number }) =>
+    c.startSec >= r.startSec - RANGE_PAD_SEC - 0.5 && c.endSec <= r.endSec + RANGE_PAD_SEC + 0.5;
+  const escapes: string[] = [];
+  let kept = 0;
+  let droppedOutside = 0;
+  const hit = new Set<number>();
+  // like a model reading the whole transcript: a proposal every 1/80th of the video, 35 s long
+  for (let k = 0; k < 80; k++) {
+    const s0 = (D * k) / 80;
+    const proposal = cand(s0, Math.min(D, s0 + 35));
+    const overlaps = ranges.some((r) => Math.min(proposal.endSec, r.endSec) > Math.max(proposal.startSec, r.startSec));
+    const got = snapInRanges(proposal, ranges, t.segments, t.sceneCuts ?? [], settings, D, thought);
+    if (!got) {
+      if (!overlaps) droppedOutside++;
+      continue;
+    }
+    if (!overlaps) escapes.push(`${s0.toFixed(0)}s overlaps no range but was kept`);
+    if (!inside(got.c, got.range)) escapes.push(`${got.c.startSec}-${got.c.endSec} leaves ${got.range.startSec}-${got.range.endSec}`);
+    kept++;
+    hit.add(ranges.indexOf(got.range));
+  }
+  const out: CaseResult[] = [
+    {
+      id: `${name}/ranges-find`,
+      pass: !escapes.length && hit.size === ranges.length,
+      metrics: { kept, droppedOutside, rangesHit: hit.size },
+      notes: [...escapes.slice(0, 4), ...(hit.size < ranges.length ? [`only ${hit.size} of ${ranges.length} ranges got a pick`] : [])].join("; "),
+    },
+  ];
+  // exact clips: short and long ranges across the video snap inside their own padding, never to nothing
+  const exactFails: string[] = [];
+  const exact = [0.1, 0.35, 0.5, 0.75, 0.9].flatMap((f) =>
+    [12, 45].map((len) => ({ startSec: Math.round(D * f), endSec: Math.round(Math.min(D, D * f + len)) })),
+  );
+  for (const r of exact) {
+    const b = exactRangeBounds(r, t.segments, t.sceneCuts ?? [], settings, D, words);
+    if (!inside(b, r)) exactFails.push(`${r.startSec}-${r.endSec} → ${b.startSec}-${b.endSec}`);
+    if (b.endSec - b.startSec <= 0) exactFails.push(`${r.startSec}-${r.endSec} → empty`);
+  }
+  out.push({ id: `${name}/ranges-exact`, pass: !exactFails.length, metrics: { ranges: exact.length }, notes: exactFails.slice(0, 4).join("; ") });
   return out;
 }
 
@@ -659,6 +725,7 @@ export const selectionSuite: Suite = {
       out.push({ id: `${name}/snapping`, pass: !snapFails.length && tried > 20, metrics: { candidates: tried }, notes: snapFails.slice(0, 4).join("; ") });
 
       out.push(...edgeCases(name, t));
+      out.push(...rangeCases(name, t));
       // a clip ends on a complete thought: what the model proposed goes through the real snapper with words, under
       // the sentence rules production reads from this transcript
       const rules = sentenceRules(t.words ?? [], t.language);

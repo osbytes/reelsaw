@@ -17,6 +17,8 @@ import {
   type UserSortKey,
   formatBytes,
   utcDay,
+  type SourceRangeInput,
+  parseRangeArg,
   localePrefsPatchSchema,
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
@@ -364,6 +366,21 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
+
+/** Every `--range start-end[:find|clip]` given (`1:15:00-1:30:00`, `25:00-26:50:clip`), as create_project takes them. */
+function rangeFlags(usage: string): SourceRangeInput[] | undefined {
+  const out: SourceRangeInput[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--range") continue;
+    const text = args[++i] ?? "";
+    const r = parseRangeArg(text);
+    if (!r)
+      throw new Error(`--range "${text}" is not start-end[:find|clip], like 1:15:00-1:30:00 or 25:00-26:50:clip
+${usage}`);
+    out.push(r);
+  }
+  return out.length ? out : undefined;
+}
 
 /** `--stage`, `--cause`, `--q`, `--since 24h|ISO` as the Failed work filter (ops/failures.ts). */
 function failureFilterFlags(command: string): FailureFilter {
@@ -889,9 +906,14 @@ ${usage}`);
   },
   /** Would this source be accepted now: `reelsaw check-source <url> | --minutes <n> [--user email|id]`. Same function as projects.checkSource and the check_source tool. */
   async "check-source"(svc) {
-    const usage = "usage: reelsaw check-source <url> [--user <email|id>]  |  reelsaw check-source --minutes <n> [--user <email|id>]";
+    const usage =
+      "usage: reelsaw check-source <url> [--range start-end[:clip]]… [--user <email|id>]  |  reelsaw check-source --minutes <n> [--range …]… [--user <email|id>]";
     const minutes = flag("minutes");
-    const input = checkSourceInput.safeParse({ sourceUrl: pos[0], durationSec: minutes === undefined ? undefined : Number(minutes) * 60 });
+    const input = checkSourceInput.safeParse({
+      sourceUrl: pos[0],
+      durationSec: minutes === undefined ? undefined : Number(minutes) * 60,
+      ranges: rangeFlags(usage),
+    });
     if (!input.success) throw new Error(`${input.error.issues.map((i) => i.message).join("; ")}\n${usage}`);
     const user = await actingUser(svc, flag("user"));
     const r = await checkSource(svc, user.id, input.data, "cli");
@@ -905,15 +927,26 @@ ${usage}`);
           (a.firstVideoFree ? t(msg`; first video free up to ${{ minutes: a.firstVideoFree }} minutes`) : ""),
       );
     else console.log(t(msg`allowance: no minutes limit`));
+    if (r.ranges) {
+      const minutes = r.ranges.minutes;
+      console.log(t(msg`ranges: ${{ minutes }} minutes counted`));
+      for (const c of r.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+      for (const problem of r.ranges.problems) console.log(`  ${problem}`);
+    }
     if (r.fits === false) {
       console.log(t(msg`refused: ${{ message: r.message }}`));
       if (r.quota?.primary && "href" in r.quota.primary) console.log(t(msg`offer: ${{ label: r.quota.primary.label }}: ${{ href: r.quota.primary.href }}`));
       process.exitCode = 1;
     } else console.log(r.fits ? t(msg`fits`) : t(msg`fits so far (length unknown)`));
   },
-  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…`. Same function as projects.create and the create_project tool. */
+  /**
+   * Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…
+   * [--range start-end[:clip]]…`. Same function as projects.create and the create_project tool.
+   */
   async "create-project"(svc) {
-    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…";
+    const usage =
+      "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]… [--range start-end[:find|clip]]… [--most-replayed n]";
+    const replayed = flag("most-replayed");
     if (!pos[0]) throw new Error(usage);
     const { settings, clear } = settingsFlags(usage);
     const input = createProjectInputSchema.safeParse({
@@ -921,11 +954,18 @@ ${usage}`);
       title: flag("title"),
       settings: Object.keys(settings).length ? settings : undefined,
       ...(clear.length ? { clear } : {}),
+      ranges: rangeFlags(usage),
+      ...(replayed ? { rangesFrom: { mostReplayed: Number(replayed) } } : {}),
     });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));
-    const p = await createProject(svc, user.id, input.data);
+    const p = await createProject(svc, user.id, input.data, { rangeOrigin: "api" });
     console.log(t(msg`created ${{ id: p.id }} "${{ title: p.title }}" for ${{ email: user.email }}; reelsaw status ${{ id: p.id }} follows it`));
+    if (p.ranges) {
+      const minutes = Math.round((p.ranges.billedSec / 60) * 10) / 10;
+      console.log(t(msg`ranges: ${{ minutes }} minutes counted`));
+      for (const c of p.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+    }
   },
   /** Resume a project from where it stopped: `reelsaw retry <projectId>`. Same function as projects.retry and the retry_project tool. */
   async retry(svc) {
@@ -933,10 +973,21 @@ ${usage}`);
     const r = await retryOwnedProject(svc, null, pos[0]);
     console.log(t(msg`resumed ${{ id: pos[0] }} at ${{ queue: r.queue }}`));
   },
-  /** Clip more of a partly processed video: `reelsaw extend-project <projectId>`. Same function as projects.extend and the extend_project tool. */
+  /**
+   * Clip more of a video: `reelsaw extend-project <projectId> [--range start-end[:clip]]…` (the rest of a partly processed
+   * video, or those ranges). Same function as projects.extend and the extend_project tool.
+   */
   async "extend-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw extend-project <projectId>");
-    const r = await extendProject(svc, null, pos[0]);
+    const usage = "usage: reelsaw extend-project <projectId> [--range start-end[:find|clip]]…";
+    if (!pos[0]) throw new Error(usage);
+    const ranges = rangeFlags(usage);
+    const r = await extendProject(svc, null, pos[0], { ranges, rangeOrigin: "api" });
+    if (r.ranges) {
+      const minutes = Math.round((r.ranges.billedSec / 60) * 10) / 10;
+      console.log(t(msg`ranges added: ${{ minutes }} minutes counted`));
+      for (const c of r.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+      return;
+    }
     const m = (sec: number) => Math.round(sec / 60);
     console.log(
       r.whole

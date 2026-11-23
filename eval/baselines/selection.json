@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-22T04:31:29.665Z",
+  "updatedAt": "2026-11-23T01:09:56.387Z",
   "acceptedRegressions": [
     {
       "metric": "punctuatedEdges",
@@ -41,7 +41,15 @@
     "hormozi-unpunctuated/edges-unpunctuated-before": true,
     "hormozi-unpunctuated/edges-unpunctuated": true,
     "hormozi-unpunctuated/edges-punctuated-before": true,
-    "hormozi-unpunctuated/edges-punctuated": true
+    "hormozi-unpunctuated/edges-punctuated": true,
+    "apollo/ranges-find": true,
+    "apollo/ranges-exact": true,
+    "hindi-unpunctuated/ranges-find": true,
+    "hindi-unpunctuated/ranges-exact": true,
+    "hormozi-unpunctuated/ranges-find": true,
+    "hormozi-unpunctuated/ranges-exact": true,
+    "lonely-chapter/ranges-find": true,
+    "lonely-chapter/ranges-exact": true
   },
   "metrics": {
     "passRate": {

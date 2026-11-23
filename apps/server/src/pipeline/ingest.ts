@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import {
   QuotaExceededError,
   type SourceAdmission,
+  admitRanges,
   admitSource,
   hasMinuteLimits,
   recordSourceDuration,
@@ -12,7 +13,14 @@ import {
   trackIngestRefusal,
 } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
-import { eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { eq, inArray, sql } from "drizzle-orm";
+import { RANGE_FETCH_GAP_SEC, RANGE_MIN_SEC, mergeSpans, planRanges, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
+import { buildSparseSource, type SourcePiece } from "./sparse.js";
+import { rangeProblemsText } from "../projects/ranges.js";
+import type { Project, ProjectRange } from "../db/schema.js";
+import type { UnitOfWork } from "../uow.js";
+import type { Services } from "../services.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
@@ -120,7 +128,20 @@ export async function ingest(ctx: StageContext) {
   const dir = await ctx.dir();
   await ctx.start("ingesting");
 
-  const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
+  // a link's ranges: when a person or a caller chose some, only the time every range needs is downloaded (a sparse
+  // source), its "whole" ranges included (a partly processed start, parts added by Clip the rest); a range added since
+  // that the sparse source does not hold has it fetched again
+  const linkRanges =
+    project.sourceType === "url"
+      ? await ctx.db
+          .select({ startSec: schema.projectRanges.startSec, endSec: schema.projectRanges.endSec, origin: schema.projectRanges.origin })
+          .from(schema.projectRanges)
+          .where(eq(schema.projectRanges.projectId, projectId))
+      : [];
+  const chosenRanges = linkRanges.filter((r) => r.origin !== "whole");
+  const sparseHeld = (project.sourceMeta?.["sparse"] as { spans?: [number, number][] } | undefined)?.spans;
+  const sparseShort = !!sparseHeld && project.durationSec !== null && !spansCover(sparseHeld, transcriptSpans(linkRanges, project.durationSec));
+  const stored = !sparseShort && project.sourceKey && (await svc.storage.exists(project.sourceKey));
   const upload =
     !stored && project.sourceType === "upload"
       ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.["uploadId"] ?? "")) })
@@ -153,8 +174,20 @@ export async function ingest(ctx: StageContext) {
       if (announced && (await recordedSourceSec(ctx.db, projectId)) === null) {
         const over = await svc.tx(async (u) => {
           await takeTxLock(u.db, txLock.quota(project.userId));
-          // a long video is not refused while its start fits: only less than one chunk of room refuses before downloading
-          return admitSource(u.db, svc.settings.get(), project.userId, projectId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).then(
+          // ranges count only their own time (admitted whole or refused, as at the end of ingest); a whole video is not
+          // refused while its start fits: only less than one chunk of room refuses before downloading
+          const planned = chosenRanges.length
+            ? planRanges(
+                chosenRanges.map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
+                { durationSec: announced, maxClipSec: Number.POSITIVE_INFINITY },
+              )
+            : null;
+          const admit: Promise<unknown> = planned
+            ? planned.ok
+              ? admitRanges(u.db, svc.settings.get(), project.userId, projectId, planned.billedSec, svc.entitlements)
+              : Promise.resolve() // ranges that cannot be ranges are refused, with their reasons, once the file's length is known
+            : admitSource(u.db, svc.settings.get(), project.userId, projectId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
+          return admit.then(
             () => null,
             (err: unknown) => {
               if (err instanceof QuotaExceededError) return err;
@@ -169,7 +202,7 @@ export async function ingest(ctx: StageContext) {
         }
       }
       // a plan with a source cap (Free) downloads a small copy for the editor and analysis; each clip's render
-      // fetches its own window at full quality (sections.ts), so the proxy never carries the whole video in HD
+      // fetches its own window at full quality (windows.ts), so the proxy never carries the whole video in HD
       const cap = await sourceHeightFor(ctx.db, project.userId, svc.entitlements);
       const { previewHeight: _was, ...rest } = meta;
       meta = cap ? { ...rest, previewHeight: cap } : rest;
@@ -181,54 +214,81 @@ export async function ingest(ctx: StageContext) {
       // --max-filesize only refuses a size known up front; a fragmented download (a stream's recording) has none, so
       // stop it ourselves once what has arrived passes the limit instead of letting it run for hours
       const oversize = new AbortController();
+      /** one yt-dlp download to `<stem>.<ext>`: the whole video, or one section of it; `share` places its progress */
+      const fetchSource = (stem: string, section: [number, number] | null, share: [number, number]) =>
+        svc.media
+          .ytdlp(
+            [
+              "--no-playlist",
+              "--no-warnings",
+              // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
+              "--progress",
+              "--newline",
+              "--print-json",
+              // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
+              "-f",
+              sourceFormat(cap ?? 1080, !!cap),
+              "--merge-output-format",
+              "mp4",
+              // a live stream would be recorded until it ends; skip it here too, for when the lookup above could not tell
+              "--match-filter",
+              NOT_LIVE_FILTER,
+              "--max-filesize",
+              `${limitMB}M`,
+              ...(section ? ["--download-sections", `*${section[0].toFixed(3)}-${section[1].toFixed(3)}`] : []),
+              "-o",
+              path.join(dir, `${stem}.%(ext)s`),
+              "--",
+              project.sourceUrl!,
+            ],
+            {
+              signal: AbortSignal.any([ctx.signal, oversize.signal]),
+              onStderr: (line) => {
+                stderrTail = (stderrTail + "\n" + line).slice(-4000);
+              },
+              onStdout: (line) => {
+                if (line.trimStart().startsWith("{")) jsonLine = line;
+                const tick = parseDownloadTick(line);
+                if (!tick) return;
+                if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
+                downloaded = Math.max(downloaded, share[0] + tick.fraction * share[1]);
+                void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
+              },
+            },
+          )
+          .catch((err: Error) => {
+            ctx.signal.throwIfAborted();
+            if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
+            const message = describeDownloadFailure(err, stderrTail);
+            // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
+            if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
+            throw new DownloadFailedError(message);
+          });
+      // a link with ranges (docs/specs/range-clipping.md): only its padded ranges are downloaded, close ones together,
+      // and joined on the source clock into a sparse source (pipeline/sparse.ts); needs the length the site announced
+      const sparseSpans = chosenRanges.length && announced ? mergeSpans(transcriptSpans(linkRanges, announced), RANGE_FETCH_GAP_SEC) : null;
       const t0 = performance.now();
-      const { proxyId } = await svc.media
-        .ytdlp(
-          [
-            "--no-playlist",
-            "--no-warnings",
-            // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
-            "--progress",
-            "--newline",
-            "--print-json",
-            // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
-            "-f",
-            sourceFormat(cap ?? 1080, !!cap),
-            "--merge-output-format",
-            "mp4",
-            // a live stream would be recorded until it ends; skip it here too, for when the lookup above could not tell
-            "--match-filter",
-            NOT_LIVE_FILTER,
-            "--max-filesize",
-            `${limitMB}M`,
-            "-o",
-            path.join(dir, "source.%(ext)s"),
-            "--",
-            project.sourceUrl!,
-          ],
-          {
-            signal: AbortSignal.any([ctx.signal, oversize.signal]),
-            onStderr: (line) => {
-              stderrTail = (stderrTail + "\n" + line).slice(-4000);
-            },
-            onStdout: (line) => {
-              if (line.trimStart().startsWith("{")) jsonLine = line;
-              const tick = parseDownloadTick(line);
-              if (!tick) return;
-              if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
-              downloaded = Math.max(downloaded, tick.fraction);
-              void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
-            },
-          },
-        )
-        .catch((err: Error) => {
-          ctx.signal.throwIfAborted();
-          if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
-          const message = describeDownloadFailure(err, stderrTail);
-          // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
-          if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
-          throw new DownloadFailedError(message);
-        });
+      let proxyId = "";
+      const pieces: SourcePiece[] = [];
+      if (sparseSpans) {
+        const total = spansSec(sparseSpans);
+        let done = 0;
+        for (const [i, span] of sparseSpans.entries()) {
+          const stem = `piece-${i}`;
+          for (const f of await fs.readdir(dir)) if (f.startsWith(`${stem}.`)) await fs.rm(path.join(dir, f), { force: true });
+          ({ proxyId } = await fetchSource(stem, span, [done / total, (span[1] - span[0]) / total]));
+          done += span[1] - span[0];
+          const name = (await fs.readdir(dir)).find((f) => f.startsWith(`${stem}.`) && f.endsWith(".mp4"));
+          if (!name) throw new Error("yt-dlp finished but no file was produced for a range");
+          pieces.push({ path: path.join(dir, name), startSec: span[0], endSec: span[1] });
+        }
+        meta = { ...meta, sparse: { spans: sparseSpans } };
+        ctx.log.info({ spans: sparseSpans, fetchedSec: Math.round(total), durationSec: announced }, "downloaded only the project's ranges");
+      } else {
+        ({ proxyId } = await fetchSource("source", null, [0, 1]));
+        const { sparse: _was, ...rest } = meta;
+        meta = rest;
+      }
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       if (jsonLine) {
         info = JSON.parse(jsonLine) as Record<string, unknown>;
@@ -260,6 +320,10 @@ export async function ingest(ctx: StageContext) {
         if (missing === "failed") throw new NonRetryableError(LIVE_SOURCE_MESSAGE);
         ctx.log.error({ filter: NOT_LIVE_FILTER, stderrTail }, "download skipped by the live filter although the lookup said not live");
         throw new NonRetryableError(FILTER_CONTRADICTION_MESSAGE, "platform");
+      }
+      if (sparseSpans && announced) {
+        await ctx.progress(0.62, "Joining the ranges");
+        sourcePath = await buildSparseSource(ctx, pieces, announced, dir);
       }
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
@@ -321,7 +385,8 @@ export async function ingest(ctx: StageContext) {
     // its own name: an upload's source path can sit in a folder other ingests share
     const posterPath = path.join(os.tmpdir(), `reelsaw-poster-${projectId}.jpg`);
     try {
-      const at = Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
+      const firstSpan = (meta["sparse"] as { spans?: [number, number][] } | undefined)?.spans?.[0];
+      const at = firstSpan ? Math.min(firstSpan[1], firstSpan[0] + 20) : Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
       await svc.media.ffmpeg(["-y", "-ss", at.toFixed(2), "-i", sourcePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "4", posterPath], {
         threads: "light",
       });
@@ -345,7 +410,11 @@ export async function ingest(ctx: StageContext) {
     await takeTxLock(u.db, txLock.quota(project.userId));
     decided.admitted = null;
     const recorded = await recordedSourceSec(u.db, projectId);
-    if (recorded === null) {
+    // ranges, then the project row: the ranges a person or a caller chose are admitted whole or refused, never cut short
+    const ranges = await u.db.select().from(schema.projectRanges).where(eq(schema.projectRanges.projectId, projectId)).for("update");
+    const chosen = ranges.filter((r) => r.origin !== "whole");
+    const rangesSec = chosen.length && recorded === null ? await settleRanges(svc, u, project, chosen, probe.durationSec) : null;
+    if (recorded === null && rangesSec === null) {
       try {
         decided.admitted = await admitSource(
           u.db,
@@ -365,7 +434,8 @@ export async function ingest(ctx: StageContext) {
       }
     }
     const admitted = decided.admitted;
-    const limit = admitted ? admitted.until : (project.sourceLimitSec ?? null);
+    // ranges bound the work themselves; a whole video may be cut to the start the minutes cover
+    const limit = chosen.length ? null : admitted ? admitted.until : (project.sourceLimitSec ?? null);
     await u.db
       .update(schema.projects)
       .set({
@@ -381,6 +451,11 @@ export async function ingest(ctx: StageContext) {
         updatedAt: new Date(),
       })
       .where(eq(schema.projects.id, projectId));
+    if (rangesSec !== null) await recordSourceDuration(u.db, projectId, rangesSec);
+    if (!ranges.length) {
+      const end = limit === null ? probe.durationSec : Math.min(limit, probe.durationSec);
+      await u.db.insert(schema.projectRanges).values({ id: randomUUID(), projectId, startSec: 0, endSec: end, mode: "find", origin: "whole", billedSec: end });
+    }
     if (admitted) {
       // the ledger counts what is processed: the whole video, or the start a partial project covers
       await recordSourceDuration(u.db, projectId, admitted.until ?? probe.durationSec);
@@ -404,10 +479,54 @@ export async function ingest(ctx: StageContext) {
 }
 
 /**
+ * The ranges a project was created with, now that the file's length is known: clamped to it (the length announced
+ * before downloading can differ by a second), joined where they overlap, priced, and admitted against the account's
+ * minutes (refused with the upgrade offer when they do not fit). Returns the billed seconds. In the ingest's unit,
+ * under the quota lock and with the ranges locked.
+ */
+async function settleRanges(svc: Services, u: UnitOfWork, project: Project, all: ProjectRange[], durationSec: number): Promise<number> {
+  // a file's length is known only now: a range that starts past its end (or keeps less than RANGE_MIN_SEC of it) is
+  // dropped, and the others are clipped; only when none is left does the project fail, with every reason
+  const fits = (r: ProjectRange) => r.startSec < durationSec && Math.min(r.endSec, durationSec) - r.startSec >= RANGE_MIN_SEC;
+  const chosen = all.filter(fits);
+  const outside = all.filter((r) => !fits(r));
+  const asInput = (r: ProjectRange) => ({ startSec: r.startSec, endSec: r.endSec, mode: r.mode });
+  // modes were settled when the ranges were chosen; here only the length can change them
+  const plan = planRanges(chosen.map(asInput), { durationSec, maxClipSec: Number.POSITIVE_INFINITY });
+  if (!plan.ok) {
+    const refused = planRanges(all.map(asInput), { durationSec, maxClipSec: Number.POSITIVE_INFINITY });
+    // stored as the owner reads it: the job runs in their locale
+    throw new NonRetryableError(rangeProblemsText(refused.ok ? [] : refused.problems).join(" "));
+  }
+  if (outside.length)
+    svc.log
+      .child({ module: "ingest", projectId: project.id })
+      .warn({ durationSec, dropped: outside.map((r) => [r.startSec, r.endSec]) }, "ranges past the end of the file dropped");
+  const dropped: string[] = outside.map((r) => r.id);
+  for (const r of plan.ranges) {
+    const [keep, ...rest] = r.inputs.map((i) => chosen[i]).filter((x): x is ProjectRange => x !== undefined);
+    if (!keep) continue;
+    dropped.push(...rest.map((x) => x.id));
+    await u.db
+      .update(schema.projectRanges)
+      .set({ startSec: r.startSec, endSec: r.endSec, mode: r.mode, billedSec: r.billedSec })
+      .where(eq(schema.projectRanges.id, keep.id));
+  }
+  if (dropped.length) await u.db.delete(schema.projectRanges).where(inArray(schema.projectRanges.id, dropped));
+  try {
+    await admitRanges(u.db, svc.settings.get(), project.userId, project.id, plan.billedSec, svc.entitlements);
+  } catch (err) {
+    if (err instanceof QuotaExceededError) trackIngestRefusal(svc.telemetry, project.userId, err);
+    throw err;
+  }
+  return plan.billedSec;
+}
+
+/**
  * yt-dlp format selector for a link's source, at most `height` tall. H.264 first: it decodes everywhere (browser
  * preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU. A preview copy (`small`) keeps the same audio stream
  * as the full download (`ba[ext=m4a]`, ~1 MB a minute): transcription hears it at full quality, and a clip's
- * full-quality window lines up with it sample for sample (sections.ts). Without a small enough video, the smallest.
+ * full-quality window lines up with it sample for sample (windows.ts). Without a small enough video, the smallest.
  */
 export function sourceFormat(height: number, small = false): string {
   const h = `[height<=${height}]`;

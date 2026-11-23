@@ -1028,6 +1028,10 @@ msgstr "Can I clip a GTA 6 stream from Twitch automatically?"
 msgid "Can I clip a whole server's streams?"
 msgstr "Can I clip a whole server's streams?"
 
+#: content/guides.ts
+msgid "Can I clip only part of a long stream?"
+msgstr "Can I clip only part of a long stream?"
+
 #: content/use-cases.ts
 msgid "Can I clip someone else's GTA 6 stream?"
 msgstr "Can I clip someone else's GTA 6 stream?"
@@ -2075,8 +2079,8 @@ msgid "Ingest fetches the video with yt-dlp (or takes an upload), probes it, and
 msgstr "Ingest fetches the video with yt-dlp (or takes an upload), probes it, and stores the source once."
 
 #: content/guides.ts
-msgid "Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it."
-msgstr "Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it."
+msgid "Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long stream, pick only the parts worth clipping on a timeline (or take YouTube's Most replayed peaks): only those are downloaded, transcribed and counted."
+msgstr "Ingest: yt-dlp fetches the video, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long stream, pick only the parts worth clipping on a timeline (or take YouTube's Most replayed peaks): only those are downloaded, transcribed and counted."
 
 #: content/use-cases.ts
 msgid "Inside a campaign that covers that creator, yes; that is what the campaign pays for. Outside one, ask the creator first."
@@ -4731,6 +4735,10 @@ msgstr "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a sc
 #: content/competitors.ts
 msgid "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
 msgstr "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
+
+#: content/guides.ts
+msgid "Yes. Pick ranges on the timeline before anything downloads, take the video's Most replayed peaks, or send ranges from a script through the MCP server or the CLI. Only the ranges are downloaded, transcribed and counted against your minutes, and each range either finds clips inside it or is the clip."
+msgstr "Yes. Pick ranges on the timeline before anything downloads, take the video's Most replayed peaks, or send ranges from a script through the MCP server or the CLI. Only the ranges are downloaded, transcribed and counted against your minutes, and each range either finds clips inside it or is the clip."
 
 #: content/guides.ts
 msgid "Yes. Reelsaw (AGPL-3.0, TypeScript) and OpenShorts (MIT, Python) are both open-source AI clippers you can self-host with Docker Compose. Reelsaw runs with no API key at all and lets you pick any provider per model; OpenShorts can pick moments locally but still needs Gemini for layout picking and silent videos. See the Opus Clip comparison for a feature-by-feature table."

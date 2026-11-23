@@ -206,7 +206,7 @@ export async function capacityOfferFor(
 
 /**
  * How tall a link's source is downloaded for this account: the plan's cap (Free: 240p, the editor's and analysis's
- * copy; clips still render from full-quality windows, pipeline/sections.ts), or null for the full download.
+ * copy; clips still render from full-quality windows, pipeline/windows.ts), or null for the full download.
  * Admins and instances without plans always get the full download.
  */
 export async function sourceHeightFor(db: Db, userId: string, ent?: Entitlements | null): Promise<number | null> {
@@ -853,7 +853,10 @@ export async function admitSource(
   throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
-/** Which minutes limit a video of `durationSec` would pass, with the sentence; `projectId` (when it exists) is left out of the counts. */
+/**
+ * Which minutes limit `durationSec` of video would pass, with the sentence; `projectId` (when it exists) is left out of
+ * the counts. `what` words it for a whole video or for the ranges of one (docs/specs/range-clipping.md).
+ */
 async function minutesOver(
   db: Db,
   instance: InstanceLimits,
@@ -861,6 +864,7 @@ async function minutesOver(
   projectId: string | null,
   durationSec: number,
   ent?: Entitlements | null,
+  what: "video" | "ranges" = "video",
 ): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; descriptor: MessageDescriptor; offer: string; firstVideo: boolean } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
@@ -870,10 +874,16 @@ async function minutesOver(
     const used = await minutesToday(db, userId, except);
     if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY) {
       const [rest, max, at] = [left(l.MAX_SOURCE_MINUTES_PER_DAY, used), Math.round(l.MAX_SOURCE_MINUTES_PER_DAY), hhmm(nextMidnightUtc())];
-      const descriptor = msg({
-        id: "quota.video_over_day",
-        message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes a day left. Resets at ${{ at }}.`,
-      });
+      const descriptor =
+        what === "ranges"
+          ? msg({
+              id: "quota.ranges_over_day",
+              message: msg`These ranges are ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes a day left. Resets at ${{ at }}.`,
+            })
+          : msg({
+              id: "quota.video_over_day",
+              message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes a day left. Resets at ${{ at }}.`,
+            });
       const sentence = t(descriptor);
       return { d, key: "MAX_SOURCE_MINUTES_PER_DAY", message: sentence, sentence, descriptor, offer: "", firstVideo: false };
     }
@@ -892,19 +902,46 @@ async function minutesOver(
       const rest = left(l.MAX_SOURCE_MINUTES_PER_MONTH, m.used);
       const on = resetDay(period.end);
       const descriptor = m.firstPending
-        ? msg({
-            id: "quota.video_over_first",
-            message: msg`This video is ${plural({ length }, { other: "#" })} minutes. Your first video is free up to ${plural({ free }, { other: "#" })} minutes, and after that your plan covers ${plural({ max }, { other: "#" })} minutes a month. Try a video under ${plural({ fits }, { other: "#" })} minutes.`,
-          })
-        : msg({
-            id: "quota.video_over_month",
-            message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes left this period. Resets on ${{ on }}.`,
-          });
+        ? what === "ranges"
+          ? msg({
+              id: "quota.ranges_over_first",
+              message: msg`These ranges are ${plural({ length }, { other: "#" })} minutes. Your first video is free up to ${plural({ free }, { other: "#" })} minutes, and after that your plan covers ${plural({ max }, { other: "#" })} minutes a month. Choose ranges under ${plural({ fits }, { other: "#" })} minutes.`,
+            })
+          : msg({
+              id: "quota.video_over_first",
+              message: msg`This video is ${plural({ length }, { other: "#" })} minutes. Your first video is free up to ${plural({ free }, { other: "#" })} minutes, and after that your plan covers ${plural({ max }, { other: "#" })} minutes a month. Try a video under ${plural({ fits }, { other: "#" })} minutes.`,
+            })
+        : what === "ranges"
+          ? msg({
+              id: "quota.ranges_over_month",
+              message: msg`These ranges are ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes left this period. Resets on ${{ on }}.`,
+            })
+          : msg({
+              id: "quota.video_over_month",
+              message: msg`This video is ${plural({ length }, { other: "#" })} minutes and you have ${plural({ rest }, { other: "#" })} of your ${plural({ max }, { other: "#" })} minutes left this period. Resets on ${{ on }}.`,
+            });
       const sentence = t(descriptor);
       return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `${sentence}${offer}`, sentence, descriptor, offer, firstVideo: m.firstPending };
     }
   }
   return null;
+}
+
+/**
+ * A project of ranges (docs/specs/range-clipping.md): its billed seconds are admitted whole or refused with the
+ * upgrade offer, never cut to their start the way a whole video is (`admitSource`), since which ranges to drop is the
+ * person's choice. Call under the account's quota lock, in the unit that records the seconds.
+ */
+export async function admitRanges(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  projectId: string | null,
+  billedSec: number,
+  ent?: Entitlements | null,
+): Promise<void> {
+  const over = await minutesOver(db, instance, userId, projectId, billedSec, ent, "ranges");
+  if (over) throw new QuotaExceededError(over.message, over.key, quotaRefusal(over.d, over.key, over.sentence), { firstVideo: over.firstVideo });
 }
 
 /** Whole minutes still free under a cap, never negative. */

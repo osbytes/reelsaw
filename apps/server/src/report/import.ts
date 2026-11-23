@@ -457,6 +457,8 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         renderGen: _g,
         outputKey: _o,
         thumbnailKey: _t,
+        // the bundle carries no ranges, so a clip's range would point at nothing (and break its foreign key)
+        rangeId: _r,
         ...rest
       } = c as Record<string, unknown> & typeof c;
       clipRows.push({
@@ -512,7 +514,11 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       } as never);
       if (transcript) {
         const { chunks, projectId: _tp, createdAt: _tc, ...t } = transcript as Record<string, unknown> & typeof transcript;
-        await u.db.insert(schema.transcripts).values({ ...(remap(t) as Record<string, unknown>), projectId } as never);
+        // a bundle from before covered spans says only how far the transcript reaches (covered_sec; null = the video)
+        const spans = Array.isArray(t["covered"]) && t["covered"].length ? t["covered"] : null;
+        const end = typeof t["coveredSec"] === "number" ? t["coveredSec"] : project.durationSec;
+        const covered = spans ?? (end ? [[0, end]] : []);
+        await u.db.insert(schema.transcripts).values({ ...(remap(t) as Record<string, unknown>), covered, projectId } as never);
         if (chunks.length)
           await u.db.insert(schema.transcriptChunks).values(
             chunks.map((c) => ({

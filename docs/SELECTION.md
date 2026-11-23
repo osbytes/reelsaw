@@ -17,6 +17,16 @@ How a clip's start and end are chosen, and where to add a fixture when one is wr
    `test/thought.test.ts`) moves the edges onto sentence boundaries. The editor's manual edits never
    go through it (user decisions are durable).
 
+## Ranges
+
+A project with ranges (docs/specs/range-clipping.md) picks only inside them. Each **find** range is searched with
+only its own sentences, plus 15 s of padding on each side (`snapInRanges`, `analyze.ts`): a proposal is cut to its
+range and padding before snapping and dropped if it still reaches past them, so a pick never lands in time no range
+asked for. An **exact clip** range is the clip, its ends snapped to the nearest sentences inside its padding
+(`exactRangeBounds`), then titled and scored by prepare's exact mode. A range is picked from once (`picked_at`);
+ranges added later are picked around the clips already there. The `selection` eval holds both bounds on every stored
+transcript (`ranges-find`, `ranges-exact`).
+
 ## Scoring candidates
 
 After snapping and pooling, candidates are scored on the rubric in batches of 4 (`scoreSample`, `select.ts`; the one

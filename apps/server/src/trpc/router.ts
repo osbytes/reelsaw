@@ -1,5 +1,6 @@
 import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
-import { rendersFromSections } from "../pipeline/sections.js";
+import { rendersFromWindows } from "../pipeline/windows.js";
+import { projectRangesOf, publicRange } from "../projects/ranges.js";
 import { z } from "zod";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -96,6 +97,8 @@ import {
   CLEARABLE_SETTINGS,
   projectMetadataSchema,
   createProjectInputSchema,
+  MAX_RANGES,
+  rangeSchema,
   projectSettingsPatchSchema,
   defaultProjectSettings,
   PASSWORD_MAX_LENGTH,
@@ -233,6 +236,8 @@ function publicClip(c: schema.Clip) {
     emphasis: c.emphasis ?? [],
     status: c.status,
     origin: c.origin,
+    /** the project range the clip came from (get_project lists them); null for clips from before ranges */
+    rangeId: c.rangeId ?? null,
     diagnostics: c.diagnostics ?? null,
     error: c.error,
     layout: c.layout,
@@ -270,7 +275,7 @@ function publicProject(p: schema.Project) {
     metadata: p.metadata,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
     /** the stored source is a small preview this tall (the plan's cap): clips still render from full-quality windows of the link; null = full source */
-    sourcePreviewHeight: rendersFromSections(p),
+    sourcePreviewHeight: rendersFromWindows(p),
     /** retention removed the stored source; Retry downloads it again */
     sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
@@ -1552,12 +1557,29 @@ const restRouter = router({
       const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
       // a partly processed video: what was processed, what is left and what finishes it (Clip the rest, or the plan)
       const partial = await partialSourceOf(ctx.svc, p);
-      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers, partial };
+      // the parts of the video the project processes (docs/specs/range-clipping.md); each clip names its range and ref
+      const ranges = (await projectRangesOf(db, p.id)).map(publicRange);
+      const refOf = new Map(ranges.map((r) => [r.id, r.ref]));
+      return {
+        ...publicProject(p),
+        ranges,
+        clips: clips.map((c) => ({ ...publicClip(c), ref: (c.rangeId && refOf.get(c.rangeId)) || null })),
+        replacedClips,
+        transcript,
+        estimates,
+        bumpers,
+        partial,
+      };
     }),
 
-    create: protectedProcedure
-      .input(createProjectInputSchema)
-      .mutation(async ({ ctx, input }) => publicProject(await createProject(ctx.svc, ctx.user.id, input))),
+    create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
+      // ranges from the New project timeline are a person's; from MCP, an API key or the CLI, a caller's
+      const surface = ctx.surface ?? (ctx.who.via === "session" ? "web" : "api");
+      const p = await createProject(ctx.svc, ctx.user.id, input, { rangeOrigin: surface === "web" ? "user" : "api" });
+      if (!p.ranges) return publicProject(p);
+      const ranges = (await projectRangesOf(ctx.svc.database.db, p.id)).map(publicRange);
+      return { ...publicProject(p), ranges, rangeChanges: p.ranges.changes, billedSec: p.ranges.billedSec };
+    }),
 
     /** The project transcript as an SRT / VTT file (one cue per segment; VTT can carry word times). */
     transcriptFile: protectedProcedure
@@ -1587,8 +1609,14 @@ const restRouter = router({
      * where it stopped (extendProject). A quota refusal with the upgrade offer when no minutes are left.
      */
     extend: protectedProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ ctx, input }) => extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+      .input(z.object({ id: z.string(), ranges: z.array(rangeSchema).min(1).max(MAX_RANGES).optional() }))
+      .mutation(({ ctx, input }) => {
+        const surface = ctx.surface ?? (ctx.who.via === "session" ? "web" : "api");
+        return extendProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, {
+          ranges: input.ranges,
+          rangeOrigin: surface === "web" ? "user" : "api",
+        });
+      }),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
     refine: protectedProcedure

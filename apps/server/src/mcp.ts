@@ -135,7 +135,7 @@ export function createMcpServer(
     ...(p.deletedAt ? { deletedAt: p.deletedAt, storedBytes: p.storedBytes, purgeAt: p.purgeAt } : {}),
     url: abs(`/p/${p.id}`),
   });
-  const clipSummary = (c: Awaited<ReturnType<typeof api.projects.get>>["clips"][number]) => ({
+  const clipSummary = (c: Omit<Awaited<ReturnType<typeof api.projects.get>>["clips"][number], "ref"> & { ref?: string | null }) => ({
     id: c.id,
     index: c.index,
     title: c.title,
@@ -147,6 +147,9 @@ export function createMcpServer(
     status: c.status,
     error: c.error,
     layout: c.layout,
+    // the project range it came from and your ref for it (create_project ranges); null without ranges
+    rangeId: c.rangeId,
+    ref: c.ref ?? null,
     videoUrl: abs(c.videoUrl),
     thumbnailUrl: abs(c.thumbnailUrl),
   });
@@ -199,12 +202,14 @@ export function createMcpServer(
     }),
   );
 
-  server.registerTool("check_source", TOOLS.check_source, ({ sourceUrl, durationSec }) => run(() => api.projects.checkSource({ sourceUrl, durationSec })));
+  server.registerTool("check_source", TOOLS.check_source, ({ sourceUrl, durationSec, ranges }) =>
+    run(() => api.projects.checkSource({ sourceUrl, durationSec, ranges })),
+  );
 
   server.registerTool(
     "create_project",
     TOOLS.create_project,
-    ({ sourceUrl, uploadId, title, metadata, settings, introAssetId, outroAssetId, introSec, outroSec, clear }) =>
+    ({ sourceUrl, uploadId, title, metadata, settings, introAssetId, outroAssetId, introSec, outroSec, clear, ranges, rangesFrom }) =>
       run(async () => {
         // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
         const merged = {
@@ -215,7 +220,16 @@ export function createMcpServer(
           ...(outroSec !== undefined ? { outroSec } : {}),
         };
         return {
-          ...(await api.projects.create({ sourceUrl, uploadId, title, metadata, settings: Object.keys(merged).length ? merged : undefined, clear })),
+          ...(await api.projects.create({
+            sourceUrl,
+            uploadId,
+            title,
+            metadata,
+            settings: Object.keys(merged).length ? merged : undefined,
+            clear,
+            ranges,
+            rangesFrom,
+          })),
           next: "wait_for_project",
         };
       }),
@@ -592,7 +606,7 @@ export function createMcpServer(
   server.registerTool("retry_project", TOOLS.retry_project, ({ id }) => run(() => api.projects.retry({ id })));
 
   server.registerTool("reanalyze_project", TOOLS.reanalyze_project, ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })));
-  server.registerTool("extend_project", TOOLS.extend_project, ({ id }) => run(() => api.projects.extend({ id })));
+  server.registerTool("extend_project", TOOLS.extend_project, ({ id, ranges }) => run(() => api.projects.extend({ id, ranges })));
   server.registerTool("list_upgrade_work", TOOLS.list_upgrade_work, () => run(() => api.projects.upgradeWork()));
   server.registerTool("start_upgrade_work", TOOLS.start_upgrade_work, ({ rerender, finish }) => run(() => api.projects.startUpgradeWork({ rerender, finish })));
 

@@ -393,6 +393,11 @@ msgstr ""
 msgid "quota.rerenders_per_hour"
 msgstr ""
 
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.too_many"
+msgstr ""
+
 #: src/cli.ts
 msgid "{cpus} ({leased} leased)"
 msgstr ""
@@ -767,6 +772,11 @@ msgstr ""
 
 #: src/cli.ts
 msgid "{s}s ago"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.refused"
 msgstr ""
 
 #: src/cli.ts
@@ -1508,6 +1518,11 @@ msgid "project.source_required"
 msgstr ""
 
 #. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.none"
+msgstr ""
+
+#. js-lingui-explicit-id
 #: src/mcp.ts
 msgid "mcp.revoke_media_link.one_target"
 msgstr ""
@@ -1733,6 +1748,11 @@ msgstr ""
 
 #: src/cli.ts
 msgid "more: reelsaw users {take} [same filter flags] --cursor {cursor}"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.most_replayed_upload"
 msgstr ""
 
 #. js-lingui-explicit-id
@@ -2441,6 +2461,29 @@ msgstr ""
 msgid "Queued. The new video replaces the old when done; poll get_clip."
 msgstr ""
 
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.end_before_start"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.too_short"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/ranges.ts
+msgid "ranges.past_end"
+msgstr ""
+
+#: src/cli.ts
+msgid "ranges added: {minutes} minutes counted"
+msgstr ""
+
+#: src/cli.ts
+msgid "ranges: {minutes} minutes counted"
+msgstr ""
+
 #: src/cli.ts
 msgid "re-render requested"
 msgstr ""
@@ -2474,18 +2517,23 @@ msgid "Reelsaw clips the rest when your minutes reset."
 msgstr ""
 
 #. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.length_unknown"
+msgstr ""
+
+#. js-lingui-explicit-id
 #: src/clips/service.ts
 msgid "clip.processed_so_far"
 msgstr ""
 
 #. js-lingui-explicit-id
-#: src/clips/service.ts
-msgid "clip.still_transcribing"
+#: src/projects/service.ts
+msgid "project.still_transcribing_rest"
 msgstr ""
 
 #. js-lingui-explicit-id
-#: src/projects/service.ts
-msgid "project.still_transcribing_rest"
+#: src/clips/service.ts
+msgid "clip.still_transcribing_part"
 msgstr ""
 
 #: src/email.ts
@@ -3017,6 +3065,11 @@ msgid "list.invalid_page_link"
 msgstr ""
 
 #. js-lingui-explicit-id
+#: src/clips/service.ts
+msgid "clip.outside_ranges"
+msgstr ""
+
+#. js-lingui-explicit-id
 #: src/signup-rules.ts
 msgid "signup_rule.email_matches_all"
 msgstr ""
@@ -3194,6 +3247,21 @@ msgid "These finished while you were away."
 msgstr ""
 
 #. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_day"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_month"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/quota.ts
+msgid "quota.ranges_over_first"
+msgstr ""
+
+#. js-lingui-explicit-id
 #: src/accounts.ts
 msgid "account.account_does_not_need_new"
 msgstr ""
@@ -3343,6 +3411,11 @@ msgid "project.already_whole"
 msgstr ""
 
 #. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "project.clips_ranges"
+msgstr ""
+
+#. js-lingui-explicit-id
 #: src/transcript-files.ts
 msgid "transcript.export_not_ready"
 msgstr ""
@@ -3354,6 +3427,11 @@ msgstr ""
 #. js-lingui-explicit-id
 #: src/library/service.ts
 msgid "library.svg_links_other_files_embed"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.no_heatmap"
 msgstr ""
 
 #. js-lingui-explicit-id
@@ -3383,6 +3461,11 @@ msgstr ""
 #. js-lingui-explicit-id
 #: src/webhooks/service.ts
 msgid "webhook.webhook_turned_off_turn_then"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/projects/service.ts
+msgid "ranges.already_clipped"
 msgstr ""
 
 #: src/mcp.ts

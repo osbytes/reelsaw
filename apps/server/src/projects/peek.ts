@@ -2,6 +2,7 @@ import { msg } from "@lingui/core/runtime-macro";
 import { LRUCache } from "lru-cache";
 import { z } from "zod";
 import type { MediaTools } from "../media.js";
+import type { HeatBin } from "@reelsaw/shared";
 import { t } from "../i18n.js";
 
 const oembedSchema = z.object({ title: z.string().optional(), thumbnail_url: z.string().optional(), author_name: z.string().optional() });
@@ -118,7 +119,12 @@ async function lookUp(media: Pick<MediaTools, "ytdlp">, url: string, signal?: Ab
     .find((l) => l.trim().startsWith("{"));
   const parsed = jsonLine ? announcedSchema.safeParse(JSON.parse(jsonLine)) : null;
   const info = parsed?.success ? parsed.data : {};
-  const answer = { sec: info.duration ?? null, live: isUnfinishedStream(info) };
+  const heatmap = (info.heatmap ?? []).flatMap((b) =>
+    typeof b.start_time === "number" && typeof b.end_time === "number" && typeof b.value === "number"
+      ? [{ startSec: b.start_time, endSec: b.end_time, value: b.value }]
+      : [],
+  );
+  const answer = { sec: info.duration ?? null, live: isUnfinishedStream(info), heatmap };
   lengths.set(url, answer);
   return answer;
 }
@@ -128,11 +134,28 @@ const announcedSchema = z.object({
   duration: z.number().positive().nullish().catch(null),
   is_live: z.boolean().nullish().catch(null),
   live_status: z.string().nullish().catch(null),
+  /** YouTube's Most replayed: how often each stretch is watched (docs/specs/range-clipping.md) */
+  heatmap: z
+    .array(z.object({ start_time: z.number().optional(), end_time: z.number().optional(), value: z.number().optional() }))
+    .nullish()
+    .catch(null),
 });
 
 interface Announced {
   sec: number | null;
   live: boolean;
+  /** the site's replay heatmap; empty when it has none */
+  heatmap: HeatBin[];
+}
+
+/**
+ * A link's replay heatmap (YouTube's Most replayed), from the same lookup as its length and remembered with it: empty
+ * when the site has none (new or small videos, most other sites).
+ */
+export async function announcedHeatmap(media: Pick<MediaTools, "ytdlp">, url: string, signal?: AbortSignal): Promise<HeatBin[]> {
+  const known = lengths.get(url) ?? (await lookUp(media, url, signal));
+  if (known.live) throw new LiveSourceError();
+  return known.heatmap;
 }
 
 /** How long a link's looked-up length is reused: long enough to span checking a link, creating it and ingest starting. */
