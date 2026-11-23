@@ -33,8 +33,14 @@ import {
   plural,
   processedEndSec,
   spansCover,
+  type RangeChange,
+  MAX_RANGES,
+  planRanges,
+  rangeProblemMessage,
+  rangeSchema,
 } from "@reelsaw/shared";
 import {
+  admitRanges,
   checkAnnouncedMinutes,
   checkProjectQuota,
   checkRestoreQuota,
@@ -911,7 +917,24 @@ export async function rerenderProjectClips(
  * the first (ingest) job commit together, so there is never a "queued" project with no job behind it.
  * tRPC `projects.create`, the MCP create_project tool and `reelsaw create-project` call this.
  */
-export async function createProject(svc: Services, userId: string, input: CreateProjectInput): Promise<typeof schema.projects.$inferSelect> {
+/** What creating a project with ranges planned: the billed seconds and what the planner changed (merges, clamps). */
+interface CreatedRanges {
+  billedSec: number;
+  changes: RangeChange[];
+}
+
+/**
+ * Start a project. With `ranges` (docs/specs/range-clipping.md) only those parts are processed: they are planned
+ * (`planRanges`: checked, clamped to the announced length, merged, priced) and admitted whole against the minutes, or
+ * refused with the upgrade offer; ingest settles them again on the file. `rangeOrigin` says who chose them: a person
+ * (the web timeline) or a caller (MCP, API, CLI).
+ */
+export async function createProject(
+  svc: Services,
+  userId: string,
+  input: CreateProjectInput,
+  o: { rangeOrigin?: "user" | "api" } = {},
+): Promise<typeof schema.projects.$inferSelect & { ranges?: CreatedRanges }> {
   const db = svc.database.db;
   const log = svc.log.child({ module: "projects", userId });
   if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a sourceUrl (a link to the video) or an uploadId." });
@@ -923,6 +946,8 @@ export async function createProject(svc: Services, userId: string, input: Create
   await checkProjectQuota(db, svc.settings.get(), userId, { ent: svc.entitlements }).catch(quotaReached);
   let sourceMeta: (typeof schema.projects.$inferSelect)["sourceMeta"] = null;
   let title = input.title?.trim() || "";
+  /** the length the site announced; null for a file (ingest settles ranges on it) or a site that does not say */
+  let announcedSec: number | null = null;
   if (input.uploadId) {
     const up = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, userId)) });
     if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "No upload with that id in your account." });
@@ -931,13 +956,16 @@ export async function createProject(svc: Services, userId: string, input: Create
   } else if (input.sourceUrl) {
     const [peek, announced] = await Promise.all([
       peekUrlMeta(input.sourceUrl),
-      announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
+      // ranges are planned against the video's length, so it is looked up for them whatever the account's limits
+      (input.ranges ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch((err: unknown) => {
         if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
         throw err;
       }),
     ]);
+    announcedSec = announced;
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
-    if (announced)
+    // (ranges are admitted whole below instead, once the project's settings say how long a clip may be)
+    if (announced && !input.ranges)
       await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
     title ||= peek.title ?? "";
@@ -951,6 +979,10 @@ export async function createProject(svc: Services, userId: string, input: Create
     const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+    const plan = input.ranges ? planRanges(input.ranges, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
+    if (plan && !plan.ok) throw new TRPCError({ code: "BAD_REQUEST", message: plan.problems.map(rangeProblemMessage).join(" ") });
+    // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock
+    if (plan) await admitRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
     const [row] = await u.db
       .insert(schema.projects)
       .values({
@@ -967,11 +999,25 @@ export async function createProject(svc: Services, userId: string, input: Create
       .returning();
     if (!row) throw new Error("the project row was not returned");
     await recordProjectCreated(u.db, userId, id, row.createdAt);
+    if (plan?.ok && plan.ranges.length)
+      await u.db.insert(schema.projectRanges).values(
+        plan.ranges.map((r) => ({
+          id: randomUUID(),
+          projectId: id,
+          startSec: r.startSec,
+          endSec: r.endSec,
+          mode: r.mode,
+          origin: o.rangeOrigin ?? "api",
+          label: r.label ?? null,
+          ref: r.ref ?? null,
+          billedSec: r.billedSec,
+        })),
+      );
     await syncProjectRefs(u.db, row); // the defaults' intro/outro
     await u.emit("project.created", { projectId: id, title, sourceType: row.sourceType });
     await startRun(u, id, { reason: "created", status: "queued" });
     await u.enqueue(QUEUES.ingest, { projectId: id });
-    return row;
+    return plan?.ok ? { ...row, ranges: { billedSec: plan.billedSec, changes: plan.changes } } : row;
   });
 }
 
@@ -982,6 +1028,11 @@ export async function createProject(svc: Services, userId: string, input: Create
  */
 async function announcedMinutesFor(svc: Services, userId: string, url: string, log: Services["log"]): Promise<number | null> {
   if (!(await hasMinuteLimits(svc.database.db, svc.settings.get(), userId, svc.entitlements))) return null;
+  return announcedLengthFor(svc, url, log);
+}
+
+/** The length a link announces, looked up whatever the account's limits (ranges are planned against it); as above. */
+async function announcedLengthFor(svc: Services, url: string, log: Services["log"]): Promise<number | null> {
   try {
     await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
     return await announcedDuration(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
@@ -998,6 +1049,12 @@ export const checkSourceInput = z
   .object({
     sourceUrl: z.url().optional().describe("Link to the video you are about to add; its length is looked up without downloading it"),
     durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you are about to upload, in seconds (instead of sourceUrl)"),
+    ranges: z
+      .array(rangeSchema)
+      .min(1)
+      .max(MAX_RANGES)
+      .optional()
+      .describe("The parts you would clip (as create_project takes them): priced and checked against your minutes instead of the whole video"),
   })
   .refine((v) => !!v.sourceUrl !== (v.durationSec !== undefined), { message: "Give sourceUrl or durationSec, not both" });
 
@@ -1026,6 +1083,11 @@ export interface SourceCheck {
   quota: QuotaRefusal | null;
   /** the monthly minutes this account has, when a minutes limit applies */
   allowance: MinutesAllowance | null;
+  /**
+   * With `ranges`: what they cost and what the planner changed; `fits` and `message` are then about the ranges (no
+   * partial: ranges are admitted whole or refused). `problems`: ranges that cannot be ranges (each in a sentence).
+   */
+  ranges: { seconds: number; minutes: number; changes: RangeChange[]; problems: string[] } | null;
 }
 
 /**
@@ -1043,17 +1105,17 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutesAllowance(db, s, userId, svc.entitlements),
     input.durationSec ??
       (input.sourceUrl
-        ? announcedMinutesFor(svc, userId, input.sourceUrl, log).catch((err: unknown) => {
+        ? (input.ranges ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch((err: unknown) => {
             if (err instanceof LiveSourceError) return "live" as const;
             throw err;
           })
         : null),
   ]);
-  if (durationSec === "live") return { minutes: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance };
+  if (durationSec === "live") return { minutes: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance, ranges: null };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
-    return { minutes, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance };
+    return { minutes, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance, ranges: null };
   };
   try {
     await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
@@ -1061,11 +1123,36 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     if (err instanceof QuotaError) return refused(err);
     throw err;
   }
-  if (!durationSec) return { minutes, partial: null, fits: null, message: null, quota: null, allowance };
+  if (input.ranges) {
+    // priced the way createProject plans them: the account's default longest clip, the length when it is known
+    const settings = await resolveProjectSettings(db, userId, undefined, undefined);
+    const plan = planRanges(input.ranges, { durationSec: durationSec || null, maxClipSec: settings.maxClipSeconds });
+    if (!plan.ok) {
+      const problems = plan.problems.map(rangeProblemMessage);
+      return {
+        minutes,
+        partial: null,
+        fits: false,
+        message: problems.join(" "),
+        quota: null,
+        allowance,
+        ranges: { seconds: 0, minutes: 0, changes: [], problems },
+      };
+    }
+    const priced = { seconds: plan.billedSec, minutes: Math.round((plan.billedSec / 60) * 10) / 10, changes: plan.changes, problems: [] };
+    try {
+      await admitRanges(db, s, userId, null, plan.billedSec, svc.entitlements);
+    } catch (err) {
+      if (err instanceof QuotaError) return { ...refused(err), ranges: priced };
+      throw err;
+    }
+    return { minutes, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
+  }
+  if (!durationSec) return { minutes, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
   const r = await predictAdmission(db, s, userId, durationSec, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
   if ("refused" in r) return refused(r.refused);
   const until = r.admission.until;
-  if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance };
+  if (until === null) return { minutes, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
   const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
   const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
   const partial: SourcePartial = {
@@ -1087,7 +1174,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutes: partial.minutes,
     totalMinutes: partial.totalMinutes,
   });
-  return { minutes, partial, fits: true, message: null, quota: null, allowance };
+  return { minutes, partial, fits: true, message: null, quota: null, allowance, ranges: null };
 }
 
 /**

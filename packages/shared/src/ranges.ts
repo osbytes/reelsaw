@@ -5,7 +5,8 @@
  * `extend_project` and the CLI all plan through `planRanges`, so the price a person sees is the price charged.
  */
 import { z } from "zod";
-import { formatTime } from "./index.js";
+// never "./index.js": index builds its schemas from these at load time, so a cycle leaves them undefined in a bundle
+import { formatTime } from "./format.js";
 
 export const RANGE_MODES = ["find", "clip"] as const;
 export type RangeMode = (typeof RANGE_MODES)[number];

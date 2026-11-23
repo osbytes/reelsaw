@@ -21,6 +21,8 @@ import {
   MAX_CLIP_LAYERS,
   REFINE_STEPS,
   projectMetadataSchema,
+  MAX_RANGES,
+  rangeSchema,
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
@@ -129,10 +131,16 @@ export const TOOLS = {
   check_source: {
     title: "Check source",
     description:
-      "Before create_project: would this video be accepted now? Give sourceUrl (its length is looked up, nothing is downloaded) or durationSec for a file. Returns { minutes, partial, fits, message, quota, allowance }; fits false means create_project would be refused, message says why, quota.primary is the upgrade offer (a link for a person). fits null: the length is unknown. partial: accepted, but only its first partial.minutes are processed now (extend_project later).",
+      "Before create_project: would this video be accepted now? Give sourceUrl (length looked up, nothing downloaded) or durationSec for a file, plus ranges if you clip only parts. Returns { minutes, partial, fits, message, quota, allowance, ranges }: fits false = create_project would be refused (message says why; quota.primary is the upgrade offer); fits null = length unknown; partial = only the first partial.minutes are processed now. ranges: { minutes } they count, changes made (merged, clamped), problems.",
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or durationSec"),
       durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you will upload, in seconds; give this or sourceUrl"),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe("The parts you would clip, as create_project takes them: priced and checked against your minutes instead of the whole video"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -140,7 +148,7 @@ export const TOOLS = {
     title: "Create project",
     annotations: { destructiveHint: false },
     description:
-      'Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: "queued", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.',
+      'Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: "queued", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise. ranges: only those parts.',
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or uploadId"),
       uploadId: z
@@ -154,6 +162,14 @@ export const TOOLS = {
         .optional()
         .describe('Your own key/value strings (≤20 keys, 1 KB), returned by get_project and sent in every webhook for this project, e.g. { runId: "n8n-123" }'),
       settings: settingsInput.optional(),
+      ranges: z
+        .array(rangeSchema)
+        .min(1)
+        .max(MAX_RANGES)
+        .optional()
+        .describe(
+          'Clip only these parts, in seconds of the source video: [{ startSec, endSec, mode?: "find" (pick moments inside it, default) | "clip" (the range is the clip), label?, ref? }]. Only they are fetched, transcribed, picked from and counted (check_source prices them). The response adds ranges, rangeChanges and billedSec; each clip from a range carries rangeId and your ref (get_project, clip.done / clip.failed webhooks). Omit for the whole video.',
+        ),
       introAssetId: z
         .string()
         .min(1)

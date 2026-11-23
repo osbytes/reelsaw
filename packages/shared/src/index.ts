@@ -1,5 +1,6 @@
 import { objectKeys } from "ts-extras";
 import { z } from "zod";
+import { MAX_RANGES, rangeSchema } from "./ranges.js";
 import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
 import { outputShapeSchema } from "./shape.js";
 
@@ -1143,6 +1144,18 @@ export const createProjectInputSchema = z.object({
   settings: projectSettingsPatchSchema.optional(),
   /** Settings your project defaults give that this project leaves unset (language: detect; focus: none), as in an update. */
   clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional(),
+  /**
+   * Clip only these parts of the video (docs/specs/range-clipping.md): only they are fetched, transcribed, picked from
+   * and counted against minutes. Omitted: the whole video.
+   */
+  ranges: z
+    .array(rangeSchema)
+    .min(1)
+    .max(MAX_RANGES)
+    .optional()
+    .describe(
+      'Only these parts of the video, in source seconds: only they are transcribed, picked from and counted. mode "find" picks moments inside a range, "clip" makes the range one clip. ref is your own id, returned on its clips and their webhooks.',
+    ),
 });
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 
@@ -1375,8 +1388,14 @@ export const projectEventSchemas = {
   }),
   "clip.created": event(clipRef),
   "clip.rendering": event({ clipId: z.string() }),
-  "clip.done": event({ clipId: z.string(), index: z.number().int(), renderSec: z.number().optional() }),
-  "clip.failed": event({ clipId: z.string(), error: z.string(), errorKind: z.string().optional() }),
+  "clip.done": event({
+    clipId: z.string(),
+    index: z.number().int(),
+    renderSec: z.number().optional(),
+    rangeId: z.string().optional(),
+    ref: z.string().optional(),
+  }),
+  "clip.failed": event({ clipId: z.string(), error: z.string(), errorKind: z.string().optional(), rangeId: z.string().optional(), ref: z.string().optional() }),
   "clip.retrying": event({ clipId: z.string(), step: z.string(), attempt: z.number().int(), max: z.number().int(), reason: z.string() }),
   "clip.capacity_wait": event({ clipId: z.string(), bound: z.enum(["ceiling", "reserve"]) }),
   /** `both`: joining the intro and outro failed, so the clip went out without either */
@@ -1469,14 +1488,6 @@ export interface EventsReplayed {
   hasMore: boolean;
 }
 export const isEventsReplayed = (e: ProjectEvent | EventsReplayed): e is EventsReplayed => e.type === "events.replayed";
-
-export function formatTime(sec: number): string {
-  const s = Math.max(0, sec);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const r = Math.floor(s % 60);
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
-}
 
 // ---------- captions (shared by the ASS renderer and the browser preview) ----------
 

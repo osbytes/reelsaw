@@ -18,6 +18,8 @@ import {
   formatBytes,
   plural,
   utcDay,
+  type SourceRangeInput,
+  parseRangeArg,
 } from "@reelsaw/shared";
 import { SCENARIOS, seedScenario } from "./dev/scenarios.js";
 import { CommandError } from "./media.js";
@@ -360,6 +362,21 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
+
+/** Every `--range start-end[:find|clip]` given (`1:15:00-1:30:00`, `25:00-26:50:clip`), as create_project takes them. */
+function rangeFlags(usage: string): SourceRangeInput[] | undefined {
+  const out: SourceRangeInput[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--range") continue;
+    const text = args[++i] ?? "";
+    const r = parseRangeArg(text);
+    if (!r)
+      throw new Error(`--range "${text}" is not start-end[:find|clip], like 1:15:00-1:30:00 or 25:00-26:50:clip
+${usage}`);
+    out.push(r);
+  }
+  return out.length ? out : undefined;
+}
 
 /** `--stage`, `--cause`, `--q`, `--since 24h|ISO` as the Failed work filter (ops/failures.ts). */
 function failureFilterFlags(command: string): FailureFilter {
@@ -836,9 +853,14 @@ ${usage}`);
   },
   /** Would this source be accepted now: `reelsaw check-source <url> | --minutes <n> [--user email|id]`. Same function as projects.checkSource and the check_source tool. */
   async "check-source"(svc) {
-    const usage = "usage: reelsaw check-source <url> [--user <email|id>]  |  reelsaw check-source --minutes <n> [--user <email|id>]";
+    const usage =
+      "usage: reelsaw check-source <url> [--range start-end[:clip]]… [--user <email|id>]  |  reelsaw check-source --minutes <n> [--range …]… [--user <email|id>]";
     const minutes = flag("minutes");
-    const input = checkSourceInput.safeParse({ sourceUrl: pos[0], durationSec: minutes === undefined ? undefined : Number(minutes) * 60 });
+    const input = checkSourceInput.safeParse({
+      sourceUrl: pos[0],
+      durationSec: minutes === undefined ? undefined : Number(minutes) * 60,
+      ranges: rangeFlags(usage),
+    });
     if (!input.success) throw new Error(`${input.error.issues.map((i) => i.message).join("; ")}\n${usage}`);
     const user = await actingUser(svc, flag("user"));
     const r = await checkSource(svc, user.id, input.data, "cli");
@@ -849,15 +871,23 @@ ${usage}`);
         `allowance: ${a.left} of ${a.perMonth} minutes a month left, resets ${a.resetsOn.slice(0, 10)}${a.firstVideoFree ? `; first video free up to ${a.firstVideoFree} minutes` : ""}`,
       );
     else console.log("allowance: no minutes limit");
+    if (r.ranges) {
+      console.log(`ranges: ${r.ranges.minutes} minutes counted`);
+      for (const c of r.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+      for (const problem of r.ranges.problems) console.log(`  ${problem}`);
+    }
     if (r.fits === false) {
       console.log(`refused: ${r.message}`);
       if (r.quota?.primary && "href" in r.quota.primary) console.log(`offer: ${r.quota.primary.label}: ${r.quota.primary.href}`);
       process.exitCode = 1;
     } else console.log(r.fits ? "fits" : "fits so far (length unknown)");
   },
-  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…`. Same function as projects.create and the create_project tool. */
+  /**
+   * Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]… [--clear key]…
+   * [--range start-end[:clip]]…`. Same function as projects.create and the create_project tool.
+   */
   async "create-project"(svc) {
-    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…";
+    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]… [--range start-end[:find|clip]]…";
     if (!pos[0]) throw new Error(usage);
     const { settings, clear } = settingsFlags(usage);
     const input = createProjectInputSchema.safeParse({
@@ -865,11 +895,16 @@ ${usage}`);
       title: flag("title"),
       settings: Object.keys(settings).length ? settings : undefined,
       ...(clear.length ? { clear } : {}),
+      ranges: rangeFlags(usage),
     });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));
-    const p = await createProject(svc, user.id, input.data);
+    const p = await createProject(svc, user.id, input.data, { rangeOrigin: "api" });
     console.log(`created ${p.id} "${p.title}" for ${user.email}; reelsaw status ${p.id} follows it`);
+    if (p.ranges) {
+      console.log(`ranges: ${Math.round((p.ranges.billedSec / 60) * 10) / 10} minutes counted`);
+      for (const c of p.ranges.changes) console.log(`  ${c.kind.replace(/_/g, " ")}: ${JSON.stringify(c)}`);
+    }
   },
   /** Resume a project from where it stopped: `reelsaw retry <projectId>`. Same function as projects.retry and the retry_project tool. */
   async retry(svc) {

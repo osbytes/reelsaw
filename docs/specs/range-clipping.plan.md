@@ -69,10 +69,15 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       project never gets `source_limit_sec` (ingest sets it only for a whole video), so `processedEndSec`,
       `partialSourceOf`, the "Clip the rest" sentence and the after-upgrade follow-up treat it as not partial, which
       it is not. Left for 2.1: `extend_project` on a ranges project still answers "already covers the whole video".
-- [ ] 1.7 Surfaces, one service call each:
-      tRPC `projects.create` / MCP `create_project` / `reelsaw create-project --range a-b[:clip]` take `ranges`;
-      MCP `check_source` and `projects.checkSource` return the plan (`ranges`, `changes`); `get_project` returns
-      `ranges[]` and each clip's `rangeId` and `ref`; webhook `clip.done` carries `rangeId` and `ref`.
+- [x] 1.7 Surfaces, one service call each: `createProject` (tRPC `projects.create`, MCP `create_project`,
+      `reelsaw create-project --range a-b[:clip]`) takes `ranges`, plans them against the announced length (looked up
+      for ranges whatever the account's limits), admits them whole (advisory; ingest binds) and stores them
+      (`origin` user from the web, api otherwise); the response adds `ranges`, `rangeChanges`, `billedSec`.
+      `checkSource` (`check_source`, `reelsaw check-source --range`) prices them: `ranges { seconds, minutes, changes,
+      problems }`, fits / refused like a video. `get_project` lists `ranges`; each clip has `rangeId` and `ref`;
+      `clip.done` / `clip.failed` (events and webhooks) carry `rangeId` and `ref`. Shared modules index.ts imports
+      values from never import index.ts back (test/shared-import-cycle.test.ts): the cycle left `rangeSchema`
+      undefined in the bundle and refused every create.
 - [ ] 1.8 Web, NewProject.tsx: Whole video / Ranges toggle, the shadow timeline (track, ruler, click to add,
       drag ends, typed start and end, mode per range, remove), and the "Before you start" panel fed by the same
       `checkSource` call (debounced; the panel's height is reserved so nothing shifts). Phone: tap to add, drag
