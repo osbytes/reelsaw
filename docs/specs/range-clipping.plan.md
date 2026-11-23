@@ -95,8 +95,9 @@ Goal: a person or a pipeline gives ranges; only they are transcribed, analyzed a
       before it, in production analyze too: a proposal is now cut to its range and padding before snapping and dropped
       if it still reaches past them. The range helpers (`rangeSegments`, `rangeOverlapping`, `snapInRanges`,
       `exactRangeBounds`) live in analyze.ts; the suite calls `snapInRanges` and `exactRangeBounds`.
-- [ ] 1.10 Copy: README feature list, `website/content/` (the "long videos" page), docs/SELECTION.md (how picking is
-      bounded), the MCP server instructions line in mcp-tools.ts.
+- [x] 1.10 Copy: README (a feature bullet and the minutes paragraph; the MCP and CLI reference regenerated), the
+      website's YouTube-to-Shorts guide (ingest bullet and an FAQ), docs/SELECTION.md (how picking is bounded by
+      ranges), the MCP server instructions' workflow line, and a changeset.
 
 ## Slice 2 — Add a range later
 
