@@ -887,7 +887,9 @@ ${usage}`);
    * [--range start-end[:clip]]…`. Same function as projects.create and the create_project tool.
    */
   async "create-project"(svc) {
-    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]… [--range start-end[:find|clip]]…";
+    const usage =
+      "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]… [--range start-end[:find|clip]]… [--most-replayed n]";
+    const replayed = flag("most-replayed");
     if (!pos[0]) throw new Error(usage);
     const { settings, clear } = settingsFlags(usage);
     const input = createProjectInputSchema.safeParse({
@@ -896,6 +898,7 @@ ${usage}`);
       settings: Object.keys(settings).length ? settings : undefined,
       ...(clear.length ? { clear } : {}),
       ranges: rangeFlags(usage),
+      ...(replayed ? { rangesFrom: { mostReplayed: Number(replayed) } } : {}),
     });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));

@@ -117,38 +117,38 @@ Goal: a finished project grows by ranges; today's "Clip the rest" is one of them
 
 ## Slice 3 — Fetch only the ranges
 
-Goal: a link's ranges are the only bytes downloaded. Riskiest slice: spike first.
+Goal: a link's ranges are the only bytes downloaded.
 
-- [ ] 3.1 Spike (1 day, notes in this file): yt-dlp `--download-sections` with and without
-      `--force-keyframes-at-cuts` on a 3 h YouTube VOD, a Twitch VOD and a Vimeo link: wall time, bytes, and the
-      error between the requested start and the first frame (ffprobe `start_time`, audio cross-check). Decide
-      re-encode-at-cuts versus measured offset per piece.
-- [ ] 3.2 Ingest for a ranges link: no whole download. For each planner `fetchPiece` (padded, close ranges
-      grouped), download through the proxy pool (reuse windows.ts `downloadPiece` minus `placeWindow`, which needs a
-      preview), at `sourceHeightFor` height, store as a `source_pieces` row (`project_id`, `start_sec`, `end_sec`,
-      `offset_sec`, `key`, `bytes`, `height`). Storage and `assertStorageRoom` count the pieces.
-- [ ] 3.3 `sourceAt` returns the piece covering a span (error when none does: a stage asked for unfetched time);
-      `ensureSource` is refused for a pieces project. Thumbnail and poster come from the first piece.
-- [ ] 3.4 Render: Free renders full quality from windows as today (windows are inside pieces' spans); paid plans
-      with no preview fetch pieces at full height and render from them directly.
-- [ ] 3.5 Editor playback: `/media/source/:projectId` serves a piece by `?at=<sec>`; the editor's source player
-      switches piece at range edges and maps `currentTime` through `offset_sec`. Hatched time is not seekable.
-- [ ] 3.6 Retention and re-fetch: an expired pieces project re-fetches only its pieces; `reelsaw status` and Settings
-      → System show pieces bytes.
-- [ ] 3.7 Uploads: unchanged (whole file stored); `sourceAt` returns it with offset 0.
+- [x] 3.1 Spike (2026-11-22, Big Buck Bunny on YouTube, inside the app container): `--download-sections "*120-150"`
+      with and without `--force-keyframes-at-cuts` both start at source 120.00 s against the full download (audio
+      envelope correlation 1.0 / 0.999), each 30.0 s; plain is as fast. So a section is placed at its requested start,
+      no audio alignment or re-encode at cuts. The format chosen without the app's preference was AV1 / Opus, so the
+      app's `sourceFormat` (H.264 / AAC first) matters for joining. Not tried: Twitch, Vimeo.
+- [x] 3.2–3.4 Instead of pieces every stage reads separately, a **sparse source** (pipeline/sparse.ts): the padded
+      ranges are downloaded (`mergeSpans(transcriptSpans(…), RANGE_FETCH_GAP_SEC)`, close ones in one section) and
+      joined on the source clock by stream copy (concat, each part cut with `outpoint`) with black, silent filler at 1
+      fps between them, so the project keeps one ordinary source file as long as the video and every stage, the
+      editor's player and render read it unchanged. In the spike the join took 3 s, filler cost ~25 KB a minute and
+      the clock held within 0.05 s. A piece in another shape is re-encoded to H.264 / AAC at the first's size.
+      `source_meta.sparse.spans` says what it holds; the poster is taken inside the first range. Without an announced
+      length the whole video is downloaded as before.
+- [x] 3.5 The editor's player plays black in time not fetched; both timelines hatch it.
+- [x] 3.6 Ranges added later that the sparse source does not hold restart the run from ingest, which downloads the
+      ranges again (all of them: nothing but network is spent twice; transcription and minutes count only new time);
+      a source removed by retention is fetched again the same way.
+- [x] 3.7 Uploads: unchanged (the whole file is stored); only the ranges are transcribed and counted.
 
 ## Slice 4 — Most replayed
 
-- [ ] 4.1 The length probe (`announcedDuration`) keeps yt-dlp's `heatmap` from the same JSON; stored in
-      `source_meta.heatmap` (bins only) at create.
-- [ ] 4.2 Shared `replayPeaks(heatmap, { top, minGapSec })`: local maxima above the median, widened to where the
-      curve falls under half the peak, merged by the planner. Tests on recorded heatmaps (fixtures, no network).
-- [ ] 4.3 `check_source` returns `mostReplayed[]`; `create_project { rangesFrom: { mostReplayed: n } }` and
-      `reelsaw create-project --most-replayed n` add the top peaks as clip ranges (`origin: most_replayed`);
-      refused with a reason when there is no heatmap.
-- [ ] 4.4 Web: heatmap bars on both timelines; peak chips (rank and time) toggle ranges; hidden when absent.
-- [ ] 4.5 Telemetry: `project.ranges` (count, billed minutes, share of the video, origins) for the funnel; no
-      per-user detail in public copy.
+- [x] 4.1 The length lookup (`announcedDuration`, projects/peek.ts) keeps yt-dlp's `heatmap` from the same answer;
+      `announcedHeatmap` reads it from the same cache.
+- [x] 4.2 Shared `replayPeaks(heatmap, { top })`: local maxima above the median, widened over neighbours at half their
+      height, at most 120 s around the peak, grown to RANGE_MIN_SEC; overlapping ones keep the hotter. Unit tested.
+- [x] 4.3 `check_source` returns `mostReplayed[]` when the length was looked up for ranges; `create_project {
+      rangesFrom: { mostReplayed: n } }` and `reelsaw create-project --most-replayed n` add the top peaks as exact-clip
+      ranges (`origin: most_replayed`, labelled "Most replayed #n"); refused with the reason when there is no heatmap.
+- [x] 4.4 Web: New project shows the peaks as bars on the timeline and as chips that add or remove them.
+- [x] 4.5 Telemetry: `project.ranges` (count, billed minutes, share of the video, peaks used, surface); no per-user detail.
 
 ## Done when
 - A 3 h link with three ranges downloads, transcribes and bills about the ranges' length plus padding, and its

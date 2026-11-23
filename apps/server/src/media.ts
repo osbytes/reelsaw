@@ -49,10 +49,20 @@ export interface ProbeInfo {
    * Rendered as is, a clip's seek lands past that frame and ffmpeg writes sound alone (pipeline/ingest.ts stillAsVideo).
    */
   still?: boolean | undefined;
+  /** what a stream-copy join needs to match (pipeline/sparse.ts): codecs, the audio's rate and channels, the video's timescale */
+  videoCodec?: string | undefined;
+  audioCodec?: string | undefined;
+  sampleRate?: number | undefined;
+  channels?: number | undefined;
+  videoTimescale?: number | undefined;
 }
 
 type ProbeStream = {
   codec_type?: string;
+  codec_name?: string;
+  sample_rate?: string;
+  channels?: number;
+  time_base?: string;
   width?: number;
   height?: number;
   duration?: string;
@@ -81,6 +91,11 @@ export function probeInfo(json: { format?: { duration?: string }; streams?: Prob
     fps,
     ...(frames > 0 ? { frames } : {}),
     ...(video && (video.disposition?.attached_pic || frames === 1) ? { still: true } : {}),
+    ...(video?.codec_name ? { videoCodec: video.codec_name } : {}),
+    ...(audio?.codec_name ? { audioCodec: audio.codec_name } : {}),
+    ...(audio?.sample_rate ? { sampleRate: Number(audio.sample_rate) } : {}),
+    ...(audio?.channels ? { channels: audio.channels } : {}),
+    ...(video?.time_base?.includes("/") ? { videoTimescale: Number(video.time_base.split("/")[1]) } : {}),
   };
 }
 

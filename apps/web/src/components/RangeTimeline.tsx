@@ -6,7 +6,7 @@
 import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { RANGE_MIN_SEC, formatTime, parseClock, type RangeMode } from "@reelsaw/shared";
+import { RANGE_MIN_SEC, formatTime, parseClock, type RangeMode, type ReplayPeak } from "@reelsaw/shared";
 import { Segmented } from "./ui";
 
 /** A range being drawn on New project, before the project exists. */
@@ -44,6 +44,7 @@ export function RangeTimeline({
   coverSec,
   fixed = [],
   marks = [],
+  peaks = [],
 }: {
   durationSec: number;
   ranges: DraftRange[];
@@ -54,6 +55,8 @@ export function RangeTimeline({
   fixed?: ReadonlyArray<{ startSec: number; endSec: number }>;
   /** clips, drawn as marks inside what was processed */
   marks?: ReadonlyArray<{ startSec: number; endSec: number }>;
+  /** the video's Most replayed peaks, drawn under everything else as bars as tall as they are hot */
+  peaks?: readonly ReplayPeak[];
 }) {
   const { t } = useLingui();
   const track = useRef<HTMLDivElement>(null);
@@ -95,6 +98,14 @@ export function RangeTimeline({
         onPointerUp={() => setDrag(null)}
         onPointerCancel={() => setDrag(null)}
       >
+        {peaks.map((p) => (
+          <span
+            key={`peak-${p.startSec}`}
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 rounded-t-[3px] bg-ink3/40"
+            style={{ insetInlineStart: pct(p.startSec), width: pct(p.endSec - p.startSec), minWidth: 3, height: `${Math.round(25 + p.heat * 70)}%` }}
+          />
+        ))}
         {fixed.map((r) => (
           <div
             key={`${r.startSec}-${r.endSec}`}
@@ -298,6 +309,46 @@ export function RangeList({ durationSec, ranges, onChange }: { durationSec: numb
           {problem}
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The video's Most replayed peaks as chips, hottest first: each adds that stretch as an exact clip, or takes it away
+ * again. Nothing when the site has no heatmap.
+ */
+export function PeakChips({ peaks, ranges, onChange }: { peaks: readonly ReplayPeak[]; ranges: DraftRange[]; onChange: (next: DraftRange[]) => void }) {
+  const { t } = useLingui();
+  if (!peaks.length) return null;
+  const isOn = (p: ReplayPeak) => ranges.some((r) => r.startSec === p.startSec && r.endSec === p.endSec);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="me-1 text-xs font-semibold text-ink3">
+        <Trans>Most replayed</Trans>
+      </span>
+      {peaks.map((p, i) => {
+        const on = isOn(p);
+        const n = i + 1;
+        return (
+          <button
+            key={p.startSec}
+            type="button"
+            aria-pressed={on}
+            aria-label={t`Most replayed #${n}`}
+            className={`flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink"}`}
+            onClick={() =>
+              onChange(
+                on
+                  ? ranges.filter((r) => !(r.startSec === p.startSec && r.endSec === p.endSec))
+                  : [...ranges, { key: newKey(), startSec: p.startSec, endSec: p.endSec, mode: "clip" }],
+              )
+            }
+          >
+            <b>#{n}</b>
+            <span className="font-mono">{formatTime(p.startSec)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

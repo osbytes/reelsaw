@@ -618,7 +618,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `resend_webhook_delivery` | Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). |
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
-| `extend_project` | Process more of a video only the start of which was processed (get_project partial: the account's minutes covered that much). |
+| `extend_project` | Process more of a video. |
 | `list_upgrade_work` | After a plan change: your other projects it could improve. |
 | `start_upgrade_work` | Start the picked projects from list_upgrade_work: finish clips the rest of each video as far as the minutes go (like extend_project), rerender renders each project's watermarked clips again without the watermark. |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |

@@ -33,6 +33,9 @@ import {
   plural,
   processedEndSec,
   spansCover,
+  transcriptSpans,
+  replayPeaks,
+  type ReplayPeak,
   type RangeChange,
   type SourceRangeInput,
   MAX_RANGES,
@@ -77,7 +80,7 @@ import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, peekUrlMeta } from "./peek.js";
+import { LIVE_SOURCE_MESSAGE, LiveSourceError, announcedDuration, announcedHeatmap, peekUrlMeta } from "./peek.js";
 import { failedRow, runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
@@ -949,6 +952,9 @@ export async function createProject(
   let title = input.title?.trim() || "";
   /** the length the site announced; null for a file (ingest settles ranges on it) or a site that does not say */
   let announcedSec: number | null = null;
+  /** ranges from the video's Most replayed peaks (`rangesFrom`), added to the caller's */
+  let peakRanges: SourceRangeInput[] = [];
+  if (input.rangesFrom && !input.sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "Most replayed needs a link to the video, not an upload." });
   if (input.uploadId) {
     const up = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, userId)) });
     if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "No upload with that id in your account." });
@@ -958,15 +964,27 @@ export async function createProject(
     const [peek, announced] = await Promise.all([
       peekUrlMeta(input.sourceUrl),
       // ranges are planned against the video's length, so it is looked up for them whatever the account's limits
-      (input.ranges ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch((err: unknown) => {
-        if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        throw err;
-      }),
+      (input.ranges || input.rangesFrom ? announcedLengthFor(svc, input.sourceUrl, log) : announcedMinutesFor(svc, userId, input.sourceUrl, log)).catch(
+        (err: unknown) => {
+          if (err instanceof LiveSourceError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+          throw err;
+        },
+      ),
     ]);
     announcedSec = announced;
+    if (input.rangesFrom?.mostReplayed) {
+      const heat = await announcedHeatmap(svc.media, input.sourceUrl, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS)).catch(() => []);
+      const peaks = replayPeaks(heat, { top: input.rangesFrom.mostReplayed });
+      if (!peaks.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This video has no Most replayed heatmap (new or small videos, and most sites other than YouTube, have none). Give ranges instead.",
+        });
+      peakRanges = peaks.map((p, i) => ({ startSec: p.startSec, endSec: p.endSec, mode: "clip" as const, label: `Most replayed #${i + 1}` }));
+    }
     // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
     // (ranges are admitted whole below instead, once the project's settings say how long a clip may be)
-    if (announced && !input.ranges)
+    if (announced && !input.ranges && !input.rangesFrom)
       await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
     title ||= peek.title ?? "";
@@ -980,7 +998,9 @@ export async function createProject(
     const settings = await resolveProjectSettings(u.db, userId, input.settings, input.clear);
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
-    const plan = input.ranges ? planRanges(input.ranges, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
+    const given = input.ranges ?? [];
+    const asked = [...given, ...peakRanges];
+    const plan = asked.length ? planRanges(asked, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
     if (plan && !plan.ok) throw new TRPCError({ code: "BAD_REQUEST", message: plan.problems.map(rangeProblemMessage).join(" ") });
     // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock
     if (plan) await admitRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
@@ -1008,7 +1028,8 @@ export async function createProject(
           startSec: r.startSec,
           endSec: r.endSec,
           mode: r.mode,
-          origin: o.rangeOrigin ?? "api",
+          // a range merged from a Most replayed peak and one of the caller's is the caller's
+          origin: r.inputs.every((i) => i >= given.length) ? ("most_replayed" as const) : (o.rangeOrigin ?? "api"),
           label: r.label ?? null,
           ref: r.ref ?? null,
           billedSec: r.billedSec,
@@ -1018,6 +1039,16 @@ export async function createProject(
     await u.emit("project.created", { projectId: id, title, sourceType: row.sourceType });
     await startRun(u, id, { reason: "created", status: "queued" });
     await u.enqueue(QUEUES.ingest, { projectId: id });
+    if (plan?.ok)
+      // the funnel: how many ranges, from where, and how much of the video they cover (no per-user detail)
+      svc.telemetry.capture("project.ranges", userId, {
+        projectId: id,
+        ranges: plan.ranges.length,
+        billedMinutes: Math.round(plan.billedSec / 60),
+        share: announcedSec ? Math.round((plan.billedSec / announcedSec) * 100) / 100 : null,
+        mostReplayed: peakRanges.length,
+        surface: o.rangeOrigin ?? "api",
+      });
     return plan?.ok ? { ...row, ranges: { billedSec: plan.billedSec, changes: plan.changes } } : row;
   });
 }
@@ -1082,6 +1113,8 @@ export interface SourceCheck {
   minutes: number | null;
   /** the same length in seconds (the range timeline is drawn from it) */
   durationSec: number | null;
+  /** the video's Most replayed peaks, hottest first, when the length was looked up for ranges and the site has them */
+  mostReplayed: ReplayPeak[];
   /** the video is accepted, but only its start is processed now; null when all of it is (or it is refused) */
   partial: SourcePartial | null;
   /** false: creating the project now would be refused (message and quota say why and what to do; no quota for a live stream); null: the length is unknown, so ingest decides */
@@ -1121,12 +1154,37 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
         : null),
   ]);
   if (durationSec === "live")
-    return { minutes: null, durationSec: null, partial: null, fits: false, message: LIVE_SOURCE_MESSAGE, quota: null, allowance, ranges: null };
+    return {
+      minutes: null,
+      durationSec: null,
+      mostReplayed: [],
+      partial: null,
+      fits: false,
+      message: LIVE_SOURCE_MESSAGE,
+      quota: null,
+      allowance,
+      ranges: null,
+    };
   const minutes = durationSec ? Math.round((durationSec / 60) * 10) / 10 : null;
   const lengthSec = durationSec || null;
+  // the peaks come with the length lookup (the same yt-dlp answer, remembered): only when it ran for ranges
+  const mostReplayed =
+    input.sourceUrl && (input.ranges || input.lookupLength)
+      ? replayPeaks(await announcedHeatmap(svc.media, input.sourceUrl, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS)).catch(() => []))
+      : [];
   const refused = (err: QuotaError): SourceCheck => {
     svc.telemetry.capture("quota.warned", userId, refusalEvent(err.limit, surface, err.quota, err.props));
-    return { minutes, durationSec: lengthSec, partial: null, fits: false, message: err.message, quota: err.quota ?? null, allowance, ranges: null };
+    return {
+      minutes,
+      durationSec: lengthSec,
+      mostReplayed,
+      partial: null,
+      fits: false,
+      message: err.message,
+      quota: err.quota ?? null,
+      allowance,
+      ranges: null,
+    };
   };
   try {
     await checkProjectQuota(db, s, userId, { ent: svc.entitlements });
@@ -1143,6 +1201,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
       return {
         minutes,
         durationSec: lengthSec,
+        mostReplayed,
         partial: null,
         fits: false,
         message: problems.join(" "),
@@ -1158,13 +1217,13 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
       if (err instanceof QuotaError) return { ...refused(err), ranges: priced };
       throw err;
     }
-    return { minutes, durationSec: lengthSec, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
+    return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: true, message: null, quota: null, allowance, ranges: priced };
   }
-  if (!durationSec) return { minutes, durationSec: lengthSec, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
+  if (!durationSec) return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: null, message: null, quota: null, allowance, ranges: null };
   const r = await predictAdmission(db, s, userId, durationSec, svc.config.TRANSCRIBE_CHUNK_SECONDS, svc.entitlements);
   if ("refused" in r) return refused(r.refused);
   const until = r.admission.until;
-  if (until === null) return { minutes, durationSec: lengthSec, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
+  if (until === null) return { minutes, durationSec: lengthSec, mostReplayed, partial: null, fits: true, message: null, quota: null, allowance, ranges: null };
   const offer = await minutesOffer(db, s, userId, svc.entitlements, r.admission.binding);
   const upgrade = offer.refusal.primary?.kind === "upgrade" ? { label: offer.refusal.primary.label, href: offer.refusal.primary.href } : null;
   const partial: SourcePartial = {
@@ -1186,7 +1245,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     minutes: partial.minutes,
     totalMinutes: partial.totalMinutes,
   });
-  return { minutes, durationSec: lengthSec, partial, fits: true, message: null, quota: null, allowance, ranges: null };
+  return { minutes, durationSec: lengthSec, mostReplayed, partial, fits: true, message: null, quota: null, allowance, ranges: null };
 }
 
 /**
@@ -1398,14 +1457,18 @@ async function addRanges(svc: Services, actor: Actor, projectId: string, input: 
           billedSec: r.billedSec,
         })),
     );
+    // a sparse source (a link that downloaded only its ranges) holds none of the new time: download again first
+    const held = (p.sourceMeta?.["sparse"] as { spans?: [number, number][] } | undefined)?.spans;
+    const all = [...existing, ...plan.ranges.map((r) => ({ ...r, origin }))];
+    const fetch = !!p.sourceExpiredAt || !p.sourceKey || (!!held && !spansCover(held, transcriptSpans(all, p.durationSec)));
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
     await supersedeStages(u, p.id); // a stage still running for the old ranges commits nothing
-    await startRun(u, p.id, { reason: "extend", status: "queued", stage: "transcribe", continueActive: true });
+    await startRun(u, p.id, { reason: "extend", status: "queued", stage: fetch ? "ingest" : "transcribe", continueActive: true });
     const fromSec = Math.min(...plan.ranges.map((r) => r.startSec));
     const untilSec = Math.max(...plan.ranges.map((r) => r.endSec));
     await u.emit("project.extended", { projectId: p.id, fromSec, untilSec, durationSec: p.durationSec });
-    // a source retention removed is fetched again first; ingest keeps what the video was admitted as and hands on
-    await u.enqueue(p.sourceExpiredAt || !p.sourceKey ? QUEUES.ingest : QUEUES.transcribe, { projectId: p.id });
+    // ingest keeps what the video was admitted as and hands on to transcribe
+    await u.enqueue(fetch ? QUEUES.ingest : QUEUES.transcribe, { projectId: p.id });
     return {
       fromSec,
       untilSec,

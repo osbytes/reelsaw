@@ -22,10 +22,11 @@ import {
   type ProjectSettings,
   type QuotaRefusal,
   type RangeChange,
+  type ReplayPeak,
   type Style,
   formatTime,
 } from "@reelsaw/shared";
-import { RangeList, RangeTimeline, type DraftRange } from "../components/RangeTimeline";
+import { PeakChips, RangeList, RangeTimeline, type DraftRange } from "../components/RangeTimeline";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
@@ -402,10 +403,12 @@ export function NewProjectPage() {
                 </div>
                 {lengthSec ? (
                   <>
+                    {scope === "ranges" && <PeakChips peaks={check.data?.mostReplayed ?? []} ranges={ranges} onChange={setRanges} />}
                     <RangeTimeline
                       durationSec={lengthSec}
                       ranges={ranges}
                       onChange={setRanges}
+                      peaks={scope === "ranges" ? (check.data?.mostReplayed ?? []) : []}
                       coverSec={scope === "whole" ? (fit?.partial ? fit.partial.minutes * 60 : lengthSec) : undefined}
                     />
                     {scope === "ranges" && (
@@ -774,6 +777,7 @@ export function NewProjectPage() {
 type SourceCheck = {
   minutes: number | null;
   durationSec: number | null;
+  mostReplayed: ReplayPeak[];
   ranges: { seconds: number; minutes: number; changes: RangeChange[]; problems: string[] } | null;
   /** accepted, but only the first `minutes` are processed now (the server's SourcePartial) */
   partial: { minutes: number; totalMinutes: number; firstVideo: boolean; sentence: string; upgrade: { label: string; href: string } | null } | null;

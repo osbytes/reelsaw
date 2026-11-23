@@ -259,3 +259,57 @@ export function rangeProblemMessage(p: RangeProblem): string {
       return `${which} is shorter than ${p.minSec} seconds.`;
   }
 }
+
+/** One bin of a video site's replay heatmap (YouTube's Most replayed): how often that stretch is watched, 0..1. */
+export interface HeatBin {
+  startSec: number;
+  endSec: number;
+  value: number;
+}
+
+/** A Most replayed peak as a range to suggest: the stretch around a local maximum, and how hot it is (0..1). */
+export interface ReplayPeak {
+  startSec: number;
+  endSec: number;
+  heat: number;
+}
+
+/** A peak suggested as a clip is at most this long; a wider hot stretch is cut around its hottest bin. */
+const PEAK_MAX_SEC = 120;
+
+/**
+ * The hottest stretches of a replay heatmap, hottest first: each local maximum above the median, widened over the
+ * neighbouring bins still at half its height or more, cut to at most PEAK_MAX_SEC around its peak and grown to
+ * RANGE_MIN_SEC; overlapping ones keep the hotter. Empty for a flat or missing heatmap.
+ */
+export function replayPeaks(heatmap: readonly HeatBin[], o: { top?: number } = {}): ReplayPeak[] {
+  const bins = [...heatmap].filter((b) => b.endSec > b.startSec).sort((a, b) => a.startSec - b.startSec);
+  if (bins.length < 3) return [];
+  const sorted = bins.map((b) => b.value).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const peaks: ReplayPeak[] = [];
+  bins.forEach((b, i) => {
+    const prev = bins[i - 1]?.value ?? -1;
+    const next = bins[i + 1]?.value ?? -1;
+    if (b.value <= median || b.value < prev || b.value < next) return;
+    let lo = i;
+    let hi = i;
+    while (lo > 0 && (bins[lo - 1]?.value ?? 0) >= b.value / 2) lo--;
+    while (hi < bins.length - 1 && (bins[hi + 1]?.value ?? 0) >= b.value / 2) hi++;
+    let startSec = bins[lo]?.startSec ?? b.startSec;
+    let endSec = bins[hi]?.endSec ?? b.endSec;
+    const mid = (b.startSec + b.endSec) / 2;
+    if (endSec - startSec > PEAK_MAX_SEC) {
+      startSec = Math.max(startSec, mid - PEAK_MAX_SEC / 2);
+      endSec = Math.min(endSec, startSec + PEAK_MAX_SEC);
+    }
+    if (endSec - startSec < RANGE_MIN_SEC) {
+      startSec = Math.max(0, mid - RANGE_MIN_SEC / 2);
+      endSec = startSec + RANGE_MIN_SEC;
+    }
+    peaks.push({ startSec: Math.round(startSec), endSec: Math.round(endSec), heat: Math.round(b.value * 100) / 100 });
+  });
+  const out: ReplayPeak[] = [];
+  for (const p of peaks.sort((a, b) => b.heat - a.heat)) if (!out.some((q) => p.startSec < q.endSec && q.startSec < p.endSec)) out.push(p);
+  return out.slice(0, o.top ?? 10);
+}

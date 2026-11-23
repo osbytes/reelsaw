@@ -1156,6 +1156,11 @@ export const createProjectInputSchema = z.object({
     .describe(
       'Only these parts of the video, in source seconds: only they are transcribed, picked from and counted. mode "find" picks moments inside a range, "clip" makes the range one clip. ref is your own id, returned on its clips and their webhooks.',
     ),
+  /** Ranges Reelsaw finds for you, added to `ranges`: the video's Most replayed peaks (YouTube's replay heatmap). */
+  rangesFrom: z
+    .object({ mostReplayed: z.number().int().min(1).max(MAX_RANGES).describe("How many of the hottest Most replayed stretches to clip") })
+    .optional()
+    .describe("Ranges from the video site's replay heatmap, each an exact clip; refused when the video has none"),
 });
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 

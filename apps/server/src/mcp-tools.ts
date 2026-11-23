@@ -131,7 +131,7 @@ export const TOOLS = {
   check_source: {
     title: "Check source",
     description:
-      "Before create_project: would this video be accepted now? Give sourceUrl (length looked up, nothing downloaded) or durationSec for a file, plus ranges if you clip only parts. Returns { minutes, partial, fits, message, quota, allowance, ranges }: fits false = create_project would be refused (message says why; quota.primary is the upgrade offer); fits null = length unknown; partial = only the first partial.minutes are processed now. ranges: { minutes } they count, changes made (merged, clamped), problems.",
+      "Before create_project: would this video be accepted now? Give sourceUrl (length looked up, nothing downloaded) or durationSec for a file, plus ranges if you clip only parts. Returns { minutes, partial, fits, message, quota, allowance, ranges }: fits false = create_project would be refused (message says why; quota.primary is the upgrade offer); fits null = length unknown; partial = only the first partial.minutes are processed now. ranges: { minutes } they count, changes, problems. mostReplayed: the heatmap's peaks.",
     inputSchema: {
       sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or durationSec"),
       durationSec: z.number().positive().max(86_400).optional().describe("Length of a file you will upload, in seconds; give this or sourceUrl"),
@@ -170,6 +170,10 @@ export const TOOLS = {
         .describe(
           'Clip only these parts, in seconds of the source video: [{ startSec, endSec, mode?: "find" (pick moments inside it, default) | "clip" (the range is the clip), label?, ref? }]. Only they are fetched, transcribed, picked from and counted (check_source prices them). The response adds ranges, rangeChanges and billedSec; each clip from a range carries rangeId and your ref (get_project, clip.done / clip.failed webhooks). Omit for the whole video.',
         ),
+      rangesFrom: z
+        .object({ mostReplayed: z.number().int().min(1).max(MAX_RANGES).describe("How many of the hottest stretches") })
+        .optional()
+        .describe("Add the video's Most replayed peaks (YouTube's replay heatmap; check_source lists them) as exact-clip ranges; refused when it has none"),
       introAssetId: z
         .string()
         .min(1)

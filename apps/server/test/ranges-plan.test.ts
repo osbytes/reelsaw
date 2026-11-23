@@ -12,6 +12,7 @@ import {
   parseRangeArg,
   planRanges,
   rangeProblemMessage,
+  replayPeaks,
   spansSec,
   subtractSpans,
   type RangePlan,
@@ -221,5 +222,27 @@ describe("time parsing", () => {
     assert.deepEqual(parseRangeArg("1:15:00-1:30:00"), { startSec: 4500, endSec: 5400, mode: "find" });
     assert.equal(parseRangeArg("1:15:00"), null);
     assert.equal(parseRangeArg("1:15:00-1:30:00:both"), null);
+  });
+});
+
+describe("replayPeaks", () => {
+  // 100 bins of 6 s (a 10-minute video): a big peak at bin 20, a smaller one at 70, the rest flat
+  const bins = Array.from({ length: 100 }, (_, i) => ({
+    startSec: i * 6,
+    endSec: i * 6 + 6,
+    value: i === 20 ? 1 : i === 19 || i === 21 ? 0.7 : i === 70 ? 0.5 : i === 71 ? 0.3 : 0.1,
+  }));
+  it("finds the hottest stretches, hottest first, widened while half as hot", () => {
+    assert.deepEqual(replayPeaks(bins), [
+      { startSec: 114, endSec: 132, heat: 1 },
+      { startSec: 420, endSec: 432, heat: 0.5 },
+    ]);
+  });
+  it("takes the top n", () => {
+    assert.equal(replayPeaks(bins, { top: 1 }).length, 1);
+  });
+  it("finds nothing in a flat or missing heatmap", () => {
+    assert.deepEqual(replayPeaks(bins.map((b) => ({ ...b, value: 0.2 }))), []);
+    assert.deepEqual(replayPeaks([]), []);
   });
 });

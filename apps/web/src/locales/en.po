@@ -192,6 +192,14 @@ msgstr "Most cores at once"
 msgid "Most memory at once, MB"
 msgstr "Most memory at once, MB"
 
+#: src/components/RangeTimeline.tsx
+msgid "Most replayed"
+msgstr "Most replayed"
+
+#: src/components/RangeTimeline.tsx
+msgid "Most replayed #{n}"
+msgstr "Most replayed #{n}"
+
 #: src/pages/Login.tsx
 msgid "Name"
 msgstr "Name"

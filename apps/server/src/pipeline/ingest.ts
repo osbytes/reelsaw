@@ -14,8 +14,9 @@ import {
 } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
-import { planRanges, rangeProblemMessage } from "@reelsaw/shared";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { RANGE_FETCH_GAP_SEC, mergeSpans, planRanges, rangeProblemMessage, spansCover, spansSec, transcriptSpans } from "@reelsaw/shared";
+import { buildSparseSource, type SourcePiece } from "./sparse.js";
 import type { Project, ProjectRange } from "../db/schema.js";
 import type { UnitOfWork } from "../uow.js";
 import type { Services } from "../services.js";
@@ -126,7 +127,17 @@ export async function ingest(ctx: StageContext) {
   const dir = await ctx.dir();
   await ctx.start("ingesting");
 
-  const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
+  // ranges of a link (not "whole"): a sparse source holds only what they need, so one added since is fetched again
+  const chosenRanges =
+    project.sourceType === "url"
+      ? await ctx.db
+          .select({ startSec: schema.projectRanges.startSec, endSec: schema.projectRanges.endSec, origin: schema.projectRanges.origin })
+          .from(schema.projectRanges)
+          .where(and(eq(schema.projectRanges.projectId, projectId), ne(schema.projectRanges.origin, "whole")))
+      : [];
+  const sparseHeld = (project.sourceMeta?.["sparse"] as { spans?: [number, number][] } | undefined)?.spans;
+  const sparseShort = !!sparseHeld && project.durationSec !== null && !spansCover(sparseHeld, transcriptSpans(chosenRanges, project.durationSec));
+  const stored = !sparseShort && project.sourceKey && (await svc.storage.exists(project.sourceKey));
   const upload =
     !stored && project.sourceType === "upload"
       ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.["uploadId"] ?? "")) })
@@ -187,54 +198,81 @@ export async function ingest(ctx: StageContext) {
       // --max-filesize only refuses a size known up front; a fragmented download (a stream's recording) has none, so
       // stop it ourselves once what has arrived passes the limit instead of letting it run for hours
       const oversize = new AbortController();
+      /** one yt-dlp download to `<stem>.<ext>`: the whole video, or one section of it; `share` places its progress */
+      const fetchSource = (stem: string, section: [number, number] | null, share: [number, number]) =>
+        svc.media
+          .ytdlp(
+            [
+              "--no-playlist",
+              "--no-warnings",
+              // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
+              "--progress",
+              "--newline",
+              "--print-json",
+              // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
+              "-f",
+              sourceFormat(cap ?? 1080, !!cap),
+              "--merge-output-format",
+              "mp4",
+              // a live stream would be recorded until it ends; skip it here too, for when the lookup above could not tell
+              "--match-filter",
+              NOT_LIVE_FILTER,
+              "--max-filesize",
+              `${limitMB}M`,
+              ...(section ? ["--download-sections", `*${section[0].toFixed(3)}-${section[1].toFixed(3)}`] : []),
+              "-o",
+              path.join(dir, `${stem}.%(ext)s`),
+              "--",
+              project.sourceUrl!,
+            ],
+            {
+              signal: AbortSignal.any([ctx.signal, oversize.signal]),
+              onStderr: (line) => {
+                stderrTail = (stderrTail + "\n" + line).slice(-4000);
+              },
+              onStdout: (line) => {
+                if (line.trimStart().startsWith("{")) jsonLine = line;
+                const tick = parseDownloadTick(line);
+                if (!tick) return;
+                if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
+                downloaded = Math.max(downloaded, share[0] + tick.fraction * share[1]);
+                void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
+              },
+            },
+          )
+          .catch((err: Error) => {
+            ctx.signal.throwIfAborted();
+            if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
+            const message = describeDownloadFailure(err, stderrTail);
+            // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
+            if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
+            throw new DownloadFailedError(message);
+          });
+      // a link with ranges (docs/specs/range-clipping.md): only its padded ranges are downloaded, close ones together,
+      // and joined on the source clock into a sparse source (pipeline/sparse.ts); needs the length the site announced
+      const sparseSpans = chosenRanges.length && announced ? mergeSpans(transcriptSpans(chosenRanges, announced), RANGE_FETCH_GAP_SEC) : null;
       const t0 = performance.now();
-      const { proxyId } = await svc.media
-        .ytdlp(
-          [
-            "--no-playlist",
-            "--no-warnings",
-            // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
-            "--progress",
-            "--newline",
-            "--print-json",
-            // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
-            "-f",
-            sourceFormat(cap ?? 1080, !!cap),
-            "--merge-output-format",
-            "mp4",
-            // a live stream would be recorded until it ends; skip it here too, for when the lookup above could not tell
-            "--match-filter",
-            NOT_LIVE_FILTER,
-            "--max-filesize",
-            `${limitMB}M`,
-            "-o",
-            path.join(dir, "source.%(ext)s"),
-            "--",
-            project.sourceUrl!,
-          ],
-          {
-            signal: AbortSignal.any([ctx.signal, oversize.signal]),
-            onStderr: (line) => {
-              stderrTail = (stderrTail + "\n" + line).slice(-4000);
-            },
-            onStdout: (line) => {
-              if (line.trimStart().startsWith("{")) jsonLine = line;
-              const tick = parseDownloadTick(line);
-              if (!tick) return;
-              if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
-              downloaded = Math.max(downloaded, tick.fraction);
-              void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
-            },
-          },
-        )
-        .catch((err: Error) => {
-          ctx.signal.throwIfAborted();
-          if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
-          const message = describeDownloadFailure(err, stderrTail);
-          // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
-          if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
-          throw new DownloadFailedError(message);
-        });
+      let proxyId = "";
+      const pieces: SourcePiece[] = [];
+      if (sparseSpans) {
+        const total = spansSec(sparseSpans);
+        let done = 0;
+        for (const [i, span] of sparseSpans.entries()) {
+          const stem = `piece-${i}`;
+          for (const f of await fs.readdir(dir)) if (f.startsWith(`${stem}.`)) await fs.rm(path.join(dir, f), { force: true });
+          ({ proxyId } = await fetchSource(stem, span, [done / total, (span[1] - span[0]) / total]));
+          done += span[1] - span[0];
+          const name = (await fs.readdir(dir)).find((f) => f.startsWith(`${stem}.`) && f.endsWith(".mp4"));
+          if (!name) throw new Error("yt-dlp finished but no file was produced for a range");
+          pieces.push({ path: path.join(dir, name), startSec: span[0], endSec: span[1] });
+        }
+        meta = { ...meta, sparse: { spans: sparseSpans } };
+        ctx.log.info({ spans: sparseSpans, fetchedSec: Math.round(total), durationSec: announced }, "downloaded only the project's ranges");
+      } else {
+        ({ proxyId } = await fetchSource("source", null, [0, 1]));
+        const { sparse: _was, ...rest } = meta;
+        meta = rest;
+      }
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       if (jsonLine) {
         info = JSON.parse(jsonLine) as Record<string, unknown>;
@@ -266,6 +304,10 @@ export async function ingest(ctx: StageContext) {
         if (missing === "failed") throw new NonRetryableError(LIVE_SOURCE_MESSAGE);
         ctx.log.error({ filter: NOT_LIVE_FILTER, stderrTail }, "download skipped by the live filter although the lookup said not live");
         throw new NonRetryableError(FILTER_CONTRADICTION_MESSAGE, "platform");
+      }
+      if (sparseSpans && announced) {
+        await ctx.progress(0.62, "Joining the ranges");
+        sourcePath = await buildSparseSource(ctx, pieces, announced, dir);
       }
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
@@ -327,7 +369,8 @@ export async function ingest(ctx: StageContext) {
     // its own name: an upload's source path can sit in a folder other ingests share
     const posterPath = path.join(os.tmpdir(), `reelsaw-poster-${projectId}.jpg`);
     try {
-      const at = Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
+      const firstSpan = (meta["sparse"] as { spans?: [number, number][] } | undefined)?.spans?.[0];
+      const at = firstSpan ? Math.min(firstSpan[1], firstSpan[0] + 20) : Math.min(30, Math.max(0, (probe.durationSec ?? 0) * 0.1));
       await svc.media.ffmpeg(["-y", "-ss", at.toFixed(2), "-i", sourcePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "4", posterPath], {
         threads: "light",
       });
