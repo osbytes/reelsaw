@@ -1,5 +1,22 @@
 # @reelsaw/server
 
+## 0.51.1
+
+### Patch Changes
+
+- [#369](https://github.com/osbytes/reelsaw/pull/369) [`ca287e2`](https://github.com/osbytes/reelsaw/commit/ca287e2ae7e2f75f168835199cb8ae7074307829) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Name fixes stop flagging everyday words: entities made of ordinary words, handles and spelled-out letters no longer replace what was heard, a real word is offered only when it sounds the same as the name, web addresses and possessives are left alone, and a fix you rejected is not proposed again in your other projects.
+
+- [#370](https://github.com/osbytes/reelsaw/pull/370) [`1005590`](https://github.com/osbytes/reelsaw/commit/10055908aa6bb348aa6588d95ac43cd4afae3dc8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Projects that clipped only ranges or the start of a long video now say so on their Projects card (how much of the
+  video, with a strip of the clipped parts, and how many ranges), in the ⌘K palette and in `list_projects`
+  (`processed`). Range fixes: Most replayed peaks longer than the longest clip are added as ranges to find clips in
+  instead of exact clips the planner then rejects (also for `rangesFrom` over MCP and the CLI); ranges keep their
+  numbers when one is added later; expected processing times count the ranges, not the whole video, and no longer
+  skew the estimates of other projects; each range's download says which part it is; a range that found no moments
+  keeps its heading. On a phone, New project's footer no longer overlaps itself, Most replayed chips scroll in one
+  row, range handles stay grabbable when a range is narrow, and the timeline's tick labels no longer collide.
+
+- [#370](https://github.com/osbytes/reelsaw/pull/370) [`a0be6a6`](https://github.com/osbytes/reelsaw/commit/a0be6a6d3167dd8fafc37564c2b6aeb2592fc9e4) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Projects with ranges (and Most replayed peaks) download again behind an `https://` download proxy: the parts of the video are now fetched through the same proxy as the rest of the download instead of straight from the server, which the site refused. When no configured proxy can fetch parts of a video, the project says so instead of "the site blocked the download".
+
 ## 0.51.0
 
 ### Minor Changes
