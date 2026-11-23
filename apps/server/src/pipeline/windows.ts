@@ -379,6 +379,7 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
       {
         signal: ctx.signal,
         sections: true,
+        download: { dir, maxFileBytes: svc.settings.get().MAX_SOURCE_FILE_MB * 1024 * 1024 },
         onStderr: (line) => {
           stderrTail = `${stderrTail}\n${line}`.slice(-4000);
         },

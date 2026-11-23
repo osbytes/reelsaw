@@ -217,10 +217,9 @@ export const overlaysSuite: Suite = {
       // all sources: share of required burned-in labels found, and share of detected boxes that are burned-in text
       overlayRecall: { value: Number((sum("found") / (sum("wanted") || 1)).toFixed(2)), better: "higher", tolerance: 0.03 },
       rawPrecision: { value: Number((sum("onOverlay") / (sum("boxes") || 1)).toFixed(2)), better: "higher", tolerance: 0.05 },
-      // only when aggregates ran: with their media uncached (--offline) a 0 here would read as a regression
-      ...(results.some((r) => r.id.startsWith("aggregate-"))
-        ? { aggregatePass: { value: results.filter((r) => r.id.startsWith("aggregate-") && r.pass).length, better: "higher" as const } }
-        : {}),
+      // no count or share of passing aggregates: which ones run depends on the media cached (--offline skips the
+      // rest), so either reads a partial run as a regression. Each aggregate is a case, and the baseline's per-case
+      // comparison already catches one that stops passing.
     };
   },
 };

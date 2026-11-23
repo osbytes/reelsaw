@@ -216,7 +216,7 @@ export const USE_CASES: UseCase[] = [
         paragraphs: [
           COST_PARAGRAPH,
           t(
-            msg`An eight-hour stream is 480 source minutes: more than a hosted Creator month. Streamers who clip every night are the people self-hosting is for.`,
+            msg`An eight-hour stream is 480 source minutes: more than a hosted Creator month. If you know where the good scenes are, pick just those ranges before anything downloads: only the ranges are downloaded, transcribed and counted against your minutes. Streamers who clip whole streams every night are the people self-hosting is for.`,
           ),
         ],
       },
@@ -411,6 +411,9 @@ export const USE_CASES: UseCase[] = [
             msg`No per-clip credits: hosted plans meter minutes of source video, and self-hosted Reelsaw has no meter at all, so a 6-hour stream costs the same whether it yields 5 clips or 40.`,
           ),
           t(msg`Long sources read end to end: campaign streams run for hours, and the transcript is chunked so hour five is weighed like minute five.`),
+          t(
+            msg`Only the part you need: on a long stream, pick the ranges the campaign covers (or YouTube's Most replayed peaks) and only those minutes are downloaded and counted.`,
+          ),
           t(msg`'Find clips about …' keeps only moments on the campaign's topic, and instructions steer the rest ('the reactions, not the gameplay menus').`),
           t(msg`Captions and hooks people stop for: word-level highlight, key words picked by the model, safe-zone overlay for each platform.`),
           t(msg`An export zip per stream with a paste-ready caption, a TikTok post body and a YouTube Data API body per clip.`),

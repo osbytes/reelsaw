@@ -84,8 +84,10 @@ describe("soft delete", () => {
 
   it("delete hides the project, restore brings it back", async () => {
     assert.ok((await listed()).includes(projectId));
-    // the stack's worker may already have finished the re-analyze above, so pin the project mid-run
-    await pool.query(`update projects set status = 'analyzing', stage = 'analyze' where id = $1`, [projectId]);
+    // the stack's worker may still be running the re-analyze above, and its commit would put the status back: stop
+    // that run's jobs first, then pin the project mid-run
+    await pool.query(`update pgboss.job set state = 'cancelled' where state in ('created', 'retry', 'active') and data->>'projectId' = $1`, [projectId]);
+    await pool.query(`update projects set status = 'analyzing', stage = 'analyze', stage_seq = stage_seq + 1 where id = $1`, [projectId]);
     const del = await trpc(owner.cookie, "projects.delete", { id: projectId });
     assert.equal(del.status, 200, JSON.stringify(del.error));
     // work in progress stopped; rows and files are kept

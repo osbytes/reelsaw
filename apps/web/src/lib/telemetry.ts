@@ -97,7 +97,8 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
         release: t.sentry.release,
         tracesSampleRate: 0,
         // the user id is set by identify(); nothing inferred (the IP address) is ours to keep
-        dataCollection: { userInfo: false },
+        // nor the request's headers, cookies, bodies or query strings (the SDK's defaults collect them)
+        dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
         // an error whose throwing frame is an extension's script, not the app's
         denyUrls: EXTENSION_SCRIPT_URLS,
         beforeSend: (event, hint) => (isExpectedClientError(hint.originalException) || isForeignDomMutation(hint.originalException) ? null : event),

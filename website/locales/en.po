@@ -744,8 +744,8 @@ msgid "AI video clipping"
 msgstr "AI video clipping"
 
 #: app/page.tsx
-msgid "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones."
-msgstr "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones."
+msgid "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones. Every script the transcription model takes, from Hindi and Thai to Japanese and Arabic, with titles, hooks and hashtags written in the video's language."
+msgstr "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones. Every script the transcription model takes, from Hindi and Thai to Japanese and Arabic, with titles, hooks and hashtags written in the video's language."
 
 #: components/footer.tsx
 msgid "AI-powered long-form to short-form video clipper. Self-host, or use app.reelsaw.com. Pure TypeScript, any AI vendor, one-step Docker deploy."
@@ -779,8 +779,8 @@ msgid "An editor for when the first cut isn't the one"
 msgstr "An editor for when the first cut isn't the one"
 
 #: content/use-cases.ts
-msgid "An eight-hour stream is 480 source minutes: more than a hosted Creator month. Streamers who clip every night are the people self-hosting is for."
-msgstr "An eight-hour stream is 480 source minutes: more than a hosted Creator month. Streamers who clip every night are the people self-hosting is for."
+msgid "An eight-hour stream is 480 source minutes: more than a hosted Creator month. If you know where the good scenes are, pick just those ranges before anything downloads: only the ranges are downloaded, transcribed and counted against your minutes. Streamers who clip whole streams every night are the people self-hosting is for."
+msgstr "An eight-hour stream is 480 source minutes: more than a hosted Creator month. If you know where the good scenes are, pick just those ranges before anything downloads: only the ranges are downloaded, transcribed and counted against your minutes. Streamers who clip whole streams every night are the people self-hosting is for."
 
 #: content/use-cases.ts
 msgid "An export zip per stream with a paste-ready caption, a TikTok post body and a YouTube Data API body per clip."
@@ -2818,6 +2818,10 @@ msgstr "One video through the five queues: <0>project.ingest → project.transcr
 msgid "Only if every model can run locally. Reelsaw's installer sets up Ollama and a local Whisper so nothing leaves your machine; with cloud models, only audio (for transcription) or transcript text (for selection) is sent to the vendor you chose."
 msgstr "Only if every model can run locally. Reelsaw's installer sets up Ollama and a local Whisper so nothing leaves your machine; with cloud models, only audio (for transcription) or transcript text (for selection) is sent to the vendor you chose."
 
+#: content/use-cases.ts
+msgid "Only the part you need: on a long stream, pick the ranges the campaign covers (or YouTube's Most replayed peaks) and only those minutes are downloaded and counted."
+msgstr "Only the part you need: on a long stream, pick the ranges the campaign covers (or YouTube's Most replayed peaks) and only those minutes are downloaded and counted."
+
 #: content/legal.ts
 msgid "Only what the Service needs:"
 msgstr "Only what the Service needs:"
@@ -3003,8 +3007,8 @@ msgid "Paste a YouTube link"
 msgstr "Paste a YouTube link"
 
 #: app/page.tsx
-msgid "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it."
-msgstr "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it."
+msgid "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long video, pick only the ranges worth clipping (or YouTube's Most replayed peaks): only those are downloaded, transcribed and counted."
+msgstr "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long video, pick only the ranges worth clipping (or YouTube's Most replayed peaks): only those are downloaded, transcribed and counted."
 
 #: content/guides.ts
 msgid "Paste a YouTube link, get vertical Shorts with word-highlight captions and a hook, rendered on your own hardware. Open source, no credits, no watermark."
@@ -4628,6 +4632,10 @@ msgstr "Yes, Docker Compose; optional CUDA override"
 msgid "Yes, for English: jump cuts located by forced alignment, each one reviewable"
 msgstr "Yes, for English: jump cuts located by forced alignment, each one reviewable"
 
+#: content/competitors.ts
+msgid "Yes, for English. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
+msgstr "Yes, for English. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
+
 #: content/guides.ts
 msgid "Yes, forced-alignment verified, each cut reviewable"
 msgstr "Yes, forced-alignment verified, each cut reviewable"
@@ -4731,10 +4739,6 @@ msgstr "Yes. A webcam tile in your OBS scene is found automatically and the clip
 #: content/competitors.ts
 msgid "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser."
 msgstr "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser."
-
-#: content/competitors.ts
-msgid "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
-msgstr "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
 
 #: content/guides.ts
 msgid "Yes. Pick ranges on the timeline before anything downloads, take the video's Most replayed peaks, or send ranges from a script through the MCP server or the CLI. Only the ranges are downloaded, transcribed and counted against your minutes, and each range either finds clips inside it or is the clip."

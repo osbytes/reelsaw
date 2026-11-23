@@ -866,6 +866,8 @@ async function minutesOver(
   ent?: Entitlements | null,
   what: "video" | "ranges" = "video",
 ): Promise<{ d: LimitsDetail; key: LimitKey; message: string; sentence: string; descriptor: MessageDescriptor; offer: string; firstVideo: boolean } | null> {
+  // every comparison below is false for NaN, which would let any video in: a length that is not a number is a bug
+  if (!Number.isFinite(durationSec) || durationSec < 0) throw new Error(`minutes check needs a length in seconds, got ${durationSec}`);
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const length = Math.round(durationSec / 60);
@@ -1120,7 +1122,8 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
   const [{ hour } = { hour: 0 }] = await db
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.sourceUsage)
-    .where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, new Date(Date.now() - 3_600_000))));
+    // new projects, as the limit counts them: an extension ("Clip the rest") is a later part of the same project
+    .where(and(eq(schema.sourceUsage.userId, userId), ownRow, gte(schema.sourceUsage.createdAt, new Date(Date.now() - 3_600_000))));
   const [jobs] = (
     await db.execute<{ live: number; renders: number }>(sql`
     select

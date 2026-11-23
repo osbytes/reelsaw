@@ -58,6 +58,13 @@ export function pageOf<T>(rows: T[], limit: number, key: (last: T) => readonly (
   return { items, nextCursor: encodeCursor(key(items[items.length - 1]!)) };
 }
 
+/** Whether a cursor's value casts to the column's type: Postgres's `::text` of a number or a timestamptz. */
+export function cursorValueFits(value: string, type: SortColumn["type"]): boolean {
+  if (type === "text") return true;
+  if (type === "timestamptz") return /^(-?infinity|\d{4,}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}(:?\d{2}){0,2}|Z)?)$/.test(value);
+  return /^(-?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?|-?Infinity|NaN)$/i.test(value);
+}
+
 /** One sortable column of a keyset list: its SQL value (never null, so row comparisons page cleanly) and its type. */
 export type SortColumn = { expr: SQL; type: "text" | "numeric" | "real" | "timestamptz" };
 
@@ -74,6 +81,9 @@ export function sortedKeyset(col: SortColumn, key: string, dir: SortDir, id: Any
       "BAD_REQUEST",
       msg({ id: "list.page_link_other_order", message: "That page link is for another order. Start again from the first page." }),
     );
+  // a cursor whose value is not of the column's type would fail the cast in Postgres (a 500): refuse it here
+  if (c && !cursorValueFits(String(c[2]), col.type))
+    throw new AppError("BAD_REQUEST", msg({ id: "list.invalid_page_link", message: "That page link is not valid. Start again from the first page." }));
   const at = c ? sql`(${String(c[2])}::${sql.raw(col.type)}, ${String(c[3])})` : null;
   return {
     after: at ? (dir === "asc" ? sql`(${col.expr}, ${id}) > ${at}` : sql`(${col.expr}, ${id}) < ${at}`) : undefined,

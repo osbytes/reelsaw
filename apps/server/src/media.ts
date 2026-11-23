@@ -1,4 +1,6 @@
 import { spawn, execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { llmContext } from "./ai/trace.js";
 import { promisify } from "node:util";
 import type { Config } from "./config.js";
@@ -36,6 +38,32 @@ export class OutputTooLargeError extends Error {
     super(`${cmd} wrote more than ${Math.round(limit / 1024 / 1024)} MB to stdout; stopped it`);
   }
 }
+/** A yt-dlp download whose file grew past its limit on disk; the same link is as big on every attempt. */
+export class DownloadTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`yt-dlp wrote a file larger than ${Math.round(limitBytes / 1024 / 1024)} MB; stopped it`);
+  }
+}
+
+export type YtdlpOptions = RunOptions & {
+  sections?: boolean;
+  download: { dir: string; maxFileBytes: number } | "none";
+};
+
+/** How often a download's files are measured: a fast link writes ~100 MB a second, so the overshoot stays small. */
+const DOWNLOAD_POLL_MS = 1000;
+
+/** The largest file in `dir` (yt-dlp's `.part` and fragment files included); 0 when the folder is empty or missing. */
+export async function largestFileBytes(dir: string): Promise<number> {
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  let most = 0;
+  for (const name of names) {
+    const st = await fs.stat(path.join(dir, name)).catch(() => null);
+    if (st?.isFile() && st.size > most) most = st.size;
+  }
+  return most;
+}
+
 export interface ProbeInfo {
   durationSec: number;
   width?: number | undefined;
@@ -241,7 +269,12 @@ export interface MediaTools {
   ffprobe(file: string): Promise<ProbeInfo>;
   /** `proxyId`: the YTDLP_PROXY candidate that served it, "direct" with no pool, "explicit" when `args` carry `--proxy` */
   /** `sections`: the download uses `--download-sections` (ffmpeg fetches it), so only HTTP proxies or direct can serve it */
-  ytdlp(args: string[], opts?: RunOptions & { sections?: boolean }): Promise<RunResult & { proxyId: string }>;
+  /**
+   * `download`: where the files land and the most one file may grow to, or "none" for a lookup (`--no-download`).
+   * Required because `--max-filesize` only refuses a size the server announces: a link that streams with no length
+   * (chunked, no Content-Length) grows on disk until it is stopped, so the files themselves are watched.
+   */
+  ytdlp(args: string[], opts: YtdlpOptions): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
   /**
@@ -446,22 +479,43 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
     encoder: () => encoder,
     videoEncodeArgs: (enc = encoder.name) => videoEncodeArgs(enc),
     ytdlpProxies: () => ytdlpPool.snapshot(),
-    async ytdlp(args, opts) {
+    async ytdlp(args, { download, sections, ...opts }) {
       const cookies = config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : [];
       // YouTube n-sig / PO tokens: eval already passes this; ingest and issue-report must too
       const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
       // progress goes to stdout and has no size bound: only a caller that reads it line by line asks for it
-      const progress = opts?.onStdout || args.includes("--progress") ? [] : ["--no-progress"];
+      const progress = opts.onStdout || args.includes("--progress") ? [] : ["--no-progress"];
       const prefix = [...js, ...cookies, ...progress];
-      if (args.includes("--proxy") || ytdlpPool.size === 0) {
-        return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], opts)), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
+      if (download === "none" && !args.includes("--no-download") && !args.includes("--simulate")) {
+        throw new Error('ytdlp: download "none" needs --no-download or --simulate in the arguments');
       }
-      const { value, id } = await ytdlpPool.run(
-        (choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }),
-        opts?.signal,
-        opts?.sections ? { accept: ffmpegCanUse } : undefined,
-      );
-      return { ...value, proxyId: id };
+      // the file on disk is the bound, not what yt-dlp says: with no announced length its progress has no total
+      const over = new AbortController();
+      const watch =
+        download === "none"
+          ? null
+          : setInterval(() => {
+              void largestFileBytes(download.dir).then((n) => {
+                if (n > download.maxFileBytes && !over.signal.aborted) over.abort();
+              });
+            }, DOWNLOAD_POLL_MS);
+      const signal = opts.signal ? AbortSignal.any([opts.signal, over.signal]) : over.signal;
+      try {
+        if (args.includes("--proxy") || ytdlpPool.size === 0) {
+          return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], { ...opts, signal })), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
+        }
+        const { value, id } = await ytdlpPool.run(
+          (choice, s) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal: s }),
+          signal,
+          sections ? { accept: ffmpegCanUse } : undefined,
+        );
+        return { ...value, proxyId: id };
+      } catch (err) {
+        if (over.signal.aborted && download !== "none" && !opts.signal?.aborted) throw new DownloadTooLargeError(download.maxFileBytes);
+        throw err;
+      } finally {
+        if (watch) clearInterval(watch);
+      }
     },
 
     async ffprobe(file) {
