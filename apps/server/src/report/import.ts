@@ -426,7 +426,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
             "--",
             allowed.url,
           ],
-          {},
+          { download: { dir: out, maxFileBytes: svc.settings.get().MAX_SOURCE_FILE_MB * 1024 * 1024 } },
         );
         const f = (await fsp.readdir(out)).find((x) => x.startsWith("source."));
         if (f) sourcePath = path.join(out, f);

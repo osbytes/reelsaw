@@ -580,7 +580,7 @@ export const COMPETITORS: Competitor[] = [
       {
         q: t(msg`Does Reelsaw remove filler words like quso.ai?`),
         a: t(
-          msg`Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs.`,
+          msg`Yes, for English. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs.`,
         ),
       },
     ],

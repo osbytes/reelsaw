@@ -568,8 +568,12 @@ export function createApp(svc: Services) {
     c.set("userId", hit.ownerId);
     const range = c.req.header("range");
     // one line per fetch, not per Range part of the same fetch
-    if (!range || /^bytes=0-/.test(range))
+    if (!range || /^bytes=0-/.test(range)) {
       mlog.info({ linkId: link.id, userId: hit.ownerId, projectId: link.projectId, clipId: link.clipId, kind: link.kind }, "media link served");
+      // the same end of the funnel as a download from the app: agents and integrations take clips through share links
+      if (link.kind === "clip")
+        svc.telemetry.capture("clip.downloaded", hit.ownerId, { projectId: link.projectId, clipId: link.clipId, surface: "share_link" });
+    }
     recordUse(db, link.id).catch((err) => mlog.warn({ err, linkId: link.id }, "media link use not recorded"));
     const owner = { id: hit.ownerId, admin: false };
     const headers = { ...shared, "Cache-Control": "private, max-age=300" };
@@ -577,6 +581,12 @@ export function createApp(svc: Services) {
     try {
       if (link.kind === "export") {
         const plan = await exportPlan(svc, owner, link.projectId, link.clipIds ?? []);
+        svc.telemetry.capture("project.exported", hit.ownerId, {
+          projectId: link.projectId,
+          clips: plan.clips.length,
+          subset: plan.subset,
+          surface: "share_link",
+        });
         const { stream } = await createExportZip(
           { storage, paths, log: mlog },
           { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },

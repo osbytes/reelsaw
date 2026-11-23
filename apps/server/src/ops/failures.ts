@@ -429,8 +429,10 @@ export async function retryQuotaRefusals(svc: Services, userId: string): Promise
     .where(quotaRefusedWhere(userId))
     .orderBy(desc(schema.projects.updatedAt))
     .limit(FAILURE_PAGE);
-  // would even a one-minute video fit now (each refused project is left out of the counts, as ingest leaves it)?
-  if (rows[0] && (await sourceMinutesExceeded(svc.database.db, svc.settings.get(), userId, rows[0].id, 60, svc.entitlements))) return { retried: 0 };
+  // would even the smallest admission fit now (each refused project is left out of the counts, as ingest leaves it)?
+  // Ingest lets a video in only a whole transcription chunk at a time, so less room than one chunk refuses every one.
+  const smallestSec = svc.config.TRANSCRIBE_CHUNK_SECONDS;
+  if (rows[0] && (await sourceMinutesExceeded(svc.database.db, svc.settings.get(), userId, rows[0].id, smallestSec, svc.entitlements))) return { retried: 0 };
   let retried = 0;
   for (const r of rows) if (await retryFailedProject(svc, r.id)) retried++;
   if (retried) svc.log.child({ module: "ops", userId }).info({ retried }, "retried plan refusals after a plan or limits change");

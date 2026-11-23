@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { decodeCursor, encodeCursor, escapeLike, pageOf } from "../src/pagination.js";
+import { cursorValueFits, decodeCursor, encodeCursor, escapeLike, pageOf } from "../src/pagination.js";
 
 describe("pagination helpers", () => {
   it("round-trips a cursor tuple", () => {
@@ -32,5 +32,15 @@ describe("pagination helpers", () => {
     const more = pageOf(rows, 2, (n) => [n]);
     assert.deepEqual(more.items, [1, 2]);
     assert.deepEqual(decodeCursor(more.nextCursor!, 1), [2]);
+  });
+
+  it("a cursor value must cast to its column type, so a forged one is a 400, not a Postgres error", () => {
+    assert.ok(cursorValueFits("2026-10-17 12:00:00.123456+00", "timestamptz"));
+    assert.ok(cursorValueFits("2026-10-17 12:00:00+05:30", "timestamptz"));
+    assert.ok(!cursorValueFits("not a date", "timestamptz"));
+    assert.ok(cursorValueFits("12.5", "numeric"));
+    assert.ok(cursorValueFits("-3", "real"));
+    assert.ok(!cursorValueFits("1; drop", "numeric"));
+    assert.ok(cursorValueFits("anything", "text"));
   });
 });

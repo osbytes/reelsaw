@@ -613,10 +613,11 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   "Reelsaw cannot X" on the site after X shipped is the same class of bug as shipping a screen
   without its MCP tool. That means:
   - `README.md`: features, MCP tools, CLI commands, and the roadmap (delete items that shipped).
+  - `docs/RESEARCH.md`: its status line names what is still open; move shipped items out of it.
   - `website/`: home-page features and MCP chips (`app/page.tsx`; chips must name tools that exist),
     the Reelsaw column in `content/reelsaw.ts`, competitor `betterAt` / `pickThem` / `pickReelsaw` /
-    FAQs that claim what Reelsaw cannot do (`content/competitors.ts`), and the matching guides
-    (`content/guides.ts`). Hosted Reelsaw at app.reelsaw.com is part of the product: say so, do not
+    FAQs that claim what Reelsaw cannot do (`content/competitors.ts`), the matching guides
+    (`content/guides.ts`) and use-case pages (`content/use-cases.ts`), and `app/llms.txt`. Hosted Reelsaw at app.reelsaw.com is part of the product: say so, do not
     gate copy or `/pricing` / `/terms` / `/privacy` behind a flag. Vendor prices: re-read the public
     page before bumping `CHECKED`. Claims about Reelsaw come from the README and source
     ([website/README.md](../website/README.md)).

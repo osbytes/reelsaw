@@ -736,7 +736,7 @@ msgid "AI video clipping"
 msgstr ""
 
 #: app/page.tsx
-msgid "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones."
+msgid "AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones. Every script the transcription model takes, from Hindi and Thai to Japanese and Arabic, with titles, hooks and hashtags written in the video's language."
 msgstr ""
 
 #: components/footer.tsx
@@ -771,7 +771,7 @@ msgid "An editor for when the first cut isn't the one"
 msgstr ""
 
 #: content/use-cases.ts
-msgid "An eight-hour stream is 480 source minutes: more than a hosted Creator month. Streamers who clip every night are the people self-hosting is for."
+msgid "An eight-hour stream is 480 source minutes: more than a hosted Creator month. If you know where the good scenes are, pick just those ranges before anything downloads: only the ranges are downloaded, transcribed and counted against your minutes. Streamers who clip whole streams every night are the people self-hosting is for."
 msgstr ""
 
 #: content/use-cases.ts
@@ -2807,6 +2807,10 @@ msgstr ""
 msgid "Only if every model can run locally. Reelsaw's installer sets up Ollama and a local Whisper so nothing leaves your machine; with cloud models, only audio (for transcription) or transcript text (for selection) is sent to the vendor you chose."
 msgstr ""
 
+#: content/use-cases.ts
+msgid "Only the part you need: on a long stream, pick the ranges the campaign covers (or YouTube's Most replayed peaks) and only those minutes are downloaded and counted."
+msgstr ""
+
 #: content/legal.ts
 msgid "Only what the Service needs:"
 msgstr ""
@@ -2992,7 +2996,7 @@ msgid "Paste a YouTube link"
 msgstr ""
 
 #: app/page.tsx
-msgid "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it."
+msgid "Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long video, pick only the ranges worth clipping (or YouTube's Most replayed peaks): only those are downloaded, transcribed and counted."
 msgstr ""
 
 #: content/guides.ts
@@ -4617,6 +4621,10 @@ msgstr ""
 msgid "Yes, for English: jump cuts located by forced alignment, each one reviewable"
 msgstr ""
 
+#: content/competitors.ts
+msgid "Yes, for English. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
+msgstr ""
+
 #: content/guides.ts
 msgid "Yes, forced-alignment verified, each cut reviewable"
 msgstr ""
@@ -4719,10 +4727,6 @@ msgstr ""
 
 #: content/competitors.ts
 msgid "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser."
-msgstr ""
-
-#: content/competitors.ts
-msgid "Yes. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
 msgstr ""
 
 #: content/guides.ts

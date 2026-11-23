@@ -20,6 +20,33 @@ import { setErrorSink, type Logger } from "./log.js";
 import { readGauges, setMetricSink, type MetricSink } from "./metrics.js";
 import { otel } from "./otel.js";
 
+/**
+ * What the Sentry SDK may collect on its own. Its defaults (SDK 11) take the client's address, every request header,
+ * cookies, bodies and query strings; addresses stay in the local log only (docs/CONFIG.md, "Telemetry"), and a
+ * request's headers and body carry sessions, keys and user content.
+ */
+export const SENTRY_DATA_COLLECTION = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: false,
+  httpBodies: [],
+  urlQueryParams: false,
+  genAI: { inputs: false, outputs: false },
+} satisfies NonNullable<Parameters<typeof Sentry.init>[0]>["dataCollection"];
+
+/** The last line before an event leaves: whatever an integration still attached about the person or the request. */
+export function scrubSentryEvent<E extends Sentry.ErrorEvent>(event: E): E {
+  if (event.user) {
+    const { ip_address: _ip, email: _email, username: _name, geo: _geo, ...rest } = event.user;
+    event.user = rest;
+  }
+  if (event.request) {
+    const { headers: _h, cookies: _c, data: _d, query_string: _q, env: _e, ...rest } = event.request;
+    event.request = rest;
+  }
+  return event;
+}
+
 export interface TelemetryPublic {
   /** replaysOnErrorSampleRate: share of browser errors that keep a masked replay of the moments before them (0 = none) */
   sentry: { dsn: string; environment: string; release: string; replaysOnErrorSampleRate: number } | null;
@@ -86,6 +113,8 @@ export function createTelemetry(
       // OpenTelemetry owns spans. Leave Sentry's tracer off so the same request is not sent twice.
       tracesSampleRate: 0,
       enableOpenTelemetrySetup: false,
+      dataCollection: SENTRY_DATA_COLLECTION,
+      beforeSend: scrubSentryEvent,
       integrations: (defaults) => [
         ...defaults,
         // Logs go out as OTLP (log.ts), not through pinoIntegration, so a line is not sent twice.

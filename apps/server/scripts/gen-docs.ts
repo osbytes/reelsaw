@@ -182,7 +182,7 @@ async function mcpTable(): Promise<string> {
   const { TOOLS } = await import("../src/mcp-tools.js");
   const lines = ["| Tool | What it does |", "| --- | --- |"];
   for (const [name, t] of objectEntries(TOOLS)) {
-    const first = /^.*?[.!?](?=\s|$)/.exec(t.description)?.[0] ?? t.description;
+    const first = /^.*?(?<!\b(?:e\.g|i\.e|vs|etc))[.!?](?=\s|$)/.exec(t.description)?.[0] ?? t.description;
     lines.push(`| \`${name}\` | ${cell(first)} |`);
   }
   return lines.join("\n");

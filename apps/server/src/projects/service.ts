@@ -32,6 +32,8 @@ import {
   formatDay,
   processedEndSec,
   spansCover,
+  spansSec,
+  subtractSpans,
   transcriptSpans,
   replayPeaks,
   type HeatBin,
@@ -1443,11 +1445,22 @@ export async function extendProject(
     if (plan === "none")
       throw await extensionRefusal(u.db, svc.settings.get(), p.userId, p.durationSec - fromSec, room.sec ?? 0, svc.entitlements, room.binding);
     const untilSec = plan.until ?? p.durationSec;
-    await recordSourceExtension(u.db, p.userId, p.id, untilSec - fromSec);
+    // ranges added past the limit (addRanges) were billed when they were added: only the time they leave is new
+    const billed = await u.db
+      .select({ startSec: schema.projectRanges.startSec, endSec: schema.projectRanges.endSec })
+      .from(schema.projectRanges)
+      .where(eq(schema.projectRanges.projectId, p.id));
+    const billedSec = spansSec(
+      subtractSpans(
+        [[fromSec, untilSec]],
+        billed.map((r): [number, number] => [r.startSec, r.endSec]),
+      ),
+    );
+    await recordSourceExtension(u.db, p.userId, p.id, billedSec);
     // the part added is a range of its own (docs/specs/range-clipping.md), picked from by the run this starts
     await u.db
       .insert(schema.projectRanges)
-      .values({ id: randomUUID(), projectId: p.id, startSec: fromSec, endSec: untilSec, mode: "find", origin: "whole", billedSec: untilSec - fromSec });
+      .values({ id: randomUUID(), projectId: p.id, startSec: fromSec, endSec: untilSec, mode: "find", origin: "whole", billedSec });
     // moments picked before (even ones deleted since) mean the old part is done: the new picks go only in the new part.
     // None picked yet (the first run had not got that far): the whole processed video is picked from.
     const [picked] = await u.db

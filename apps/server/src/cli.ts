@@ -77,14 +77,15 @@ import { t } from "./i18n.js";
  *   update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]
  *                                           change the caption/hook style and fades (fadeIn, fadeOut, bumperTransition, bumperTransitionSec) of the whole project, clearing per-clip overrides and re-rendering
  *                                           (same as projects.updateStyle and update_project_style); values are JSON or text
- *   check-source <url> [--user <email|id>] | --minutes <n> [--user <email|id>]
+ *   check-source <url> [--range start-end[:clip]]… [--user <email|id>] | --minutes <n> [--range …]… [--user <email|id>]
  *                                           would a project from this link (or a file this long) be accepted for the account now:
  *                                           its length, the minutes left, and the refusal with its upgrade offer (same as projects.checkSource and check_source)
- *   create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]…
+ *   create-project <url> [--user <email|id>] [--title t] [--set key=value]… [--clear key]… [--range start-end[:find|clip]]… [--most-replayed n]
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
  *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
- *   extend-project <projectId>              clip more of a video only the start of which was processed (projects.extend and extend_project)
+ *   extend-project <projectId> [--range start-end[:find|clip]]…
+ *                                           clip more of a video: the rest of a partly processed one, or the given ranges (projects.extend and extend_project)
  *   upgrade-work [--user <email|id>]        after a plan change: the account's projects with watermarked clips and its partly processed videos
  *                                           (same as projects.upgradeWork and list_upgrade_work)
  *   start-upgrade-work [--rerender id,id] [--finish id,id]

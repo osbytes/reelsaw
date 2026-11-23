@@ -23,7 +23,7 @@ const STEPS = [
     icon: Download,
     title: t(msg`Ingest`),
     body: t(
-      msg`Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it.`,
+      msg`Paste a YouTube link or upload a file. yt-dlp fetches it, ffprobe reads it, and the source is stored once so every later step can resume from it. On a long video, pick only the ranges worth clipping (or YouTube's Most replayed peaks): only those are downloaded, transcribed and counted.`,
     ),
   },
   {
@@ -82,7 +82,7 @@ const FEATURES = [
     icon: Captions,
     title: t(msg`Captions that read`),
     body: t(
-      msg`AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones.`,
+      msg`AI-picked key words coloured and enlarged, readability limits on line length and time on screen, karaoke word highlight, boxed or outlined, with optional punch-in zooms on the key words. Drag caption and hook positions on a live preview with platform safe zones. Every script the transcription model takes, from Hindi and Thai to Japanese and Arabic, with titles, hooks and hashtags written in the video's language.`,
     ),
   },
   {

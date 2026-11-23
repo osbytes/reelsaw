@@ -112,6 +112,7 @@ export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: s
 async function lookUp(media: Pick<MediaTools, "ytdlp">, url: string, signal?: AbortSignal): Promise<Announced> {
   const { stdout } = await media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], {
     signal,
+    download: "none",
   });
   const jsonLine = stdout
     .split("\n")

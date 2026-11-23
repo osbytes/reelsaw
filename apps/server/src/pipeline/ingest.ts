@@ -29,7 +29,7 @@ import { LIVE_SOURCE_MESSAGE, LiveSourceError, NOT_LIVE_FILTER, announcedDuratio
 import { type StageContext, DownloadFailedError, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
 import { count, histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
-import { CommandError } from "../media.js";
+import { CommandError, DownloadTooLargeError } from "../media.js";
 import { BOT_CHECK, isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
 import { ENCODE_PASS_CPU } from "../resources.js";
 
@@ -243,6 +243,7 @@ export async function ingest(ctx: StageContext) {
             ],
             {
               signal: AbortSignal.any([ctx.signal, oversize.signal]),
+              download: { dir, maxFileBytes: limitMB * 1024 * 1024 },
               onStderr: (line) => {
                 stderrTail = (stderrTail + "\n" + line).slice(-4000);
               },
@@ -258,7 +259,7 @@ export async function ingest(ctx: StageContext) {
           )
           .catch((err: Error) => {
             ctx.signal.throwIfAborted();
-            if (oversize.signal.aborted) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
+            if (oversize.signal.aborted || err instanceof DownloadTooLargeError) throw new NonRetryableError(overSizeLimitMessage(limitMB, null));
             const message = describeDownloadFailure(err, stderrTail);
             // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
             if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);

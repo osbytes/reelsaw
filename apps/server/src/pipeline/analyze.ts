@@ -338,6 +338,8 @@ export function snapCandidate(
       );
     ({ start, end } = fit);
   }
+  // every clamp above caps the end at `durationSec`; a candidate past it has no clip left, never an inverted one
+  if (end - start < Math.min(1, settings.minClipSeconds)) return null;
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }
 
@@ -476,8 +478,12 @@ export async function analyze(ctx: StageContext) {
   await ctx.start("analyzing");
   const sceneCuts = await ensureSceneCuts(ctx, project, transcript.sceneCuts);
 
-  /** where the processed part ends (a partly processed video's limit, else the whole video) */
-  const endSec = processedEndSec(project) ?? transcript.words.at(-1)?.end ?? 0;
+  /**
+   * where the processed part ends (a partly processed video's limit, else the whole video). Chosen ranges bound the
+   * work themselves (as in ingest), and one added to a partly processed project can lie past its limit: clamping to
+   * the limit there made clips that end before they start.
+   */
+  const endSec = (hasChosenRanges ? project.durationSec : processedEndSec(project)) ?? transcript.words.at(-1)?.end ?? 0;
   /** the stretch this run picks in: everything processed, only the new part of an extension, or the find ranges */
   const durationSec = hasChosenRanges ? spansSec(findRanges.map((r) => [r.startSec, r.endSec])) : Math.max(0, endSec - (extendFrom ?? 0));
   const findRangeOf = (c: { startSec: number; endSec: number }) => rangeOverlapping(findRanges, c);
@@ -485,28 +491,32 @@ export async function analyze(ctx: StageContext) {
   const rangeIdOf = (startSec: number) => (toPick.find((r) => startSec >= r.startSec - RANGE_PAD_SEC && startSec < r.endSec) ?? null)?.id ?? null;
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   /** exact clip ranges as clips, their ends snapped to sentences inside the padding; titled and scored by prepare */
-  const exactRows = exactRanges.map((r, index) => {
-    const c = exactRangeBounds(r, transcript.segments, sceneCuts, settings, endSec, transcript.words);
-    return {
-      id: randomUUID(),
-      projectId,
-      index,
-      title: (r.label ?? `${formatTime(r.startSec)}–${formatTime(r.endSec)}`).slice(0, 120),
-      hook: "",
-      startSec: c.startSec,
-      endSec: c.endSec,
-      layers: layersForNewClip(template, c),
-      bumpers: bumpersForNewClip(template),
-      score: 0,
-      scores: null,
-      emphasis: null,
-      reasoning: "",
-      caption: "",
-      hashtags: [],
-      status: "pending" as const,
-      rangeId: r.id,
-    };
-  });
+  // a re-pick clears every range's pickedAt but keeps the clips the user edited: an exact range that still has its
+  // clip gets no second one
+  const exactRows = exactRanges
+    .filter((r) => !kept.some((k) => k.rangeId === r.id))
+    .map((r, index) => {
+      const c = exactRangeBounds(r, transcript.segments, sceneCuts, settings, endSec, transcript.words);
+      return {
+        id: randomUUID(),
+        projectId,
+        index,
+        title: (r.label ?? `${formatTime(r.startSec)}–${formatTime(r.endSec)}`).slice(0, 120),
+        hook: "",
+        startSec: c.startSec,
+        endSec: c.endSec,
+        layers: layersForNewClip(template, c),
+        bumpers: bumpersForNewClip(template),
+        score: 0,
+        scores: null,
+        emphasis: null,
+        reasoning: "",
+        caption: "",
+        hashtags: [],
+        status: "pending" as const,
+        rangeId: r.id,
+      };
+    });
   /** in the commit that adds this run's clips: the ranges it picked from are done, so a later run picks only in new ones */
   const markPicked = async (u: UnitOfWork) => {
     if (toPick.length)
