@@ -8,13 +8,13 @@ import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
 import { ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
-import { correctTranscript, applyFlags } from "./entities.js";
+import { correctTranscript, applyFlags, fixPairKey } from "./entities.js";
 import { DISFLUENCY_PROMPT_VERSION, detectDisfluencies, type DisfluencyCheckpoint, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
 import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
 import { refineStepOn, resolveRefineOptions, type RefineOptions } from "./refine-options.js";
-import { rejectedCutRows } from "../decisions/service.js";
+import { rejectedCutRows, rejectedEntityPairs } from "../decisions/service.js";
 
 /**
  * Refine stage = three independent jobs after transcription:
@@ -274,6 +274,7 @@ export async function refineEntities(ctx: StageContext) {
       timeoutMs: ctx.unitTimeoutMs(svc.models.get().language),
       telemetry: svc.otel.enabled,
       autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
+      rejected: await rejectedEntityFixes(svc, ctx.projectId).catch(() => new Set<string>()),
       log: ctx.log,
     },
   );
@@ -295,6 +296,14 @@ export async function refineEntities(ctx: StageContext) {
     { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } },
     ctx.seq,
   );
+}
+
+/** Name fixes the project's owner rejected in other projects: the entity pass does not propose them again. */
+async function rejectedEntityFixes(svc: Services, projectId: string): Promise<Set<string>> {
+  const db = svc.database.db;
+  const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
+  if (!p) return new Set();
+  return new Set((await rejectedEntityPairs(db, p.userId, projectId)).map((r) => fixPairKey(r.heard, r.suggested)));
 }
 
 /** "… [words] …": a rejected cut in its sentence, the way the verifier is shown it. */

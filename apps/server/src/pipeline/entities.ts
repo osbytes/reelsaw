@@ -42,6 +42,11 @@ function everydayWords(): Set<string> {
   return out;
 }
 
+/** "Michelle's" → "Michelle": the possessive of a name is still that name. */
+function stripPossessive(w: string): string {
+  return w.replace(/[’‘`]/g, "'").replace(/'s?$/i, "");
+}
+
 /**
  * English contraction endings. A closed set fixed by the grammar, so it lives in code: "don't" is "do", "you're" is
  * "you", "can't" is "can". A name's possessive ("Ludwig's") stays a name. SCOWL lists no contractions.
@@ -257,6 +262,122 @@ export function similarity(a: string, b: string): number {
   return Math.min(1, Math.max(plain, cons * 0.9) + prefix);
 }
 
+/**
+ * Metaphone key (Lawrence Philips, 1990; the closed rule set, so it lives in code): how an English spelling sounds,
+ * as consonant classes ("Monica" and "Monicah" → MNK, "stuff" and "Stav" → STF, "stop" STP vs "Steam" STM).
+ * Vowels count only at the start, written "A".
+ */
+export function metaphone(input: string): string {
+  const w = norm(input).replace(/[^a-z]/g, "");
+  if (!w) return "";
+  let s = w;
+  if (/^(kn|gn|pn|ae|wr)/.test(s)) s = s.slice(1);
+  if (s[0] === "x") s = `s${s.slice(1)}`;
+  if (s.startsWith("wh")) s = `w${s.slice(2)}`;
+  const isIn = (set: string, c: string | undefined) => !!c && set.includes(c);
+  const V = (c: string | undefined) => isIn("aeiou", c);
+  let out = "";
+  for (const [i, c] of [...s].entries()) {
+    const n = s[i + 1];
+    const p = s[i - 1];
+    if (c === p && c !== "c") continue;
+    switch (c) {
+      case "a":
+      case "e":
+      case "i":
+      case "o":
+      case "u":
+        if (i === 0) out += "A";
+        break;
+      case "b":
+        if (!(p === "m" && i === s.length - 1)) out += "B";
+        break;
+      case "c":
+        if (n === "i" && s[i + 2] === "a") out += "X";
+        else if (n === "h") out += p === "s" ? "K" : "X";
+        else if (n === "i" || n === "e" || n === "y") {
+          if (p !== "s") out += "S";
+        } else out += "K";
+        break;
+      case "d":
+        out += n === "g" && isIn("eiy", s[i + 2]) ? "J" : "T";
+        break;
+      case "g":
+        if (n === "h" && i + 2 < s.length && !V(s[i + 2])) break; // "night"
+        if (n === "n" && (i + 2 === s.length || s.slice(i + 2) === "ed")) break; // "sign", "signed"
+        if (p === "d" && isIn("eiy", n)) break; // "dge": the d already said J
+        out += isIn("eiy", n) ? "J" : "K";
+        break;
+      case "h":
+        if (V(n) && !isIn("csptg", p)) out += "H";
+        break;
+      case "k":
+        if (p !== "c") out += "K";
+        break;
+      case "p":
+        out += n === "h" ? "F" : "P";
+        break;
+      case "q":
+        out += "K";
+        break;
+      case "s":
+        out += n === "h" || (n === "i" && (s[i + 2] === "o" || s[i + 2] === "a")) ? "X" : "S";
+        break;
+      case "t":
+        if (n === "i" && (s[i + 2] === "o" || s[i + 2] === "a")) out += "X";
+        else if (n === "h") out += "0";
+        else if (!(n === "c" && s[i + 2] === "h")) out += "T";
+        break;
+      case "v":
+        out += "F";
+        break;
+      case "w":
+      case "y":
+        if (V(n)) out += c.toUpperCase();
+        break;
+      case "x":
+        out += "KS";
+        break;
+      case "z":
+        out += "S";
+        break;
+      default:
+        out += c.toUpperCase(); // f j l m n r
+    }
+  }
+  return out.replace(/(.)\1+/g, "$1");
+}
+
+/**
+ * An entity the correction pass may write into the transcript. The rest still steer the transcriber as vocabulary hints
+ * but never replace what it heard:
+ * - made only of everyday words ("Steam", "Server", "Discord", "God", "DOUBLE KILL", "Product School", "ProductManager"):
+ *   a transcriber that hears the word writes it, so a "fix" would swap a different word in ("stop" → "Steam");
+ * - letters and digits mixed ("b3d", "fnaf1", "BCON25"): handles and tags, not how anyone says the name;
+ * - a capitalized run with no vowel ("GCMX"): spelled out letter by letter, never misheard as a word.
+ */
+export function isCorrectable(entity: string): boolean {
+  const tokens = entity
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s_.-]+/)
+    .filter(Boolean);
+  if (!tokens.length) return false;
+  if (tokens.some((t) => /\p{L}/u.test(t) && /\p{N}/u.test(t))) return false;
+  if (tokens.every((t) => /^[A-Z]{2,}$/.test(t) && !/[AEIOUY]/.test(t))) return false;
+  return !tokens.every((t) => isCommonWord(t));
+}
+
+/**
+ * The transcriber wrote a capitalized word mid-sentence: it heard a name ("Rachel", "Texas"), so it is a real word too.
+ * SCOWL's package lists no names, and the transcriber's own capital is the better evidence anyway.
+ */
+function heardAsName(token: string, prev: string | undefined): boolean {
+  return /^\p{Lu}\p{Ll}/u.test(token) && prev !== undefined && !/[.!?]["')\]]*$/.test(prev);
+}
+
+/** A heard token that is a web address or handle ("aura.com", "Blender.org,", "@reelsaw"): said as written, not misheard. */
+const ADDRESS = /^@|\p{L}\.\p{L}{2,}/u;
+
 export interface Candidate {
   id: number;
   wordIndex: number; // first word index in `words`
@@ -265,25 +386,39 @@ export interface Candidate {
   entity: string;
   score: number;
   context: string;
+  /**
+   * The heard words are everyday English, or the heard text and the name contain one another ("ever" / "Server",
+   * "Monica" / "Monicah"). Such a span is offered only when it sounds the same as the name, needs a sure model, and is
+   * never applied without review.
+   */
+  realWord: boolean;
+}
+
+/** The key a rejected fix is remembered by: what was heard and what was proposed, spelling-insensitive. */
+export function fixPairKey(heard: string, suggested: string): string {
+  return `${norm(heard)}→${norm(suggested)}`;
 }
 
 /** Find transcript spans that sound like an entity but are not spelled like it. */
-export function findCandidates(words: Word[], entities: string[], threshold = 0.62): Candidate[] {
+export function findCandidates(words: Word[], entities: string[], threshold = 0.62, opts: { rejected?: ReadonlySet<string> | undefined } = {}): Candidate[] {
   const out: Candidate[] = [];
-  const ents = entities.map((e) => ({ e, tokens: e.split(/\s+/).length }));
+  const correctable = entities.filter(isCorrectable);
+  const ents = correctable.map((e) => ({ e, tokens: e.split(/\s+/).length, n: norm(e), key: metaphone(e) }));
   const entityNorms = new Set(entities.map(norm));
   let id = 0;
   for (let i = 0; i < words.length; i++) {
-    for (const { e, tokens } of ents) {
+    for (const { e, tokens, n: en, key } of ents) {
       for (const span of new Set([tokens, Math.max(1, tokens - 1), tokens + 1])) {
         if (i + span > words.length) continue;
-        const heard = words
-          .slice(i, i + span)
-          .map((w) => w.text)
-          .join(" ");
-        if (norm(heard) === norm(e)) continue; // already right
-        if (entityNorms.has(norm(heard))) continue; // already spelled like another known name (Copia vs copiacash)
-        const heardTokens = words.slice(i, i + span).map((w) => norm(w.text));
+        const raw = words.slice(i, i + span).map((w) => w.text);
+        const prev = words[i - 1]?.text;
+        if (raw.some((t) => ADDRESS.test(t))) continue; // "aura.com", "Blender.org": the address as said
+        const heard = raw.join(" ");
+        const hn = norm(raw.map(stripPossessive).join(" "));
+        if (!hn || hn === en) continue; // already right, possessive included ("Michelle's")
+        if (entityNorms.has(hn)) continue; // already spelled like another known name (Copia vs copiacash)
+        if (opts.rejected?.has(fixPairKey(heard, e))) continue; // the user said no to this exact fix before
+        const heardTokens = raw.map((t) => norm(stripPossessive(t)));
         if (heardTokens.every((t) => STOP.has(t))) continue; // "a day" is never a name
         const entityTokens = e.toLowerCase().split(/\s+/).map(norm);
         if (heardTokens.some((t) => entityTokens.includes(t))) continue; // already contains the name
@@ -291,12 +426,20 @@ export function findCandidates(words: Word[], entities: string[], threshold = 0.
         if (s < (span > 1 ? Math.max(threshold, 0.72) : threshold)) continue;
         // skip when the heard text is a common word and the entity is short (e.g. "see" vs "Seen")
         if (span === 1 && STOP.has(norm(heard)) && norm(e).length <= 4) continue;
+        // A real word is what the speaker most likely said: offer the name only when it sounds the same
+        // ("Monica" → "Monicah", "stuff" → "Stav"), never on a loose look-alike ("stop" → "Steam", "Rachel" → "Michelle",
+        // "Texas" → "Texan", "ever" → "Server"). A non-word ("Zorvacks", "Lashkarlands") is a transcriber's guess.
+        // A name the transcriber already capitalized ("Rachel", "Texas", "Zorvacks") gets the same sound test but may still
+        // apply on its own: a misheard name is often written as a name.
+        const realWord = raw.every((t) => isCommonWord(t)) || hn.includes(en) || en.includes(hn);
+        const asName = raw.every((t, k) => isCommonWord(t) || heardAsName(t, k ? raw[k - 1] : prev));
+        if ((realWord || asName) && metaphone(raw.join("")) !== key) continue;
         const context = words
           .slice(Math.max(0, i - 6), Math.min(words.length, i + span + 6))
           .map((w, k) => (k === Math.min(6, i) ? `[[${w.text}` : k === Math.min(6, i) + span - 1 ? `${w.text}]]` : w.text))
           .join(" ")
           .replace(/\[\[([^\]]*)\]\]/, "[[$1]]");
-        out.push({ id: id++, wordIndex: i, span, heard, entity: e, score: Number(s.toFixed(2)), context });
+        out.push({ id: id++, wordIndex: i, span, heard, entity: e, score: Number(s.toFixed(2)), context, realWord });
       }
     }
   }
@@ -308,6 +451,9 @@ export function findCandidates(words: Word[], entities: string[], threshold = 0.
   }
   return [...best.values()].slice(0, 80);
 }
+
+/** Below this a fix over a real word is noise in the review list (the live model rated "stuff" → "Stav" 0.6). */
+const REAL_WORD_MIN_CONFIDENCE = 0.8;
 
 const decisionSchema = z.object({
   decisions: z.array(
@@ -402,13 +548,15 @@ export async function correctTranscript(
     telemetry?: boolean;
     autoConfidence?: number;
     minFlagConfidence?: number;
+    /** fixes this user rejected before, as `fixPairKey(heard, suggested)`: never proposed again */
+    rejected?: ReadonlySet<string>;
     log?: Logger;
   } = {},
 ): Promise<CorrectionResult> {
   const autoConfidence = opts.autoConfidence ?? 0.85;
   const minFlagConfidence = opts.minFlagConfidence ?? 0.4;
-  entities = await filterProperNouns(model, entities, context, opts.signal, opts.timeoutMs);
-  const candidates = findCandidates(words, entities);
+  entities = await filterProperNouns(model, entities.filter(isCorrectable), context, opts.signal, opts.timeoutMs);
+  const candidates = findCandidates(words, entities, undefined, { rejected: opts.rejected });
   const trace: NonNullable<CorrectionResult["trace"]> = {
     entities,
     candidates: candidates.map((c) => ({ wordIndex: c.wordIndex, heard: c.heard, proposed: c.entity, outcome: "model failed" })),
@@ -421,6 +569,8 @@ Known names and terms that appear in this video: ${entities.join(", ")}.
 
 For each candidate below, the transcriber heard the text in [[double brackets]]. Decide whether the speaker actually said the proposed name/term instead.
 - replace=true only when the context makes the proposed term clearly more plausible than what was heard.
+- If the heard text is an ordinary word or name that makes sense in its sentence, the speaker most likely said it: replace=false.
+- The proposed term must fit the sentence as a name: "stop following me" is never "Steam following me".
 - confidence is your probability (0-1) that the proposed term is what was said. Be calibrated: common words that merely sound similar deserve low confidence.
 
 Candidates:
@@ -445,6 +595,8 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
     return none;
   }
   const byId = new Map(decisions.map((d) => [d.id, d]));
+  // a real word that sounds like the name is still most likely the word: show it only when the model is sure
+  const floor = (c: Candidate) => (c.realWord ? Math.max(minFlagConfidence, REAL_WORD_MIN_CONFIDENCE) : minFlagConfidence);
   const flags: TranscriptFlag[] = [];
   let lastEnd = -1;
   const traced = new Map(candidates.map((c, i) => [c, trace.candidates[i]!]));
@@ -454,9 +606,9 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
     Object.assign(tr, {
       replace: d?.replace,
       confidence: d?.confidence,
-      outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < minFlagConfidence ? "low confidence" : "flagged",
+      outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < floor(c) ? "low confidence" : "flagged",
     });
-    if (!d?.replace || d.confidence < minFlagConfidence) continue;
+    if (!d?.replace || d.confidence < floor(c)) continue;
     if (c.wordIndex < lastEnd) {
       tr.outcome = "overlaps an earlier fix";
       continue; // overlapping candidate
@@ -472,8 +624,8 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
       heard: c.heard,
       suggested: c.entity,
       confidence: Number(d.confidence.toFixed(2)),
-      // replacing an everyday English word is never automatic, however confident the model is
-      status: d.confidence >= autoConfidence && !c.heard.split(/\s+/).some((t) => isCommonWord(t)) ? "auto" : "pending",
+      // replacing a real word is never automatic, however confident the model is
+      status: d.confidence >= autoConfidence && !c.realWord && !c.heard.split(/\s+/).some((t) => isCommonWord(t)) ? "auto" : "pending",
     });
   }
   const applied = flags.filter((f) => f.status === "auto").map((f) => ({ heard: f.heard, entity: f.suggested, at: f.start }));
