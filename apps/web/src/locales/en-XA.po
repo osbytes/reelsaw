@@ -286,6 +286,11 @@ msgstr ""
 msgid "{0, plural, one {# project} other {# projects}}"
 msgstr ""
 
+#. placeholder {0}: c.ranges
+#: src/components/RangeCoverage.tsx
+msgid "{0, plural, one {# range} other {# ranges}}"
+msgstr ""
+
 #. placeholder {0}: s.done
 #: src/components/CommandPaletteDialog.tsx
 msgid "{0, plural, one {# rendered clip with paste-ready metadata} other {# rendered clips with paste-ready metadata}}"
@@ -809,6 +814,10 @@ msgstr ""
 
 #: src/components/ClipEditor.tsx
 msgid "{dirtyCount} unsaved · needs re-render"
+msgstr ""
+
+#: src/components/RangeCoverage.tsx
+msgid "{done} of {total}"
 msgstr ""
 
 #: src/pages/Project.tsx
@@ -1662,7 +1671,7 @@ msgid "<0>{0}</0>{1} wants to use Reelsaw as <1>{2}</1>: create projects, read t
 msgstr ""
 
 #: src/pages/NewProject.tsx
-msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with {pad} s of context on both sides, not counted."
 msgstr ""
 
 #: src/components/CommandPaletteDialog.tsx
@@ -7453,6 +7462,10 @@ msgstr ""
 msgid "No models of this kind here"
 msgstr ""
 
+#: src/pages/Project.tsx
+msgid "No moment in this range stood on its own. Select text in the transcript to make a clip from it."
+msgstr ""
+
 #: src/components/CommandPaletteDialog.tsx
 msgid "No outro on this project"
 msgstr ""
@@ -7876,6 +7889,10 @@ msgstr ""
 msgid "Online"
 msgstr ""
 
+#: src/components/RangeCoverage.tsx
+msgid "Only {done} of this {total} video was clipped, in ranges. The rest was not downloaded or transcribed; add a range on the project page."
+msgstr ""
+
 #: src/pages/AdminUsers.tsx
 msgid "Only accounts that signed up from {signupIp}. Click to show everyone."
 msgstr ""
@@ -7898,6 +7915,10 @@ msgstr ""
 
 #: src/pages/NewProject.tsx
 msgid "Only on-topic moments are kept. Each clip also gets a relevance score."
+msgstr ""
+
+#: src/components/RangeCoverage.tsx
+msgid "Only the first {done} of this {total} video was clipped. Clip the rest on the project page."
 msgstr ""
 
 #: src/pages/AdminUsers.tsx

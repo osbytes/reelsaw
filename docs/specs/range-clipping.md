@@ -64,6 +64,12 @@ The timeline shows processed ranges (clips marked inside them) and hatched unpro
 hatched time opens **New range** with its mode and cost; "Clip this range" runs only that part. Clips are
 grouped by range; a find range offers "Find more in this range".
 
+### Projects list and ⌘K
+A project that processed only part of its video (`rangeCoverage`: chosen ranges, or the start of a long one) says
+so wherever it is listed: the card's length badge reads "3 ranges · 4:30 of 1:02:33" with a strip of the clipped
+parts along the thumbnail's bottom edge, the ⌘K row's hint says the same, and `list_projects` adds
+`processed { seconds, ranges }`.
+
 ### Agents and integrations
 - `check_source { sourceUrl | durationSec, ranges? }` → adds `mostReplayed[]` (peaks, when the site has them) and
   `ranges { seconds, minutes, fits, changes[] }`.

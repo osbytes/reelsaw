@@ -214,8 +214,11 @@ export async function ingest(ctx: StageContext) {
       // --max-filesize only refuses a size known up front; a fragmented download (a stream's recording) has none, so
       // stop it ourselves once what has arrived passes the limit instead of letting it run for hours
       const oversize = new AbortController();
-      /** one yt-dlp download to `<stem>.<ext>`: the whole video, or one section of it; `share` places its progress */
-      const fetchSource = (stem: string, section: [number, number] | null, share: [number, number]) =>
+      /**
+       * one yt-dlp download to `<stem>.<ext>`: the whole video, or one section of it; `share` places its progress and
+       * `part` ("part 2 of 3") says which section, since each one's own percentage starts over
+       */
+      const fetchSource = (stem: string, section: [number, number] | null, share: [number, number], part?: string) =>
         svc.media
           .ytdlp(
             [
@@ -253,7 +256,7 @@ export async function ingest(ctx: StageContext) {
                 if (!tick) return;
                 if (tick.bytes !== null && tick.bytes > limitMB * 1024 * 1024 && !oversize.signal.aborted) oversize.abort();
                 downloaded = Math.max(downloaded, share[0] + tick.fraction * share[1]);
-                void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
+                void ctx.progress(downloaded * 0.6, part ? `${tick.message} (${part})` : tick.message).catch(() => {});
               },
             },
           )
@@ -277,7 +280,10 @@ export async function ingest(ctx: StageContext) {
         for (const [i, span] of sparseSpans.entries()) {
           const stem = `piece-${i}`;
           for (const f of await fs.readdir(dir)) if (f.startsWith(`${stem}.`)) await fs.rm(path.join(dir, f), { force: true });
-          ({ proxyId } = await fetchSource(stem, span, [done / total, (span[1] - span[0]) / total]));
+          const part = `part ${i + 1} of ${sparseSpans.length}`;
+          // a section's first progress line comes only once ffmpeg has found its start, which takes a while: say which now
+          await ctx.progress((done / total) * 0.6, `Downloading ${part}`).catch(() => {});
+          ({ proxyId } = await fetchSource(stem, span, [done / total, (span[1] - span[0]) / total], part));
           done += span[1] - span[0];
           const name = (await fs.readdir(dir)).find((f) => f.startsWith(`${stem}.`) && f.endsWith(".mp4"));
           if (!name) throw new Error("yt-dlp finished but no file was produced for a range");

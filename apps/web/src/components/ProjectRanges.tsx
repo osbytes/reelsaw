@@ -6,13 +6,15 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { formatTime, planRanges, spansSec } from "@reelsaw/shared";
+import { formatTime, planRanges, rangeCoverage } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { QuotaNotice, quotaFromError } from "./QuotaNotice";
 import { RangeList, RangeTimeline, type DraftRange } from "./RangeTimeline";
 
 interface ProjectRange {
   id: string;
+  /** stable across additions (the server numbers ranges in the order they were added); null for a whole part */
+  number: number | null;
   startSec: number;
   endSec: number;
   mode: "find" | "clip";
@@ -22,8 +24,7 @@ interface ProjectRange {
 
 /** Whether a project's page shows its ranges: it chose ranges, or part of its video is not processed yet. */
 export function showsRanges(p: { durationSec: number | null; ranges?: ProjectRange[] | undefined }): boolean {
-  if (!p.durationSec || !p.ranges?.length) return false;
-  return p.ranges.some((r) => r.origin !== "whole") || spansSec(p.ranges.map((r) => [r.startSec, r.endSec])) < p.durationSec - 1;
+  return rangeCoverage(p.ranges ?? [], p.durationSec) !== null;
 }
 
 export function ProjectRanges({
@@ -56,6 +57,8 @@ export function ProjectRanges({
   const billed = plan?.ok ? plan.billedSec : 0;
   const quota = extend.error ? quotaFromError(extend.error) : null;
   const n = ordered.length;
+  // new ranges are numbered after the project's own, which keep theirs
+  const numberFrom = ranges.reduce((m, r) => Math.max(m, r.number ?? 0), 0) + 1;
   return (
     <section className="flex flex-col gap-2 rounded-[14px] border border-line bg-panel p-3" aria-labelledby="project-ranges">
       <div className="flex items-center justify-between gap-2">
@@ -74,10 +77,10 @@ export function ProjectRanges({
           </button>
         )}
       </div>
-      <RangeTimeline durationSec={durationSec} ranges={drafts} onChange={setDrafts} fixed={fixed} marks={clips} readOnly={!adding} />
+      <RangeTimeline durationSec={durationSec} ranges={drafts} onChange={setDrafts} fixed={fixed} marks={clips} readOnly={!adding} numberFrom={numberFrom} />
       {adding && (
         <>
-          <RangeList durationSec={durationSec} ranges={drafts} onChange={setDrafts} />
+          <RangeList durationSec={durationSec} ranges={drafts} onChange={setDrafts} numberFrom={numberFrom} />
           <p className="text-xs text-ink2" aria-live="polite">
             {n ? (
               <Trans>{formatTime(billed)} of new video counted. Clips, fixes and settings already here stay.</Trans>
@@ -112,7 +115,7 @@ export function ProjectRanges({
 
 /** A clip group's heading on the project page: the range's number, times and mode. */
 export function RangeHeading({ index, range }: { index: number; range: ProjectRange }) {
-  const n = index + 1;
+  const n = range.number ?? index + 1;
   const from = formatTime(range.startSec);
   const to = formatTime(range.endSec);
   return (

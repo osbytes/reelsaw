@@ -35,6 +35,7 @@ import {
   spansSec,
   subtractSpans,
   transcriptSpans,
+  peakMode,
   replayPeaks,
   type HeatBin,
   type ReplayPeak,
@@ -1053,7 +1054,8 @@ export async function createProject(
     if (settings.minClipSeconds >= settings.maxClipSeconds)
       throw new AppError("BAD_REQUEST", msg({ id: "project.min_below_max", message: "minClipSeconds must be below maxClipSeconds" }));
     const given = input.ranges ?? [];
-    const asked = [...given, ...peakRanges];
+    // a peak is the clip when it fits the longest clip, else a range to find moments in (the timeline's chips do the same)
+    const asked = [...given, ...peakRanges.map((r) => ({ ...r, mode: peakMode({ startSec: r.startSec, endSec: r.endSec }, settings.maxClipSeconds) }))];
     const plan = asked.length ? planRanges(asked, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
     if (plan && !plan.ok) throw rangesRefused(plan.problems);
     // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock

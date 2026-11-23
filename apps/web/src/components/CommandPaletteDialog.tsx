@@ -48,6 +48,7 @@ import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { DeleteAssetDialog } from "./BumperField";
 import { downloadClip } from "./DownloadClipButton";
+import { CoverageText } from "./RangeCoverage";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
@@ -289,7 +290,18 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     return (
       <>
         <StatusText status={p.status} />
-        {p.durationSec ? ` · ${formatTime(p.durationSec)}` : ""} · <Plural value={n} one="# clip" other="# clips" /> · {ago(p.updatedAt)}
+        {/* only part of the video was clipped: say how much, not just the video's length */}
+        {p.coverage ? (
+          <>
+            {" · "}
+            <CoverageText c={p.coverage} />
+          </>
+        ) : p.durationSec ? (
+          ` · ${formatTime(p.durationSec)}`
+        ) : (
+          ""
+        )}{" "}
+        · <Plural value={n} one="# clip" other="# clips" /> · {ago(p.updatedAt)}
       </>
     );
   };

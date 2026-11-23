@@ -98,6 +98,35 @@ export function transcriptSpans(
   );
 }
 
+/** How much of its video a project processes, when that is not all of it: the Projects cards, ⌘K, list_projects. */
+export interface RangeCoverage {
+  /** seconds of the video processed (ranges and whole parts, overlaps once) */
+  sec: number;
+  /** the video's length */
+  durationSec: number;
+  /** ranges a person or a caller chose; 0 for a video processed from its start only (a partial project) */
+  ranges: number;
+  /** the processed time, merged, in source order: drawn as a strip over the video's length */
+  spans: [number, number][];
+}
+
+/**
+ * A project's coverage from its ranges, or null when it processes the whole video (or its length or ranges are not
+ * known yet). The one rule for "this project has only part of its video": the project page's range panel uses it too.
+ */
+export function rangeCoverage(
+  ranges: readonly { startSec: number; endSec: number; origin: RangeOrigin | string }[],
+  durationSec: number | null,
+): RangeCoverage | null {
+  if (!durationSec || !ranges.length) return null;
+  const chosen = ranges.filter((r) => r.origin !== "whole").length;
+  const spans = mergeSpans(ranges.map((r): Span => [r.startSec, Math.min(r.endSec, durationSec)]));
+  const sec = spansSec(spans);
+  // a second short of the length is the whole video (the probe and the file disagree by a frame or two)
+  if (!chosen && sec >= durationSec - 1) return null;
+  return { sec, durationSec, ranges: chosen, spans };
+}
+
 export interface PlannedRange {
   startSec: number;
   endSec: number;
@@ -261,6 +290,14 @@ export interface ReplayPeak {
   startSec: number;
   endSec: number;
   heat: number;
+}
+
+/**
+ * How a Most replayed peak is added: as the clip itself when it fits the project's longest clip, else as a range to
+ * find moments in (an exact clip longer than that would only be turned into one by the planner, with a warning).
+ */
+export function peakMode(peak: { startSec: number; endSec: number }, maxClipSec: number): RangeMode {
+  return peak.endSec - peak.startSec <= maxClipSec ? "clip" : "find";
 }
 
 /** A peak suggested as a clip is at most this long; a wider hot stretch is cut around its hottest bin. */

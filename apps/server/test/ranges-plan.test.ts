@@ -11,6 +11,7 @@ import {
   parseClock,
   parseRangeArg,
   planRanges,
+  rangeCoverage,
   replayPeaks,
   spansSec,
   subtractSpans,
@@ -244,5 +245,37 @@ describe("replayPeaks", () => {
   it("finds nothing in a flat or missing heatmap", () => {
     assert.deepEqual(replayPeaks(bins.map((b) => ({ ...b, value: 0.2 }))), []);
     assert.deepEqual(replayPeaks([]), []);
+  });
+});
+
+describe("rangeCoverage", () => {
+  it("is null for a video processed whole, or not known yet", () => {
+    assert.equal(rangeCoverage([{ startSec: 0, endSec: 600, origin: "whole" }], 600), null);
+    assert.equal(rangeCoverage([{ startSec: 0, endSec: 599.5, origin: "whole" }], 600), null);
+    assert.equal(rangeCoverage([], 600), null);
+    assert.equal(rangeCoverage([{ startSec: 0, endSec: 60, origin: "user" }], null), null);
+  });
+  it("says how much of a partly processed video was clipped, with no chosen ranges", () => {
+    assert.deepEqual(rangeCoverage([{ startSec: 0, endSec: 1200, origin: "whole" }], 3600), { sec: 1200, durationSec: 3600, ranges: 0, spans: [[0, 1200]] });
+  });
+  it("counts chosen ranges and merges their time, even when they cover the whole video", () => {
+    const c = rangeCoverage(
+      [
+        { startSec: 100, endSec: 200, origin: "user" },
+        { startSec: 150, endSec: 260, origin: "api" },
+        { startSec: 900, endSec: 1000, origin: "most_replayed" },
+      ],
+      3600,
+    );
+    assert.deepEqual(c, {
+      sec: 260,
+      durationSec: 3600,
+      ranges: 3,
+      spans: [
+        [100, 260],
+        [900, 1000],
+      ],
+    });
+    assert.equal(rangeCoverage([{ startSec: 0, endSec: 600, origin: "user" }], 600)?.ranges, 1);
   });
 });

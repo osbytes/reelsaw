@@ -19,6 +19,7 @@ import { useDebounced } from "../lib/useDebounced";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useShortcut, useShortcuts } from "../lib/shortcuts";
 import { ProjectsBar } from "../components/ProjectsBar";
+import { CoverageBadge, RangesCount } from "../components/RangeCoverage";
 import { pageTitle, useDocumentTitle } from "../lib/title";
 import { ListEmpty, showingCount } from "../components/ListPage";
 import {
@@ -420,7 +421,9 @@ export function ProjectsPage() {
                     )}
                     {/* intro (left) and outro (right) assets, fanned like the clips */}
                     <PosterBumperCards bumpers={p.bumpers} />
-                    {p.durationSec ? (
+                    {p.coverage ? (
+                      <CoverageBadge c={p.coverage} strip={!active} />
+                    ) : p.durationSec ? (
                       <span className="absolute bottom-2 end-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">
                         {formatTime(p.durationSec)}
                       </span>
@@ -435,7 +438,10 @@ export function ProjectsPage() {
                     {/* always two lines tall so every card in the row ends at the same height, whatever the title length */}
                     <h3 className="line-clamp-2 min-h-[2.75em] text-[15px] font-semibold leading-snug">{p.title}</h3>
                     <StatusText status={p.status} />
-                    <div className="truncate text-xs text-ink3">{detail}</div>
+                    <div className="truncate text-xs text-ink3">
+                      <RangesCount c={p.coverage} />
+                      {detail}
+                    </div>
                   </div>
                 </Link>
               </div>

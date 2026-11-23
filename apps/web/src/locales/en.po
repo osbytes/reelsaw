@@ -286,6 +286,11 @@ msgstr "{0, plural, one {# project did not start: {why}} other {# projects did n
 msgid "{0, plural, one {# project} other {# projects}}"
 msgstr "{0, plural, one {# project} other {# projects}}"
 
+#. placeholder {0}: c.ranges
+#: src/components/RangeCoverage.tsx
+msgid "{0, plural, one {# range} other {# ranges}}"
+msgstr "{0, plural, one {# range} other {# ranges}}"
+
 #. placeholder {0}: s.done
 #: src/components/CommandPaletteDialog.tsx
 msgid "{0, plural, one {# rendered clip with paste-ready metadata} other {# rendered clips with paste-ready metadata}}"
@@ -810,6 +815,10 @@ msgstr "{dirtyCount} unsaved"
 #: src/components/ClipEditor.tsx
 msgid "{dirtyCount} unsaved · needs re-render"
 msgstr "{dirtyCount} unsaved · needs re-render"
+
+#: src/components/RangeCoverage.tsx
+msgid "{done} of {total}"
+msgstr "{done} of {total}"
 
 #: src/pages/Project.tsx
 msgid "{elapsed} elapsed"
@@ -1662,8 +1671,8 @@ msgid "<0>{0}</0>{1} wants to use Reelsaw as <1>{2}</1>: create projects, read t
 msgstr "<0>{0}</0>{1} wants to use Reelsaw as <1>{2}</1>: create projects, read transcripts, edit and download clips."
 
 #: src/pages/NewProject.tsx
-msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
-msgstr "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with 15 s of context on both sides, not counted."
+msgid "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with {pad} s of context on both sides, not counted."
+msgstr "<0>{counted}</0> of {total} transcribed and counted · skips {skipped}% of the video. Each range is fetched with {pad} s of context on both sides, not counted."
 
 #: src/components/CommandPaletteDialog.tsx
 msgid "<0>←</0> back"
@@ -7453,6 +7462,10 @@ msgstr "No matches"
 msgid "No models of this kind here"
 msgstr "No models of this kind here"
 
+#: src/pages/Project.tsx
+msgid "No moment in this range stood on its own. Select text in the transcript to make a clip from it."
+msgstr "No moment in this range stood on its own. Select text in the transcript to make a clip from it."
+
 #: src/components/CommandPaletteDialog.tsx
 msgid "No outro on this project"
 msgstr "No outro on this project"
@@ -7876,6 +7889,10 @@ msgstr "One video opens New project. Several start a project each with the defau
 msgid "Online"
 msgstr "Online"
 
+#: src/components/RangeCoverage.tsx
+msgid "Only {done} of this {total} video was clipped, in ranges. The rest was not downloaded or transcribed; add a range on the project page."
+msgstr "Only {done} of this {total} video was clipped, in ranges. The rest was not downloaded or transcribed; add a range on the project page."
+
 #: src/pages/AdminUsers.tsx
 msgid "Only accounts that signed up from {signupIp}. Click to show everyone."
 msgstr "Only accounts that signed up from {signupIp}. Click to show everyone."
@@ -7899,6 +7916,10 @@ msgstr "only crashes"
 #: src/pages/NewProject.tsx
 msgid "Only on-topic moments are kept. Each clip also gets a relevance score."
 msgstr "Only on-topic moments are kept. Each clip also gets a relevance score."
+
+#: src/components/RangeCoverage.tsx
+msgid "Only the first {done} of this {total} video was clipped. Clip the rest on the project page."
+msgstr "Only the first {done} of this {total} video was clipped. Clip the rest on the project page."
 
 #: src/pages/AdminUsers.tsx
 msgid "Only this address"

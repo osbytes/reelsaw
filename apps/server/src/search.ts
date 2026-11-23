@@ -9,6 +9,7 @@
  */
 import { and, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "./db/index.js";
+import { coverageOf } from "./projects/ranges.js";
 
 export const SEARCH_PROJECTS = 8;
 export const SEARCH_CLIPS = 15;
@@ -104,11 +105,16 @@ async function clipFacts(db: Db, ids: string[]) {
 }
 
 async function projectRows(db: Db, rows: Array<ProjectRow & { score?: number }>) {
-  const facts = await clipFacts(
-    db,
-    rows.map((p) => p.id),
-  );
+  const [facts, coverage] = await Promise.all([
+    clipFacts(
+      db,
+      rows.map((p) => p.id),
+    ),
+    coverageOf(db, rows),
+  ]);
   return rows.map((p) => ({
+    /** non-null: only part of the video is processed (ranges, or the start of a long one) */
+    coverage: coverage.get(p.id) ?? null,
     id: p.id,
     title: p.title,
     status: p.status,

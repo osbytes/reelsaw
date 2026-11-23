@@ -1,6 +1,6 @@
 import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
 import { rendersFromWindows } from "../pipeline/windows.js";
-import { projectRangesOf, publicRange } from "../projects/ranges.js";
+import { processedSecOf, projectRangesOf, publicRanges } from "../projects/ranges.js";
 import { z } from "zod";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -1551,14 +1551,16 @@ const restRouter = router({
         : null;
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
-      const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
+      // scaled by the time the project processes: its ranges (and their padding), not the whole video
+      const processedSec = (await processedSecOf(db, [p])).get(p.id) ?? null;
+      const estimates = processedSec ? estimateStages(processedSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
       // clips deleted or replaced by a re-analyze, restorable with clips.restore until the purge
       const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
       // a partly processed video: what was processed, what is left and what finishes it (Clip the rest, or the plan)
       const partial = await partialSourceOf(ctx.svc, p);
       // the parts of the video the project processes (docs/specs/range-clipping.md); each clip names its range and ref
-      const ranges = (await projectRangesOf(db, p.id)).map(publicRange);
+      const ranges = publicRanges(await projectRangesOf(db, p.id));
       const refOf = new Map(ranges.map((r) => [r.id, r.ref]));
       return {
         ...publicProject(p),
@@ -1577,7 +1579,7 @@ const restRouter = router({
       const surface = ctx.surface ?? (ctx.who.via === "session" ? "web" : "api");
       const p = await createProject(ctx.svc, ctx.user.id, input, { rangeOrigin: surface === "web" ? "user" : "api" });
       if (!p.ranges) return publicProject(p);
-      const ranges = (await projectRangesOf(ctx.svc.database.db, p.id)).map(publicRange);
+      const ranges = publicRanges(await projectRangesOf(ctx.svc.database.db, p.id));
       return { ...publicProject(p), ranges, rangeChanges: p.ranges.changes, billedSec: p.ranges.billedSec };
     }),
 

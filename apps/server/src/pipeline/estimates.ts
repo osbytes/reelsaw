@@ -13,6 +13,7 @@ import type { Db } from "../db/index.js";
 import type { Config } from "../config.js";
 import { providerOf } from "../ai/registry.js";
 import { firstStageSeconds, loadRunLogs, runsOf } from "./runs.js";
+import { processedSecOf } from "../projects/ranges.js";
 
 export type Factors = Record<PipelineStage, number>;
 
@@ -127,15 +128,22 @@ export async function loadHistory(db: Db, limit = 40): Promise<StageSample[]> {
       order by r.updated_at desc
     `)
   ).rows as Array<{ id: string; title: string; duration_sec: number | string; updated_at: Date | string; models: Partial<Models> | null }>;
-  const logs = await loadRunLogs(
-    db,
-    rows.map((r) => r.id),
-  );
+  const [logs, processed] = await Promise.all([
+    loadRunLogs(
+      db,
+      rows.map((r) => r.id),
+    ),
+    // a project of ranges processed only them: its stage times are per second of those, not of the whole video
+    processedSecOf(
+      db,
+      rows.map((r) => ({ id: r.id, durationSec: Number(r.duration_sec) })),
+    ),
+  ]);
   // each stage counts from the first run that completed it: a later refine / re-analyze / re-render on the same project must not stretch it
   return rows.map((r) => ({
     projectId: r.id,
     title: r.title,
-    durationSec: Number(r.duration_sec),
+    durationSec: processed.get(r.id) ?? Number(r.duration_sec),
     finishedAt: new Date(r.updated_at).toISOString(),
     models: r.models ?? {},
     stages: Object.fromEntries(Object.entries(firstStageSeconds(runsOf(logs.get(r.id) ?? []))).filter(([, sec]) => sec > 0)) as StageSample["stages"],
