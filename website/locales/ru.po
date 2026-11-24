@@ -70,15 +70,7 @@ msgid "{\n"
 "    }\n"
 "  }\n"
 "}"
-msgstr "{"
-"  \"mcpServers\": {"
-"    \"reelsaw\": {"
-"      \"type\": \"http\","
-"      \"url\": \"https://your-host/api/mcp\","
-"      \"headers\": { \"Authorization\": \"Bearer rs_…\" }"
-"    }"
-"  }"
-"}"
+msgstr "{  \"mcpServers\": {    \"reelsaw\": {      \"type\": \"http\",      \"url\": \"https://your-host/api/mcp\",      \"headers\": { \"Authorization\": \"Bearer rs_…\" }    }  }}"
 
 #: components/replay-ranges.tsx
 msgid "{billed} of {total} min"
@@ -1898,10 +1890,7 @@ msgid "git clone https://github.com/osbytes/reelsaw.git && cd reelsaw\n"
 "cp .env.example .env\n"
 "# set BETTER_AUTH_SECRET, APP_URL and at least one AI provider key\n"
 "docker compose up -d --build"
-msgstr "git clone https://github.com/osbytes/reelsaw.git && cd reelsaw"
-"cp .env.example .env"
-"# задайте BETTER_AUTH_SECRET, APP_URL и хотя бы один ключ ИИ-провайдера"
-"docker compose up -d --build"
+msgstr "git clone https://github.com/osbytes/reelsaw.git && cd reelsawcp .env.example .env# задайте BETTER_AUTH_SECRET, APP_URL и хотя бы один ключ ИИ-провайдераdocker compose up -d --build"
 
 #: app/releases/[releases]/page.tsx
 #: components/release-list.tsx
