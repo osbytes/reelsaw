@@ -83,7 +83,7 @@ msgstr "«{0}» удаляется навсегда. Клипы, в которы
 #. placeholder {0}: title || t`Untitled clip`
 #: src/components/ClipEditor.tsx
 msgid "“{0}” is hidden from the project and {dirtyCount, plural, one {your # unsaved edit is} other {your # unsaved edits are}} discarded; Undo brings back the clip, not the edits."
-msgstr "«{0}» скрывается из проекта, а {dirtyCount, plural, one {ваше # несохранённое изменение} few {ваши # несохранённых изменения} many {ваши # несохранённых изменений} other {ваши # несохранённых изменений}} теряется; отмена возвращает клип, но не изменения."
+msgstr "«{0}» скрывается из проекта, а {dirtyCount, plural, one {теряется ваше # несохранённое изменение} few {теряются ваши # несохранённых изменения} many {теряются ваши # несохранённых изменений} other {теряются ваши # несохранённых изменений}}; отмена возвращает клип, но не изменения."
 
 #. placeholder {0}: failed[0]?.title
 #: src/components/ProjectsBar.tsx
@@ -244,7 +244,7 @@ msgstr "{0, plural, one {# элемент} few {# элемента} many {# эл
 #. placeholder {0}: r.layersSkipped
 #: src/components/TemplatePicker.tsx
 msgid "{0, plural, one {# layer had no room} other {# layers had no room}}"
-msgstr "{0, plural, one {# слою не хватило места} few {# слоям не хватило места} many {# слоям не хватило места} other {# слоям не хватило места}}"
+msgstr "{0, plural, one {у # слоя не хватило места} few {у # слоёв не хватило места} many {у # слоёв не хватило места} other {у # слоёв не хватило места}}"
 
 #. placeholder {0}: added.length
 #. placeholder {0}: r.layerCount ?? 0
@@ -347,7 +347,7 @@ msgstr "{0, plural, one {Всё готово: # клип готов{tail}} few {
 #. placeholder {0}: w.rerender.total - w.rerender.projects.length
 #: src/ee/billing/UpgradeWelcome.tsx
 msgid "{0, plural, one {and # older project; re-render them from their own page.} other {and # older projects; re-render them from their own page.}}"
-msgstr "{0, plural, one {и # более старый проект; перерендерьте их на их страницах.} few {и # более старых проекта; перерендерьте их на их страницах.} many {и # более старых проектов; перерендерьте их на их страницах.} other {и # более старых проектов; перерендерьте их на их страницах.}}"
+msgstr "{0, plural, one {и # более старый проект; перерендерьте их на соответствующих страницах.} few {и # более старых проекта; перерендерьте их на соответствующих страницах.} many {и # более старых проектов; перерендерьте их на соответствующих страницах.} other {и # более старых проектов; перерендерьте их на соответствующих страницах.}}"
 
 #. placeholder {0}: w.finish.total - w.finish.projects.length
 #: src/ee/billing/UpgradeWelcome.tsx
@@ -1166,7 +1166,7 @@ msgstr "{n, plural, one {Отрендерен # клип} few {Отрендер�
 
 #: src/pages/AdminUsers.tsx
 msgid "{n, plural, one {Sent back to approval: # account} other {Sent back to approval: # accounts}}"
-msgstr "{n, plural, one {Возвращён на одобрение: # аккаунт} few {Возвращены на одобрение: # аккаунта} many {Возвращены на одобрение: # аккаунтов} other {Возвращены на одобрение: # аккаунтов}}"
+msgstr "{n, plural, one {Возвращён на одобрение: # аккаунт} few {Возвращены на одобрение: # аккаунта} many {Возвращено на одобрение: # аккаунтов} other {Возвращено на одобрение: # аккаунтов}}"
 
 #: src/pages/AdminUsers.tsx
 msgid "{n, plural, one {Suspended # account} other {Suspended # accounts}}"
@@ -1178,7 +1178,7 @@ msgstr "{n, plural, one {В этом клипе # слой.} few {В этом к
 
 #: src/components/VerticalPreview.tsx
 msgid "{n} buttons"
-msgstr "{n} кнопки"
+msgstr "кнопок: {n}"
 
 #: src/lib/time.ts
 msgid "{n} d ago"
@@ -1198,7 +1198,7 @@ msgstr "{n} с"
 
 #: src/components/VerticalPreview.tsx
 msgid "{n} username + description"
-msgstr "{n} имя пользователя + описание"
+msgstr "полей «имя пользователя + описание»: {n}"
 
 #: src/components/ProjectDefaults.tsx
 msgid "{name} ({len})"
@@ -1422,7 +1422,7 @@ msgstr "этап {stage} начат"
 
 #: src/lib/activity.ts
 msgid "{stage} step \"{step}\" gave up, continuing without it: {why}"
-msgstr "{stage} step \"{step}\" gave up, continuing without it: {why}"
+msgstr "{stage}: шаг \"{step}\" не выполнен, продолжаем без него: {why}"
 
 #: src/pages/Project.tsx
 msgid "{stage}: elapsed"
@@ -1510,7 +1510,7 @@ msgstr "{total, plural, one {# ссылка публикации} few {# ссы�
 
 #: src/components/PosterBumperCards.tsx
 msgid "{total, plural, one {all # clip} other {all # clips}}"
-msgstr "{total, plural, one {все # клипы} few {все # клипов} many {все # клипов} other {все # клипов}}"
+msgstr "{total, plural, one {все # клипы} few {все # клипа} many {все # клипов} other {все # клипов}}"
 
 #: src/components/QueueSection.tsx
 msgid "{total, plural, one {Bring # dismissed failure back into Failed work.} other {Bring # dismissed failures back into Failed work.}}"
@@ -2433,7 +2433,7 @@ msgstr "Всегда"
 
 #: src/pages/AdminUsers.tsx
 msgid "Always burn the watermark into this account's renders"
-msgstr "Всегда вжигать водяной знак в рендеры этого аккаунта"
+msgstr "Всегда накладывать водяной знак на рендеры этого аккаунта"
 
 #: src/components/ProjectDefaults.tsx
 msgid "always hide"
@@ -2657,7 +2657,7 @@ msgstr "как задано в .env"
 
 #: src/components/ProjectDefaults.tsx
 msgid "as many as stand on their own"
-msgstr "столько, сколько самостоятельных"
+msgstr "столько, сколько получится самостоятельных"
 
 #: src/components/ListToolbar.tsx
 msgid "Ascending"
@@ -4229,7 +4229,7 @@ msgstr "Удалить это исправление; повторяющиеся
 
 #: src/components/TranscriptPanel.tsx
 msgid "Delete this fix; the words stay as heard"
-msgstr "Удалить это исправление; слова останутся как услышаны"
+msgstr "Удалить это исправление; слова останутся в распознанном виде"
 
 #: src/components/CommandPaletteDialog.tsx
 #: src/components/ProjectsBar.tsx
@@ -4547,7 +4547,7 @@ msgstr "Скачать отчет"
 
 #: src/components/TranscriptFileModal.tsx
 msgid "Download the transcript as subtitles, or use a subtitle file instead of transcribing."
-msgstr "Скачайте транскрипцию субтитрами или используйте файл субтитров вместо распознавания речи."
+msgstr "Скачайте транскрипт в виде субтитров или используйте файл субтитров вместо распознавания речи."
 
 #: src/components/DownloadClipButton.tsx
 msgid "Download with watermark"
@@ -6548,7 +6548,7 @@ msgstr "Обновления в реальном времени остановл
 
 #: src/components/ListToolbar.tsx
 msgid "Load {n} more"
-msgstr "Загрузить еще {n}"
+msgstr "Загрузить ещё {n}"
 
 #: src/components/QueueSection.tsx
 msgid "Load {nextCount} more"
@@ -7915,7 +7915,7 @@ msgstr "только сбои"
 
 #: src/pages/NewProject.tsx
 msgid "Only on-topic moments are kept. Each clip also gets a relevance score."
-msgstr "Оставляются только моменты по теме. Каждый клип также получает оценку релевантности."
+msgstr "Сохраняются только моменты по теме. Каждый клип также получает оценку релевантности."
 
 #: src/components/RangeCoverage.tsx
 msgid "Only the first {done} of this {total} video was clipped. Clip the rest on the project page."
@@ -8104,7 +8104,7 @@ msgstr "Сброс пароля требует email на этом инстан�
 
 #: src/components/EmailSection.tsx
 msgid "Password resets and other mail you need always come."
-msgstr "Сбросы пароля и другая необходимая почта приходят всегда."
+msgstr "Письма о сбросе пароля и другие нужные письма приходят всегда."
 
 #: src/components/CommandPaletteDialog.tsx
 msgid "paste a link or upload"
@@ -8381,7 +8381,7 @@ msgstr "Играть под всем клипом"
 
 #: src/components/TemplateEditor.tsx
 msgid "Played before and after the clip. Applying the template sets them as the clip’s own; Clip’s own leaves each clip’s choice alone."
-msgstr "Проигрываются до и после клипа. Применение шаблона задаёт их как собственные для клипа; вариант «Собственный клипа» оставляет выбор каждого клипа без изменений."
+msgstr "Проигрываются до и после клипа. Применение шаблона задаёт их как собственные для клипа; вариант «Собственный выбор клипа» оставляет выбор каждого клипа без изменений."
 
 #: src/components/TranscriptPanel.tsx
 msgid "playing as recorded"
@@ -10094,7 +10094,7 @@ msgstr "Отправить ещё раз"
 #: src/pages/Login.tsx
 #: src/pages/ResetPassword.tsx
 msgid "Send me a new link"
-msgstr "Прислать мне новую ссылку"
+msgstr "Отправить мне новую ссылку"
 
 #: src/pages/ResetPassword.tsx
 msgid "Send reset link"
@@ -10669,7 +10669,7 @@ msgstr "Исходник удалён · получить заново"
 #. placeholder {0}: r.rerendered
 #: src/components/ClipEditor.tsx
 msgid "Source text kept · re-rendering {0, plural, one {# clip} other {# clips}}"
-msgstr "Текст исходника сохранён · перерендеривается {0, plural, one {# клип} few {# клипа} many {# клипов} other {# клипов}}"
+msgstr "Текст исходника сохранён · перерендеривается {0, plural, one {# клип} few {# клипа} many {# клипов} other {# клипа}}"
 
 #: src/pages/Project.tsx
 msgid "Source unavailable"
@@ -11256,7 +11256,7 @@ msgstr "Сохранённые ключ и адрес сервера будут 
 
 #: src/components/TranscriptPanel.tsx
 msgid "the seam wasn't clean"
-msgstr "склейка вышла нечистой"
+msgstr "склейка получилась нечистой"
 
 #: src/pages/AdminUsers.tsx
 msgid "The selected accounts are already suspended"
@@ -11452,7 +11452,7 @@ msgstr "Сбой этого сервера (диск, модель, кодиро
 
 #: src/components/ReportDialog.tsx
 msgid "This instance’s unfinished work, job queue, usage and recent failures, the app’s settings (secrets shown only as set/unset), and your description."
-msgstr "Незавершённая работа этого сервера, очередь задач, использование и недавние сбои, настройки приложения (секреты показаны только как задан/не задан) и ваше описание."
+msgstr "Незавершённая работа этого сервера, очередь задач, использование и недавние сбои, настройки приложения (секреты показаны только как задано/не задано) и ваше описание."
 
 #: src/pages/NewProject.tsx
 msgid "This is how your captions will look on every clip you make"
@@ -12672,7 +12672,7 @@ msgstr "Ваш тариф изменился: минуты нарезки {fromM
 
 #: src/components/ReportDialog.tsx
 msgid "Your projects' status and recent failures, the app’s settings (secrets shown only as set/unset), and your description."
-msgstr "Статус ваших проектов и недавние сбои, настройки приложения (секреты показаны только как задан/не задан) и ваше описание."
+msgstr "Статус ваших проектов и недавние сбои, настройки приложения (секреты показаны только как задано/не задано) и ваше описание."
 
 #: src/components/ClipCard.tsx
 msgid "Your range"

@@ -257,7 +257,7 @@ msgstr ", без владельца (нет аккаунта): {orphans}"
 
 #: src/cli.ts
 msgid ", setting their {slots}"
-msgstr ", их {slots} задаются"
+msgstr ", назначая им {slots}"
 
 #: src/cli.ts
 msgid ", showing the newest {shown}"
@@ -2628,7 +2628,7 @@ msgstr "Сброс пароля"
 
 #: src/email.ts
 msgid "Reset your password"
-msgstr "Сброс вашего пароля"
+msgstr "Сброс пароля"
 
 #: src/email.ts
 msgid "Reset your Reelsaw password"

@@ -70,7 +70,15 @@ msgid "{\n"
 "    }\n"
 "  }\n"
 "}"
-msgstr "{  \"mcpServers\": {    \"reelsaw\": {      \"type\": \"http\",      \"url\": \"https://your-host/api/mcp\",      \"headers\": { \"Authorization\": \"Bearer rs_…\" }    }  }}"
+msgstr "{\n"
+"  \"mcpServers\": {{\n"
+"    \"reelsaw\": {{\n"
+"      \"type\": \"http\",\n"
+"      \"url\": \"https://your-host/api/mcp\",\n"
+"      \"headers\": {{ \"Authorization\": \"Bearer rs_…\" }}\n"
+"    }}\n"
+"  }}\n"
+"}}"
 
 #: components/replay-ranges.tsx
 msgid "{billed} of {total} min"
@@ -183,11 +191,11 @@ msgstr "↺ из субтитров"
 
 #: app/releases/page.tsx
 msgid "<0/> commit<1/> over <2/> days, <3/> day<4/> with a release."
-msgstr "<0/>коммитов<1/> за <2/> дней, <3/> день<4/> с релизом."
+msgstr "<0/> коммитов<1/> за <2/> дней, <3/> день<4/> с релизом."
 
 #: components/pipeline-film.tsx
 msgid "<0/> comparisons"
-msgstr "<0/> сравнения"
+msgstr "<0/> сравнений"
 
 #: app/alternatives/[slug]/page.tsx
 msgid "<0/> vs Reelsaw, feature by feature"
@@ -423,7 +431,7 @@ msgstr "Альтернатива 2short.ai без лимита часов в м�
 
 #: content/competitors.ts
 msgid "2short.ai is one of the cheaper hosted clippers: it meters the minutes of video it analyses and charges by the hour bucket. Reelsaw removes the meter by running on your hardware, so the comparison is mostly about convenience versus control."
-msgstr "2short.ai — один из самых дешёвых облачных клипперов: он считает минуты проанализированного видео и тарифицирует по часовым пакетам. Reelsaw убирает этот счётчик, работая на вашем железе, поэтому сравнение сводится в основном к удобству против контроля."
+msgstr "2short.ai — один из самых дешёвых облачных клипперов: он считает минуты проанализированного видео и тарифицирует по часовым пакетам. Reelsaw убирает этот счётчик, работая на вашем железе, поэтому сравнение сводится в основном к выбору между удобством и контролем."
 
 #: content/guides.ts
 msgid "2short.ai pricing"
@@ -640,7 +648,7 @@ msgstr "Небольшой водяной знак на клипах"
 
 #: app/page.tsx
 msgid "A tiny face detector and tracker on the CPU pick a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, follow a moving subject when there is no face, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro, fades and crossfades in one encode."
-msgstr "Крошечный детектор и трекер лиц на CPU выбирают раскладку на каждой склейке кадров: следить за спикером, поставить двоих друг на друга, слайды поверх плитки с вебкамерой, следить за движущимся объектом, если лиц нет, или показать весь кадр. ffmpeg за один проход вжигает субтитры, хук, интро и аутро, фейды и кроссфейды."
+msgstr "Крошечный детектор и трекер лиц на CPU выбирают раскладку на каждой склейке кадров: следить за спикером, поставить двоих друг на друга, слайды поверх плитки с вебкамерой, следить за движущимся объектом, если лиц нет, или показать весь кадр. ffmpeg за один проход впечатывает субтитры, хук, интро и аутро, фейды и кроссфейды."
 
 #: content/use-cases.ts
 msgid "A Twitch clip is 16:9, at most a minute, and cut by whoever pressed the button. A TikTok is 9:16, captioned, and starts on its hook. Getting from one to the other by hand is an hour of scrubbing per stream."
@@ -672,7 +680,7 @@ msgstr "Аккаунты, одобрение и квоты"
 
 #: content/guides.ts
 msgid "Add a Buffer API key as a second Header Auth credential, list your Buffer channel ids, activate the workflow and press Send test in Reelsaw: the delivery log should show 200."
-msgstr "Добавьте ключ API Buffer как вторую учётную запись Header Auth, укажите id своих каналов Buffer, активируйте воркфлоу и нажмите «Отправить тест» в Reelsaw: в журнале доставки должен появиться 200."
+msgstr "Добавьте ключ API Buffer как вторую учётную запись Header Auth, укажите id своих каналов Buffer, активируйте воркфлоу и нажмите «Отправить тест» в Reelsaw: в журнале доставки должен появиться ответ 200."
 
 #: content/use-cases.ts
 msgid "Add Jason, Lucia, Leonida, Vice City and your friends' names to the vocabulary, so transcription spells them right in the captions."
@@ -688,7 +696,7 @@ msgstr "Доступ для агентов и API"
 
 #: content/guides.ts
 msgid "Agent surface: an MCP server means Claude Code, Claude Desktop, Cursor or a script can drive the whole pipeline. Check whether it is plan-gated."
-msgstr "Поверхность для агентов: MCP-сервер означает, что Claude Code, Claude Desktop, Cursor или скрипт могут вести весь конвейер. Проверьте, не закрыт ли он тарифным гейтом."
+msgstr "Интеграция с агентами: MCP-сервер означает, что Claude Code, Claude Desktop, Cursor или скрипт могут вести весь конвейер. Проверьте, не закрыт ли он тарифным гейтом."
 
 #: components/header.tsx
 #: content/guides.ts
@@ -902,7 +910,7 @@ msgstr "B-roll: ИИ-изображения, стоковые и ИИ-видео
 
 #: content/guides.ts
 msgid "Back catalogue of 100 episodes"
-msgstr "Бэклог из 100 выпусков"
+msgstr "Архив из 100 выпусков"
 
 #: app/not-found.tsx
 msgid "Back to reelsaw.com"
@@ -974,7 +982,7 @@ msgstr "По умолчанию очередь Buffer; альтернативы 
 
 #: content/guides.ts
 msgid "Buffer's API takes a video URL in one createPost call with a personal API key and no app review. Metricool also takes a URL but needs a second call to copy the file first; the setup guide on GitHub says which two nodes to swap in for it."
-msgstr "API Buffer принимает URL видео одним вызовом createPost с личным API-ключом и без ревью приложения. Metricool тоже принимает URL, но требует второй вызов, чтобы сначала скопировать файл; в гайде по настройке на GitHub сказано, какие два ноды заменить."
+msgstr "API Buffer принимает URL видео одним вызовом createPost с личным API-ключом и без ревью приложения. Metricool тоже принимает URL, но требует второй вызов, чтобы сначала скопировать файл; в гайде по настройке на GitHub сказано, какие две ноды заменить."
 
 #: content/competitors.ts
 msgid "Built for more than one person: accounts, admin approval, per-user quotas, usage, and pg-boss jobs that resume after a crash."
@@ -1123,7 +1131,7 @@ msgstr "Читаемые субтитры"
 
 #: content/guides.ts
 msgid "Captions with watermark, exports expire after 3 days"
-msgstr "Субтитры с водяным знаком, экспорты истекают через 3 дня"
+msgstr "Субтитры с водяным знаком, срок действия экспортов — 3 дня"
 
 #: content/competitors.ts
 msgid "Captions with watermark, MP4 export for 3 days at up to 1080p, media expires after 3 days, 1 brand template, no B-roll, no API"
@@ -1139,7 +1147,7 @@ msgstr "Список изменений"
 
 #: app/releases/opengraph-image.tsx
 msgid "Changelog · latest {tag}"
-msgstr "Список изменений · последняя {tag}"
+msgstr "Список изменений · последний {tag}"
 
 #: content/legal.ts
 msgid "Changes"
@@ -1215,11 +1223,11 @@ msgstr "Клипы, сделанные на тарифе Free, несут неб
 
 #: components/clip-strip.tsx
 msgid "Clips Reelsaw picked from it, in its own order"
-msgstr "Клипы, которые Reelsaw выбрал из него, в его собственном порядке"
+msgstr "Клипы, отобранные Reelsaw из видео, в выбранном им порядке"
 
 #: content/pricing.ts
 msgid "Clips render in HD from a 240p editing preview"
-msgstr "Клипы рендерятся в HD из редакторского превью 240p"
+msgstr "Клипы рендерятся в HD из монтажного превью 240p"
 
 #: content/use-cases.ts
 msgid "Clips start and end on sentences, and you can trim to the word or make a new clip from any time range in the editor."
@@ -1330,7 +1338,7 @@ msgstr "Свой"
 
 #: content/pricing.ts
 msgid "Daily publishing and a back catalogue."
-msgstr "Ежедневная публикация и бэклог выпусков."
+msgstr "Ежедневная публикация и архив выпусков."
 
 #: components/theme.tsx
 msgid "Dark theme"
@@ -1342,7 +1350,7 @@ msgstr "Дашборд с настройками для каждого виде�
 
 #: content/legal.ts
 msgid "Data travels over TLS. Passwords are hashed; API keys are shown once and stored hashed; provider keys are encrypted at rest. Access to production is limited to the operator and logged."
-msgstr "Данные передаются по TLS. Пароли хэшируются; API-ключи показываются один раз и хранятся в виде хэша; ключи провайдеров зашифрованы в покое. Доступ к продакшену ограничен оператором и логируется."
+msgstr "Данные передаются по TLS. Пароли хэшируются; API-ключи показываются один раз и хранятся в виде хэша; ключи провайдеров шифруются на диске. Доступ к продакшену ограничен оператором и логируется."
 
 #: lib/releases-data.ts
 msgctxt "short month"
@@ -1376,7 +1384,7 @@ msgstr "Слова-паразиты находятся принудительн�
 
 #: content/guides.ts
 msgid "Do any hosted free plans skip the watermark?"
-msgstr "Есть ли у облачных бесплатных тарифов клипперов вариант без водяного знака?"
+msgstr "Обходятся ли без водяного знака какие-нибудь из облачных бесплатных тарифов?"
 
 #: content/competitors.ts
 msgid "Do both have MCP servers?"
@@ -1480,7 +1488,7 @@ msgstr "Надёжность"
 
 #: content/use-cases.ts
 msgid "Each candidate is scored on hook, value, flow and shareability, and the top ten are compared head to head with positions swapped, so the ones you see first are placed reliably."
-msgstr "Каждый кандидат оценивается по хуку, ценности, динамике и «шерабельности», а топ-10 сравниваются лицом к лицу со сменой позиций, поэтому то, что вы видите первым, определено надёжно."
+msgstr "Каждый кандидат оценивается по хуку, ценности, динамике и «шерабельности», а топ-10 сравниваются попарно с перестановкой позиций, поэтому то, что вы видите первым, определено надёжно."
 
 #: content/legal.ts
 msgid "Each plan has limits (minutes of source video per period, storage, projects, jobs at once). The app states a limit when you reach it and when it resets. We may add rate limits to keep the Service working for everyone, and we may suspend an account that is used to attack or overload it."
@@ -1528,7 +1536,7 @@ msgstr "Каждая автоматическая правка — там, гд�
 
 #: components/pipeline-film.tsx
 msgid "Every box is a queue in Postgres, and every stage saves its output, so a restart resumes instead of starting over."
-msgstr "Каждая очередь — это очередь в Postgres, и каждый этап сохраняет результат, поэтому перезапуск продолжает работу, а не начинает заново."
+msgstr "Каждый блок — это очередь в Postgres, и каждый этап сохраняет результат, поэтому перезапуск продолжает работу, а не начинает заново."
 
 #: content/guides.ts
 msgid "Every clip as a 9:16 MP4 with its score, layout and a hook overlay."
@@ -1711,7 +1719,7 @@ msgstr "Правки, которые можно проверить"
 
 #: content/demo.ts
 msgid "following"
-msgstr "подписчики"
+msgstr "следование"
 
 #: content/demo.ts
 msgid "follows whoever speaks"
@@ -1731,7 +1739,7 @@ msgstr "Founders Pod #42"
 
 #: content/competitors.ts
 msgid "Four plans. The free plan watermarks captions and expires exports after three days; watermark-free export starts at $15 a month."
-msgstr "Четыре тарифа. Бесплатный ставит водяной знак на субтитры и удаляет экспорты через три дня; экспорт без водяного знака — от $15 в месяц."
+msgstr "Четыре тарифа. Бесплатный ставит водяной знак на субтитры и срок действия экспортов истекает через три дня; экспорт без водяного знака — от $15 в месяц."
 
 #: app/page.tsx
 msgid "Four stages, each one a resumable job"
@@ -1747,7 +1755,7 @@ msgstr "Раскладка"
 
 #: content/competitors.ts
 msgid "Framing decided per segment, not per video: face, split, stack and fit can change inside one clip at scene cuts, with active-speaker following, and any section can be overridden in the editor."
-msgstr "Раскладка решается по сегменту, а не по видео: «лицо», «сплит», «стек» и «вписать» могут меняться внутри одного клипа на склейках сцен, с следованием за активным спикером, а любую секцию можно переопределить в редакторе."
+msgstr "Раскладка решается по сегменту, а не по видео: «лицо», «сплит», «стек» и «вписать» могут меняться внутри одного клипа на склейках сцен, следуя за активным спикером, а любую секцию можно переопределить в редакторе."
 
 #: components/footer.tsx
 msgid "Framing layouts"
@@ -1789,7 +1797,7 @@ msgstr "Бесплатный тариф"
 
 #: content/guides.ts
 msgid "Free tiers with watermarks, 720p or expiring exports; paid from about $10 to $29 a month"
-msgstr "Бесплатные тарифы с водяными знаками, 720p или истекающими экспортами; платные — примерно от $10 до $29 в месяц"
+msgstr "Бесплатные тарифы с водяными знаками, 720p или экспортами с ограниченным сроком; платные — примерно от $10 до $29 в месяц"
 
 #: content/competitors.ts
 msgid "Free, open-source Opus Clip alternative you self-host"
@@ -1890,7 +1898,10 @@ msgid "git clone https://github.com/osbytes/reelsaw.git && cd reelsaw\n"
 "cp .env.example .env\n"
 "# set BETTER_AUTH_SECRET, APP_URL and at least one AI provider key\n"
 "docker compose up -d --build"
-msgstr "git clone https://github.com/osbytes/reelsaw.git && cd reelsawcp .env.example .env# задайте BETTER_AUTH_SECRET, APP_URL и хотя бы один ключ ИИ-провайдераdocker compose up -d --build"
+msgstr "git clone https://github.com/osbytes/reelsaw.git && cd reelsaw\n"
+"cp .env.example .env\n"
+"# задайте BETTER_AUTH_SECRET, APP_URL и хотя бы один ключ ИИ-провайдера\n"
+"docker compose up -d --build"
 
 #: app/releases/[releases]/page.tsx
 #: components/release-list.tsx
@@ -2358,7 +2369,7 @@ msgstr "раскладка"
 
 #: content/use-cases.ts
 msgid "Leave framing on auto. Reelsaw transcribes, chunks the stream at long pauses so hour five is read as carefully as minute five, collects every standalone moment, then ranks them head to head."
-msgstr "Оставьте раскладку на авто. Reelsaw транскрибирует, режет стрим на длинных паузах, чтобы пятый час был прочитан так же внимательно, как пятая минута, собирает все самостоятельные моменты, а затем ранжирует их лицом к лицу."
+msgstr "Оставьте раскладку на авто. Reelsaw транскрибирует, режет стрим на длинных паузах, чтобы пятый час был прочитан так же внимательно, как пятая минута, собирает все самостоятельные моменты, а затем сравнивает их попарно."
 
 #: components/shipping-chart.tsx
 msgid "Less<0/>More"
@@ -2426,7 +2437,7 @@ msgstr "Локальный путь: могут ли все модели раб�
 
 #: content/guides.ts
 msgid "Local: electricity. Cloud transcription: that vendor's per-minute price, no markup"
-msgstr "Локально: электричество. Облачная транскрипция: минимальная цена вендора за минуту, без наценки"
+msgstr "Локально: электричество. Облачная транскрипция: поминутная цена вендора, без наценки"
 
 #: content/guides.ts
 msgid "Long episodes without losing the middle"
@@ -2470,7 +2481,7 @@ msgstr "Разметка, объединение, ранжирование: на
 
 #: app/page.tsx
 msgid "Map, pool, rank: the transcript is chunked at long pauses, every standalone moment is collected, scored on hook, value, flow and shareability, and the top picks are compared head-to-head with positions swapped to cancel judge bias."
-msgstr "Разметка, объединение, ранжирование: транскрипт нарезается на длинных паузах, собирается каждый самостоятельный момент, оценивается по хуку, ценности, динамике и «шерабельности», а лучшие кандидаты сравниваются лицом к лицу со сменой позиций, чтобы гасить предвзятость судьи."
+msgstr "Разметка, объединение, ранжирование: транскрипт нарезается на длинных паузах, собирается каждый самостоятельный момент, оценивается по хуку, ценности, динамике и «шерабельности», а лучшие кандидаты сравниваются попарно со сменой позиций, чтобы гасить предвзятость судьи."
 
 #: components/pipeline-film.tsx
 msgid "map: transcript windows → 12 candidates"
@@ -2530,7 +2541,7 @@ msgstr "MCP-сервер, REST API с вебхуками, CLI, скилл для
 
 #: content/competitors.ts
 msgid "Metered in plan credits; media and exports expire on Free and Starter"
-msgstr "Тарификация кредитами тарифа; медиафайлы и экспорты истекают на Free и Starter"
+msgstr "Тарификация кредитами тарифа; срок медиафайлов и экспортов ограничен на Free и Starter"
 
 #: content/guides.ts
 msgid "Metered per minute or per credit; some cap export length"
@@ -2649,7 +2660,7 @@ msgstr "Никаких API-ключей вообще: установщик од�
 
 #: app/pricing/page.tsx
 msgid "No card needed"
-msgstr "Без карты не нужно"
+msgstr "Карта не нужна"
 
 #: content/competitors.ts
 msgid "No export limit, 50 AI-image B-roll clips a day and unlimited stock, AI video B-roll, Video Editing API, Scheduler API, MCP connector, Zapier (up to 300 credits/mo), 2 to 4 users, up to 4 brand templates, 100 GB storage"
@@ -2686,7 +2697,7 @@ msgstr "Нет тепловой карты, или вы знаете нужну�
 
 #: content/guides.ts
 msgid "No limit beyond your disk"
-msgstr "Лимит только ваш диск"
+msgstr "Единственный лимит — ваш диск"
 
 #: content/use-cases.ts
 msgid "No per-clip credits: hosted plans meter minutes of source video, and self-hosted Reelsaw has no meter at all, so a 6-hour stream costs the same whether it yields 5 clips or 40."
@@ -2710,7 +2721,7 @@ msgstr "Без соцпубликации: Reelsaw экспортирует zip 
 
 #: content/use-cases.ts
 msgid "No spoilers in the hook: story beats from launch week get reported. Tell the selector to skip cutscenes, or delete the clip; deleted clips can be restored for a while."
-msgstr "Спойлеров в хуке нет: сюжетные биты недели запуска передаются. Скажите селектору пропускать катсцены или удалите клип; удалённые клипы можно восстановить в течение некоторого времени."
+msgstr "Спойлеров в хуке нет: клипы, раскрывающие сюжетные моменты недели запуска, репортят. Скажите селектору пропускать катсцены или удалите клип; удалённые клипы можно восстановить в течение некоторого времени."
 
 #: content/pricing.ts
 msgid "No watermark"
@@ -2770,7 +2781,7 @@ msgstr "Ещё не ссылка: вставьте адрес видео, нап
 
 #: content/competitors.ts
 msgid "Not according to its README on {checked}: moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and for silent videos. Reelsaw runs the whole pipeline locally with Ollama and a local Whisper, which is what its installer sets up by default."
-msgstr "Согласно его README на {checked}: отбор моментов может использовать локальный OpenAI-совместимый сервер, но Gemini всё ещё нужен для выбора раскладки и видео без речи. Reelsaw выполняет весь конвейер локально с Ollama и локальным Whisper — это то, что его установщик настраивает по умолчанию."
+msgstr "Нет, не согласно его README на {checked}: отбор моментов может использовать локальный OpenAI-совместимый сервер, но Gemini всё ещё нужен для выбора раскладки и видео без речи. Reelsaw выполняет весь конвейер локально с Ollama и локальным Whisper — именно это его установщик настраивает по умолчанию."
 
 #: components/footer.tsx
 msgid "Not affiliated with YouTube, TikTok or Meta."
@@ -2803,7 +2814,7 @@ msgstr "На странице цен не указано"
 
 #: app/page.tsx
 msgid "Nothing is a black box"
-msgstr "Ничто не является чёрным ящиком"
+msgstr "Никаких чёрных ящиков"
 
 #: lib/release-pages.ts
 msgid "Nothing shipped {when}"
@@ -2849,7 +2860,7 @@ msgstr "На странице нового проекта пики — это ч
 
 #: content/pricing.ts
 msgid "One clip of your own, on top of the ones Reelsaw finds"
-msgstr "Один клип ваш собственный — поверх тех, что находит Reelsaw"
+msgstr "Ваш собственный клип — сверх тех, что находит Reelsaw"
 
 #: app/pricing/page.tsx
 msgid "One command installs it on macOS, Linux or Windows. Fully local models cost nothing per minute; with cloud models you pay the vendor's metered price (roughly $0.02 to $0.04 per minute of video on Haiku-class models and Deepgram) and no Reelsaw margin. Multi-user installs get admin approval, per-user quotas and usage, and an optional watermark for accounts that are not admins. Everything in the hosted service except billing is in the open-source build."
@@ -2869,7 +2880,7 @@ msgstr "Один настоящий прогон"
 
 #: app/page.tsx
 msgid "One video through the five queues: <0>project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</0>. Every box is a pg-boss queue in Postgres; a worker restarts mid-render and resumes from its last save."
-msgstr "Одно видео через пять очередей: <0>project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</0>. Каждая коробка — это pg-boss-очередь в Postgres; воркер перезапускается посреди рендера и продолжает с последнего сохранения."
+msgstr "Одно видео через пять очередей: <0>project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</0>. Каждый блок — это очередь pg-boss в Postgres; воркер перезапускается посреди рендера и продолжает с последнего сохранения."
 
 #: content/guides.ts
 msgid "Only if every model can run locally. Reelsaw's installer sets up Ollama and a local Whisper so nothing leaves your machine; with cloud models, only audio (for transcription) or transcript text (for selection) is sent to the vendor you chose."
@@ -2901,7 +2912,7 @@ msgstr "Open source · В облаке или self-hosted · MCP для аген
 
 #: content/competitors.ts
 msgid "Open-source 2short.ai alternative with no monthly hours"
-msgstr "Open-source альтернатива 2short.ai без месячных часов"
+msgstr "Open-source альтернатива 2short.ai без лимита часов в месяц"
 
 #: lib/og.tsx
 msgid "Open-source AI clipper: transcribe, pick moments, reframe to 9:16, caption. Self-host with no meter, or use app.reelsaw.com. Fully local with no API keys, or any AI provider."
@@ -2909,7 +2920,7 @@ msgstr "Open-source ИИ-клиппер: транскрипция, отбор м
 
 #: content/guides.ts
 msgid "Open-source AI video clippers compared (Reelsaw, AGPL-3.0; OpenShorts, MIT): the licence, the local-only path, the agent surface and the pipeline."
-msgstr "Сравнение open-source ИИ-клипперов видео (Reelsaw, AGPL-3.0; OpenShorts, MIT): лицензия, полностью локальный путь, поверхность для агентов и конвейер."
+msgstr "Сравнение open-source ИИ-клипперов видео (Reelsaw, AGPL-3.0; OpenShorts, MIT): лицензия, полностью локальный путь, средства работы с агентами и конвейер."
 
 #: content/guides.ts
 msgid "Open-source AI video clippers: what the licence gets you"
@@ -3057,7 +3068,7 @@ msgstr "Прошлые трансляции на Twitch истекают чер�
 
 #: app/page.tsx
 msgid "Paste a link to a podcast, stream, game or talk. Reelsaw finds the moments that stand on their own, frames every shot for 9:16 (whoever is speaking, the slides above the speaker, the gameplay above the facecam) and burns in captions and a hook. Every pick comes with its reason."
-msgstr "Вставьте ссылку на подкаст, стрим, игру или выступление. Reelsaw находит моменты, которые живут сами по себе, кадрирует каждую сцену под 9:16 (кто говорит, слайды над спикером, геймплей над фейскамом) и вжигает субтитры и хук. Каждый выбор снабжён обоснованием."
+msgstr "Вставьте ссылку на подкаст, стрим, игру или выступление. Reelsaw находит моменты, которые живут сами по себе, кадрирует каждую сцену под 9:16 (кто говорит, слайды над спикером, геймплей над фейскамом) и впечатывает субтитры и хук. Каждый выбор снабжён обоснованием."
 
 #: components/hero-link-form.tsx
 msgid "Paste a YouTube link"
@@ -3093,7 +3104,7 @@ msgstr "Пики взяты"
 
 #: content/use-cases.ts
 msgid "Per-view pay rewards volume: many clips from many sources, posted fast. That is the job an AI clipper does well, and the one per-clip credit pricing punishes."
-msgstr "Оплата за просмотр вознаграждает объём: много клипов из многих источников, опубликованных быстро. Это работа, которую ИИ-клиппер делает хорошо, и та, которую наказывает тарификация за клип."
+msgstr "Оплата за просмотр вознаграждает объём: много клипов из многих источников, опубликованных быстро. Это работа, которую ИИ-клиппер делает хорошо, и именно её наказывает оплата за каждый клип."
 
 #: content/guides.ts
 msgid "Phone footage edited into the frame between blurred or black bars is cropped to the picture itself, so a vertical clip fills the vertical frame."
@@ -3137,7 +3148,7 @@ msgstr "Выбрать моменты"
 
 #: content/guides.ts
 msgid "Pick: the transcript is chunked at long pauses, every standalone moment is scored on hook, value, flow and shareability, and the top picks are compared head-to-head. Optional focus: 'Find clips about pricing'."
-msgstr "Выбор: транскрипт нарезается на длинных паузах, каждый самостоятельный момент оценивается по хуку, ценности, динамике и «шерабельности», а лучшие кандидаты сравниваются лицом к лицу. Опциональный фокус: «Найти клипы о ценах»."
+msgstr "Выбор: транскрипт нарезается на длинных паузах, каждый самостоятельный момент оценивается по хуку, ценности, динамике и «шерабельности», а лучшие кандидаты сравниваются попарно. Опциональный фокус: «Найти клипы о ценах»."
 
 #: components/pipeline-film.tsx
 msgid "Picked up from the last save. <0>Captions aren’t redone.</0>"
@@ -3149,7 +3160,7 @@ msgstr "Глубина конвейера: как выбираются моме�
 
 #: app/pipeline-film/page.tsx
 msgid "Pipeline film (render source)"
-msgstr "Фильм конвейера (источник рендера)"
+msgstr "Ролик о конвейере (исходник рендера)"
 
 #: app/terms/page.tsx
 msgid "Plain terms for the hosted service. The open-source software has its own licence, the AGPL-3.0, and these terms do not change it."
@@ -3239,7 +3250,7 @@ msgstr "Цены и лимиты прочитаны с публичных стр
 
 #: app/pricing/page.tsx
 msgid "Prices in USD; tax is added at checkout where it applies. A plan's minutes count the length of the videos you add in the billing period, never per clip; on Free, your first video is free up to 60 minutes. A video longer than your minutes cover is not refused: Reelsaw clips the start it covers, and the rest when you upgrade or your minutes reset, picking up where it stopped. When minutes run out, the app says so and tells you when they reset. Storage counts sources, uploads and rendered clips, including deleted projects until you delete them forever. Plans change on Stripe's portal and are prorated. Limits: <0/>. Same prices as OpenShorts Cloud, so the choice is the pipeline and the licence."
-msgstr "Цены в USD; налог добавляется при оплате, где применимо. Минуты тарифа считают длину добавленных вами видео за платёжный период и никогда — за клип; на Free ваше первое видео бесплатно до 60 минут. Видео, длиннее, чем покрывают ваши минуты, не отклоняется: Reelsaw нарежет начало, которое покрывается, а остальное — когда вы перейдёте на другой тариф или минуты сбросятся, продолжив с места остановки. Когда минуты заканчиваются, приложение сообщает об этом и говорит, когда они сбросятся. Хранилище считает исходники, загрузки и отрендеренные клипы, включая удалённые проекты, пока вы не удалите их навсегда. Тарифы меняются в портале Stripe и пересчитываются пропорционально. Лимиты: <0/>. Те же цены, что у OpenShorts Cloud, поэтому выбор — это конвейер и лицензия."
+msgstr "Цены в USD; налог добавляется при оплате, где применимо. Минуты тарифа считают длину добавленных вами видео за платёжный период и никогда — за клип; на Free ваше первое видео бесплатно до 60 минут. Видео, длиннее, чем покрывают ваши минуты, не отклоняется: Reelsaw нарежет начало, которое покрывается, а остальное — когда вы перейдёте на другой тариф или минуты сбросятся, продолжив с места остановки. Когда минуты заканчиваются, приложение сообщает об этом и говорит, когда они сбросятся. Хранилище считает исходники, загрузки и отрендеренные клипы, включая удалённые проекты, пока вы не удалите их навсегда. Тарифы меняются на портале Stripe и пересчитываются пропорционально. Лимиты: <0/>. Те же цены, что у OpenShorts Cloud, поэтому выбор — это конвейер и лицензия."
 
 #: app/pricing/page.tsx
 #: components/footer.tsx
@@ -3311,7 +3322,7 @@ msgstr "Python: FastAPI, faster-whisper, MediaPipe, YOLOv8; фронтенд н�
 
 #: content/guides.ts
 msgid "Queue them; pg-boss runs them through and resumes after restarts"
-msgstr "Поставьте их в очередь; pg-boss проведёт их через и продолжит после перезапусков"
+msgstr "Поставьте их в очередь; pg-boss их прогонит и продолжит после перезапусков"
 
 #: components/pipeline-film.tsx
 msgid "queued"
@@ -3323,7 +3334,7 @@ msgstr "quso.ai"
 
 #: content/competitors.ts
 msgid "quso.ai alternative with no credits to count"
-msgstr "Альтернатива quso.ai без кредитов для подсчёта"
+msgstr "Альтернатива quso.ai без подсчёта кредитов"
 
 #: content/guides.ts
 msgid "quso.ai pricing"
@@ -3403,7 +3414,7 @@ msgstr "Reelsaw и OpenShorts бок о бок"
 
 #: content/competitors.ts
 msgid "Reelsaw burns in word-level karaoke captions with AI-picked key words enlarged and coloured, boxed or outlined styles, size and uppercase options, and drag-to-place positions with platform safe zones. Punch-in zooms on the key words are a style toggle, previewed in the editor. You can overlay library or stock B-roll and music. It does not add emojis or auto-inserted matched B-roll."
-msgstr "Reelsaw вжигает караоке-субтитры по словам с увеличенными и окрашенными ключевыми словами, выбранными ИИ, стилями в рамке или с обводкой, настройками размера и капслока и позициями перетаскиванием с безопасными зонами платформ. Панч-зумы на ключевых словах — переключатель стиля, виден в редакторе. Можно наложить библиотечный или стоковый B-roll и музыку. Эмодзи он не добавляет и автоматически подбираемый B-roll не вставляет."
+msgstr "Reelsaw впечатывает караоке-субтитры по словам с увеличенными и окрашенными ключевыми словами, выбранными ИИ, стилями в рамке или с обводкой, настройками размера и капслока и позициями перетаскиванием с безопасными зонами платформ. Панч-зумы на ключевых словах — переключатель стиля, виден в редакторе. Можно наложить библиотечный или стоковый B-roll и музыку. Эмодзи он не добавляет и автоматически подбираемый B-roll не вставляет."
 
 #: content/use-cases.ts
 msgid "Reelsaw clips any VOD you hand it, and every step is an MCP tool and a webhook, so a script, n8n flow or AI agent can start a project when a new VOD appears and post the clips when they finish. It does not watch Twitch channels on its own. The n8n guide shows the same flow for new YouTube uploads."
@@ -3415,7 +3426,7 @@ msgstr "Контрибьюторы Reelsaw"
 
 #: content/use-cases.ts
 msgid "Reelsaw does it from the VOD link: it transcribes the stream, picks the moments that work on their own, frames your facecam and the stream for a phone, and burns in captions word by word."
-msgstr "Reelsaw делает это по ссылке на VOD: транскрибирует стрим, выбирает моменты, которые работают сами по себе, кадрирует ваш фейскам и стрим под телефон и вжигает субтитры слово за словом."
+msgstr "Reelsaw делает это по ссылке на VOD: транскрибирует стрим, выбирает моменты, которые работают сами по себе, кадрирует ваш фейскам и стрим под телефон и впечатывает субтитры слово за словом."
 
 #: content/competitors.ts
 msgid "Reelsaw does more work to find out: chunking at pauses with overlap so long videos do not lose their middle, rubric scores as a median of several samples, pairwise comparison of the top ten with swapped positions, an optional separate judge model, and a run-relative gate instead of a fixed count. OpenShorts asks Gemini for 3 to 15 moments in one pass. Neither project publishes a head-to-head benchmark, so try both on your own video."
@@ -3423,7 +3434,7 @@ msgstr "Reelsaw делает больше, чтобы выяснить это: �
 
 #: content/guides.ts
 msgid "Reelsaw does that step inside a pipeline. Two ready-made n8n workflows watch your channel, send each new upload to Reelsaw, and when Reelsaw signals that the clips are rendered, queue each one in Buffer with its caption and hashtags. Nothing waits in between. It runs against a Reelsaw you host yourself or the hosted service, including the Free plan."
-msgstr "Reelsaw выполняет этот шаг внутри конвейера. Два готовых воркфлоу n8n следят за вашим каналом, отправляют каждую новую загрузку в Reelsaw, а когда Reelsaw сигнализирует, что клипы отрендерены, ставит каждый в очередь Buffer с его подписью и хэштегами. Между ними ничего не ждёт. Работает с self-hosted Reelsaw или облачным сервисом, включая тариф Free."
+msgstr "Reelsaw выполняет этот шаг внутри конвейера. Два готовых воркфлоу n8n следят за вашим каналом, отправляют каждую новую загрузку в Reelsaw, а когда Reelsaw сигнализирует, что клипы отрендерены, ставят каждый в очередь Buffer с его подписью и хэштегами. Между ними ничего не ждёт. Работает с self-hosted Reelsaw или облачным сервисом, включая тариф Free."
 
 #: content/competitors.ts
 msgid "Reelsaw exists for two reasons: the whole pipeline should run on your own hardware with no API key, and every model in it should be swappable for any vendor. OpenShorts is the other open-source clipper, and it gets most of the way there: MIT core, Docker Compose, an MCP server, and a local or OpenAI-compatible option for moment picking. Gemini is still required for layout picking and for silent videos, so a key and a Google account stay in the loop for those steps."
@@ -3439,7 +3450,7 @@ msgstr "Цены Reelsaw в облаке"
 
 #: content/use-cases.ts
 msgid "Reelsaw is an open-source AI clipper. Paste a Twitch or YouTube VOD link (or upload a capture) and it transcribes what you said, has a language model pick the moments worth posting, stacks your facecam under the gameplay in 9:16, burns in word-level captions and renders the clips. It runs free on your own machine, or hosted at app.reelsaw.com."
-msgstr "Reelsaw — open-source ИИ-клиппер. Вставьте ссылку на VOD Twitch или YouTube (или загрузите запись), и он транскрибирует то, что вы сказали, поручает языковой модели выбрать моменты, стоящие публикации, ставит фейскам под геймплей в 9:16, вжигает субтитры по словам и рендерит клипы. Работает бесплатно на вашей машине или в облаке на app.reelsaw.com."
+msgstr "Reelsaw — open-source ИИ-клиппер. Вставьте ссылку на VOD Twitch или YouTube (или загрузите запись), и он транскрибирует то, что вы сказали, поручает языковой модели выбрать моменты, стоящие публикации, ставит фейскам под геймплей в 9:16, впечатывает субтитры по словам и рендерит клипы. Работает бесплатно на вашей машине или в облаке на app.reelsaw.com."
 
 #: components/footer.tsx
 msgid "Reelsaw is free software released under the GNU AGPL-3.0. Run it anywhere; share your changes."
@@ -3585,7 +3596,7 @@ msgstr "Reelsaw: да, каждая из моделей — языковая, т
 
 #: content/guides.ts
 msgid "Reelsaw's automation surface is an MCP server at /api/mcp, the same tools Claude and Cursor use. The endpoint is stateless and answers plain JSON, so calling a tool is one HTTP POST with an Authorization header and a tools/call body. Finished projects arrive as webhooks, so the workflows use n8n's built-in Webhook, HTTP Request and Code nodes only and run on n8n Cloud and self-hosted n8n alike."
-msgstr "Поверхность автоматизации Reelsaw — это MCP-сервер на /api/mcp, те же инструменты, что используют Claude и Cursor. Эндпоинт не хранит состояние и отвечает обычным JSON, поэтому вызов инструмента — один HTTP POST с заголовком Authorization и телом tools/call. Готовые проекты приходят вебхуками, поэтому воркфлоу используют только встроенные ноды n8n — Webhook, HTTP Request и Code — и работают как на n8n Cloud, так и на self-hosted n8n."
+msgstr "Средства автоматизации Reelsaw — это MCP-сервер на /api/mcp, те же инструменты, что используют Claude и Cursor. Эндпоинт не хранит состояние и отвечает обычным JSON, поэтому вызов инструмента — один HTTP POST с заголовком Authorization и телом tools/call. Готовые проекты приходят вебхуками, поэтому воркфлоу используют только встроенные ноды n8n — Webhook, HTTP Request и Code — и работают как на n8n Cloud, так и на self-hosted n8n."
 
 #: components/pipeline-film.tsx
 msgid "Refine"
@@ -3593,7 +3604,7 @@ msgstr "Refine"
 
 #: components/pipeline-film.tsx
 msgid "Refine fans out into three jobs on the same transcript."
-msgstr "Refine расходится в три задачи на том же транскрипте."
+msgstr "Refine разветвляется на три задачи на том же транскрипте."
 
 #: app/page.tsx
 msgid "Reframe and render"
@@ -3655,7 +3666,7 @@ msgstr "Удалёнка против офиса"
 
 #: content/competitors.ts
 msgid "Removed on Creator and up ('No watermark' is listed as a Creator feature)"
-msgstr "Убрано с Creator и выше («без водяного знака» указана как функция Creator)"
+msgstr "Убрано с Creator и выше (функция «без водяного знака» заявлена для Creator)"
 
 #: components/pipeline-film.tsx
 msgid "Render"
@@ -3667,7 +3678,7 @@ msgstr "Render собирает каждый клип (раскладка, су�
 
 #: content/guides.ts
 msgid "Render: ffmpeg burns in karaoke captions and the hook, plus your intro and outro, in one encode. Clips stream into the workspace as they finish."
-msgstr "Render: ffmpeg вжигает караоке-субтитры и хук, плюс ваше интро и аутро, за одно кодирование. Клипы появляются в рабочем пространстве по мере готовности."
+msgstr "Render: ffmpeg впечатывает караоке-субтитры и хук, плюс ваше интро и аутро, за одно кодирование. Клипы появляются в рабочем пространстве по мере готовности."
 
 #: components/replay-ranges.tsx
 msgid "Replay heatmap of the {length} stream, with the {n} hottest stretches marked"
@@ -3683,7 +3694,7 @@ msgstr "Смотрите клипы по мере рендера: обрезай
 
 #: content/use-cases.ts
 msgid "Rockstar and Take-Two have long allowed gameplay videos, with rules about leaks, spoilers and monetization. Read Rockstar's current policy before you monetize; Reelsaw makes the clip, the rules about posting it are the publisher's and the platform's."
-msgstr "Rockstar и Take-Two давно разрешают видео с геймплеем — с правилами о утечках, спойлерах и монетизации. Прочтите актуальную политику Rockstar перед монетизацией; Reelsaw делает клип, а правила его публикации — за издателем и платформой."
+msgstr "Rockstar и Take-Two давно разрешают видео с геймплеем — с правилами об утечках, спойлерах и монетизации. Прочтите актуальную политику Rockstar перед монетизацией; Reelsaw делает клип, а правила его публикации — за издателем и платформой."
 
 #: content/guides.ts
 msgid "Route: only projects tagged by the start workflow are posted, so a project you start by hand is not. The best clips by score go on, and each clip is posted once even if the project is re-run."
@@ -4039,7 +4050,7 @@ msgstr "Первый аккаунт — админ. Открытая, требу
 
 #: content/legal.ts
 msgid "The Free plan costs nothing and has the limits shown on the pricing page. Paid plans renew monthly or yearly until cancelled. Payment is handled by Stripe; where Stripe acts as merchant of record (Managed Payments), your receipt and the charge on your statement name Link, and Stripe handles tax, refunds and payment disputes under its own terms."
-msgstr "Тариф Free ничего не стоит и имеет лимиты, показанные на странице цен. Платные тарифы продлеваются помесячно или ежегодно до отмены. Оплата обрабатывается Stripe; там, где Stripe выступает мерчантом записи (Managed Payments), в квитанции и в выписке указан Link, а Stripe ведёт налоги, возвраты и споры по своим условиям."
+msgstr "Тариф Free ничего не стоит и имеет лимиты, показанные на странице цен. Платные тарифы продлеваются помесячно или ежегодно до отмены. Оплата обрабатывается Stripe; там, где Stripe выступает merchant of record (Managed Payments), в квитанции и в выписке указан Link, а Stripe ведёт налоги, возвраты и споры по своим условиям."
 
 #: components/pipeline-film.tsx
 msgid "The hiring mistake"
@@ -4067,7 +4078,7 @@ msgstr "Возможно, ссылка устарела. Всё о Reelsaw — �
 
 #: components/feature-tabs.tsx
 msgid "The model reads the timed transcript, keeps the moments that stand on their own and ranks them head to head. Each clip arrives with its score, the rubric behind it and a one-line reason, so you can disagree with it in a click."
-msgstr "Модель читает транскрипт с таймкодами, сохраняет моменты, которые живут сами по себе, и ранжирует их лицом к лицу. Каждый клип приходит с оценкой, рубрикой за ней и обоснованием в одну строку, так что вы можете не согласиться одним кликом."
+msgstr "Модель читает транскрипт с таймкодами, сохраняет моменты, которые живут сами по себе, и ранжирует их попарно. Каждый клип приходит с оценкой, рубрикой за ней и обоснованием в одну строку, так что вы можете не согласиться одним кликом."
 
 #: components/pipeline-film.tsx
 msgid "The one metric"
@@ -4103,7 +4114,7 @@ msgstr "Программа бесплатна под AGPL-3.0. В self-hosted в
 
 #: content/competitors.ts
 msgid "The source video must stay on your hardware (clients, pre-release content, internal recordings)."
-msgstr "Исходное видео должно оставаться на вашем железе (клиенты, непубликуемый контент, внутренние записи)."
+msgstr "Исходное видео должно оставаться на вашем железе (клиенты, контент до релиза, внутренние записи)."
 
 #: content/guides.ts
 msgid "The structural exception is software you run yourself. Reelsaw is an open-source AI clipper that installs with one command; on your own machine it has no plans and never writes a watermark, because there is nothing to upsell. (Its hosted service at app.reelsaw.com is a normal hosted product: the Free plan watermarks, paid plans from $12 a month do not.)"
@@ -4147,7 +4158,7 @@ msgstr "Эта установка"
 
 #: content/competitors.ts
 msgid "This page keeps to what both products document. Opus Clip's prices come from its public pricing page on the date below; Reelsaw's claims come from its README and source."
-msgstr "Эта страница держится того, что оба продукта документируют. Цены Opus Clip взяты с его публичной страницы цен на дату ниже; заявления Reelsaw — из его README и исходников."
+msgstr "Эта страница опирается только на то, что документируют оба продукта. Цены Opus Clip взяты с его публичной страницы цен на дату ниже; заявления Reelsaw — из его README и исходников."
 
 #: content/guides.ts
 msgid "This page lists what to check and how each project answers."
@@ -4419,7 +4430,7 @@ msgstr "вебинар"
 
 #: content/legal.ts
 msgid "Website: reelsaw.com uses PostHog analytics with cookieless, aggregated page views; no advertising trackers."
-msgstr "Сайт: reelsaw.com использует аналитику PostHog с безcookie, агрегированными просмотрами страниц; рекламных трекеров нет."
+msgstr "Сайт: reelsaw.com использует аналитику PostHog — просмотры страниц без cookies в агрегированном виде; рекламных трекеров нет."
 
 #: components/shipping-chart.tsx
 #: lib/releases-data.ts
@@ -4479,7 +4490,7 @@ msgstr "Что входит"
 
 #: content/use-cases.ts
 msgid "What makes a GTA 6 moment work as a short"
-msgstr "Что делает момент GTA 6 рабочим шортом"
+msgstr "Почему момент из GTA 6 работает как шорт"
 
 #: content/reelsaw.ts
 msgid "What Reelsaw costs for the same job"
@@ -4539,7 +4550,7 @@ msgstr "Что вы можете загружать и создавать"
 
 #: content/guides.ts
 msgid "What you trade for the self-hosted zero"
-msgstr "Чем вы платите за self-hosted ноль"
+msgstr "Чем вы расплачиваетесь за self-hosted ноль"
 
 #: content/competitors.ts
 msgid "When checked on {checked}, Creator was $29 a month or $14.50 a month billed yearly ($174/yr), and Business was $39 a month or $19.50 a month billed yearly ($234/yr). Paid minutes start at 600 a month. Verify on vizard.ai before buying."
@@ -4547,7 +4558,7 @@ msgstr "При проверке на {checked} Creator стоил $29 в мес�
 
 #: content/guides.ts
 msgid "When the software runs on your machine, there is no vendor paying for compute, so there is no reason to watermark. Reelsaw transcribes, picks moments, reframes to 9:16 and burns in captions using your CPU and either local models (Ollama, Whisper) or cloud models you hold the keys for."
-msgstr "Когда программа работает на вашей машине, нет вендора, платящего за вычисления, поэтому нет причины ставить водяной знак. Reelsaw транскрибирует, выбирает моменты, переформатирует в 9:16 и вжигает субтитры, используя ваш CPU и либо локальные модели (Ollama, Whisper), либо облачные, чьи ключи держите вы."
+msgstr "Когда программа работает на вашей машине, нет вендора, платящего за вычисления, поэтому нет причины ставить водяной знак. Reelsaw транскрибирует, выбирает моменты, переформатирует в 9:16 и впечатывает субтитры, используя ваш CPU и либо локальные модели (Ollama, Whisper), либо облачные, чьи ключи держите вы."
 
 #: content/use-cases.ts
 msgid "When the stream is you on camera, the crop follows your face; with guests it follows whoever is talking and stacks two people when it is not sure. Each clip is split at scene cuts, so a clip that cuts from your camera to a screen share switches layout at the cut."
@@ -4555,7 +4566,7 @@ msgstr "Когда в кадре вы, кроп следует за вашим �
 
 #: content/use-cases.ts
 msgid "When you are the picture, the crop follows your face with smooth, tripod-like moves. With a guest on camera it follows whoever is talking, checked with an audio-visual model so a laugh or a sip is not mistaken for speech, and stacks both of you when it is not sure. Phone footage shown between bars is cropped to the picture itself."
-msgstr "Когда картинка — это вы, кроп следует за вашим лицом плавными, штативными движениями. С гостем в кадре он следует за тем, кто говорит, — проверяется аудиовизуальной моделью, чтобы смех или глоток не приняли за речь, — и ставит вас обоих друг на друга, когда не уверен. Запись с телефона, показанная между полосами, обрезается до самой картинки."
+msgstr "Когда картинка — это вы, кроп следует за вашим лицом плавными, как со штатива, движениями. С гостем в кадре он следует за тем, кто говорит, — проверяется аудиовизуальной моделью, чтобы смех или глоток не приняли за речь, — и ставит вас обоих друг на друга, когда не уверен. Запись с телефона, показанная между полосами, обрезается до самой картинки."
 
 #: content/use-cases.ts
 msgid "Where GTA 6 footage comes from"
@@ -4579,7 +4590,7 @@ msgstr "Что открытее: MIT или AGPL-3.0?"
 
 #: content/competitors.ts
 msgid "Which one picks better clips?"
-msgstr "Какой выбирает клипы лучше?"
+msgstr "Кто выбирает клипы лучше?"
 
 #: app/alternatives/[slug]/page.tsx
 msgid "Which one should you pick?"
@@ -4627,7 +4638,7 @@ msgstr "Перейдёт ли GTA RP на GTA 6?"
 
 #: content/guides.ts
 msgid "Will it clip my Shorts and live streams too?"
-msgstr "Нарежет ли он и мои Shorts и прямые эфиры?"
+msgstr "Нарежет ли он также мои Shorts и прямые эфиры?"
 
 #: content/use-cases.ts
 msgid "Will Rockstar take down GTA 6 clips?"
@@ -4643,11 +4654,11 @@ msgstr "При работающем Docker Desktop. Если выполнени�
 
 #: content/use-cases.ts
 msgid "With each streamer's permission, yes, and self-hosted there is no cap. Each person can have their own account on one install, with their own vocabulary and defaults, and the queue runs the VODs through and resumes after a restart."
-msgstr "С разрешения каждого стримера — да, и в self-hosted потолка нет. У каждого может быть свой аккаунт на одной установке, со своим словарём и значениями по умолчанию, а очередь проводит VOD через и продолжает после перезапуска."
+msgstr "С разрешения каждого стримера — да, и в self-hosted потолка нет. У каждого может быть свой аккаунт на одной установке, со своим словарём и значениями по умолчанию, а очередь прогоняет VOD через конвейер и продолжает работу после перезапуска."
 
 #: components/feature-tabs.tsx
 msgid "Word-by-word highlight timed by forced alignment, key words coloured and enlarged, a hook written for the first seconds, limits on words per line and time on screen, and the source's own burned-in subtitles found and blurred."
-msgstr "Подсветка слово за словом, синхронизированная принудительным выравниванием, ключевые слова окрашены и увеличены, хук, написанный для первых секунд, лимиты на слова в строке и время на экране, а вжатые субтитры самого исходника находят и размывают."
+msgstr "Подсветка слово за словом, синхронизированная принудительным выравниванием, ключевые слова окрашены и увеличены, хук, написанный для первых секунд, лимиты на слова в строке и время на экране, а впечатанные субтитры самого исходника находят и размывают."
 
 #: content/reelsaw.ts
 msgid "Word-level captions"
@@ -4703,7 +4714,7 @@ msgstr "Да, Docker Compose; опциональное переопределе�
 
 #: content/reelsaw.ts
 msgid "Yes, for English: jump cuts located by forced alignment, each one reviewable"
-msgstr "Да, для английского: склейки найдены принудительным выравниванием, каждая проверяема"
+msgstr "Да, для английского: склейки найдены принудительным выравниванием, каждую можно проверить"
 
 #: content/competitors.ts
 msgid "Yes, for English. Fillers, repetitions and false starts are cut with jump cuts, each located by forced alignment and checked by listening to the seam. Each fix shows inline in the transcript with accept and reject, and your decisions survive re-runs."
@@ -4711,7 +4722,7 @@ msgstr "Да, для английского. Слова-паразиты, пов
 
 #: content/guides.ts
 msgid "Yes, forced-alignment verified, each cut reviewable"
-msgstr "Да, проверено принудительным выравниванием, каждая склейка проверяема"
+msgstr "Да, проверено принудительным выравниванием, каждую склейку можно проверить"
 
 #: content/competitors.ts
 msgid "Yes, large caption-style library"
@@ -4903,7 +4914,7 @@ msgstr "Вы предпочитаете стек на Python для расшир
 
 #: content/competitors.ts
 msgid "You process long sources and the credit-per-minute meter dominates the bill."
-msgstr "Вы обрабатываете длинные исходники, и счётчик кредитов за минуту доминирует в счёте."
+msgstr "Вы обрабатываете длинные исходники, и счётчик кредитов за минуту составляет основную часть счёта."
 
 #: content/competitors.ts
 msgid "You process more than 50 hours a month, or in bursts (a back catalogue) that a monthly bucket punishes."
@@ -4923,7 +4934,7 @@ msgstr "Вы планируете посты в несколько соцакк�
 
 #: content/use-cases.ts
 msgid "You submit the posts; the marketplace reviews them and pays on verified views, usually after a minimum."
-msgstr "Вы отправляете посты; маркетплейс их проверяет и платит за подтверждённые просмотры, обычно после минимума."
+msgstr "Вы отправляете посты; маркетплейс их проверяет и платит за подтверждённые просмотры, обычно по достижении минимума."
 
 #: content/competitors.ts
 msgid "You upload under an hour a month and the free tier covers you."
@@ -4951,7 +4962,7 @@ msgstr "Вам нужен дубляж, генерация UGC или пряма
 
 #: content/competitors.ts
 msgid "You want filler removal you can audit: every cut is listed with accept and reject, and verified by forced alignment."
-msgstr "Вам нужен проверяемый удалитель слов-паразитов: каждая склейка перечислена с «принять» и «отклонить» и проверена принудительным выравниванием."
+msgstr "Вам нужно удаление слов-паразитов, которое можно проверить: каждая склейка показана с «принять» и «отклонить» и проверена принудительным выравниванием."
 
 #: content/competitors.ts
 msgid "You want full control over which models run, including local ones, and an MCP server to drive them."
@@ -4995,7 +5006,7 @@ msgstr "Ваши решения: правки, которые вы приним�
 
 #: content/pricing.ts
 msgid "Your first video free, up to 60 minutes; a longer one gets its first 60 clipped, and the rest when you upgrade"
-msgstr "Ваше первое видео бесплатно, до 60 минут; у более длинного нарезается первое 60, а остальное — при переходе на платный тариф"
+msgstr "Ваше первое видео бесплатно, до 60 минут; у более длинного нарезаются первые 60 минут, а остальное — при переходе на платный тариф"
 
 #: components/hero-link-form.tsx
 msgid "Your first video free, up to 60 minutes. No card. <0>Or upload a file</0>"
@@ -5007,7 +5018,7 @@ msgstr "Ваше первое видео бесплатно в облачном 
 
 #: content/use-cases.ts
 msgid "Your HUD is not mistaken for subtitles: on-screen text that hugs the sides of the frame (menus, player lists, kill feeds) is left alone when Reelsaw hides burned-in captions."
-msgstr "Ваш HUD не принимают за субтитры: экранный текст, прижатый к краям кадра (меню, списки игроков, killfeed), оставляется в покое, когда Reelsaw прячет вжатые субтитры."
+msgstr "Ваш HUD не принимают за субтитры: экранный текст, прижатый к краям кадра (меню, списки игроков, killfeed), оставляется в покое, когда Reelsaw прячет впечатанные субтитры."
 
 #: content/competitors.ts
 msgid "Your input is the full episode, not a finished short."
@@ -5043,7 +5054,7 @@ msgstr "Ваш объём вписывается в тариф на 100 клип
 
 #: content/competitors.ts
 msgid "Your workflow is plan, clip, schedule and measure in one tool."
-msgstr "Ваш воркфлоу — планировать, нарезать, расписывать и мерить в одном инструменте."
+msgstr "Ваш воркфлоу — планирование, нарезка, отложенный постинг и аналитика в одном инструменте."
 
 #: app/page.tsx
 msgid "YouTube knows which stretches viewers replay. Reelsaw reads that heatmap before downloading anything and clips only the peaks you choose, so a three-hour stream costs the minutes of its best moments, not three hours."
