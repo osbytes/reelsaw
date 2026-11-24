@@ -99,6 +99,16 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "billing.unknown_price": "warn",
 };
 
+/**
+ * The level a committed project event is logged at. A run stopped because its owner deleted the project is
+ * `project.failed` with `cancelled` (deleteProject): nobody has to act and no one saw a failure, so it logs at
+ * info like the `project.deleted` that follows it, not at error.
+ */
+export function projectEventLevel(type: string, payload: Record<string, unknown>): "debug" | "info" | "warn" | "error" {
+  if (type === "project.failed" && payload["cancelled"] === true) return "info";
+  return EVENT_LEVEL[type] ?? "debug";
+}
+
 /** The scalar fields of an event payload (counts, durations, reasons), trimmed: enough to read the log without the event feed. */
 export function eventFields(payload: Record<string, unknown>): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
@@ -260,8 +270,7 @@ export function createUnitOfWork(
         log[EVENT_LEVEL[e.type] ?? "info"]({ userId, ...actor, event: e.type, ...eventFields(fields) }, "account event");
         continue;
       }
-      const level = EVENT_LEVEL[e.type] ?? "debug";
-      log[level]({ projectId, ...actor, event: e.type, ...eventFields(e.payload) }, "project event");
+      log[projectEventLevel(e.type, e.payload)]({ projectId, ...actor, event: e.type, ...eventFields(e.payload) }, "project event");
       const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
       if (telemetry && product) {
         // the owner is the distinct id (an admin acting on someone's project is not them); the surface is the request's

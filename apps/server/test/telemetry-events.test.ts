@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { createLogger, errorReportOf, setErrorSink, type ErrorReport } from "../src/log.js";
 import { SpanKind } from "@opentelemetry/api";
-import { productEvent } from "../src/uow.js";
+import { productEvent, projectEventLevel } from "../src/uow.js";
 import { errorKind } from "../src/pipeline/common.js";
 import { QuotaError, QuotaExceededError, trackQuotaRefusal } from "../src/quota.js";
 import { JobInterruptedError } from "../src/queue/reconcile.js";
@@ -46,6 +46,18 @@ describe("productEvent", () => {
     assert.deepEqual(productEvent("project.failed", { stage: "x".repeat(65) })?.properties, {});
     assert.equal(productEvent("stage.started", { stage: "ingest" }), null);
     assert.equal(productEvent("clip.retrying", { clipId: "c1" }), null);
+  });
+});
+
+describe("projectEventLevel", () => {
+  it("a run stopped by deleting the project logs at info; a real failure stays an error", () => {
+    const stopped = { stage: "render", error: "Stopped because the project was deleted. Retry to continue.", cancelled: true };
+    assert.equal(projectEventLevel("project.failed", stopped), "info");
+    assert.equal(projectEventLevel("project.failed", { stage: "ingest", error: "Could not download" }), "error");
+    assert.equal(projectEventLevel("project.failed", { stage: "ingest", cancelled: "true" }), "error");
+    assert.equal(projectEventLevel("clip.failed", { clipId: "c1", cancelled: true }), "error");
+    assert.equal(projectEventLevel("stage.completed", {}), "info");
+    assert.equal(projectEventLevel("clip.progress", {}), "debug");
   });
 });
 
