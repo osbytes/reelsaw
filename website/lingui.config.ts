@@ -10,7 +10,7 @@ import { formatter } from "@lingui/format-po";
  */
 export default defineConfig({
   sourceLocale: "en",
-  locales: ["en", "en-XA"],
+  locales: ["en", "ru", "en-XA"],
   pseudoLocale: { locale: "en-XA" },
   fallbackLocales: { "en-XA": "en", default: "en" },
   experimental: { runtimeMacro: true },

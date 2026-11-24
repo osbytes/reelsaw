@@ -8,7 +8,7 @@
  */
 import { z } from "zod";
 
-export const SHIPPED_LOCALES = ["en"] as const;
+export const SHIPPED_LOCALES = ["en", "ru"] as const;
 export const PSEUDO_LOCALE = "en-XA";
 export const DEFAULT_LOCALE = "en";
 export type ShippedLocale = (typeof SHIPPED_LOCALES)[number];
