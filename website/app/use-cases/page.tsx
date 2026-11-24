@@ -10,9 +10,9 @@ import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
 import { socialMeta } from "@/lib/social-meta";
 
-const title = t(msg`AI clips by use case: GTA 6, Twitch, Kick and clipping campaigns`);
+const title = t(msg`AI clips by use case: streams, Most replayed peaks, webinars and agents`);
 const description = t(
-  msg`What Reelsaw, the open-source AI clipper, does with GTA 6 and GTA RP streams, Twitch and Kick VODs, paid clipping campaigns and podcasts, and what it does not.`,
+  msg`What Reelsaw, the open-source AI clipper, does with GTA 6 and GTA RP streams, Twitch and Kick VODs, YouTube Most replayed peaks, webinars, AI agents and paid clipping campaigns, and what it does not.`,
 );
 
 export const metadata: Metadata = {
@@ -36,7 +36,7 @@ export default function UseCasesIndex() {
           />
           <p className="eyebrow">{t(msg`Use cases`)}</p>
           <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">
-            {t(msg`AI clips for streams, gaming and clipping campaigns`)}
+            {t(msg`AI clips for streams, webinars, agents and clipping campaigns`)}
           </h1>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">
             {t(

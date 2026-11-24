@@ -462,6 +462,318 @@ export const USE_CASES: UseCase[] = [
     ],
     disclaimer: t(msg`Reelsaw is not affiliated with Whop or Content Rewards.`),
   },
+  {
+    slug: "most-replayed-heatmap-clips",
+    nav: t(msg`Most replayed clips`),
+    hint: t(msg`heatmap-driven AI clipping`),
+    updated: "2026-11-24",
+    metaTitle: t(msg`Heatmap AI clipping: clip YouTube's Most replayed moments`),
+    metaDescription: t(
+      msg`Turn the peaks of YouTube's Most replayed heatmap into vertical clips with AI: only the hot minutes are downloaded, transcribed and counted. Open source, MCP and CLI.`,
+    ),
+    h1: t(msg`Heatmap-driven AI clipping: start from the moments viewers already replay`),
+    intro: [
+      t(
+        msg`YouTube draws a Most replayed graph over the progress bar of most popular videos: a heatmap of the seconds viewers rewound to and watched again. On a three-hour stream or podcast, the peaks of that graph are the audience telling you where the clips are.`,
+      ),
+      t(
+        msg`Reelsaw reads the heatmap before it downloads anything, turns its peaks into ranges, and clips only those: a language model snaps each one to whole sentences, the speaker is reframed to 9:16 and the captions are burned in word by word. You pay for the minutes of the peaks, not the whole video.`,
+      ),
+    ],
+    sections: [
+      {
+        heading: t(msg`How a heatmap becomes clips`),
+        bullets: [
+          t(
+            msg`Paste a YouTube link. Reelsaw looks up the video's length and its Most replayed heatmap (yt-dlp reads it as 100 bins across the video) before any download.`,
+          ),
+          t(
+            msg`The peaks are the bins hotter than the video's median and their neighbours, grown across the bins still at half their height or more, cut to at most two minutes and never under 10 seconds. Overlapping peaks keep the hotter one.`,
+          ),
+          t(
+            msg`On the New project page the peaks are chips over the video's timeline, one click each, next to ranges you drag yourself. An agent passes rangesFrom.mostReplayed: 5 to create_project, and the CLI takes --most-replayed 5.`,
+          ),
+          t(
+            msg`Only the peaks are downloaded (with 15 seconds of context each side, fetched but not counted), transcribed and analysed. Each peak becomes a clip whose ends are snapped to the nearest sentences, so it opens on words, not where the graph happens to rise. A peak longer than your longest clip setting is searched for its best moment instead.`,
+          ),
+          t(
+            msg`The rest is the same pipeline as a whole video: a hook and title per clip, face-tracked or stacked framing, word-level captions, and an editor to trim on the word or widen a clip into the padding.`,
+          ),
+        ],
+      },
+      {
+        heading: t(msg`What it saves on a long video`),
+        paragraphs: [
+          t(
+            msg`The example on the home page is a 2 hour 29 minute stream. Its five hottest peaks came to 8.5 minutes: about 6% of the video downloaded, transcribed and counted against the plan, and five clips out the other end. On hosted Reelsaw that fits inside a Free month; the whole stream would have used half a Creator month.`,
+          ),
+          COST_PARAGRAPH,
+        ],
+      },
+      {
+        heading: t(msg`Heatmap peaks or AI picks?`),
+        table: {
+          columns: ["", t(msg`Most replayed peaks`), t(msg`AI picks across the whole video`)],
+          rows: [
+            [t(msg`What decides`), t(msg`Viewers' rewinds, then sentence bounds`), t(msg`A language model scores every standalone moment`)],
+            [t(msg`What is downloaded and counted`), t(msg`Only the peaks`), t(msg`The whole video (or its start, on a plan's limit)`)],
+            [t(msg`Works on`), t(msg`Public YouTube videos with enough views to have a heatmap`), t(msg`Any link or upload with speech`)],
+            [
+              t(msg`Best for`),
+              t(msg`Old, popular long videos: back catalogues, other people's streams you clip with permission`),
+              t(msg`New uploads, your own footage, videos with no heatmap`),
+            ],
+          ],
+        },
+        paragraphs: [
+          t(
+            msg`You can mix them in one project: peaks as exact clips, plus a range you drag yourself set to 'Find clips' so the model picks inside it. Ranges added later to a finished project fetch and count only the new time.`,
+          ),
+        ],
+      },
+      {
+        heading: t(msg`From an agent or a pipeline`),
+        bullets: [
+          t(
+            msg`check_source with a link and an empty ranges list returns the peaks (mostReplayed: start, end and heat) and what the ranges would cost, before anything is created.`,
+          ),
+          t(
+            msg`create_project with rangesFrom.mostReplayed: 5 clips the five hottest; every clip carries its range id, and a ref you pass comes back on the clip and its webhooks.`,
+          ),
+          t(msg`extend_project with new ranges adds more peaks or ranges to the same project later, at the cost of the new minutes only.`),
+          t(msg`On the command line: reelsaw create-project <url> --most-replayed 5.`),
+        ],
+      },
+      {
+        heading: t(msg`What it does not do`),
+        bullets: [
+          t(
+            msg`It does not invent a heatmap: new or small videos, and most sites other than YouTube (Twitch and Kick VODs, uploads), have none. Asking for peaks there is refused with that reason; drag ranges or clip the whole video instead.`,
+          ),
+          t(msg`It does not read chat, comments or clip counts. The heatmap is a suggestion source; the clip bounds come from the transcript.`),
+          t(msg`It does not clip a stream while it is live; a live or upcoming link is refused. Clip the recording once it is up.`),
+        ],
+      },
+    ],
+    faqs: [
+      {
+        q: t(msg`What is YouTube's Most replayed heatmap?`),
+        a: t(
+          msg`A graph YouTube shows above the progress bar of videos with enough views: how often each part of the video was replayed compared with the rest. Peaks mark the moments people went back for, which is a strong hint of what works on its own as a short.`,
+        ),
+      },
+      {
+        q: t(msg`Can I clip someone else's video from its heatmap?`),
+        a: t(
+          msg`Only with permission: your own channel, a channel you edit for, or a clipping campaign that covers it. The heatmap tells you where to look; the footage still belongs to its creator.`,
+        ),
+      },
+      {
+        q: t(msg`Do the peaks cost minutes if they overlap?`),
+        a: t(
+          msg`No. Overlapping ranges merge into one and are counted once, and ranges under a minute apart share one download but are billed separately for their own seconds only. The 15 seconds of context each side are never counted.`,
+        ),
+      },
+      {
+        q: t(msg`Does it work self-hosted?`),
+        a: t(msg`Yes. The heatmap comes from yt-dlp on your own machine, and self-hosted Reelsaw has no minute meter, so peaks there only save time.`),
+      },
+    ],
+    sources: [
+      README,
+      {
+        href: "https://github.com/osbytes/reelsaw/blob/main/docs/specs/range-clipping.md",
+        label: t(msg`Reelsaw range clipping spec (peaks, padding, billing)`),
+      },
+      { href: "https://github.com/yt-dlp/yt-dlp#readme", label: t(msg`yt-dlp README (the heatmap field)`) },
+    ],
+    disclaimer: t(msg`Reelsaw is not affiliated with YouTube or Google.`),
+  },
+  {
+    slug: "webinar-to-clips",
+    nav: t(msg`Webinar and Zoom clips`),
+    hint: t(msg`slides and a webcam tile`),
+    updated: "2026-11-24",
+    metaTitle: t(msg`Webinar to clips: turn Zoom, Teams and Meet recordings into shorts`),
+    metaDescription: t(
+      msg`Turn webinar and Zoom, Teams or Meet recordings into vertical clips with AI: slides on top, the speaker's webcam tile below, names spelled right in the captions.`,
+    ),
+    h1: t(msg`Webinar to clips: Zoom, Teams and Meet recordings as vertical shorts`),
+    intro: [
+      t(
+        msg`A webinar recording is the worst case for a face-tracking clipper: the speaker is a small webcam tile in a corner, the content is a slide deck, and a crop that follows the face throws the slides away.`,
+      ),
+      t(
+        msg`Reelsaw finds the webcam tile and stacks the clip: the slides or screen share on top, the speaker below at their tile's own shape. It picks the moments worth posting from what was said, spells product and guest names right, and burns in word-level captions.`,
+      ),
+    ],
+    sections: [
+      {
+        heading: t(msg`Framing a recording with slides`),
+        bullets: [
+          t(
+            msg`Webcam tile: a picture-in-picture box from Zoom, Teams, Meet or OBS is found as a steady rectangle around a face and placed under the content, enlarged, over a blurred copy of itself. A flat band beside the tile is dropped from the top pane so the slides fill it.`,
+          ),
+          t(msg`Speaker view: when the recording cuts to a full-frame camera, the crop follows the face, and switches layout at the cut.`),
+          t(
+            msg`Two people on camera: the crop follows whoever is talking, checked with an audio-visual model so a nod or a laugh is not taken for speech, and stacks both when it is not sure.`,
+          ),
+          t(
+            msg`Slides only: the whole frame sits over a blurred copy of itself, so nothing on the slide is cropped. One clip's framing can be copied to the whole project with 'Use for all clips', since a webinar's layout rarely changes.`,
+          ),
+        ],
+      },
+      {
+        heading: t(msg`From recording to clips`),
+        bullets: [
+          t(msg`Upload the MP4 from Zoom's cloud or local recording, Teams or Meet, or paste a link to the replay on YouTube, Vimeo or any site yt-dlp reads.`),
+          t(
+            msg`Add the product, company and guests' names to the vocabulary so transcription spells them right; every correction shows in the transcript to accept or reject.`,
+          ),
+          t(
+            msg`Steer the picks: 'Find clips about pricing' keeps only that topic, and instructions such as 'the customer stories, not the agenda or Q&A housekeeping' do the rest.`,
+          ),
+          t(
+            msg`Fillers, repetitions and false starts are cut for English, each cut placed by forced alignment and reviewable, and long pauses can be shortened.`,
+          ),
+          t(msg`Export a zip with each clip, a paste-ready LinkedIn or YouTube caption, and share links a scheduler can fetch.`),
+        ],
+      },
+      {
+        heading: t(msg`Shapes for where the clip goes`),
+        paragraphs: [
+          t(
+            msg`Clips render 9:16 for Shorts, Reels and TikTok by default, or 4:5 and 1:1 for LinkedIn and feeds, or 16:9, per project or per clip. The stack of slides and speaker keeps its two panes in 4:5 and 1:1, so the slide stays readable.`,
+          ),
+        ],
+      },
+      {
+        heading: t(msg`Private recordings stay private`),
+        paragraphs: [
+          t(
+            msg`Internal all-hands, customer calls and pre-launch demos should not go to a vendor. Self-hosted Reelsaw runs fully local by default (Ollama for the language model, a local Whisper for transcription, face detection on the CPU), so the recording never leaves the machine. Hosted at app.reelsaw.com it runs the same code.`,
+          ),
+          COST_PARAGRAPH,
+        ],
+      },
+    ],
+    faqs: [
+      {
+        q: t(msg`Can Reelsaw clip a Zoom recording automatically?`),
+        a: t(
+          msg`It clips any recording it is given, and everything is an MCP tool and a signed webhook, so a script, n8n or Make flow or AI agent can start a project when a recording lands and post the clips when they finish. It does not connect to your Zoom account itself.`,
+        ),
+      },
+      {
+        q: t(msg`What if the slides have text burned in that looks like captions?`),
+        a: t(
+          msg`Reelsaw hides captions already burned into the source so they do not clash with its own, and leaves text that hugs the sides of the frame alone. If it hides a slide line, set the project's source text to keep (set_project_source_text, or reelsaw source-text) and the clips re-render.`,
+        ),
+      },
+      {
+        q: t(msg`Does it work for conference talks and keynotes?`),
+        a: t(msg`Yes. A keynote with slides beside the speaker is one of the home page's demo runs: the whole frame on top, the speaker followed below.`),
+      },
+    ],
+    sources: [README, LAYOUTS],
+    disclaimer: t(msg`Reelsaw is not affiliated with Zoom, Microsoft or Google.`),
+  },
+  {
+    slug: "clip-videos-with-claude",
+    nav: t(msg`Clip with Claude (MCP)`),
+    hint: t(msg`agents that make shorts`),
+    updated: "2026-11-24",
+    metaTitle: t(msg`Clip videos with Claude: an MCP server that makes shorts`),
+    metaDescription: t(
+      msg`Connect Reelsaw's MCP server to Claude, Cursor, n8n or any MCP client and turn long videos into captioned vertical clips from a chat. Free plan included, or self-host.`,
+    ),
+    h1: t(msg`Clip videos with Claude and other AI agents over MCP`),
+    intro: [
+      t(
+        msg`An AI agent can write the post, plan the calendar and call your tools, but it cannot watch a two-hour video and cut a 30-second short from it. That step needs transcription, moment ranking, face-tracked reframing and a video render.`,
+      ),
+      t(
+        msg`Reelsaw is that step as an MCP server. Add it to Claude (claude.ai, Claude Desktop or Claude Code), Cursor or any MCP client, and the agent can create a project from a link, wait for it, read the clips, change them and hand you download links, with the same tools the app's own screens use.`,
+      ),
+    ],
+    sections: [
+      {
+        heading: t(msg`Connect it`),
+        bullets: [
+          t(
+            msg`claude.ai or Claude Desktop: add a custom connector with the address https://app.reelsaw.com/api/mcp (or your own install's). You sign in and approve it in the browser; no key to paste.`,
+          ),
+          t(msg`Claude Code: claude mcp add --transport http reelsaw https://app.reelsaw.com/api/mcp, then /mcp to sign in.`),
+          t(
+            msg`Scripts, n8n, Make and clients that cannot sign in: create an API key under Settings, API keys and MCP, and send it as a Bearer token. A tool call is one HTTP POST.`,
+          ),
+          t(msg`On your own machine, reelsaw mcp speaks stdio as well.`),
+        ],
+      },
+      {
+        heading: t(msg`What an agent can do`),
+        bullets: [
+          t(
+            msg`check_source prices a link before anything runs, and lists its Most replayed peaks; create_project starts it, wait_for_project waits for the clips.`,
+          ),
+          t(msg`get_project, get_clip and get_transcript read the clips, their scores and reasons, and the timed words.`),
+          t(
+            msg`update_clip changes a clip's text, bounds, framing, captions and layers; update_project_style restyles every clip; create_clip makes one from any time range; reanalyze_project picks again.`,
+          ),
+          t(
+            msg`list_transcript_flags and review_transcript_flags accept or reject name fixes and filler cuts; add_transcript_correction fixes a word the captions got wrong.`,
+          ),
+          t(msg`export_project and get_media_links return share links, so an agent in a sandbox can download the clips without holding your session.`),
+          t(msg`create_webhook subscribes a URL to project.done and clip.done, signed with Standard Webhooks, so a pipeline acts the moment clips are ready.`),
+        ],
+      },
+      {
+        heading: t(msg`A prompt that works`),
+        paragraphs: [
+          t(
+            msg`'Clip the five Most replayed peaks of <link>, keep the captions boxed and yellow, and give me the download links with a TikTok caption for each.' The agent calls check_source, create_project with rangesFrom, wait_for_project, update_project_style and export_project in turn, and tells you what each step did.`,
+          ),
+        ],
+      },
+      {
+        heading: t(msg`Why it is built for agents`),
+        bullets: [
+          t(msg`Every feature on a screen ships with its MCP tool, backed by the same service code, so the agent is never a second-class user.`),
+          t(msg`Destructive tools are reversible for a while: deleted projects and clips can be restored, and risky changes ask first in the app.`),
+          t(msg`On every plan, hosted Free included, and on every self-hosted install: no API tier to buy.`),
+          t(msg`Bring your own models: the language, transcription and alignment models are each any provider, or fully local with Ollama and Whisper.`),
+        ],
+      },
+      {
+        heading: t(msg`What it costs`),
+        paragraphs: [COST_PARAGRAPH],
+      },
+    ],
+    faqs: [
+      {
+        q: t(msg`Does Claude need code execution to download the clips?`),
+        a: t(
+          msg`No. The tools return share links you can open in a browser. If you ask Claude to fetch the files in its own sandbox and the download answers 403, allow the Reelsaw host in Claude's domain allowlist for code execution.`,
+        ),
+      },
+      {
+        q: t(msg`Which MCP protocol versions does it speak?`),
+        a: t(msg`The 2026-07-28 protocol and every 2025 revision, over Streamable HTTP, so newer and older clients both connect.`),
+      },
+      {
+        q: t(msg`Can an agent post the clips for me?`),
+        a: t(
+          msg`Reelsaw does not hold social accounts. The export has a TikTok post body and a YouTube Data API body per clip and share links Buffer or Metricool can fetch, so an agent with those tools, or an n8n or Make flow, can post them.`,
+        ),
+      },
+    ],
+    sources: [
+      { href: "https://github.com/osbytes/reelsaw#mcp-drive-reelsaw-from-an-agent", label: t(msg`Reelsaw README: MCP server and tools`) },
+      { href: "https://modelcontextprotocol.io", label: t(msg`Model Context Protocol`) },
+      README,
+    ],
+    disclaimer: t(msg`Reelsaw is not affiliated with Anthropic. Claude is a trademark of Anthropic.`),
+  },
 ];
 
 export const useCaseBySlug = (slug: string) => USE_CASES.find((u) => u.slug === slug);
