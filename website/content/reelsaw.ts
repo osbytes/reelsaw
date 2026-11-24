@@ -2,7 +2,7 @@ import { msg } from "@lingui/core/runtime-macro";
 import { t } from "@/lib/i18n";
 import type { FeatureKey } from "./types";
 
-export const CHECKED = "2026-10-24";
+export const CHECKED = "2026-11-24";
 
 /** Reelsaw's column of every comparison table. Keep claims to what the README documents. */
 export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
@@ -38,7 +38,9 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
   {
     key: "moments",
     label: t(msg`AI moment detection`),
-    reelsaw: t(msg`Yes: map, pool, rank with pairwise comparison; any language model, optional separate judge model`),
+    reelsaw: t(
+      msg`Yes: map, pool, rank with pairwise comparison; any language model, optional separate judge model. On long videos, clip only chosen ranges or YouTube's Most replayed peaks, and pay for those minutes only`,
+    ),
   },
   {
     key: "reframe",

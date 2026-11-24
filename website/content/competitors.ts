@@ -35,23 +35,29 @@ export const COMPETITORS: Competitor[] = [
         {
           name: t(msg`Free`),
           price: "$0",
-          includes: t(msg`Captions with watermark, MP4 export for 3 days at up to 1080p, media expires after 3 days, 1 brand template, no B-roll, no API`),
+          includes: t(
+            msg`Captions with watermark, clips picked from speech only, MP4 export for 3 days at up to 1080p, media expires after 3 days, 1 brand template, no B-roll, no posting, no API`,
+          ),
         },
         {
           name: t(msg`Starter`),
           price: t(msg`$15/mo`),
-          includes: t(msg`Watermark-free export, 30-day export window, 3 AI-image and 3 stock B-roll clips a month, 1 brand template`),
+          includes: t(
+            msg`Watermark-free export, 30-day export window, media kept 29 days, pause and filler removal, posting to YouTube Shorts, TikTok and Instagram, 3 AI-image and 3 stock B-roll clips a month, 1 brand template`,
+          ),
         },
         {
           name: t(msg`Pro`),
           price: t(msg`$29/mo`),
           includes: t(
-            msg`No export limit, 50 AI-image B-roll clips a day and unlimited stock, AI video B-roll, Video Editing API, Scheduler API, MCP connector, Zapier (up to 300 credits/mo), 2 to 4 users, up to 4 brand templates, 100 GB storage`,
+            msg`No export limit, video dubbing, bad-take removal, 50 AI-image B-roll clips a day and unlimited stock, AI video B-roll, imports from Twitch, Zoom and other links, social scheduler, Video Editing API, Scheduler API, MCP connector, Zapier (up to 300 credits/mo), 2 to 4 users, up to 4 brand templates, 100 GB storage`,
           ),
         },
         { name: t(msg`Business`), price: t(msg`Custom`), includes: t(msg`Everything in Pro, CMS integration, unlimited seats and storage`) },
       ],
-      note: t(msg`Yearly prices and per-plan minute allowances were not shown as plain numbers on the page when checked; usage is metered in plan credits.`),
+      note: t(
+        msg`Yearly prices and per-plan minute allowances were not shown as plain numbers on the page when checked; usage is metered in credits the page does not define. The Free plan is advertised as one posted clip a day.`,
+      ),
     },
     them: {
       entry: t(msg`$15/mo (Starter) for watermark-free export; $0 with a watermark`),
@@ -64,9 +70,9 @@ export const COMPETITORS: Competitor[] = [
       moments: t(msg`Yes`),
       reframe: t(msg`Yes`),
       captions: t(msg`Yes, large caption-style library`),
-      fillers: notStated,
-      dubbing: t(msg`Not listed on the pricing page when checked`),
-      publishing: t(msg`Yes: Scheduler API on Pro and up`),
+      fillers: t(msg`Pause and filler removal from Starter; bad-take removal on Pro and up`),
+      dubbing: t(msg`Video dubbing on Pro and up`),
+      publishing: t(msg`Posting to YouTube Shorts, TikTok and Instagram from Starter; more platforms, a scheduler and Scheduler API on Pro`),
       agents: t(msg`Video Editing API, MCP connector and Zapier on Pro and up`),
       cap: t(msg`Metered in plan credits; media and exports expire on Free and Starter`),
       accounts: t(msg`2 to 4 users on Pro, unlimited on Business`),
@@ -78,6 +84,7 @@ export const COMPETITORS: Competitor[] = [
       ),
       t(msg`Caption styling breadth and brand templates.`),
       t(msg`Scheduling and publishing from the same place.`),
+      t(msg`Video dubbing and AI voice-over on paid plans; Reelsaw does neither.`),
     ],
     pickThem: [
       pickThemNoInstall,
@@ -129,7 +136,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: t(msg`Open-source Klap alternative with no clip quota`),
     metaDescription: t(
-      msg`Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14/mo; Reelsaw is open source you self-host, with no quota and no watermark.`,
+      msg`Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14.50/mo billed yearly ($29 monthly); Reelsaw is open source you self-host, with no quota and no watermark.`,
     ),
     h1: t(msg`Klap alternative: unlimited clips on your own machine`),
     intro: [
@@ -139,22 +146,26 @@ export const COMPETITORS: Competitor[] = [
       t(msg`Below is what Klap's pricing page showed when checked, what Reelsaw does for the same job, and when each is the better pick.`),
     ],
     pricing: {
-      summary: t(msg`Three plans measured in clips per month, shown with yearly billing (the toggle says yearly saves 50%).`),
+      summary: t(msg`Three plans measured in clips per month; yearly billing is half the monthly price and grants the year's clips up front.`),
       plans: [
         {
           name: t(msg`Basic`),
-          price: t(msg`$14/mo billed yearly`),
-          includes: t(msg`100 clips a month, AI clipping, unlimited TikTok, Instagram and LinkedIn accounts, analytics`),
+          price: t(msg`$29/mo, or $14.50/mo billed yearly ($174/yr)`),
+          includes: t(
+            msg`100 clips a month from sources up to 3 hours, virality scores, active-speaker reframing, captions in 99+ languages, scheduling to TikTok, YouTube, Instagram, LinkedIn and Facebook with unlimited accounts, analytics, no watermark`,
+          ),
         },
-        { name: t(msg`Pro`), price: t(msg`$39/mo billed yearly`), includes: t(msg`300 clips a month, same features`) },
-        { name: t(msg`Pro+`), price: t(msg`$94/mo billed yearly`), includes: t(msg`1,000 clips a month, same features`) },
+        { name: t(msg`Pro`), price: t(msg`$79/mo, or $39.50/mo billed yearly ($474/yr)`), includes: t(msg`300 clips a month, same features`) },
+        { name: t(msg`Pro+`), price: t(msg`$189/mo, or $94.50/mo billed yearly ($1,134/yr)`), includes: t(msg`1,000 clips a month, same features`) },
       ],
-      note: t(msg`Monthly prices, a free plan, watermark policy and export resolution were not shown as plain text on the page when checked.`),
+      note: t(
+        msg`A clip is each short Klap generates; source length does not count. The free trial is one video, which can be previewed and edited but not downloaded or posted. Export resolution was not stated. The API is priced separately per video, short and export.`,
+      ),
     },
     them: {
-      entry: t(msg`$14/mo billed yearly (Basic, 100 clips/mo)`),
-      free: t(msg`No free plan listed`),
-      watermark: notStated,
+      entry: t(msg`$29/mo, or $14.50/mo billed yearly (Basic, 100 clips/mo)`),
+      free: t(msg`No free plan: a one-video trial you can preview and edit but not download or post`),
+      watermark: t(msg`None on paid plans`),
       openSource: t(msg`No`),
       selfHost: t(msg`No, cloud only`),
       local: t(msg`No, the video is uploaded to the vendor`),
@@ -164,8 +175,8 @@ export const COMPETITORS: Competitor[] = [
       captions: t(msg`Yes`),
       fillers: notStated,
       dubbing: notStated,
-      publishing: t(msg`Yes: unlimited TikTok, Instagram and LinkedIn accounts, with analytics`),
-      agents: notStated,
+      publishing: t(msg`Yes: TikTok, YouTube, Instagram, LinkedIn and Facebook, unlimited accounts, scheduling and analytics`),
+      agents: t(msg`Separate pay-as-you-go API: $0.44 per input video, $0.32 per short, $0.48 per export`),
       cap: t(msg`100, 300 or 1,000 clips a month by plan`),
       accounts: t(msg`Pro+ is positioned for teams`),
     },
@@ -188,7 +199,9 @@ export const COMPETITORS: Competitor[] = [
     faqs: [
       {
         q: t(msg`Does Klap have a free plan?`),
-        a: t(msg`Its pricing page listed no free plan or trial length when checked on ${{ checked: CHECKED }}, only Basic, Pro and Pro+ with yearly prices.`),
+        a: t(
+          msg`No. When checked on ${{ checked: CHECKED }} it offered a one-video trial with no card: the clips can be previewed and edited, but downloading or posting them needs Basic ($29/mo, or $14.50/mo billed yearly) or above.`,
+        ),
       },
       {
         q: t(msg`Is Reelsaw really unlimited?`),
@@ -216,7 +229,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: t(msg`Open-source Vizard AI alternative, no credits, no watermark`),
     metaDescription: t(
-      msg`Reelsaw vs Vizard AI: Vizard's free plan is 60 minutes a month at 720p, Creator $29/mo. Reelsaw is self-hosted open source, no credits, no watermark.`,
+      msg`Reelsaw vs Vizard AI: Vizard's free plan is 60 credits a month at 720p, Creator $29/mo. Reelsaw is self-hosted open source, no credits, no watermark.`,
     ),
     h1: t(msg`Vizard AI alternative without the credit meter`),
     intro: [
@@ -232,12 +245,16 @@ export const COMPETITORS: Competitor[] = [
         msg`A free plan metered in credits (one credit per upload minute) and two paid tiers that remove the watermark and raise export quality to 4K.`,
       ),
       plans: [
-        { name: t(msg`Free`), price: "$0", includes: t(msg`60 upload minutes a month, 720p export, 3-day video storage, 1 social account`) },
+        {
+          name: t(msg`Free`),
+          price: "$0",
+          includes: t(msg`60 credits a month, videos up to 60 minutes and 1 GB, 720p export up to 10 minutes long, 3-day video storage`),
+        },
         {
           name: t(msg`Creator`),
           price: t(msg`$29/mo, or $14.50/mo billed yearly ($174/yr)`),
           includes: t(
-            msg`From 600 upload minutes a month, 30 GB uploads, 4K export, any export length, 100 GB storage, 6 social accounts, scheduled posts, no watermark`,
+            msg`600 to 6,200 credits a month shared between clipping and Vizard Agent (unused credits roll over 2 months), videos up to 10 hours and 30 GB, 4K export, subtitle translation, 100 GB storage, 6 social accounts, scheduled posts, no watermark`,
           ),
         },
         {
@@ -247,7 +264,7 @@ export const COMPETITORS: Competitor[] = [
         },
       ],
       note: t(
-        msg`Paid minutes start at 600 a month; the page also offered larger credit bundles. Figures above are the listed Creator and Business prices when checked.`,
+        msg`Paid credits start at 600 a month and go up to 6,200 at higher prices; the figures above are the entry Creator and Business prices when checked.`,
       ),
     },
     them: {
@@ -262,14 +279,15 @@ export const COMPETITORS: Competitor[] = [
       reframe: t(msg`Yes`),
       captions: t(msg`Yes`),
       fillers: notStated,
-      dubbing: notStated,
-      publishing: t(msg`Yes: 1 account on Free, 6 on Creator, 20 on Business, with scheduling`),
-      agents: t(msg`API with rate limits by plan (1/min on Free, 10/min on Business)`),
-      cap: t(msg`Credits: 60 a month free, from 600 a month paid`),
+      dubbing: t(msg`Subtitle translation on paid plans; dubbing not listed`),
+      publishing: t(msg`Yes: 6 accounts on Creator, 20 on Business, with scheduling`),
+      agents: t(msg`API with rate limits by plan; Vizard Agent, an AI editing assistant, on every plan`),
+      cap: t(msg`Credits: 60 a month free, 600 to 6,200 paid; videos up to 60 minutes free, 10 hours paid`),
       accounts: t(msg`Business: shared workspace, invited team members, brand kit`),
     },
     betterAt: [
-      t(msg`Free plan that works today for 60 minutes a month with nothing to install.`),
+      t(msg`Free plan that works today for 60 credits a month with nothing to install.`),
+      t(msg`Vizard Agent: an AI assistant that edits clips from a prompt, inside the product.`),
       t(msg`4K export and scheduled posting to several social accounts on paid plans.`),
       t(msg`Shared workspace and brand kit for a team that posts a lot.`),
     ],
@@ -280,7 +298,7 @@ export const COMPETITORS: Competitor[] = [
     ],
     pickReelsaw: [
       pickReelsawMeter,
-      t(msg`Your sources run past the 60-minute monthly free budget.`),
+      t(msg`Your sources run past the 60-credit monthly free budget, or one video runs past Free's 60 minutes.`),
       t(msg`You want clips to exist longer than 3 days without paying for storage.`),
       t(msg`You need the video to stay on your hardware.`),
       t(msg`You want full control over which models run, including local ones, and an MCP server to drive them.`),
@@ -289,13 +307,13 @@ export const COMPETITORS: Competitor[] = [
       {
         q: t(msg`Does Vizard's free plan have a watermark?`),
         a: t(
-          msg`The pricing page lists 'No watermark' as a feature added by the Creator plan, which implies the free plan carries one. It also caps free exports at 720p, with 3-day storage, as of ${{ checked: CHECKED }}.`,
+          msg`The pricing page lists watermark removal as a feature of Creator and Business, not Free, which implies the free plan carries one. It also caps free exports at 720p and 10 minutes, with 3-day storage, as of ${{ checked: CHECKED }}.`,
         ),
       },
       {
         q: t(msg`How much does Vizard cost per month?`),
         a: t(
-          msg`When checked on ${{ checked: CHECKED }}, Creator was $29 a month or $14.50 a month billed yearly ($174/yr), and Business was $39 a month or $19.50 a month billed yearly ($234/yr). Paid minutes start at 600 a month. Verify on vizard.ai before buying.`,
+          msg`When checked on ${{ checked: CHECKED }}, Creator was $29 a month or $14.50 a month billed yearly ($174/yr), and Business was $39 a month or $19.50 a month billed yearly ($234/yr), each for 600 credits a month; more credits cost more. Verify on vizard.ai before buying.`,
         ),
       },
       {
@@ -323,59 +341,60 @@ export const COMPETITORS: Competitor[] = [
     h1: t(msg`Submagic alternative that starts from the long video`),
     intro: [
       t(
-        msg`Submagic is a captioning and polishing tool: you bring a short video and it adds captions, zooms, B-roll and sound. Clipping long sources into shorts (its Magic Clips) is a $19/mo add-on for 10 uploads, not a headline feature of Starter, Pro or Business.`,
+        msg`Submagic is a captioning and polishing tool: you bring a short video and it adds captions, zooms, B-roll and sound. Clipping long sources into shorts (its Magic Clips) is now on every paid plan, capped at 5, 15 or 37 long videos a month by plan.`,
       ),
       t(
         msg`Reelsaw starts one step earlier, at the two-hour recording, and ends with captioned vertical clips. If your problem is choosing moments from long videos, that difference matters more than any price.`,
       ),
     ],
     pricing: {
-      summary: t(msg`Three plans priced by videos per month with a cap on each video's length; no free plan was listed.`),
+      summary: t(
+        msg`Three plans priced by videos per month with a cap on each video's length, plus a monthly number of long videos for Magic Clips; no free plan, a one-time trial.`,
+      ),
       plans: [
         {
           name: t(msg`Starter`),
           price: t(msg`$19/mo, or $12/mo billed yearly`),
-          includes: t(msg`15 videos a month up to 2 minutes each, AI captions, free B-roll and audio, text-based trimming, 1080p 30 fps, no watermark`),
+          includes: t(
+            msg`15 videos a month up to 2 minutes each, Magic Clips on 5 long videos a month up to 3 hours, AI captions, B-roll and audio, text-based trimming, 1080p 30 fps, no watermark`,
+          ),
         },
         {
           name: t(msg`Pro`),
           price: t(msg`$39/mo, or $23/mo yearly`),
           includes: t(
-            msg`40 videos a month up to 5 minutes, Storyblocks B-roll, AI auto zooms, bad-take and silence removal, AI clean audio, publishing and analytics, brand kit`,
+            msg`40 videos a month up to 5 minutes, Magic Clips on 15 long videos, 2K export, all caption templates, bad-take and silence removal, AI clean audio, eye-contact correction, publishing and analytics, brand kit`,
           ),
         },
         {
           name: t(msg`Business`),
           price: t(msg`$69/mo, or $41/mo yearly`),
-          includes: t(msg`100 videos a month up to 30 minutes, 4K 60 fps, 10 templates, custom vocabulary, priority rendering, multi-account publishing`),
+          includes: t(
+            msg`100 videos a month up to 30 minutes, Magic Clips on 37 long videos, 4K 60 fps, custom vocabulary, priority rendering, publishing from several accounts`,
+          ),
         },
         { name: t(msg`Custom`), price: t(msg`Contact sales`), includes: t(msg`Usage-based, custom Magic Clips limits, custom API limits, SSO`) },
-        {
-          name: t(msg`Magic Clips add-on`),
-          price: t(msg`$19/mo, or $12/mo billed yearly`),
-          includes: t(msg`10 long-video uploads a month on top of a plan (help centre, checked ${{ checked: CHECKED }})`),
-        },
       ],
       note: t(
-        msg`The pricing cards still list Magic Clips as a Custom-plan limit; Submagic's help centre sells it as a $19/mo add-on for 10 uploads. The page showed a few conflicting figures (Business videos as 100 and as unlimited; Pro export as 1080p and as 2K). Card numbers above follow the pricing cards.`,
+        msg`Each plan also has monthly credits (45, 120 or 300) that AI features draw on; a Magic Clips run costs 8. The trial is 15 credits once, with a watermark. API minutes are 10 a month on Starter and Pro and 100 on Business, with packs from $57 for 250 minutes.`,
       ),
     },
     them: {
       entry: t(msg`$19/mo, or $12/mo billed yearly (Starter)`),
-      free: t(msg`No free plan listed; 'no credit card required' to sign up`),
-      watermark: t(msg`No watermark on all listed plans`),
+      free: t(msg`No free plan; a one-time 15-credit trial with a watermark, no card`),
+      watermark: t(msg`On the trial; Starter lists no watermark`),
       openSource: t(msg`No`),
       selfHost: t(msg`No, cloud only`),
       local: t(msg`No, the video is uploaded to the vendor`),
       providers: t(msg`Submagic's own models; not configurable`),
-      moments: t(msg`Magic Clips: $19/mo add-on for 10 long-video uploads; Custom plans can set different limits`),
+      moments: t(msg`Magic Clips: 5, 15 or 37 long videos a month by plan, up to 3 hours each`),
       reframe: notStated,
       captions: t(msg`Yes, the core product, with animated styles`),
       fillers: t(msg`Bad takes and silences removed on Pro and up`),
       dubbing: notStated,
       publishing: t(msg`Yes on Pro and up; multi-account on Business`),
-      agents: t(msg`API credit packs from 250 minutes for $57/mo`),
-      cap: t(msg`15, 40 or 100 videos a month; 2, 5 or 30 minutes per video`),
+      agents: t(msg`API: 10 minutes a month on Starter and Pro, 100 on Business; packs from 250 minutes for $57/mo`),
+      cap: t(msg`15, 40 or 100 videos a month of 2, 5 or 30 minutes; Magic Clips on 5, 15 or 37 long videos`),
       accounts: t(msg`Multi-account publishing on Business`),
     },
     betterAt: [
@@ -390,7 +409,7 @@ export const COMPETITORS: Competitor[] = [
     ],
     pickReelsaw: [
       t(msg`Your input is the full episode, not a finished short.`),
-      t(msg`A 30-minute per-video ceiling, even on the top plan, is too low.`),
+      t(msg`You clip more long videos than Magic Clips allows (37 a month on the top listed plan), or sources over 3 hours.`),
       t(msg`You want zero per-video cost on your own machine, or hosted minutes of source instead of a per-video cap.`),
       t(msg`You want an agent to run the whole thing through MCP.`),
     ],
@@ -398,7 +417,7 @@ export const COMPETITORS: Competitor[] = [
       {
         q: t(msg`Does Submagic clip long videos into shorts?`),
         a: t(
-          msg`Yes, as Magic Clips: a $19/mo add-on for 10 long-video uploads, documented in Submagic's help centre. The public pricing cards still list Magic Clips only as a Custom-plan limit. Starter, Pro and Business themselves are described by videos per month and a maximum video length of 2, 5 or 30 minutes, as of ${{ checked: CHECKED }}.`,
+          msg`Yes, as Magic Clips, now on every paid plan: 5 long videos a month on Starter, 15 on Pro and 37 on Business, each up to 3 hours, as of ${{ checked: CHECKED }}. Its other limits are videos per month with a maximum length of 2, 5 or 30 minutes.`,
         ),
       },
       {
@@ -410,7 +429,7 @@ export const COMPETITORS: Competitor[] = [
       {
         q: t(msg`Does either tool watermark the output?`),
         a: t(
-          msg`Submagic lists 'no watermark' on every plan it sells. Reelsaw never adds one on your own machine. Hosted Reelsaw watermarks the Free plan only.`,
+          msg`Submagic's trial exports carry a watermark and its paid plans do not. Reelsaw never adds one on your own machine. Hosted Reelsaw watermarks the Free plan only.`,
         ),
       },
     ],
@@ -418,7 +437,7 @@ export const COMPETITORS: Competitor[] = [
       { href: "https://www.submagic.co/pricing", label: t(msg`Submagic pricing, checked ${{ checked: CHECKED }}`) },
       {
         href: "https://care.submagic.co/en/article/how-much-does-it-cost-to-use-submagic-1xm83pa/",
-        label: t(msg`Submagic help: Magic Clips add-on price, checked ${{ checked: CHECKED }}`),
+        label: t(msg`Submagic help: credits, trial and Magic Clips, checked ${{ checked: CHECKED }}`),
       },
       { href: "https://github.com/osbytes/reelsaw#readme", label: t(msg`Reelsaw README and source`) },
     ],
@@ -553,7 +572,7 @@ export const COMPETITORS: Competitor[] = [
       fillers: t(msg`AI filler and silence removal on Essential and up`),
       dubbing: notStated,
       publishing: t(msg`Yes: TikTok on Free, 7 platforms with scheduling on Essential and up`),
-      agents: notStated,
+      agents: t(msg`A quso.ai connector for Claude and ChatGPT on every plan; no public API listed`),
       cap: t(msg`75, 100, 300 or 600 credits a month (about one credit per minute)`),
       accounts: t(msg`Brand kit and templates on Growth`),
     },
@@ -636,7 +655,7 @@ export const COMPETITORS: Competitor[] = [
           name: t(msg`OpenShorts Cloud`),
           price: t(msg`Free, then $12, $29 or $59/mo`),
           includes: t(
-            msg`Free: first video up to 60 minutes, then 20 minutes a month, with a watermark and clips kept 7 days. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. Gemini key and auto-posting included; yearly is two months free`,
+            msg`Free: first video up to 60 minutes, then 20 minutes a month, with a watermark and 2 to 4 clips a video. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes. Paid plans: no watermark, up to 15 clips a video, auto-posting and Autopilot; Gemini key included`,
           ),
         },
       ],
@@ -650,16 +669,18 @@ export const COMPETITORS: Competitor[] = [
         msg`Gemini by default for picking, layout, scripts and thumbnails; any OpenAI-compatible server for moment picking only. Transcription is faster-whisper (or Parakeet) in-process; dubbing needs ElevenLabs`,
       ),
       entry: t(msg`$0 self-hosted (Gemini still needed for layout picking and silent videos); hosted Free, then $12, $29 or $59/mo`),
-      free: t(msg`Self-hosted: everything. Cloud: first video up to 60 minutes, then 20 minutes a month with a watermark, clips kept 7 days`),
+      free: t(msg`Self-hosted: everything. Cloud: first video up to 60 minutes, then 20 minutes a month, with a watermark and 2 to 4 clips a video`),
       watermark: t(msg`None self-hosted; on the free cloud plan`),
       openSource: t(msg`MIT core; cloud/ directory under a commercial licence. Python and FastAPI, React frontend`),
       selfHost: t(msg`Yes, Docker Compose; optional CUDA override`),
-      moments: t(msg`Gemini picks 3 to 15 moments per video in one pass`),
+      moments: t(msg`Gemini (or a local OpenAI-compatible model) picks 3 to 15 moments per video in one pass`),
       reframe: t(msg`Yes: MediaPipe and YOLOv8; track, general, split and screencast modes, one layout picked per video by Gemini`),
       captions: t(msg`Yes: faster-whisper word-level subtitles, hook overlays, AI FFmpeg effects`),
       fillers: t(msg`Not listed`),
       dubbing: t(msg`Yes: ElevenLabs, 30+ languages, your own key`),
-      publishing: t(msg`Yes: TikTok, Instagram Reels and YouTube Shorts, with scheduling; YouTube title and thumbnail studio`),
+      publishing: t(
+        msg`Yes, through Upload-Post: TikTok, Instagram, YouTube, Facebook, LinkedIn, Threads and Bluesky, with scheduling; YouTube title and thumbnail studio`,
+      ),
       agents: t(msg`MCP server, REST API with webhooks, CLI, agent skill`),
       cap: t(msg`None self-hosted; metered on Cloud`),
       accounts: t(msg`Hosted accounts with API keys; self-hosted dashboard`),
@@ -667,7 +688,7 @@ export const COMPETITORS: Competitor[] = [
     betterAt: [
       t(msg`Breadth beyond clipping: voice dubbing, AI UGC videos with lip-synced actors, a YouTube title and thumbnail studio, and one-click publishing.`),
       t(msg`An optional Parakeet transcription backend (NVIDIA NeMo), about twice as fast as Whisper on the same card.`),
-      t(msg`A larger community: about 6.8k GitHub stars when checked.`),
+      t(msg`A larger community: about 9.8k GitHub stars when checked.`),
     ],
     pickThem: [t(msg`You want dubbing, UGC generation or direct publishing from the same tool.`), t(msg`You prefer a Python stack to extend.`)],
     pickReelsaw: [

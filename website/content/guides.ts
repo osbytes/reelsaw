@@ -57,17 +57,17 @@ export const GUIDES: Guide[] = [
             [t(msg`Opus Clip`), t(msg`Captions with watermark, exports expire after 3 days`), t(msg`Starter, $15/mo`)],
             [
               t(msg`Vizard`),
-              t(msg`60 upload min/mo, 720p, 3-day storage; 'No watermark' is a Creator feature`),
+              t(msg`60 credits/mo, 720p, 3-day storage; watermark removal is a Creator feature`),
               t(msg`Creator, $29/mo or $14.50/mo billed yearly`),
             ],
             [t(msg`2short.ai`), t(msg`30 min of analysis/mo`), t(msg`Page says 'goodbye to watermarks' without a plan; Lite is $9.90/mo`)],
             [t(msg`quso.ai`), t(msg`75 credits/mo, 720p with a quso.ai watermark, 7-day retention`), t(msg`Lite, $29/mo`)],
             [
               t(msg`Submagic`),
-              t(msg`No free plan listed on the pricing page`),
-              t(msg`Starter, $19/mo or $12/mo yearly, no watermark on listed plans. Magic Clips is a $19/mo add-on`),
+              t(msg`No free plan; a one-time 15-credit trial with a watermark`),
+              t(msg`Starter, $19/mo or $12/mo yearly; Magic Clips covers 5 long videos a month`),
             ],
-            [t(msg`Klap`), t(msg`No free plan listed`), t(msg`Basic, $14/mo billed yearly; watermark not stated`)],
+            [t(msg`Klap`), t(msg`One-video trial; clips cannot be downloaded`), t(msg`Basic, $29/mo or $14.50/mo billed yearly`)],
           ],
         },
         paragraphs: [
@@ -102,7 +102,7 @@ export const GUIDES: Guide[] = [
       {
         q: t(msg`Do any hosted free plans skip the watermark?`),
         a: t(
-          msg`Among the tools checked on ${{ checked: CHECKED }}, Submagic lists no watermark on any plan but has no free plan on the pricing page; 2short.ai makes a general 'no watermarks' claim without tying it to a plan. Opus Clip, quso.ai, OpenShorts Cloud and hosted Reelsaw watermark their free tiers; Vizard lists watermark removal as a paid Creator feature ($29/mo, or $14.50/mo billed yearly).`,
+          msg`Among the tools checked on ${{ checked: CHECKED }}, only 2short.ai makes a general 'no watermarks' claim, without tying it to a plan. Opus Clip, quso.ai, OpenShorts Cloud and hosted Reelsaw watermark their free tiers; Submagic's trial is watermarked and Klap's trial clips cannot be downloaded; Vizard lists watermark removal as a paid Creator feature ($29/mo, or $14.50/mo billed yearly).`,
         ),
       },
       {
