@@ -1,7 +1,7 @@
 /**
  * The site's language (docs/I18N.md). One build per locale: `SITE_LOCALE` at build time (default English) picks the
  * catalogue, so copy rendered at import time (content/*.ts) and at request time read the same language, on the server
- * and in client components alike. Only English ships; `en-XA` is the pseudo-locale for spotting unwrapped copy.
+ * and in client components alike. The locales are lib/locales.ts; `en-XA` is the pseudo-locale for spotting unwrapped copy.
  *
  * Write copy with the runtime macro and render it with `t`:
  *   import { msg } from "@lingui/core/runtime-macro";
@@ -10,14 +10,15 @@
  * word in it stays one message: `rich(msg`Read <0>the docs</0> first`, { 0: (c) => <a href="/docs">{c}</a> })`, where `<0/>`
  * stands for an element passed whole and `<0>…</0>` for one that wraps the translated words. `pnpm i18n:extract` after a change.
  */
-import { type MessageDescriptor, setupI18n } from "@lingui/core";
+import { type MessageDescriptor, type Messages, setupI18n } from "@lingui/core";
 import { compileMessage } from "@lingui/message-utils/compileMessage";
 import { Fragment, type ReactNode, createElement } from "react";
 import { messages as en } from "@/locales/en";
 import { messages as enXA } from "@/locales/en-XA";
+import { messages as ru } from "@/locales/ru";
+import type { SiteLocale } from "./locales";
 
-const CATALOGS = { en, "en-XA": enXA } as const;
-export type SiteLocale = keyof typeof CATALOGS;
+const CATALOGS = { en, ru, "en-XA": enXA } satisfies Record<SiteLocale, Messages>;
 
 const RTL = new Set(["ar", "fa", "he", "ur"]);
 
@@ -30,8 +31,9 @@ function siteLocale(): SiteLocale {
 export const LOCALE: SiteLocale = siteLocale();
 /** `<html dir>` */
 export const DIR: "ltr" | "rtl" = RTL.has(LOCALE.split("-")[0] ?? "") ? "rtl" : "ltr";
-/** Open Graph `locale` ("en_US") */
-export const OG_LOCALE = LOCALE.startsWith("en") ? "en_US" : (LOCALE as string).replace("-", "_");
+/** Open Graph `locale` ("en_US"): a language and its territory */
+const OG: Record<SiteLocale, string> = { en: "en_US", ru: "ru_RU", "en-XA": "en_US" };
+export const OG_LOCALE = OG[LOCALE];
 
 const i18n = setupI18n();
 // a message missing from the catalogue falls back to the English in the code, compiled on first use

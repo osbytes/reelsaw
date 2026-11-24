@@ -401,7 +401,7 @@ off under Settings → Account, with `set_email_preferences` over MCP, or an ope
 reelsaw.com) comes from a message catalogue, and numbers, sizes, amounts and dates are formatted for the reader's
 locale. Each account picks its language and time zone under Settings → Account → Language and region,
 `set_locale_preferences` over MCP or `reelsaw locale-prefs <email>`; mail is written in the recipient's language
-with dates in their time zone. English ships today; a translation is a pull request to the catalogues
+with dates in their time zone. English and Russian ship today; a translation is a pull request to the catalogues
 ([docs/I18N.md](docs/I18N.md)).
 
 ## Hosting for many people

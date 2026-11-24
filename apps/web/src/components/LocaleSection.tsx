@@ -12,7 +12,9 @@ const FOLLOW = "";
 /** A locale's own name ("English", "Deutsch"), for the language picker. */
 function localeName(code: string): string {
   try {
-    return new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
+    const name = new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
+    // a language names itself in lower case in many languages ("русский"); a menu item starts with a capital
+    return name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
   } catch {
     return code;
   }

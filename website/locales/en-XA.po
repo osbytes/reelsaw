@@ -60,18 +60,6 @@ msgstr ""
 msgid "[the jurisdiction of the operator]"
 msgstr ""
 
-#: app/page.tsx
-msgid "{\n"
-"  \"mcpServers\": {\n"
-"    \"reelsaw\": {\n"
-"      \"type\": \"http\",\n"
-"      \"url\": \"https://your-host/api/mcp\",\n"
-"      \"headers\": { \"Authorization\": \"Bearer rs_…\" }\n"
-"    }\n"
-"  }\n"
-"}"
-msgstr ""
-
 #: components/replay-ranges.tsx
 msgid "{billed} of {total} min"
 msgstr ""

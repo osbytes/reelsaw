@@ -187,6 +187,16 @@ function HomeJsonLd() {
 }
 
 /** The release list is GitHub's; the page re-renders hourly like `/releases`. */
+const MCP_CONFIG = `{
+  "mcpServers": {
+    "reelsaw": {
+      "type": "http",
+      "url": "https://your-host/api/mcp",
+      "headers": { "Authorization": "Bearer rs_…" }
+    }
+  }
+}`;
+
 export const revalidate = 3600;
 
 const RECENT_RELEASES = 3;
@@ -396,17 +406,8 @@ export default async function HomePage() {
             </div>
             <div className="flex min-w-0 flex-col gap-3">
               <Command text={`claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Authorization: Bearer rs_…"`} caption="Claude Code" />
-              <Code lang="json">
-                {t(msg`{
-  "mcpServers": {
-    "reelsaw": {
-      "type": "http",
-      "url": "https://your-host/api/mcp",
-      "headers": { "Authorization": "Bearer rs_…" }
-    }
-  }
-}`)}
-              </Code>
+              {/* code, not copy: it stays out of the catalogue (a translation would only break its braces) */}
+              <Code lang="json">{MCP_CONFIG}</Code>
               <p className="text-xs text-ink3">
                 {t(
                   msg`Create an API key under Settings → API keys and MCP, or set MCP_OAUTH=true so claude.ai and Claude Desktop sign in through the browser.`,

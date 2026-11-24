@@ -573,8 +573,8 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   (`biome-ignore`, `@ts-expect-error`) always says why. A review comment made twice becomes a rule
   (`biome.json`, a GritQL plugin, or a test that scans the source) before it becomes a line in
   `AGENTS.md`.
-- **Every string a person reads goes through the catalogue.** Reelsaw ships in English and is
-  built for more: web copy uses Lingui's `<Trans>` and `t`; server errors are `AppError` with a
+- **Every string a person reads goes through the catalogue.** Reelsaw ships in English and
+  Russian and is built for more: web copy uses Lingui's `<Trans>` and `t`; server errors are `AppError` with a
   catalogue message (a stable code), and emails, notices, MCP results and CLI lines render with
   `t(msg…)` in the reader's locale (mail: the recipient's); whole sentences as one message, plurals
   as ICU messages; numbers, money and dates through `@reelsaw/shared` formatting; layout uses
