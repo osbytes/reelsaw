@@ -1,5 +1,6 @@
 import { defineConfig } from "@lingui/cli";
 import { formatter } from "@lingui/format-po";
+import { SITE_LOCALES } from "./lib/locales";
 
 /**
  * reelsaw.com's message catalogue, the same .po format as the app (docs/I18N.md). Copy is written with Lingui's runtime
@@ -10,7 +11,7 @@ import { formatter } from "@lingui/format-po";
  */
 export default defineConfig({
   sourceLocale: "en",
-  locales: ["en", "ru", "en-XA"],
+  locales: [...SITE_LOCALES],
   pseudoLocale: { locale: "en-XA" },
   fallbackLocales: { "en-XA": "en", default: "en" },
   experimental: { runtimeMacro: true },

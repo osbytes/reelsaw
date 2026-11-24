@@ -22,7 +22,8 @@ from the code and committed. Copy is written with Lingui's runtime macro, so Nex
 `t(msg`Clips from ${{ name }}`)` for a string, `rich(msg`Read <0>the docs</0>`, { 0: (c) => <a href="…">{c}</a> })`
 for a sentence with a link or a styled word in it (one message, never pieces). Content modules (`content/*.ts`) hold
 rendered strings, so each build is one language: `SITE_LOCALE` at build time (default `en`) picks the catalogue for
-the server and client bundles alike. `SITE_LOCALE=en-XA pnpm dev` shows the pseudo-locale, where copy that is still
+the server and client bundles alike. `SITE_LOCALE=ru` builds the Russian site (the locales are `lib/locales.ts`);
+`SITE_LOCALE=en-XA pnpm dev` shows the pseudo-locale, where copy that is still
 plain English was not wrapped. Product names, URLs, commands, code and the demo run's own output (hooks, the model's
 and the detector's reasons) stay as they are.
 
