@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.52.0
+
+### Minor Changes
+
+- [#374](https://github.com/osbytes/reelsaw/pull/374) [`a628a36`](https://github.com/osbytes/reelsaw/commit/a628a36a682a41f02470dd608f4a93864c831966) Thanks [@WaveHost77](https://github.com/WaveHost77)! - Ship the Russian locale: `ru` joins `SHIPPED_LOCALES` and the lingui configs, with translated web, server and website catalogues (UI, errors, notices, emails, CLI and the marketing site). Set it per account under Settings → Account → Language and region; missing messages fall back to English.
+
+### Patch Changes
+
+- [#375](https://github.com/osbytes/reelsaw/pull/375) [`925814c`](https://github.com/osbytes/reelsaw/commit/925814c5ace462679ea64b54ce6796246130e79b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A run stopped because you deleted its project is logged as information instead of an error, so the server log's errors are failures someone needs to look at.
+
 ## 0.51.1
 
 ### Patch Changes
