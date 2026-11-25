@@ -85,6 +85,8 @@ export interface ActiveJob {
   lastError?: string | undefined;
   /** pg-boss priority the job was queued with (higher starts first): minus the owner's backlog then, plus their priority */
   priority: number;
+  /** the owner's user id: the admin viewer opens the project only when it is their own */
+  ownerId?: string | undefined;
   ownerEmail?: string | undefined;
 }
 
@@ -270,6 +272,7 @@ export async function summarizeQueue(
         createdAt: rawTimeIso(r.createdOn)!,
         ...(r.lastError ? { lastError: r.lastError.slice(0, 500) } : {}),
         priority: r.priority,
+        ...(r.userId ? { ownerId: r.userId } : {}),
         ...(r.userId && emailOf.get(r.userId) ? { ownerEmail: emailOf.get(r.userId) } : {}),
       })),
       truncated: active.rows.length > ACTIVE_LIMIT,

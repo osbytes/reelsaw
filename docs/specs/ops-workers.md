@@ -140,6 +140,9 @@ truth. Competitors in this shape (n8n, Bull Board–style UIs, Temporal Web) sep
 - Active: project, stage, attempt, worker id, started.
 - Failed work: project or clip, owner (email), stage, short reason, when. The item and reason
   open a dialog with the full recorded error, Retry, Copy reason, and Open project (secondary).
+- Project links (active rows, the dialog's Open project) go to the project only when it is the
+  admin's own. Another account's project is not theirs to open, so they go to that owner on the
+  admin users page instead (Open account); there is no impersonation.
   Row Retry stays on the list. With a filter applied: "Retry matching (N)". Hash
   `#queue&fail=kind:id` deep-links the dialog. MCP `get_failure` / CLI `reelsaw failure` return
   the same item.
