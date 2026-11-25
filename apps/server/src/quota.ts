@@ -933,7 +933,24 @@ async function minutesOver(
  * A project of ranges (docs/specs/range-clipping.md): its billed seconds are admitted whole or refused with the
  * upgrade offer, never cut to their start the way a whole video is (`admitSource`), since which ranges to drop is the
  * person's choice. Call under the account's quota lock, in the unit that records the seconds.
+ *
+ * Two forms of the same answer, one per side: a request (check_source, create, extend) calls `checkRanges`, whose
+ * QuotaError is a TOO_MANY_REQUESTS refusal with the offer on every surface; a worker (ingest) calls `admitRanges`,
+ * whose QuotaExceededError fails the project at once. A worker error thrown from a request is an internal error.
  */
+export async function checkRanges(
+  db: Db,
+  instance: InstanceLimits,
+  userId: string,
+  projectId: string | null,
+  billedSec: number,
+  ent?: Entitlements | null,
+): Promise<void> {
+  const over = await minutesOver(db, instance, userId, projectId, billedSec, ent, "ranges");
+  if (over) throw new QuotaError(over.descriptor, quotaRefusal(over.d, over.key, over.sentence), over.key, { firstVideo: over.firstVideo }, over.offer);
+}
+
+/** `checkRanges` for a worker: the refusal is a QuotaExceededError, so the stage fails the project instead of retrying. */
 export async function admitRanges(
   db: Db,
   instance: InstanceLimits,

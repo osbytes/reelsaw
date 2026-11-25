@@ -7,7 +7,16 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { LIMIT_KEYS, type InstanceLimits, QuotaExceededError, admitRanges, recordProjectCreated, recordSourceDuration } from "../src/quota.js";
+import {
+  LIMIT_KEYS,
+  type InstanceLimits,
+  QuotaError,
+  QuotaExceededError,
+  admitRanges,
+  checkRanges,
+  recordProjectCreated,
+  recordSourceDuration,
+} from "../src/quota.js";
 import { schema } from "../src/db/index.js";
 import { db } from "./helpers.js";
 
@@ -50,6 +59,22 @@ describe("admitRanges", () => {
         return true;
       },
     );
+  });
+
+  it("refuses ranges on a request as a TOO_MANY_REQUESTS QuotaError with the offer, not as an internal error", async () => {
+    await assert.rejects(
+      () => checkRanges(orm, instance(30), userId, null, 400 * 60, null),
+      (err: unknown) => {
+        assert.ok(err instanceof QuotaError);
+        assert.equal(err.code, "TOO_MANY_REQUESTS");
+        assert.match(err.messageId ?? "", /^quota\.ranges_over_/);
+        assert.match(err.message, /^These ranges are 400 minutes/);
+        assert.equal(err.limit, "MAX_SOURCE_MINUTES_PER_MONTH");
+        assert.equal(err.quota?.key, "MAX_SOURCE_MINUTES_PER_MONTH");
+        return true;
+      },
+    );
+    await checkRanges(orm, instance(30), userId, null, 10 * 60, null);
   });
 
   it("counts the minutes other projects used, and not the project being admitted", async () => {
