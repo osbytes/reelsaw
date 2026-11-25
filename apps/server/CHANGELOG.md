@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.52.1
+
+### Patch Changes
+
+- [#378](https://github.com/osbytes/reelsaw/pull/378) [`b98627c`](https://github.com/osbytes/reelsaw/commit/b98627c876a2a10b8f5e66d1e4f8e36f77512e06) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Choosing ranges past your minutes now says so, with the upgrade offer, when you check a link, create a project or clip more of one. Before, those three refused with a "something went wrong" error instead.
+
 ## 0.52.0
 
 ### Minor Changes
