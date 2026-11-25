@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.52.2
+
+### Patch Changes
+
+- [#380](https://github.com/osbytes/reelsaw/pull/380) [`f2861e9`](https://github.com/osbytes/reelsaw/commit/f2861e9bea7cc35229b6baeee6802eb21d03dceb) Thanks [@dillonstreator](https://github.com/dillonstreator)! - In Settings → System → Queue, an admin's links to another account's queued or failed work now open that owner on the users page (Open account) instead of a project page they cannot see. Their own projects still open directly.
+
 ## 0.52.1
 
 ### Patch Changes
