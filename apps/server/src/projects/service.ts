@@ -46,7 +46,7 @@ import {
   rangeSchema,
 } from "@reelsaw/shared";
 import {
-  admitRanges,
+  checkRanges,
   checkAnnouncedMinutes,
   checkProjectQuota,
   checkRestoreQuota,
@@ -1059,7 +1059,7 @@ export async function createProject(
     const plan = asked.length ? planRanges(asked, { durationSec: announcedSec, maxClipSec: settings.maxClipSeconds }) : null;
     if (plan && !plan.ok) throw rangesRefused(plan.problems);
     // advisory, like the whole video's check above: ingest admits the ranges again, bound, under the quota lock
-    if (plan) await admitRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
+    if (plan) await checkRanges(u.db, svc.settings.get(), userId, null, plan.billedSec, svc.entitlements).catch(quotaReached);
     const [row] = await u.db
       .insert(schema.projects)
       .values({
@@ -1278,7 +1278,7 @@ export async function checkSource(svc: Services, userId: string, input: z.infer<
     }
     const priced = { seconds: plan.billedSec, minutes: Math.round((plan.billedSec / 60) * 10) / 10, changes: plan.changes, problems: [] };
     try {
-      await admitRanges(db, s, userId, null, plan.billedSec, svc.entitlements);
+      await checkRanges(db, s, userId, null, plan.billedSec, svc.entitlements);
     } catch (err) {
       if (err instanceof QuotaError) return { ...refused(err), ranges: priced };
       throw err;
@@ -1534,7 +1534,7 @@ async function addRanges(svc: Services, actor: Actor, projectId: string, input: 
     if (!plan.ok) throw rangesRefused(plan.problems);
     if (plan.billedSec <= 0) throw new AppError("BAD_REQUEST", msg({ id: "ranges.already_clipped", message: "Those ranges were clipped already." }));
     // counted against every project's minutes, this one's too: only the new time is billed
-    await admitRanges(u.db, svc.settings.get(), p.userId, null, plan.billedSec, svc.entitlements);
+    await checkRanges(u.db, svc.settings.get(), p.userId, null, plan.billedSec, svc.entitlements);
     await recordSourceExtension(u.db, p.userId, p.id, plan.billedSec);
     await u.db.insert(schema.projectRanges).values(
       plan.ranges
