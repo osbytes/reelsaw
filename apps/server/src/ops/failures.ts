@@ -52,6 +52,8 @@ export interface FailureItem {
   /** Clip title when kind is clip, otherwise the project title. */
   title: string;
   projectTitle: string;
+  /** the owner's user id: the admin viewer opens the project only when it is their own */
+  ownerId: string;
   ownerEmail: string;
   stage: FailureStage | string;
   /** why it failed; a row from before causes were kept reads as platform */
@@ -105,6 +107,7 @@ type Raw = {
   clipId: string | null;
   title: string;
   projectTitle: string;
+  ownerId: string;
   ownerEmail: string;
   stage: string | null;
   cause: FailureCause | null;
@@ -123,6 +126,7 @@ function view(r: Raw): FailureItem {
     clipId: r.clipId,
     title: r.title,
     projectTitle: r.projectTitle,
+    ownerId: r.ownerId,
     ownerEmail: r.ownerEmail,
     stage,
     cause,
@@ -187,6 +191,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
             error: schema.projects.error,
             failedAt: schema.projects.updatedAt,
             dismissedAt: schema.projects.failureDismissedAt,
+            ownerId: schema.user.id,
             ownerEmail: schema.user.email,
           })
           .from(schema.projects)
@@ -206,6 +211,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
             error: schema.clips.error,
             failedAt: schema.clips.updatedAt,
             dismissedAt: schema.clips.failureDismissedAt,
+            ownerId: schema.user.id,
             ownerEmail: schema.user.email,
             origin: schema.clips.origin,
             reasoning: schema.clips.reasoning,
@@ -481,6 +487,7 @@ async function loadByIds(svc: Services, ids: Ids): Promise<FailureItem[]> {
             error: schema.projects.error,
             failedAt: schema.projects.updatedAt,
             dismissedAt: schema.projects.failureDismissedAt,
+            ownerId: schema.user.id,
             ownerEmail: schema.user.email,
           })
           .from(schema.projects)
@@ -498,6 +505,7 @@ async function loadByIds(svc: Services, ids: Ids): Promise<FailureItem[]> {
             error: schema.clips.error,
             failedAt: schema.clips.updatedAt,
             dismissedAt: schema.clips.failureDismissedAt,
+            ownerId: schema.user.id,
             ownerEmail: schema.user.email,
             origin: schema.clips.origin,
             reasoning: schema.clips.reasoning,

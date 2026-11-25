@@ -7945,6 +7945,10 @@ msgstr "Open"
 msgid "Open {0}"
 msgstr "Open {0}"
 
+#: src/components/QueueSection.tsx
+msgid "Open account"
+msgstr "Open account"
+
 #: src/components/CommandPaletteDialog.tsx
 msgid "Open in library"
 msgstr "Open in library"

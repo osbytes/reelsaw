@@ -11,6 +11,7 @@ import { Search } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
+import { useSession } from "../lib/auth";
 import { ago, elapsed } from "../lib/time";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ScrollArea, SECTION_LIST_MAX_H } from "./scroll-area";
@@ -23,6 +24,22 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useDebounced } from "../lib/useDebounced";
 
 const PAGE = 50;
+
+/** The admin users page searched for one account (by email, else id). */
+const accountHref = (q: string) => `/admin/users#${new URLSearchParams({ q }).toString()}`;
+
+/**
+ * Where an admin goes from a queued or failed item: the project when it is their own, else the owner's account. Another
+ * account's project page is not theirs to open (it answers not found), so linking it would be a dead end.
+ */
+function workHref(
+  viewerId: string | undefined,
+  w: { projectId: string; clipId?: string | null; ownerId?: string | undefined; ownerEmail?: string | undefined },
+): string | null {
+  if (w.ownerId && w.ownerId === viewerId) return w.clipId ? `/p/${w.projectId}#clip=${w.clipId}` : `/p/${w.projectId}`;
+  const who = w.ownerEmail ?? w.ownerId;
+  return who ? accountHref(who) : null;
+}
 /** Below this many failures the search and filters are noise; they show once there is a list to narrow. */
 const FILTER_FROM = 6;
 
@@ -103,6 +120,7 @@ const DISMISS_ROUNDS = 20;
 export function QueueSection() {
   const { t } = useLingui();
   const trpc = useTRPC();
+  const viewerId = useSession().data?.user.id;
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [stage, setStage] = useState("");
@@ -374,7 +392,7 @@ export function QueueSection() {
                 {d.owners.map((o) => (
                   <tr key={o.userId} className="border-t border-line/60">
                     <td className="truncate py-1.5" title={o.email ?? o.userId}>
-                      <Link to={`/admin/users#${new URLSearchParams({ q: o.email ?? o.userId }).toString()}`} className="text-ink no-underline hover:underline">
+                      <Link to={accountHref(o.email ?? o.userId)} className="text-ink no-underline hover:underline">
                         {o.email ?? o.userId.slice(0, 8)}
                       </Link>
                       {o.plan && o.plan !== "free" ? <span className="text-ink3"> · {o.plan}</span> : null}
@@ -446,13 +464,16 @@ export function QueueSection() {
                   const prio = formatPriority(j.priority);
                   const owner = j.ownerEmail;
                   const attempt = j.attempt;
+                  const href = j.projectId ? workHref(viewerId, { ...j, projectId: j.projectId }) : null;
                   return (
                     <tr key={`${j.queue}:${j.projectId}:${j.clipId}:${i}`} className="border-t border-line/60">
                       <td className="truncate py-1.5" title={owner ? t`${owner} · priority ${prio}` : t`priority ${prio}`}>
-                        {j.projectId ? (
-                          <Link to={j.clipId ? `/p/${j.projectId}#clip=${j.clipId}` : `/p/${j.projectId}`} className="text-ink no-underline hover:underline">
+                        {j.projectId && href ? (
+                          <Link to={href} className="text-ink no-underline hover:underline">
                             {j.title ?? j.projectId.slice(0, 8)}
                           </Link>
+                        ) : j.projectId ? (
+                          (j.title ?? j.projectId.slice(0, 8))
                         ) : (
                           "—"
                         )}
@@ -761,12 +782,8 @@ export function QueueSection() {
               >
                 <Trans>Copy reason</Trans>
               </button>
-              <Link
-                to={detail.kind === "clip" ? `/p/${detail.projectId}#clip=${detail.id}` : `/p/${detail.projectId}`}
-                className="btn-ghost min-w-[7.5rem] no-underline"
-                onClick={closeFail}
-              >
-                <Trans>Open project</Trans>
+              <Link to={workHref(viewerId, detail) ?? accountHref(detail.ownerEmail)} className="btn-ghost min-w-[7.5rem] no-underline" onClick={closeFail}>
+                {detail.ownerId === viewerId ? t`Open project` : t`Open account`}
               </Link>
               <button
                 type="button"
