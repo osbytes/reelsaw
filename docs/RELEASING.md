@@ -103,7 +103,10 @@ setting.
     `# vX.Y.Z` comment. Dependabot bumps them monthly.
 - Settings → Branches → `main`: require the `check` and `site` checks (`ci`), `DCO` and `CLA`
   (`contributors`), and `dependencies`, `workflows` and `secrets` (`security`), with branches up to
-  date before merging. The Release PR is merged like any other. Settings → Rules → the `main`
+  date before merging, and a pull request with one approving review from a code owner
+  (`.github/CODEOWNERS`). Admins are not enforced, so a maintainer can still merge their own PR
+  (the Release PR is opened with `dillonstreator`'s token) when no other owner is around. The
+  Release PR is merged like any other. Settings → Rules → the `main`
   ruleset also blocks force pushes and deletion.
 - Settings → Rules → tag ruleset `v*`: restricts creation, update, deletion and force pushes, with
   only `dillonstreator` on the bypass list. A `v*` tag push publishes a signed image (`release.yml`),
