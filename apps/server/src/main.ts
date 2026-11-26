@@ -8,10 +8,13 @@ import { startWebhookWorker } from "./webhooks/deliver.js";
 import { startReconciler, startStallWatch } from "./queue/reconcile.js";
 import { beat, startHeartbeat } from "./ops/workers.js";
 import { trackHttpServer, type HttpCloser } from "./http-shutdown.js";
+import { startLoopLagMonitor } from "./loop-lag.js";
 
 async function main() {
   const svc = await createServices();
   const { config } = svc;
+  // how late the loop runs: read by the slow-request line and exported as reelsaw.event_loop.delay
+  startLoopLagMonitor();
   const log = svc.log.child({ module: "boot" });
   log.info(
     {

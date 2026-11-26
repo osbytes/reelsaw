@@ -217,6 +217,22 @@ The story of a run is: `project event` lines (`run.started` ... `stage.completed
 the stage's own lines between them, and `job retry` / `job failed` lines with the previous attempt's
 reason.
 
+**Lines that say why.** A few warnings carry the fields that tell causes apart:
+
+- `slow request`: `ms`, and `loopDelayMs`, the worst event-loop delay of that process over the last ~30 s. A high
+  value means the request waited for the loop (CPU work in the same process), not for its own queries; a low one
+  points at the queries (the trace's Postgres spans).
+- `child process was stopped by a signal`: `tool`, `signal`, `rssMB`, `hostFreeMB`, and in a container
+  `cgroupCurrentMB` / `cgroupMaxMB` / `cgroupPeakMB` / `oomKills`. `oomKilled: true` means the container's memory
+  limit killed it (the OOM killer's count rose during the run). Our own cancels (a deleted project, a stopped job)
+  are not logged here.
+- `pg pool error` and `pg-boss error`: `poolTotal`, `poolIdle`, `poolWaiting`, `poolMax`. A "timeout exceeded when
+  trying to connect" with every connection in use and callers waiting is a full pool (raise `DB_POOL_MAX` or find
+  what holds connections); with free room it is the database or the network.
+- `storage operation failed`: `op`, `key`, and the job's `projectId` / `clipId` / `jobId` when it ran in a job.
+- A failed ffmpeg's message starts with its own reason (the lines with an error word, else its last lines), then
+  `--- tail ---` and the end of stderr, so a log export that cuts the message still keeps the reason.
+
 **Stalls (`job.stalled`).** After `STALL_MINUTES` without a project event the watchdog posts `job.stalled` once, and the
 project page shows it. Its `message` names the stage and what is done, for example "Finding moments has made no progress
 for 15 min: 13 of 43 parts done, last part finished 16 min ago." The payload also carries `stage`, `done`, `total`,

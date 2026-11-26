@@ -2,6 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { llmContext } from "./ai/trace.js";
+import { memorySnapshot, oomKillCount } from "./memory-snapshot.js";
 import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
@@ -139,19 +140,34 @@ export class CommandError extends Error {
     /** the signal that ended the process when it did not exit on its own (code is then null) */
     public signal: NodeJS.Signals | null = null,
   ) {
-    // lead with the lines that say what went wrong; ffmpeg prints a long banner first
-    const key = stderr
-      .split("\n")
-      .filter((l) => /error|invalid|fail|cannot|no such|unable|not found|unknown/i.test(l))
-      .slice(-6)
-      .join("\n");
     // "exited with null" said nothing: a process killed from outside (out of memory, a stopped job) has no code
     const how =
       code === null
         ? `was stopped by ${signal ?? "a signal"}${signal === "SIGKILL" ? " (usually the server running out of memory)" : ""}`
         : `exited with ${code}`;
-    super(`${cmd} ${how}: ${key ? `${key}\n--- tail ---\n` : ""}${stderr.slice(-1200)}`);
+    super(`${cmd} ${how}: ${commandKey(stderr)}${stderr.slice(-1200)}`);
   }
+}
+
+/** Log exports cut a message at a few hundred characters (Sentry), so the lines that say what went wrong lead, short. */
+const KEY_MAX = 400;
+// ffmpeg's progress, banner and build lines: never the reason a run failed
+const NOISE = /^(frame=|size=|video:|Press \[q\]|built with|configuration:|lib\w+ +\d)/;
+const FLAGGED = /error|invalid|fail|cannot|no such|unable|not found|unknown|does not contain|nothing was|exhausted|corrupt|killed|out of memory/i;
+
+/**
+ * The lines of stderr that say what went wrong, then a "--- tail ---" marker. ffmpeg prints a long banner and the
+ * input's header first. Its reason is a line with an error word or, when none has one, the last lines it printed.
+ */
+function commandKey(stderr: string): string {
+  const lines = stderr
+    .split(/\r?\n|\r/)
+    .map((l) => l.trim())
+    .filter((l) => l && !NOISE.test(l));
+  const flagged = lines.filter((l) => FLAGGED.test(l));
+  const key = (flagged.length ? flagged.slice(-6) : lines.slice(-3)).join("\n");
+  if (!key) return "";
+  return `${key.length > KEY_MAX ? `${key.slice(0, KEY_MAX)}…` : key}\n--- tail ---\n`;
 }
 
 /** H.264 encoders the renders can use. libx264 is the CPU baseline every ffmpeg build has. */
@@ -457,13 +473,21 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const { projectId, clipId, jobId } = llmContext();
       return { projectId, clipId, jobId };
     };
+    // the OOM killer's count before the run: a rise by the time a signal stops it says the memory limit did
+    const oomBefore = oomKillCount();
     return withSpan(`exec ${tool}`, { "process.command": bin, "process.args_count": args.length }, () => runRaw(bin, args, opts)).then(
       (res) => {
         log.debug({ ...ids(), tool, argv: loggableArgv(args) }, "exec");
         return res;
       },
-      (err: unknown) => {
+      async (err: unknown) => {
         log.debug({ ...ids(), tool, argv: loggableArgv(args), code: err instanceof CommandError ? err.code : undefined }, "exec failed");
+        // stopped from outside, not by our own cancel: what memory looked like says whether it ran out
+        if (err instanceof CommandError && err.signal && !opts?.signal?.aborted) {
+          const [before, memory] = await Promise.all([oomBefore, memorySnapshot()]);
+          const oomKilled = before !== undefined && memory.oomKills !== undefined ? memory.oomKills > before : undefined;
+          log.warn({ ...ids(), tool, signal: err.signal, oomKilled, ...memory }, "child process was stopped by a signal");
+        }
         throw err;
       },
     );

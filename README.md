@@ -1019,6 +1019,8 @@ Metrics. Durations are seconds. Attributes are bounded sets (stage, proxy id, mo
 | `reelsaw.llm.cost` | USD | `gen_ai.request.model`, `reelsaw.stage` | Provider-reported cost (AI Gateway) |
 | `reelsaw.render.slots` | gauge | `state` (running, limit) | Renders running in a worker and the limit CPU and memory allow |
 | `reelsaw.worker.jobs.active` | gauge | `queue` | Jobs a worker process is running |
+| `reelsaw.event_loop.delay` | gauge, s | `stat` (p99, max) | How late a process's event loop ran callbacks over the last 10 s; a slow request with a high value waited for the loop |
+| `reelsaw.db.pool.connections` | gauge | `state` (used, idle, waiting, max) | A process's main Postgres pool, and callers waiting for a connection |
 | `reelsaw.span.duration` | s | `span`, `status` | Every `withSpan`: each stage and each `exec ffmpeg`, `exec ffprobe`, `exec yt-dlp` |
 
 Over OTLP, the auto-instrumentation adds `http.server.request.duration`, and pg-boss adds `messaging.process.duration` and `pgboss.queue.jobs` (backlog by queue and state). A proxy dashboard: `reelsaw.ytdlp.download.realtime_factor` p50/p95 by `proxy`, `reelsaw.ytdlp.attempts` rate by `proxy` and `outcome`, and `reelsaw.ytdlp.proxy.healthy` by `proxy`.

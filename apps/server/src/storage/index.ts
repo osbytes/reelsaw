@@ -6,6 +6,7 @@ import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Config, Paths } from "../config.js";
 import type { Logger } from "../log.js";
+import { llmContext } from "../ai/trace.js";
 
 /**
  * Durable artifact store. Everything ffmpeg touches lives in DATA_DIR (local scratch);
@@ -369,8 +370,11 @@ export function withStorageLogging(inner: Storage, log: Logger): Storage {
     try {
       return await fn();
     } catch (err) {
-      if (isStorageMissing(err)) log.debug({ op, key, driver: inner.driver }, "storage object missing");
-      else log.warn({ err, op, key, driver: inner.driver }, "storage operation failed");
+      // the job's ids (workers run each job in that context), so the line filters like the job's own lines
+      const { projectId, clipId, jobId } = llmContext();
+      const ids = { ...(projectId ? { projectId } : {}), ...(clipId ? { clipId } : {}), ...(jobId ? { jobId } : {}) };
+      if (isStorageMissing(err)) log.debug({ ...ids, op, key, driver: inner.driver }, "storage object missing");
+      else log.warn({ ...ids, err, op, key, driver: inner.driver }, "storage operation failed");
       throw err;
     }
   };
