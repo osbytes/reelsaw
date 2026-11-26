@@ -9,6 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { probeInfo } from "../src/media.js";
 import { NonRetryableError } from "../src/pipeline/common.js";
 import { takeThumbnail, type RunFfmpeg } from "../src/pipeline/thumbnail.js";
 
@@ -89,7 +90,7 @@ describe("takeThumbnail (stubbed ffmpeg)", () => {
   });
 });
 
-const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0;
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 const ffmpegCli: RunFfmpeg = async (args) => {
   execFileSync("ffmpeg", ["-v", "error", "-y", ...args], { stdio: ["ignore", "ignore", "pipe"] });
 };
@@ -117,9 +118,16 @@ describe("takeThumbnail (ffmpeg)", { skip: hasFfmpeg ? false : "ffmpeg not on PA
       );
       const out = path.join(dir, "thumb.jpg");
       const { log, warned } = quietLog();
-      await takeThumbnail(ffmpegCli, { input: clip, output: out, atSec: 20 / 3, bodyStartSec: 0, log });
+      const probe = async () =>
+        probeInfo(JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", clip], { encoding: "utf8" })));
+      await takeThumbnail(ffmpegCli, { input: clip, output: out, atSec: 20 / 3, bodyStartSec: 0, log, probe });
       assert.ok(fs.statSync(out).size > 0);
       assert.equal(warned.length, 1);
+      // the warning says why: the picture is 3 s long in a 20 s file
+      const w = warned[0] as { videoSec?: number; audioSec?: number; fileSec?: number };
+      assert.ok(w.videoSec !== undefined && Math.abs(w.videoSec - 3) < 0.2, `videoSec ${w.videoSec}`);
+      assert.ok(w.audioSec !== undefined && Math.abs(w.audioSec - 20) < 0.2, `audioSec ${w.audioSec}`);
+      assert.ok(w.fileSec !== undefined && w.fileSec > 19);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

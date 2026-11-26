@@ -34,8 +34,21 @@ async function nonEmpty(file: string) {
  */
 export async function takeThumbnail(
   run: RunFfmpeg,
-  opts: { input: string; output: string; atSec: number; bodyStartSec: number; signal?: AbortSignal | undefined; log: Logger },
+  opts: {
+    input: string;
+    output: string;
+    atSec: number;
+    bodyStartSec: number;
+    signal?: AbortSignal | undefined;
+    log: Logger;
+    /** the rendered file's stream lengths, read only when the first seek finds no frame: they say why it didn't */
+    probe?: (() => Promise<{ durationSec: number; videoSec?: number | undefined; audioSec?: number | undefined }>) | undefined;
+  },
 ): Promise<void> {
+  const streams = async () => {
+    const p = await opts.probe?.().catch(() => undefined);
+    return p ? { fileSec: p.durationSec, videoSec: p.videoSec, audioSec: p.audioSec } : {};
+  };
   const tries = [...new Set([opts.atSec, opts.bodyStartSec, 0].map((s) => Math.max(0, Number(s.toFixed(2)))))];
   let lastErr: unknown;
   for (const sec of tries) {
@@ -47,10 +60,12 @@ export async function takeThumbnail(
       lastErr = err;
     }
     if (await nonEmpty(opts.output)) {
-      if (sec !== tries[0]) opts.log.warn({ atSec: tries[0], usedSec: sec, err: lastErr }, "thumbnail seek found no frame; used an earlier one");
+      if (sec !== tries[0])
+        opts.log.warn({ atSec: tries[0], usedSec: sec, ...(await streams()), err: lastErr }, "thumbnail seek found no frame; used an earlier one");
       return;
     }
   }
+  opts.log.warn({ tried: tries, ...(await streams()), err: lastErr }, "no frame in the rendered clip for a thumbnail");
   const reason = lastErr instanceof Error ? `: ${lastErr.message}` : "";
   throw new NonRetryableError(`the rendered clip has no picture, so no thumbnail could be taken${reason}`, "platform");
 }

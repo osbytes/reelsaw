@@ -1194,6 +1194,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     bodyStartSec: attached.transitions.bodyStartSec,
     signal: ctx.signal,
     log,
+    probe: () => svc.media.ffprobe(outPath),
   });
 
   const outputKey = keys.clip(projectId, clip.id, gen);
