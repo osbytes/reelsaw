@@ -83,6 +83,9 @@ export interface ProbeInfo {
   sampleRate?: number | undefined;
   channels?: number | undefined;
   videoTimescale?: number | undefined;
+  /** the picture's and the sound's own lengths when the container records them: a video track can end before the file */
+  videoSec?: number | undefined;
+  audioSec?: number | undefined;
 }
 
 type ProbeStream = {
@@ -124,6 +127,8 @@ export function probeInfo(json: { format?: { duration?: string }; streams?: Prob
     ...(audio?.sample_rate ? { sampleRate: Number(audio.sample_rate) } : {}),
     ...(audio?.channels ? { channels: audio.channels } : {}),
     ...(video?.time_base?.includes("/") ? { videoTimescale: Number(video.time_base.split("/")[1]) } : {}),
+    ...(Number(video?.duration) > 0 ? { videoSec: Number(video?.duration) } : {}),
+    ...(Number(audio?.duration) > 0 ? { audioSec: Number(audio?.duration) } : {}),
   };
 }
 
