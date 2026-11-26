@@ -10,6 +10,7 @@ import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { errorKind, failedRow, type StageContext } from "./common.js";
 import { renderSource } from "./windows.js";
+import { takeThumbnail } from "./thumbnail.js";
 import { rangeTag } from "../projects/ranges.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
@@ -1186,10 +1187,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   await fs.rename(tmpOut, outPath);
   // the thumbnail is a still of the clip itself, so it is taken after the intro
-  await svc.media.ffmpeg(
-    ["-ss", (attached.transitions.bodyStartSec + outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath],
-    { signal: ctx.signal, threads: "light" },
-  );
+  await takeThumbnail((args) => svc.media.ffmpeg(args, { signal: ctx.signal, threads: "light" }), {
+    input: outPath,
+    output: thumbPath,
+    atSec: attached.transitions.bodyStartSec + outDuration / 3,
+    bodyStartSec: attached.transitions.bodyStartSec,
+    signal: ctx.signal,
+    log,
+  });
 
   const outputKey = keys.clip(projectId, clip.id, gen);
   const thumbnailKey = keys.thumb(projectId, clip.id, gen);
