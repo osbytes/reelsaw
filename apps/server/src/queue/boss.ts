@@ -3,6 +3,7 @@ import type { EventHandlerQueue } from "../event-handlers.js";
 import type pg from "pg";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
+import { poolCounts } from "../db/index.js";
 
 export const QUEUES = {
   ingest: "project.ingest",
@@ -175,7 +176,7 @@ export function createQueue(
     openTelemetry: { enabled: otelEnabled, propagateContext: true },
   });
   // a failed poll or maintenance pass is retried on the next tick; one that keeps failing shows as stalled jobs
-  boss.on("error", (err) => log.warn({ err }, "pg-boss error"));
+  boss.on("error", (err) => log.warn({ err, ...poolCounts(pool) }, "pg-boss error"));
   boss.on("warning", (w) => log.warn({ warning: w }, "pg-boss warning"));
   let started = false;
 

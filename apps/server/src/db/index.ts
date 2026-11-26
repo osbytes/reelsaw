@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as schema from "./schema.js";
 import type { Logger } from "../log.js";
+import { gauge } from "../metrics.js";
 
 export type Db = NodePgDatabase<typeof schema>;
 export { schema };
@@ -47,10 +48,18 @@ const CONNECT_TIMEOUT_MS = 10_000;
  */
 const IDLE_IN_TRANSACTION_MS = 5 * 60_000;
 
+/**
+ * A pool's connections when something went wrong: "timeout exceeded when trying to connect" with every connection
+ * checked out and callers waiting is a full pool; with free room it is the database or the network.
+ */
+export function poolCounts(pool: pg.Pool): { poolTotal: number; poolIdle: number; poolWaiting: number; poolMax: number } {
+  return { poolTotal: pool.totalCount, poolIdle: pool.idleCount, poolWaiting: pool.waitingCount, poolMax: pool.options.max };
+}
+
 function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
   const pool = new pg.Pool({ connectionString, max, connectionTimeoutMillis: CONNECT_TIMEOUT_MS });
   // an idle client's connection dropped; the pool discards it and opens another, so this recovers by itself
-  pool.on("error", (err) => log.warn({ err }, "pg pool error"));
+  pool.on("error", (err) => log.warn({ err, ...poolCounts(pool) }, "pg pool error"));
   // queued ahead of the first query the pool hands out on this connection
   pool.on("connect", (client) => {
     client
@@ -63,6 +72,20 @@ function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
 export function createDatabase(connectionString: string, log: Logger, opts: { poolMax?: number | undefined } = {}): Database {
   const poolMax = opts.poolMax ?? 10;
   const pool = makePool(connectionString, poolMax, log);
+  gauge(
+    "reelsaw.db.pool.connections",
+    "{connection}",
+    () => {
+      const c = poolCounts(pool);
+      return [
+        [c.poolTotal - c.poolIdle, { state: "used" }],
+        [c.poolIdle, { state: "idle" }],
+        [c.poolWaiting, { state: "waiting" }],
+        [c.poolMax, { state: "max" }],
+      ];
+    },
+    "Connections of this process's main Postgres pool, and callers waiting for one",
+  );
   const extraPools = new Set<pg.Pool>();
   const db = drizzle(pool, { schema });
   return {

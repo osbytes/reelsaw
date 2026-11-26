@@ -25,6 +25,8 @@
  *   reelsaw.ytdlp.proxy.success_rate       1    proxy           (gauge: last PROXY_RESULT_WINDOW results)
  *   reelsaw.render.slots                   {render} state      (gauge: running, limit)
  *   reelsaw.worker.jobs.active             {job} queue         (gauge: this process)
+ *   reelsaw.event_loop.delay               s    stat            (gauge: p99, max over the last 10 s)
+ *   reelsaw.db.pool.connections            {connection} state  (gauge: used, idle, waiting, max)
  *   gen_ai.client.operation.duration       s    gen_ai.request.model, reelsaw.stage, reelsaw.call, outcome
  *   gen_ai.client.token.usage              {token} gen_ai.request.model, gen_ai.token.type, reelsaw.stage, reelsaw.call
  *   reelsaw.llm.cost                       USD  gen_ai.request.model, reelsaw.stage

@@ -106,8 +106,8 @@ describe("llmErrorFields", () => {
 
 describe("storage logging", () => {
   const recorder = () => {
-    const lines: Array<{ level: string; msg: string }> = [];
-    const at = (level: string) => (_o: unknown, msg: string) => lines.push({ level, msg });
+    const lines: Array<{ level: string; msg: string; fields: Record<string, unknown> }> = [];
+    const at = (level: string) => (o: Record<string, unknown>, msg: string) => lines.push({ level, msg, fields: o });
     const log = { debug: at("debug"), warn: at("warn") } as unknown as Logger; // only these two are called
     return { lines, log };
   };
@@ -130,6 +130,16 @@ describe("storage logging", () => {
       ["debug storage object missing", "debug storage object missing", "warn storage operation failed"],
     );
     assert.equal(isStorageMissing(new Error("x")), false);
+  });
+
+  it("a failure inside a job carries the job's ids, so it filters like the job's own lines", async () => {
+    const { lines, log } = recorder();
+    await withLlmContext({ projectId: "p1", clipId: "c1", jobId: "j1" }, () =>
+      withStorageLogging(failing(new Error("ENOENT")), log)
+        .ensureLocal("k", "/tmp/k")
+        .catch(() => {}),
+    );
+    assert.deepEqual([lines[0]?.fields["projectId"], lines[0]?.fields["clipId"], lines[0]?.fields["jobId"]], ["p1", "c1", "j1"]);
   });
 });
 

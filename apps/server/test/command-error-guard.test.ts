@@ -37,3 +37,37 @@ describe("child process failures", () => {
     assert.match(new CommandError("ffmpeg", 1, "").message, /^ffmpeg exited with 1/);
   });
 });
+
+describe("CommandError's lead lines", () => {
+  const header = [
+    "ffmpeg version 5.1.6-0+deb12u1 Copyright (c) 2000-2024 the FFmpeg developers",
+    "  built with gcc 12 (Debian 12.2.0-14)",
+    "  configuration: --prefix=/usr --extra-version=0+deb12u1 " + "--enable-x ".repeat(60),
+    "  libavutil      57. 28.100 / 57. 28.100",
+    "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'clip.mp4':",
+    ...Array.from({ length: 12 }, (_, i) => `    Stream #0:${i}: Audio: aac (LC), 48000 Hz, stereo, fltp, 128 kb/s (default)`),
+  ].join("\n");
+
+  it("a reason with no error word (the last lines) still leads, ahead of the banner", () => {
+    const e = new CommandError("ffmpeg", 1, `${header}\nOutput #0, image2, to 'thumb.jpg':\nOutput file #0 does not contain any stream\n`);
+    const lead = e.message.split("--- tail ---")[0] ?? "";
+    assert.match(lead, /does not contain any stream/);
+    assert.doesNotMatch(lead, /configuration:|built with/);
+    assert.ok(lead.length < 600, `lead is ${lead.length} chars`);
+  });
+
+  it("flagged lines win over the last lines, and progress lines never lead", () => {
+    const e = new CommandError(
+      "ffmpeg",
+      69,
+      `${header}\n[aac @ 0x1] Input buffer exhausted before END element found\nframe=  100 fps=30 q=28.0 size=512kB time=00:00:03.33\n`,
+    );
+    assert.match(e.message, /^ffmpeg exited with 69: \[aac @ 0x1\] Input buffer exhausted before END element found\n--- tail ---/);
+  });
+
+  it("a long flagged block is cut so the message's start survives a short export limit", () => {
+    const noisy = Array.from({ length: 6 }, (_, i) => `[h264 @ 0x${i}] error while decoding MB ${"x".repeat(150)}`).join("\n");
+    const lead = new CommandError("ffmpeg", 1, noisy).message.split("--- tail ---")[0] ?? "";
+    assert.ok(lead.length < 450, `lead is ${lead.length} chars`);
+  });
+});

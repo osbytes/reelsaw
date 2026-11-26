@@ -12,6 +12,7 @@ import type { MiddlewareHandler } from "hono";
 import { trace } from "@opentelemetry/api";
 import { HTTPException } from "hono/http-exception";
 import type { Logger } from "./log.js";
+import { recentLoopDelayMs } from "./loop-lag.js";
 
 export type AppEnv = { Variables: { requestId: string; log: Logger; userId?: string } };
 
@@ -69,7 +70,8 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
       route: c.req.routePath,
       status,
       userId: c.get("userId"),
-      ...(level === "warn" && status < 400 ? { ms } : {}),
+      // a slow request with a high loop delay waited for this process's event loop, not for its own work
+      ...(level === "warn" && status < 400 ? { ms, loopDelayMs: recentLoopDelayMs() } : {}),
       // the MCP SDK answers a refused request (an unsupported protocol version, a malformed envelope) with a 4xx
       // response rather than a throw: the version the client asked for says what to support next
       ...(status >= 400 && status < 500 && path === "/api/mcp" ? mcpVersion(c.req.header("mcp-protocol-version")) : {}),
