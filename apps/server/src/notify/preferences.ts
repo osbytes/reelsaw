@@ -1,7 +1,8 @@
 /**
  * What mail an account wants beyond the mail it must get (password reset, verification, approval).
- * Optional mail is split into topics (`EMAIL_TOPICS` in @reelsaw/shared; today `ready`, the note when
- * projects finish), each with its own switch, stored one row per chosen topic in `email_topic_prefs`.
+ * Optional mail is split into topics (`EMAIL_TOPICS` in @reelsaw/shared: `ready`, the note when projects
+ * finish, and `product_updates`, the occasional broadcast about new features, sent out of band to the
+ * accounts that have it on), each with its own switch, stored one row per chosen topic in `email_topic_prefs`.
  * Settings → Account, tRPC `me.updateEmailPreferences`, MCP `get_email_preferences` /
  * `set_email_preferences`, `reelsaw email-prefs` and the email's own unsubscribe link all go through here.
  *

@@ -13,6 +13,10 @@ const TOPIC_COPY: Record<EmailTopic, { label: MessageDescriptor; description: Me
     label: msg`When projects finish while I'm away`,
     description: msg`One note for everything that finished since you last opened Reelsaw.`,
   },
+  product_updates: {
+    label: msg`Product updates`,
+    description: msg`An occasional email about new Reelsaw features, a few times a year at most.`,
+  },
 };
 
 /**

@@ -2451,6 +2451,10 @@ msgstr ""
 msgid "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
 msgstr ""
 
+#: src/components/EmailSection.tsx
+msgid "An occasional email about new Reelsaw features, a few times a year at most."
+msgstr ""
+
 #: src/lib/auth.ts
 msgid "An operator set a temporary password. Choose yours to continue; you will not need the temporary one after this."
 msgstr ""
@@ -8518,6 +8522,10 @@ msgstr ""
 
 #: src/components/ProcessingTimes.tsx
 msgid "Processing time"
+msgstr ""
+
+#: src/components/EmailSection.tsx
+msgid "Product updates"
 msgstr ""
 
 #: src/pages/Settings.tsx

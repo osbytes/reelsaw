@@ -1078,13 +1078,13 @@ export const TOOLS = {
   get_email_preferences: {
     title: "Email preferences",
     description:
-      "Which optional emails you get, by topic. Returns { emailEnabled, emailPreferences: { ready } }; ready is the note sent when projects finish while you are away. emailEnabled false means this instance sends no mail at all.",
+      "Which optional emails you get, by topic. Returns { emailEnabled, emailPreferences: { ready, product_updates } }; ready is the note sent when projects finish while you are away, product_updates the occasional email about new features. emailEnabled false means this instance sends no mail at all.",
     annotations: { readOnlyHint: true },
   },
   set_email_preferences: {
     title: "Set email preferences",
     description:
-      "Turn topics of optional email on or off; omitted topics stay as they are. ready = the note sent when projects finish while you are away (Settings → Account, or the link in the email). Mail you need (password reset, verification) is not affected. Returns { ok, emailPreferences }.",
+      "Turn topics of optional email on or off; omitted topics stay as they are. ready = the note sent when projects finish while you are away; product_updates = occasional emails about new features (Settings → Account, or the link in the email). Mail you need (password reset, verification) is not affected. Returns { ok, emailPreferences }.",
     inputSchema: emailPreferencesPatchSchema.shape,
     annotations: { idempotentHint: true },
   },
