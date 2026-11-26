@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.53.0
+
+### Minor Changes
+
+- [#385](https://github.com/osbytes/reelsaw/pull/385) [`eb803dc`](https://github.com/osbytes/reelsaw/commit/eb803dcaff96e22767c6f0d114693f9bcef1df4c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Product updates are an email topic of their own. Settings → Account, `set_email_preferences` and `reelsaw email-prefs <email> --product_updates off` turn the occasional email about new features on or off, separately from the note sent when projects finish. It is on until an account turns it off. Reelsaw does not send these itself: an operator's broadcast goes to the verified accounts that have it on.
+
+### Patch Changes
+
+- [#383](https://github.com/osbytes/reelsaw/pull/383) [`d656ab2`](https://github.com/osbytes/reelsaw/commit/d656ab27c880677864f66eebfb526b67ac0fc029) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Logs say more about why something failed: a slow request carries the event-loop delay, a process killed by a signal logs memory use and whether the container's memory limit killed it, Postgres pool errors carry the pool's connection counts, storage failures carry the project and clip, and a failed ffmpeg run leads with its own reason. New gauges: `reelsaw.event_loop.delay` and `reelsaw.db.pool.connections`.
+
+- [#382](https://github.com/osbytes/reelsaw/pull/382) [`05b9a63`](https://github.com/osbytes/reelsaw/commit/05b9a638d3df54f67b5ca153f8be74f2c71e908e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A clip whose picture ends before its sound no longer fails after rendering: its thumbnail is taken from an earlier frame instead of a point past the last one. A clip with no picture at all now fails at once with a plain reason instead of retrying.
+
 ## 0.52.2
 
 ### Patch Changes
