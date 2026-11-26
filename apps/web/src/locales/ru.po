@@ -2451,6 +2451,10 @@ msgstr "Приложение"
 msgid "An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen."
 msgstr "Приложение просит использовать Reelsaw от вашего имени. Войдите, чтобы продолжить; что оно получит, вы увидите на следующем экране."
 
+#: src/components/EmailSection.tsx
+msgid "An occasional email about new Reelsaw features, a few times a year at most."
+msgstr "Изредка письмо о новых возможностях Reelsaw, не больше нескольких раз в год."
+
 #: src/lib/auth.ts
 msgid "An operator set a temporary password. Choose yours to continue; you will not need the temporary one after this."
 msgstr "Оператор установил временный пароль. Задайте свой, чтобы продолжить; временный после этого не понадобится."
@@ -8519,6 +8523,10 @@ msgstr "Очередь обработки"
 #: src/components/ProcessingTimes.tsx
 msgid "Processing time"
 msgstr "Время обработки"
+
+#: src/components/EmailSection.tsx
+msgid "Product updates"
+msgstr "Новости продукта"
 
 #: src/pages/Settings.tsx
 msgid "Profile"

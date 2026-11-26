@@ -216,9 +216,12 @@ import { t } from "./i18n.js";
  *                                           --watermark sets the per-user override (same as Users → Limits);
  *                                           --priority sets the account's queue priority (-20..20, follow = the plan)
  *   email-prefs <email> [--<topic> on|off]
- *   locale-prefs <email> [--locale <code>|follow] [--time-zone <IANA zone>|utc]
  *                                           an account's optional mail by topic (ready: the note when projects finish;
- *                                           same as their Settings → Account and the email's unsubscribe link)
+ *                                           product_updates: broadcasts; same as their Settings → Account and the
+ *                                           email's unsubscribe link)
+ *   locale-prefs <email> [--locale <code>|follow] [--time-zone <IANA zone>|utc]
+ *                                           an account's language and time zone for mail, notices and messages (same as
+ *                                           their Settings → Account → Language and region)
  *   abuse [--run]                           accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
  *   signup-rules [list | add <ip|email|domain|flag> <pattern> <hold|block|allow> [--note text] | rm <id…> | test <email> [--ip addr]]
@@ -2013,7 +2016,7 @@ ${usage}`);
     if (Object.keys(patch).length) await setEmailPreferences(svc, u.id, patch, "cli");
     const p = await emailPreferences(svc.database.db, u.id);
     console.log(svc.email.enabled ? u.email : t(msg`${{ email: u.email }} (this instance sends no mail: EMAIL_DRIVER=none)`));
-    for (const topic of EMAIL_TOPIC_NAMES) console.log(`  ${topic.padEnd(10)} ${p[topic] ? t(msg`on `) : t(msg`off`)}  ${EMAIL_TOPICS[topic].label}`);
+    for (const topic of EMAIL_TOPIC_NAMES) console.log(`  ${topic.padEnd(15)} ${p[topic] ? t(msg`on `) : t(msg`off`)}  ${EMAIL_TOPICS[topic].label}`);
   },
   /** One account's language and time zone for mail and messages (notify/locale.ts): show them, or set `--locale` / `--time-zone`. */
   "locale-prefs": async (svc) => {

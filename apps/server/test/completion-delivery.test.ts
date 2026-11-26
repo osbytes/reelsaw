@@ -84,11 +84,11 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
 
   it("follows the topic's default until the account chooses, and records where the choice was made", async () => {
     const u = await account(null);
-    assert.deepEqual(await emailPreferences(h.svc.database.db, u), { ready: true });
+    assert.deepEqual(await emailPreferences(h.svc.database.db, u), { ready: true, product_updates: true });
     assert.equal((await h.pool.query(`select count(*)::int as n from email_topic_prefs where user_id = $1`, [u])).rows[0].n, 0);
     await setEmailPreferences(h.svc, u, { ready: false }, "unsubscribe_link");
     await setEmailPreferences(h.svc, u, {}, "settings");
-    assert.deepEqual(await emailPreferences(h.svc.database.db, u), { ready: false });
+    assert.deepEqual(await emailPreferences(h.svc.database.db, u), { ready: false, product_updates: true });
     const r = await h.pool.query(`select topic, enabled, source from email_topic_prefs where user_id = $1`, [u]);
     assert.deepEqual(r.rows, [{ topic: "ready", enabled: false, source: "unsubscribe_link" }]);
     await setEmailPreferences(h.svc, u, { ready: true }, "mcp");

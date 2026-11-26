@@ -1244,11 +1244,13 @@ export function firstName(person: { name?: string | null }): string | null {
 // ---------- Email ----------
 
 /**
- * Topics of optional mail, each with its own switch and unsubscribe link (docs/specs/email.md). Mail an
- * account must get (password reset, verification, approval) has no topic. `defaultOn` applies until the
- * account chooses; an opt-in topic (marketing) must default off.
+ * Topics of optional mail, each with its own switch and unsubscribe link. Mail an account must get
+ * (password reset, verification, approval) has no topic. `defaultOn` applies until the account chooses.
+ * A default-on promotional topic (`product_updates`) only covers news about Reelsaw itself, and every
+ * send carries an unsubscribe link; mail about other products or third parties must be a default-off topic.
+ * Product updates are sent out of band (an operator's broadcast) to the accounts that have the topic on.
  */
-export const EMAIL_TOPIC_NAMES = ["ready"] as const;
+export const EMAIL_TOPIC_NAMES = ["ready", "product_updates"] as const;
 export type EmailTopic = (typeof EMAIL_TOPIC_NAMES)[number];
 /** `label` / `description` are the Settings switch; `stopped` finishes "You will no longer get …" on the unsubscribe page */
 export const EMAIL_TOPICS: Record<EmailTopic, { defaultOn: boolean; label: string; description: string; stopped: string }> = {
@@ -1258,14 +1260,24 @@ export const EMAIL_TOPICS: Record<EmailTopic, { defaultOn: boolean; label: strin
     description: "One note for everything that finished since you last opened Reelsaw.",
     stopped: "an email when your projects finish",
   },
+  product_updates: {
+    defaultOn: true,
+    label: "Product updates",
+    description: "An occasional email about new Reelsaw features, a few times a year at most.",
+    stopped: "product update emails",
+  },
 };
 export const isEmailTopic = (t: string): t is EmailTopic => EMAIL_TOPIC_NAMES.some((n) => n === t);
 export type EmailPreferences = Record<EmailTopic, boolean>;
 /** each topic's default, for an account that has not chosen */
-export const DEFAULT_EMAIL_PREFERENCES: EmailPreferences = { ready: EMAIL_TOPICS.ready.defaultOn };
+export const DEFAULT_EMAIL_PREFERENCES: EmailPreferences = {
+  ready: EMAIL_TOPICS.ready.defaultOn,
+  product_updates: EMAIL_TOPICS.product_updates.defaultOn,
+};
 /** A change to some topics; omitted ones stay. tRPC `me.updateEmailPreferences` and MCP `set_email_preferences`. */
 export const emailPreferencesPatchSchema = z.object({
   ready: z.boolean().optional().describe("the note sent when projects finish while you are away: true to get it, false to stop it"),
+  product_updates: z.boolean().optional().describe("occasional emails about new Reelsaw features: true to get them, false to stop them"),
 });
 // every topic has a field in the patch (a new topic that is missing here does not compile)
 const _patchCoversTopics: Record<EmailTopic, unknown> = emailPreferencesPatchSchema.shape;

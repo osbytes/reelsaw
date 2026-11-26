@@ -395,7 +395,7 @@ watch are left out of the note. The first project, and later the 10th, 25th, 50t
 get a line of their own. Nothing is sent when email is off. Each note has a one-click unsubscribe
 (the `List-Unsubscribe` header mail apps show, and a link in the footer); people can also turn it
 off under Settings → Account, with `set_email_preferences` over MCP, or an operator with
-`reelsaw email-prefs <email> --ready off`. Optional mail is split into topics (today `ready`), each with its own switch and its own unsubscribe link, so later kinds of mail can be turned off one at a time.
+`reelsaw email-prefs <email> --ready off`. Optional mail is split into topics, each with its own switch: `ready` and `product_updates`, the occasional email about new features. Reelsaw does not send product updates itself; an operator sending one (a Resend broadcast, say) mails the verified accounts that have the topic on, with the provider's unsubscribe link, and records unsubscribes with `reelsaw email-prefs <email> --product_updates off`.
 
 **Language and region.** Every string a person reads (the app, errors, notices, emails, MCP results, CLI lines and
 reelsaw.com) comes from a message catalogue, and numbers, sizes, amounts and dates are formatted for the reader's
@@ -814,8 +814,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow] [--priority N\|follow] [--cores N --mem-mb M \| --resources follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits); --priority sets the account's queue priority (-20..20, follow = the plan) |
-| `reelsaw email-prefs <email> [--<topic> on\|off]` | see the header of apps/server/src/cli.ts |
-| `reelsaw locale-prefs <email> [--locale <code>\|follow] [--time-zone <IANA zone>\|utc]` | an account's optional mail by topic (ready: the note when projects finish; same as their Settings → Account and the email's unsubscribe link) |
+| `reelsaw email-prefs <email> [--<topic> on\|off]` | an account's optional mail by topic (ready: the note when projects finish; product_updates: broadcasts; same as their Settings → Account and the email's unsubscribe link) |
+| `reelsaw locale-prefs <email> [--locale <code>\|follow] [--time-zone <IANA zone>\|utc]` | an account's language and time zone for mail, notices and messages (same as their Settings → Account → Language and region) |
 | `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw signup-rules [list \| add <ip\|email\|domain\|flag> <pattern> <hold\|block\|allow> [--note text] \| rm <id…> \| test <email> [--ip addr]]` | sign-up rules in front of SIGNUP_MODE (same as Settings → Sign-up rules and list_signup_rules / manage_signup_rules); hold = needs approval without saying why; rm takes ids or their first 8 characters |
 | `reelsaw languages` | the spoken languages the transcription model in force takes, for a project's language, each with what works less well for it than for English (same as the language pickers and list_languages) |
