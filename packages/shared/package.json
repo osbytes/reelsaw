@@ -12,12 +12,23 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"
   },
-  "dependencies": { "fuse.js": "7.1.0", "ts-extras": "3.0.0", "zod": "^4.6.7" },
-  "devDependencies": { "cldr-misc-full": "49.0.0", "typescript": "5.9.3" }
+  "dependencies": {
+    "fuse.js": "7.1.0",
+    "lodash-es": "^4.18.1",
+    "ts-extras": "3.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
+    "cldr-misc-full": "49.0.0",
+    "typescript": "5.9.3"
+  }
 }

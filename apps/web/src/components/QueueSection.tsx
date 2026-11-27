@@ -22,6 +22,7 @@ import { i18n, type MessageDescriptor } from "@lingui/core";
 import { msg, plural, t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useDebounced } from "../lib/useDebounced";
+import { subDays, subHours } from "date-fns";
 
 const PAGE = 50;
 
@@ -74,8 +75,8 @@ const SINCE: Array<{ value: string; label: MessageDescriptor; title: MessageDesc
 ];
 
 function sinceIso(v: string): string | undefined {
-  if (v === "24h") return new Date(Date.now() - 24 * 3600_000).toISOString();
-  if (v === "7d") return new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  if (v === "24h") return subHours(Date.now(), 24).toISOString();
+  if (v === "7d") return subDays(Date.now(), 7).toISOString();
   return undefined;
 }
 

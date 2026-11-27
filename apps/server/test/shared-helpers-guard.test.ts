@@ -34,6 +34,17 @@ const INLINE = [
   /=== 1 \? "(\w*)" : "\1(?:e?s|ies)"/,
   /=== 1 \? "y" : "ies"/,
 ];
+/**
+ * Helpers lodash-es, date-fns and node:timers/promises already ship, under the names local copies had: `clamp` ×7,
+ * `chunk`, `escapeRegExp`, `escapeHtml`, two `sleep`s with abort handling that disagreed, and two `field` getters
+ * over `Reflect.get` (caught by REFLECT_GET below, since `field` is also a fine name for a form row). Import them (`import { clamp } from "lodash-es"`, `setTimeout as sleep`) instead.
+ */
+const LIBRARY_NAMES = ["clamp", "chunk", "escapeRegExp", "escapeRegex", "escapeHtml", "sleep", "uniq", "debounce", "throttle", "isPlainObject", "isRecord"];
+const libraryCopy = new RegExp(
+  String.raw`(?:^|\s)(?:function\s+(${LIBRARY_NAMES.join("|")})\s*[<(]|const\s+(${LIBRARY_NAMES.join("|")})\s*=\s*(?:<[^>]*>)?(?:\([^)]*\)|\w+)\s*(?::[^=]+)?=>)`,
+);
+/** Reading a property off an unknown value: lodash `get` (with a path), not `Reflect.get` and an object check. A Proxy trap's three-argument form is fine. */
+const REFLECT_GET = /Reflect\.get\([^,()]+,[^,()]+\)/;
 /** A date written for people without formatDay: the viewer's locale and the server's fixed form both live there. */
 const LOCAL_DATE = /\.toLocaleDateString\(/;
 
@@ -44,10 +55,13 @@ function files(dir: string): string[] {
   });
 }
 
-const sources = SCANNED.flatMap((d) => files(path.join(root, d))).map((file) => ({
-  rel: path.relative(root, file).split(path.sep).join("/"),
-  lines: fs.readFileSync(file, "utf8").split("\n"),
-}));
+const read = (dirs: string[]) =>
+  dirs
+    .flatMap((d) => files(path.join(root, d)))
+    .map((file) => ({ rel: path.relative(root, file).split(path.sep).join("/"), lines: fs.readFileSync(file, "utf8").split("\n") }));
+const sources = read(SCANNED);
+/** packages/shared as well, where a general helper would be written next (format.ts defines its own, so not above) */
+const everywhere = [...sources, ...read(["packages/shared/src"])];
 
 describe("generic helpers are shared, not local", () => {
   it("no app defines its own copy of a format.ts helper", () => {
@@ -65,6 +79,13 @@ describe("generic helpers are shared, not local", () => {
   it("no app formats a calendar day itself", () => {
     const local = sources.flatMap(({ rel, lines }) => lines.flatMap((l, i) => (LOCAL_DATE.test(l) ? [`${rel}:${i + 1}: ${l.trim()}`] : [])));
     assert.deepEqual(local, [], `use formatDay from @reelsaw/shared:\n${local.join("\n")}`);
+  });
+
+  it("no app writes its own copy of a lodash-es / date-fns / node helper", () => {
+    const local = everywhere.flatMap(({ rel, lines }) =>
+      lines.flatMap((l, i) => ((libraryCopy.test(l) || REFLECT_GET.test(l)) && !/^\s*(\*|\/\/)/.test(l) ? [`${rel}:${i + 1}: ${l.trim()}`] : [])),
+    );
+    assert.deepEqual(local, [], `import these from lodash-es, date-fns or node:timers/promises instead:\n${local.join("\n")}`);
   });
 
   it("the shared helpers say what their callers expect", () => {

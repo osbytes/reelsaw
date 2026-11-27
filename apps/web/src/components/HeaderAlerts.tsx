@@ -12,6 +12,7 @@ import { useMe, useSystemStatus } from "../lib/account";
 import { refreshForNewVersion, useStaleChunkNudge } from "../lib/stale-chunk";
 import { useUnsaved } from "../lib/unsaved";
 import { urgent, useModelLifecycle } from "./ModelRetirement";
+import { modelOf } from "@reelsaw/shared";
 
 type Tone = "acc" | "warn" | "err";
 const TONE: Record<Tone, string> = { acc: "bg-acc-soft", warn: "bg-warn-soft", err: "bg-err-soft" };
@@ -66,7 +67,7 @@ export function useHeaderAlerts(): HeaderAlert[] {
   const first = lifecycle?.models.find((m) => m.retirement);
   if (isAdmin && lifecycle && first?.retirement) {
     const r = first.retirement;
-    const name = first.model.slice(first.model.indexOf(":") + 1);
+    const name = modelOf(first.model);
     const days = r.daysLeft ?? 0;
     const others = lifecycle.retiring - 1;
     const label =

@@ -16,6 +16,8 @@ import { aliasesOf, credentialOwner, OPENCODE_DEFAULT_BASE_URL } from "./provide
 import type { WordTimestampVerdict } from "./word-timestamps.js";
 import { anthropicRetirement, expirationRetirement, gatewayRetirement, listsExpiration, openAiRetirement, type ModelRetirement } from "./retirement.js";
 import { createFuzzy, formatBytes, formatNumber } from "@reelsaw/shared";
+// `get` here is the module's own fetch helper, so lodash's is named for what it is
+import { get as lodashGet, isArray, isString } from "lodash-es";
 import { msg } from "@lingui/core/runtime-macro";
 import { t } from "../i18n.js";
 
@@ -262,14 +264,13 @@ export function createModelCatalog(
    */
   const gatewayRetirements = async (): Promise<Map<string, ModelRetirement> | null> => {
     try {
-      const body: unknown = await get(GATEWAY_PUBLIC_MODELS);
-      const data: unknown = body && typeof body === "object" ? Reflect.get(body, "data") : undefined;
-      if (!Array.isArray(data)) throw new Error("the listing has no data array");
+      const data: unknown = lodashGet(await get(GATEWAY_PUBLIC_MODELS), "data");
+      if (!isArray(data)) throw new Error("the listing has no data array");
       const out = new Map<string, ModelRetirement>();
       for (const m of data) {
-        const id: unknown = m && typeof m === "object" ? Reflect.get(m, "id") : undefined;
+        const id: unknown = lodashGet(m, "id");
         const r = gatewayRetirement(m);
-        if (typeof id === "string" && r) out.set(id, r);
+        if (isString(id) && r) out.set(id, r);
       }
       return out;
     } catch (err) {

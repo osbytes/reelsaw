@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { plural } from "@lingui/core/macro";
 import { formatDay } from "@reelsaw/shared";
+import { isAfter } from "date-fns";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 
@@ -44,7 +45,7 @@ export function useRetirementLabel() {
     if (!r.retiresAt) return t`deprecated, no date yet`;
     // providers give a UTC day: the same day for every reader
     const date = formatDay(r.retiresAt, { utc: true });
-    return Date.parse(r.retiresAt) <= now ? t`retired ${date}` : t`retires ${date}`;
+    return isAfter(r.retiresAt, now) ? t`retires ${date}` : t`retired ${date}`;
   };
 }
 

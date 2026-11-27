@@ -65,6 +65,7 @@ import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { Thumb, clockText } from "./BumperCombobox";
 import { ShortcutSheet } from "./ShortcutSheet";
 import { ThemeToggle } from "../App";
+import { clamp } from "lodash-es";
 
 /** The template as the editor receives it (`layerTemplates.get`). */
 export interface EditorTemplate {
@@ -118,7 +119,6 @@ const FRAMING: Framing = { layout: "fit", cx: 0.5, cy: 0.5 };
 const STYLE: Style = { ...defaultStyle, showHook: false };
 const r2 = (n: number) => Number(n.toFixed(2));
 const r4 = (n: number) => Number(n.toFixed(4));
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 function readPreviewSec(): number {
   try {

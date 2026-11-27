@@ -45,7 +45,8 @@ import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
 import { setEmailPreferences, UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "./notify/preferences.js";
-import { escapeHtml, htmlMessage, layout } from "./email.js";
+import { escape as escapeHtml } from "lodash-es";
+import { htmlMessage, layout } from "./email.js";
 import { msg } from "@lingui/core/runtime-macro";
 import { LOCALE_HEADER, localeMiddleware, t } from "./i18n.js";
 

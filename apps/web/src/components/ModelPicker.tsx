@@ -10,7 +10,7 @@ import { useTRPC } from "../lib/trpc";
 import { useDebounced } from "../lib/useDebounced";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { formatNumber } from "@reelsaw/shared";
+import { formatNumber, providerOf } from "@reelsaw/shared";
 import { useRetirementLabel } from "./ModelRetirement";
 
 type CatalogPage = inferRouterOutputs<AppRouter>["admin"]["models"]["catalog"];
@@ -103,7 +103,7 @@ export function ModelPicker({
   const stateOf = (provider: string) => states.find((s) => s.provider === provider);
   /** the provider listing a model id: its prefix, or the provider that owns that prefix (opencode-go → opencode) */
   const cardOf = (id: string) => {
-    const prefix = id.split(":")[0]!;
+    const prefix = providerOf(id);
     return providers.find((p) => p.provider === prefix || p.prefixes?.includes(prefix))?.provider ?? prefix;
   };
   // open on the current value's provider
@@ -202,7 +202,7 @@ export function ModelPicker({
             <span className={`min-h-4 truncate text-[11px] ${current?.retirement ? "text-warn" : "text-ink3"}`}>
               {current?.retirement
                 ? `! ${retirementLabel(current.retirement)}${current.note ? ` · ${current.note}` : ""}`
-                : (current?.note ?? (value ? value.split(":")[0] : ""))}
+                : (current?.note ?? (value ? providerOf(value) : ""))}
             </span>
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />

@@ -13,6 +13,7 @@
  * workers wrap each job in `withLlmContext`, helpers add the call name.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { get, isBoolean, isNumber, isObjectLike, isString } from "lodash-es";
 import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
 import { reportedCost } from "../eval/meter.js";
@@ -92,30 +93,27 @@ function promptText(prompt: Prompt): Array<{ role: string; content: string }> {
  * then the class and status are all that is left to tell a rate limit from a bad request. None of these is user content.
  */
 type LlmErrorFields = { errName?: string; statusCode?: number; errCode?: string; retryable?: boolean };
-const field = (o: object, k: string): unknown => (k in o ? Reflect.get(o, k) : undefined);
 export function llmErrorFields(err: unknown): LlmErrorFields {
-  if (!err || typeof err !== "object") return {};
+  if (!isObjectLike(err)) return {};
   const out: LlmErrorFields = {};
-  const name = field(err, "name");
-  const status = field(err, "statusCode");
-  const retryable = field(err, "isRetryable");
-  if (typeof name === "string") out.errName = name;
-  if (typeof status === "number") out.statusCode = status;
-  if (typeof retryable === "boolean") out.retryable = retryable;
-  const code = field(err, "code");
-  const type = field(err, "type");
-  const c = typeof code === "string" ? code : typeof type === "string" ? type : bodyCode(field(err, "responseBody"));
+  const name: unknown = get(err, "name");
+  const status: unknown = get(err, "statusCode");
+  const retryable: unknown = get(err, "isRetryable");
+  if (isString(name)) out.errName = name;
+  if (isNumber(status)) out.statusCode = status;
+  if (isBoolean(retryable)) out.retryable = retryable;
+  const code: unknown = get(err, "code");
+  const type: unknown = get(err, "type");
+  const c = isString(code) ? code : isString(type) ? type : bodyCode(get(err, "responseBody"));
   if (c) out.errCode = c.slice(0, 80);
   return out;
 }
 function bodyCode(body: unknown): string | undefined {
-  if (typeof body !== "string" || !body.startsWith("{")) return undefined;
+  if (!isString(body) || !body.startsWith("{")) return undefined;
   try {
     const parsed: unknown = JSON.parse(body);
-    const error = parsed && typeof parsed === "object" ? field(parsed, "error") : undefined;
-    if (!error || typeof error !== "object") return undefined;
-    const c = field(error, "code") ?? field(error, "type");
-    return typeof c === "string" ? c : undefined;
+    const c: unknown = get(parsed, "error.code") ?? get(parsed, "error.type");
+    return isString(c) ? c : undefined;
   } catch {
     return undefined;
   }

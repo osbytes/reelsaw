@@ -1,10 +1,4 @@
-/** Small helpers for bounded background work: chunks, bounded parallelism, deadlines, keyset loops. */
-
-export function chunk<T>(items: readonly T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
+/** Small helpers for bounded background work: bounded parallelism, deadlines, keyset loops (chunks: lodash `chunk`). */
 
 /** Map with at most `limit` calls in flight; results keep input order. */
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {

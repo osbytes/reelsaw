@@ -18,7 +18,10 @@
  * A provider that names a replacement in its listing has it shown; none of the four above does today, so the
  * replacement field stays empty rather than guessed.
  */
-import { formatDay } from "@reelsaw/shared";
+import { formatDay, providerOf } from "@reelsaw/shared";
+import { utc } from "@date-fns/utc";
+import { differenceInCalendarDays, isAfter, isValid } from "date-fns";
+import { get, has, isNumber, isString } from "lodash-es";
 import { msg, plural } from "@lingui/core/runtime-macro";
 import { t } from "../i18n.js";
 import type { CatalogKind, CatalogProvider, ModelCatalog } from "./catalog.js";
@@ -34,7 +37,6 @@ export interface ModelRetirement {
 
 /** Inside this many days a retirement is urgent (the chip turns red). */
 const RETIREMENT_SOON_DAYS = 30;
-const DAY_MS = 86_400_000;
 
 type RetirementStatus =
   /** the date has passed: calls may already fail */
@@ -45,53 +47,48 @@ type RetirementStatus =
   /** deprecated, no date announced */
   | { status: "deprecated"; daysLeft: null };
 
-/** How urgent a retirement is at `now` (ms). Whole days, rounded up: a model retiring later today has 1 day left. */
+/** How urgent a retirement is at `now` (ms). Days are UTC calendar days, the way providers give the date; later today counts as 1. */
 export function retirementStatus(r: ModelRetirement, now: number): RetirementStatus {
-  if (!r.retiresAt) return { status: "deprecated", daysLeft: null };
-  const at = Date.parse(r.retiresAt);
-  if (!Number.isFinite(at)) return { status: "deprecated", daysLeft: null };
-  if (at <= now) return { status: "retired", daysLeft: 0 };
-  const daysLeft = Math.ceil((at - now) / DAY_MS);
+  const at = r.retiresAt ? new Date(r.retiresAt) : null;
+  if (!at || !isValid(at)) return { status: "deprecated", daysLeft: null };
+  if (!isAfter(at, now)) return { status: "retired", daysLeft: 0 };
+  const daysLeft = Math.max(1, differenceInCalendarDays(at, now, { in: utc }));
   return daysLeft <= RETIREMENT_SOON_DAYS ? { status: "soon", daysLeft } : { status: "scheduled", daysLeft };
 }
 
-const isoOrNull = (v: unknown): string | null => {
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return new Date(v).toISOString();
-  if (typeof v !== "string" || !v.trim()) return null;
-  const at = Date.parse(v);
-  return Number.isFinite(at) ? new Date(at).toISOString() : null;
-};
-const field = (entry: unknown, key: string): unknown => (entry && typeof entry === "object" ? Reflect.get(entry, key) : undefined);
+/** A listing's date field (an ISO string, or epoch milliseconds on the gateway) as a retirement; undefined when it holds no date. */
+function retiringOn(value: unknown): ModelRetirement | undefined {
+  // NaN and Infinity make an invalid date, which isValid turns away
+  const at = isString(value) || isNumber(value) ? new Date(value) : null;
+  return at && isValid(at) ? { retiresAt: at.toISOString(), replacement: null } : undefined;
+}
 
 /** OpenAI `/v1/models` entry: `shutdown_date`. */
 export function openAiRetirement(entry: unknown): ModelRetirement | undefined {
-  const at = isoOrNull(field(entry, "shutdown_date"));
-  return at ? { retiresAt: at, replacement: null } : undefined;
+  return retiringOn(get(entry, "shutdown_date"));
 }
 
 /** Anthropic `/v1/models` entry: `lifecycle` plus `retires_at`. A deprecated model with no date yet still counts. */
 export function anthropicRetirement(entry: unknown): ModelRetirement | undefined {
-  const lifecycle = field(entry, "lifecycle");
-  const at = isoOrNull(field(entry, "retires_at"));
-  if (lifecycle !== "deprecated" && lifecycle !== "retired" && !at) return undefined;
-  return { retiresAt: at, replacement: null };
+  const dated = retiringOn(get(entry, "retires_at"));
+  const lifecycle: unknown = get(entry, "lifecycle");
+  if (dated || (lifecycle !== "deprecated" && lifecycle !== "retired")) return dated;
+  return { retiresAt: null, replacement: null };
 }
 
 /** OpenRouter-style `expiration_date` on an OpenAI-compatible `/models` entry. */
 export function expirationRetirement(entry: unknown): ModelRetirement | undefined {
-  const at = isoOrNull(field(entry, "expiration_date"));
-  return at ? { retiresAt: at, replacement: null } : undefined;
+  return retiringOn(get(entry, "expiration_date"));
 }
 
 /** Vercel AI Gateway public `/v1/models` entry: `deprecated_at` (ms; see the header). */
 export function gatewayRetirement(entry: unknown): ModelRetirement | undefined {
-  const at = isoOrNull(field(entry, "deprecated_at"));
-  return at ? { retiresAt: at, replacement: null } : undefined;
+  return retiringOn(get(entry, "deprecated_at"));
 }
 
 /** Does a compatible server's listing carry retirement dates at all (OpenRouter always sends the key, often null)? */
 export function listsExpiration(entries: readonly unknown[]): boolean {
-  return entries.some((e) => e !== null && typeof e === "object" && "expiration_date" in e);
+  return entries.some((e) => has(e, "expiration_date"));
 }
 
 type ModelUse = keyof ModelIds | "judge";
@@ -125,7 +122,7 @@ const ORDER: Record<RetirementStatus["status"], number> = { retired: 0, soon: 1,
 
 /** Find `id` in one kind's listing: the provider whose prefix it carries, then the model with that exact id. */
 function lookup(listing: readonly CatalogProvider[], id: string) {
-  const prefix = id.slice(0, Math.max(0, id.indexOf(":")));
+  const prefix = providerOf(id);
   const provider = listing.find((p) => p.provider === prefix || p.prefixes?.includes(prefix));
   return { provider, model: provider?.models.find((m) => m.id === id) };
 }
@@ -151,7 +148,7 @@ export function lifecycleOf(
     byModel.set(model, {
       model,
       uses: [use],
-      providerTitle: provider?.title ?? model.split(":")[0] ?? model,
+      providerTitle: provider?.title ?? providerOf(model),
       retirement: r ? { ...r, ...retirementStatus(r, now) } : null,
       published: provider?.lifecycle === true,
       error: provider?.error ?? null,

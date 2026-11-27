@@ -9,7 +9,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseProfiles } from "../src/eval/profiles.js";
 import { createMeter, percentile, reportedCost, summarize } from "../src/eval/meter.js";
-import { underlyingProvider, providerOf } from "../src/ai/registry.js";
+import { providerOf } from "@reelsaw/shared";
+import { underlyingProvider } from "../src/ai/registry.js";
 
 describe("profiles", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reelsaw-matrix-"));

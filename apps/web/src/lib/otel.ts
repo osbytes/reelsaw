@@ -5,6 +5,8 @@
  * Loaded on demand so instances without OTEL never pull the SDK chunk. The Sentry SDK does not
  * trace: that would send a second copy. OTEL_TRACES_SAMPLE_RATE is the sample rate.
  */
+import { escapeRegExp, get, isString } from "lodash-es";
+
 type Public = {
   endpoint: string;
   headers: Record<string, string>;
@@ -107,13 +109,11 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
   return started;
 }
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 /** A string attribute the fetch or XHR instrumentation put on its span when it started, if the span exposes it. */
 function spanAttr(span: object, key: string): string | undefined {
-  const attrs: unknown = Reflect.get(span, "attributes");
-  const value = attrs && typeof attrs === "object" ? Reflect.get(attrs, key) : undefined;
-  return typeof value === "string" ? value : undefined;
+  // `key` holds dots ("url.full"), so it is one path segment, not a dotted path
+  const value: unknown = get(span, ["attributes", key]);
+  return isString(value) ? value : undefined;
 }
 
 /** The request URL the instrumentation recorded when the request started (`url.full`). */

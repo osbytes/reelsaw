@@ -129,7 +129,8 @@ describe("clips ready template", () => {
       ],
     });
     assert.equal(mail.subject, "2 projects are ready");
-    assert.match(mail.html, /That's 10 projects finished/);
+    // the HTML escapes apostrophes (lodash escape): &#39; renders as ' in every mail client
+    assert.match(mail.html, /That&#39;s 10 projects finished/);
     assert.match(mail.html, /Open projects/);
     assert.match(mail.html, /href="https:\/\/app\.example\.com\/p\/a"/);
     assert.match(mail.html, /href="https:\/\/app\.example\.com\/p\/b"/);

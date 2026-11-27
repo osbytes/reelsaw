@@ -134,7 +134,7 @@ import {
   restoreOwnedAsset,
   purgeOwnedAsset,
 } from "../library/service.js";
-import { templateBumpersSchema } from "@reelsaw/shared";
+import { providerOf, templateBumpersSchema } from "@reelsaw/shared";
 import {
   applyLayerTemplate,
   applyLayerTemplateInput,
@@ -181,7 +181,6 @@ import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
 import { reportCapabilities } from "../report/capabilities.js";
 import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
-import { providerOf } from "../ai/registry.js";
 import { testModel } from "../ai/model-test.js";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
 import { msg, plural as icuPlural } from "@lingui/core/runtime-macro";

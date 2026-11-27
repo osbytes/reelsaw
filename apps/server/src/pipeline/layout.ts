@@ -9,6 +9,7 @@ import { probeDivider, detectContentRegion, contentReason, frameVote, type Conte
 import { probeTiles, aggregateTile, tileContent, tileReason, TILE, type TileProbe } from "./webcam-tile.js";
 import { probeInset, insetRuns, insetReason, type InsetProbe } from "./inset.js";
 import { motionProber, subjectFraming, subjectReason, type MotionProbe } from "./saliency.js";
+import { clamp } from "lodash-es";
 
 /**
  * Layout thresholds config. Face sizes are normalized to the frame height, so their meaning shifts
@@ -987,7 +988,6 @@ export function adjustDecision(
 ): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
   const a = cleanAdjust(adjust);
   if (!a || d.layout === "none" || (d.layout === "fit" && !a.crop)) return { decision: d };
-  const clamp = (v: number) => Math.max(0, Math.min(1, v));
   let out: LayoutDecision = { ...d };
   let subject: "followed" | "fixed" | undefined;
   let subject2: "followed" | "fixed" | undefined;
@@ -1024,11 +1024,14 @@ export function adjustDecision(
       s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`,
     );
   }
-  const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) => (dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx), y: clamp(p.y + dy) })) : tr);
+  const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) =>
+    dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx, 0, 1), y: clamp(p.y + dy, 0, 1) })) : tr;
   if ((a.offsetX || a.offsetY) && !a.crop) {
     out = {
       ...out,
-      track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }],
+      track: out.track.length
+        ? shift(out.track, a.offsetX, a.offsetY)
+        : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0), 0, 1), y: clamp(0.45 + (a.offsetY ?? 0), 0, 1) }],
     };
     // a webcam tile stays as detected: the renderer and the preview move its window by the pane's offset (`shiftRegion`)
   }
@@ -1036,7 +1039,9 @@ export function adjustDecision(
     const base = out.track2?.length ? out.track2 : out.track;
     out = {
       ...out,
-      track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }],
+      track2: base.length
+        ? shift(base, a.offsetX2, a.offsetY2)
+        : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0), 0, 1), y: clamp(0.45 + (a.offsetY2 ?? 0), 0, 1) }],
     };
   }
   if (notes.length) out = { ...out, reason: `${out.reason}; ${notes.join("; ")}` };

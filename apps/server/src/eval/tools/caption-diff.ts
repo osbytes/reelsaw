@@ -24,6 +24,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "../framework.js";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export interface TimedWord {
   text: string;
@@ -271,7 +272,6 @@ export function humanWordsIn(al: Alignment, from: number, to: number): TimedWord
 }
 
 const round = (x: number) => Math.round(x * 1000) / 1000;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Fetch (or reuse) `<dir>/<id>.en.json3` (human) and `<dir>/<id>.en-orig.json3` (ASR). Some videos

@@ -13,6 +13,7 @@ import { localeDir, REPO_URL } from "@reelsaw/shared";
 import { currentLocale, type MessageDescriptor, t } from "./i18n.js";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
+import { escape as escapeHtml } from "lodash-es";
 
 export interface Mail {
   to: string;
@@ -142,10 +143,6 @@ const line = "#e2e2e0";
 const acc = "#8460d2";
 const accInk = "#ffffff";
 const accText = "#653eae";
-
-export function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 function brandMark(): string {
   return (
