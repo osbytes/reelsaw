@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.54.0
+
+### Minor Changes
+
+- [#387](https://github.com/osbytes/reelsaw/pull/387) [`dd6d265`](https://github.com/osbytes/reelsaw/commit/dd6d26503538608e92fef10ac540f0cde1941ac8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `POSTHOG_PROXY=true` sends the web app's PostHog events through the app's own origin at `/api/relay`, which the server forwards to `POSTHOG_HOST`, so ad blockers that block posthog.com do not drop them. Cookies and authorization headers are not forwarded; the client address is, when `TRUST_PROXY` is on. Off by default.
+
 ## 0.53.0
 
 ### Minor Changes
