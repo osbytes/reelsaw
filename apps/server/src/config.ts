@@ -201,6 +201,8 @@ export const envSchema = z.object({
   SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   POSTHOG_KEY: z.string().max(200).optional(),
   POSTHOG_HOST: z.string().url().default("https://us.i.posthog.com"),
+  // the browser sends PostHog events to this origin at /api/relay, forwarded to POSTHOG_HOST (posthog-proxy.ts); off = direct
+  POSTHOG_PROXY: boolFalse,
   // quotas (0 = unlimited); admins can override per user in Users → Limits
   MAX_PROJECTS_PER_USER: z.coerce.number().int().min(0).default(0),
   MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),

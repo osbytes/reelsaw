@@ -983,7 +983,9 @@ calls (tool, outcome, client name), and billing and abuse-flag events, each with
 through (`web`, `api`, `mcp`, `cli`); the web app sends page views and a handful of product events
 (`lib/telemetry.ts`). Event properties are ids, counts, durations and names, never a title, an
 error message or other free text; people are identified by user id, role and plan only, with no
-autocapture and no session recording. Both are off unless set, the browser gets the public keys
+autocapture and no session recording. `POSTHOG_PROXY=true` has the browser send to the app's
+own origin (`/api/relay`), and the server forwards to PostHog without cookies, so ad
+blockers that block posthog.com do not drop the events. Both are off unless set, the browser gets the public keys
 from `system.status`, and the SDK chunks are only requested when on. Prompts, transcripts and media
 never go through either (`apps/server/src/telemetry.ts`). Release images upload their source maps to
 Sentry when the release workflow has `SENTRY_AUTH_TOKEN` (`.github/workflows/release.yml`); no map

@@ -8,7 +8,8 @@
  */
 type Public = {
   sentry: { dsn: string; environment: string; release: string; replaysOnErrorSampleRate?: number } | null;
-  posthog: { key: string; host: string } | null;
+  /** host: a path on this origin when the server proxies PostHog (POSTHOG_PROXY), else PostHog's own host */
+  posthog: { key: string; host: string; uiHost?: string } | null;
 };
 
 import { ATTRIBUTION_HEADER, type Attribution, attributionFromSearch, attributionSchema, encodeAttributionHeader } from "@reelsaw/shared";
@@ -121,6 +122,7 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
       ph.init(t.posthog.key, {
         ...(fresh && landingUtm.site_id ? { bootstrap: { distinctID: landingUtm.site_id } } : {}),
         api_host: t.posthog.host,
+        ...(t.posthog.uiHost ? { ui_host: t.posthog.uiHost } : {}),
         capture_pageview: false,
         capture_pageleave: true,
         autocapture: false,

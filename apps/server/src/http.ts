@@ -37,6 +37,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
+import { POSTHOG_PROXY_PATH, posthogProxy } from "./posthog-proxy.js";
 import { requestLogger, logTrpcError, refusalBody, type AppEnv } from "./request-log.js";
 import { z } from "zod";
 import { runHealthChecks } from "./health.js";
@@ -267,6 +268,14 @@ export function createApp(svc: Services) {
   // Stripe webhooks (ee): raw body (bounded: events are a few hundred KB at most, and the signature is checked only after
   // the body is read), 2xx only once the event and its sync job committed
   if (svc.ee) app.post("/api/billing/webhook", bodyLimit({ maxSize: 1024 * 1024 }), (c) => svc.ee!.webhook(c));
+  // PostHog reverse proxy (posthog-proxy.ts): the browser's events reach PostHog through this origin. Raw bodies,
+  // bounded (session recording is off).
+  if (config.POSTHOG_KEY && config.POSTHOG_PROXY) {
+    const forward = posthogProxy(config);
+    const limit = bodyLimit({ maxSize: 5 * 1024 * 1024 });
+    app.all(POSTHOG_PROXY_PATH, limit, forward);
+    app.all(`${POSTHOG_PROXY_PATH}/*`, limit, forward);
+  }
   app.use(
     "/api/trpc/*",
     trpcServer({
