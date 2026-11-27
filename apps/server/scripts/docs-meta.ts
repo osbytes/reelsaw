@@ -426,6 +426,10 @@ export const DOCS: Record<string, [GroupId, string]> = {
     "PostHog project key (public). Set, the server sends sign-ups, approvals, project created/done/failed/cancelled, clip done/failed, requested jobs, quota refusals and the warnings that head them off, downloads and exports, MCP tool calls, billing and abuse-flag events (with the surface: web, api, mcp, cli), and the web app sends page views and a few product events; properties are ids, counts and names, and people are identified by user id, role and plan only (no email or name). Unset, nothing is sent.",
   ],
   POSTHOG_HOST: ["observability", "PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance)."],
+  POSTHOG_PROXY: [
+    "observability",
+    "`true` has the web app send PostHog events to the app's own origin at `/api/relay`, which the server forwards to `POSTHOG_HOST` (and `/static/*` to PostHog's assets host), so ad blockers that block posthog.com do not drop them. Cookies and authorization headers are not forwarded; the client address is, as X-Forwarded-For, when TRUST_PROXY is on. Default `false`: the browser talks to `POSTHOG_HOST` directly. Only used with `POSTHOG_KEY`.",
+  ],
 
   FFMPEG_PATH: ["tools", "ffmpeg binary."],
   FFMPEG_ENCODER: [

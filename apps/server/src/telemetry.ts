@@ -19,6 +19,7 @@ import type { Config } from "./config.js";
 import { setErrorSink, type Logger } from "./log.js";
 import { readGauges, setMetricSink, type MetricSink } from "./metrics.js";
 import { otel } from "./otel.js";
+import { POSTHOG_PROXY_PATH, posthogHosts } from "./posthog-proxy.js";
 
 /**
  * What the Sentry SDK may collect on its own. Its defaults (SDK 11) take the client's address, every request header,
@@ -50,7 +51,8 @@ export function scrubSentryEvent<E extends Sentry.ErrorEvent>(event: E): E {
 export interface TelemetryPublic {
   /** replaysOnErrorSampleRate: share of browser errors that keep a masked replay of the moments before them (0 = none) */
   sentry: { dsn: string; environment: string; release: string; replaysOnErrorSampleRate: number } | null;
-  posthog: { key: string; host: string } | null;
+  /** host: where posthog-js sends (POSTHOG_PROXY_PATH on this origin with POSTHOG_PROXY); uiHost: the PostHog app, for its toolbar */
+  posthog: { key: string; host: string; uiHost: string } | null;
 }
 
 /** How often a monitored loop checks in: a crontab (UTC) or every N minutes. */
@@ -94,7 +96,14 @@ const sentryMetricSink: MetricSink = {
 export function createTelemetry(
   config: Pick<
     Config,
-    "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV"
+    | "SENTRY_DSN"
+    | "SENTRY_ENVIRONMENT"
+    | "SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE"
+    | "POSTHOG_KEY"
+    | "POSTHOG_HOST"
+    | "POSTHOG_PROXY"
+    | "REELSAW_VERSION"
+    | "NODE_ENV"
   >,
   log: Logger,
 ): Telemetry {
@@ -149,7 +158,9 @@ export function createTelemetry(
     enabled: { sentry, posthog: !!posthog },
     public: {
       sentry: sentry ? { dsn: config.SENTRY_DSN!, environment, release, replaysOnErrorSampleRate: config.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE } : null,
-      posthog: posthog ? { key: config.POSTHOG_KEY!, host: config.POSTHOG_HOST } : null,
+      posthog: posthog
+        ? { key: config.POSTHOG_KEY!, host: config.POSTHOG_PROXY ? POSTHOG_PROXY_PATH : config.POSTHOG_HOST, uiHost: posthogHosts(config.POSTHOG_HOST).ui }
+        : null,
     },
     capture(event, distinctId, properties) {
       posthog?.capture({ distinctId, event, properties: { ...properties, $lib_custom: "reelsaw-server", release } });
