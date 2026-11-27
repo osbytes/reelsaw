@@ -11,6 +11,7 @@ import { useDebounced } from "../lib/useDebounced";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { formatNumber } from "@reelsaw/shared";
+import { useRetirementLabel } from "./ModelRetirement";
 
 type CatalogPage = inferRouterOutputs<AppRouter>["admin"]["models"]["catalog"];
 export type PickerProvider = CatalogPage["providers"][number];
@@ -86,6 +87,7 @@ export function ModelPicker({
 }) {
   const { t } = useLingui();
   const trpc = useTRPC();
+  const retirementLabel = useRetirementLabel();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
@@ -160,6 +162,10 @@ export function ModelPicker({
           </span>
           {m.note && <span className="block truncate text-[11px] text-ink3">{m.note}</span>}
         </span>
+        {m.retirement && (
+          // a word with its glyph, never colour alone; the row stays one line high (the label sits beside the name)
+          <span className="shrink-0 rounded-[6px] bg-warn-soft px-1.5 py-0.5 text-[11px] font-semibold text-ink">! {retirementLabel(m.retirement)}</span>
+        )}
         {needsPull && (
           <span
             className={`inline-flex shrink-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] font-semibold ${busy ? "text-ink3" : "bg-acc-soft text-acc-text"}`}
@@ -193,7 +199,11 @@ export function ModelPicker({
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={`truncate font-mono text-xs ${value ? "" : "text-ink3"}`}>{value || (placeholder ?? t`Pick a model`)}</span>
             {/* always two lines, so pickers side by side stay the same height */}
-            <span className="min-h-4 truncate text-[11px] text-ink3">{current?.note ?? (value ? value.split(":")[0] : "")}</span>
+            <span className={`min-h-4 truncate text-[11px] ${current?.retirement ? "text-warn" : "text-ink3"}`}>
+              {current?.retirement
+                ? `! ${retirementLabel(current.retirement)}${current.note ? ` · ${current.note}` : ""}`
+                : (current?.note ?? (value ? value.split(":")[0] : ""))}
+            </span>
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
         </button>

@@ -166,6 +166,8 @@ import { t } from "./i18n.js";
  *   models <language|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json]
  *                                           what each provider offers, a page per provider with the models in use first;
  *                                           --q searches, --provider + --cursor pages on (the Settings → Models picker, list_models)
+ *   models retirements [--refresh] [--json] the models in use and when their providers retire them (check_model_retirements);
+ *                                           exits 2 when one has retired or retires within 30 days
  *   hear <clipId> [start] [dur]             transcribe a range of the RENDERED clip (what viewers hear)
  *   flags <projectId> [from] [to]           transcript flags (entities / disfluencies / collapsed loops) with status
  *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes;
@@ -292,6 +294,7 @@ import { listUsers, userGroups } from "./accounts-list.js";
 import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, queuePriorityFor, resourceCeilingFor, usageByUser, watermarkFor } from "./quota.js";
 import { testModel } from "./ai/model-test.js";
+import { describeModelInUse } from "./ai/retirement.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState, reclaimScratch } from "./storage/sweep.js";
@@ -610,6 +613,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (args.includes("--json"))
       return void console.log(JSON.stringify({ ...s, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT }, null, 2));
     console.log(t(msg`running   ${{ current: s.current }}  (${{ commit: svc.config.REELSAW_COMMIT }}, built ${{ builtAt: svc.config.REELSAW_BUILT_AT }})`));
+    // the other thing that changes under a running install: a model in use that its provider is retiring (`reelsaw models retirements`)
+    const lifecycle = await svc.modelLifecycle.get().catch(() => null);
+    for (const m of lifecycle?.models ?? []) if (m.retirement) console.log(t(msg`model     ${{ model: m.model }} ${{ state: describeModelInUse(m) }}`));
     if (!s.enabled) return void console.log(t(msg`latest    not checked (UPDATE_CHECK=false)`));
     if (!s.latest) return void console.log(t(msg`latest    unknown: ${{ error: s.error ?? t(msg`no answer`) }}`));
     console.log(
@@ -2544,8 +2550,18 @@ ${usage}`);
   /** The Settings → Models picker's listing / list_models (ai/catalog.ts `page`), a page per provider. */
   async models(svc) {
     const [kind] = pos;
+    // the models in use and when their providers retire them (ai/retirement.ts; check_model_retirements, the Models chip)
+    if (kind === "retirements") {
+      const r = await svc.modelLifecycle.get({ refresh: args.includes("--refresh") });
+      if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
+      table(r.models.map((m) => ({ model: m.model, uses: m.uses.join(", "), retirement: describeModelInUse(m) })));
+      if (r.retiring) process.exitCode = r.worst === "retired" || r.worst === "soon" ? 2 : 0;
+      return;
+    }
     if (kind !== "language" && kind !== "transcription")
-      throw new Error("usage: reelsaw models <language|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json]");
+      throw new Error(
+        "usage: reelsaw models <language|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json] | reelsaw models retirements [--refresh] [--json]",
+      );
     const limit = flag("limit");
     const r = await svc.catalog.page(kind, {
       provider: flag("provider"),

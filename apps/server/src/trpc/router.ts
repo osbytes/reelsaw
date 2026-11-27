@@ -1269,6 +1269,10 @@ const restRouter = router({
     }),
     models: router({
       get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
+      /** The models in use and when their providers retire them (ai/retirement.ts). Same as check_model_retirements / `reelsaw models retirements`. */
+      lifecycle: adminProcedure
+        .input(z.object({ refresh: z.boolean().default(false) }).default({ refresh: false }))
+        .query(({ ctx, input }) => ctx.svc.modelLifecycle.get({ refresh: input.refresh })),
       /** A page of each provider's models (or one provider's, or the matches for q), the models in use first. Same as list_models / `reelsaw models`. */
       catalog: adminProcedure.input(catalogPageInput).query(async ({ ctx, input }) => {
         try {

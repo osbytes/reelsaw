@@ -7,9 +7,11 @@
 import { Link } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Plural, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
 import { useMe, useSystemStatus } from "../lib/account";
 import { refreshForNewVersion, useStaleChunkNudge } from "../lib/stale-chunk";
 import { useUnsaved } from "../lib/unsaved";
+import { urgent, useModelLifecycle } from "./ModelRetirement";
 
 type Tone = "acc" | "warn" | "err";
 const TONE: Record<Tone, string> = { acc: "bg-acc-soft", warn: "bg-warn-soft", err: "bg-err-soft" };
@@ -34,6 +36,8 @@ export function useHeaderAlerts(): HeaderAlert[] {
   const isAdmin = useMe().data?.role === "admin";
   const stale = useStaleChunkNudge();
   const dirty = useUnsaved();
+  // admins only (the query is off for everyone else): a model in use that its provider is retiring
+  const lifecycle = useModelLifecycle().data;
   const alerts: HeaderAlert[] = [];
   if (stale) {
     alerts.push({
@@ -57,6 +61,28 @@ export function useHeaderAlerts(): HeaderAlert[] {
       tone: "warn",
       // admins land on the workers that are short; everyone else has nothing to change, so it stays a note
       ...(isAdmin ? { href: "/settings/system#workers" } : {}),
+    });
+  }
+  const first = lifecycle?.models.find((m) => m.retirement);
+  if (isAdmin && lifecycle && first?.retirement) {
+    const r = first.retirement;
+    const name = first.model.slice(first.model.indexOf(":") + 1);
+    const days = r.daysLeft ?? 0;
+    const others = lifecycle.retiring - 1;
+    const label =
+      r.status === "retired"
+        ? t`${name} retired · Review`
+        : r.status === "deprecated"
+          ? t`${name} deprecated · Review`
+          : plural(days, { one: `${name} retires in # day · Review`, other: `${name} retires in # days · Review` });
+    alerts.push({
+      id: "model-retirement",
+      glyph: "!",
+      short: t`Models`,
+      label: others > 0 ? `${label} ${plural(others, { one: "(+# more)", other: "(+# more)" })}` : label,
+      detail: t`A model in use is being retired by its provider. Open Settings → System → Models to switch.`,
+      tone: urgent(lifecycle.worst) ? "err" : "warn",
+      href: "/settings/system#models",
     });
   }
   return alerts;

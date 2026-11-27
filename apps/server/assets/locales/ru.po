@@ -275,6 +275,10 @@ msgstr "; {more, plural, one {ещё # общий адрес не показан
 msgid "; {notRendered, plural, one {# picked clip} other {# picked clips}} are not rendered and were left out"
 msgstr "; {notRendered, plural, one {# выбранный клип не отрендерен и пропущен} few {# выбранных клипа не отрендерены и пропущены} many {# выбранных клипов не отрендерены и пропущены} other {# выбранных клипов не отрендерены и пропущены}}"
 
+#: src/ai/retirement.ts
+msgid "; {provider} suggests {replacement}"
+msgstr ""
+
 #: src/cli.ts
 msgid "; {skipped} still preparing or rendering keep the old style (re-render them when done)"
 msgstr "; {skipped} ещё готовятся или рендерятся и сохранят прежний стиль (позже перерендерьте их)"
@@ -1342,6 +1346,10 @@ msgstr "Удалено. Можно восстановить {restorable}. Оно
 msgid "Deleted. restore_clip brings it back {restorable}."
 msgstr "Удалено. restore_clip вернёт его {restorable}."
 
+#: src/ai/retirement.ts
+msgid "deprecated, no retirement date yet{instead}"
+msgstr ""
+
 #: src/cli.ts
 msgid "device present, no driver tools"
 msgstr "устройство есть, утилиты драйвера отсутствуют"
@@ -1720,6 +1728,10 @@ msgid "project.min_below_max"
 msgstr "minClipSeconds должен быть меньше maxClipSeconds"
 
 #: src/cli.ts
+msgid "model     {model} {state}"
+msgstr ""
+
+#: src/cli.ts
 msgid "models"
 msgstr "модели"
 
@@ -1861,6 +1873,10 @@ msgstr "нет клипа или проекта с таким id"
 msgid "clip.not_found"
 msgstr "Клипа с таким id нет в вашем аккаунте (удалённые клипы — в разделе «Удалённые»; restore_clip вернёт клип)."
 
+#: src/ai/retirement.ts
+msgid "no dates published by {provider}"
+msgstr ""
+
 #: src/cli.ts
 msgid "no failed projects or clips"
 msgstr "нет неудачных проектов или клипов"
@@ -1923,6 +1939,10 @@ msgstr "Проекта с таким id нет в вашем аккаунте. �
 #: src/cli.ts
 msgid "no rendered clips in this project"
 msgstr "в этом проекте нет отрендеренных клипов"
+
+#: src/ai/retirement.ts
+msgid "no retirement announced"
+msgstr ""
 
 #: src/media-links/service.ts
 msgid "No revoked or expired share links to clear."
@@ -2686,6 +2706,14 @@ msgstr "восстановлено:"
 #: src/cli.ts
 msgid "resumed {id} at {queue}"
 msgstr "возобновлён {id} на {queue}"
+
+#: src/ai/retirement.ts
+msgid "RETIRED on {date}: calls may already fail{instead}"
+msgstr ""
+
+#: src/ai/retirement.ts
+msgid "retires {date} ({days, plural, one {in # day} other {in # days}}){instead}"
+msgstr ""
 
 #: src/cli.ts
 msgid "retried {retried, plural, one {# project} other {# projects}}"
@@ -3501,6 +3529,10 @@ msgstr "Неизвестный или отключённый провайдер 
 #: src/trpc/router.ts
 msgid "provider.unknown"
 msgstr "Неизвестный провайдер \"{provider}\""
+
+#: src/ai/retirement.ts
+msgid "unknown: {provider} could not be listed ({error})"
+msgstr ""
 
 #: src/cli.ts
 msgid "unlimited"

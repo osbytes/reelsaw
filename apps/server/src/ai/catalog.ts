@@ -14,6 +14,7 @@ import { providerKeyEnv, envCredentialSource, type CredentialSource } from "./re
 import { OPENCODE_PLANS, opencodeUserAgent, type OpenCodePlan } from "./opencode.js";
 import { aliasesOf, credentialOwner, OPENCODE_DEFAULT_BASE_URL } from "./provider-ids.js";
 import type { WordTimestampVerdict } from "./word-timestamps.js";
+import { anthropicRetirement, expirationRetirement, gatewayRetirement, listsExpiration, openAiRetirement, type ModelRetirement } from "./retirement.js";
 import { createFuzzy, formatBytes, formatNumber } from "@reelsaw/shared";
 import { msg } from "@lingui/core/runtime-macro";
 import { t } from "../i18n.js";
@@ -37,6 +38,8 @@ export interface CatalogModel {
   sizeBytes?: number;
   /** section within its provider (one of the provider's `groups`); models of a section stay together */
   group?: string;
+  /** the provider's listing says this model is going away (ai/retirement.ts) */
+  retirement?: ModelRetirement;
 }
 
 export interface CatalogProvider {
@@ -57,6 +60,8 @@ export interface CatalogProvider {
   groups?: Array<{ name: string; notice?: string }>;
   /** the listing failed; models may be a static fallback */
   error?: string;
+  /** the listing carries retirement dates (OpenAI, Anthropic, the AI Gateway, OpenRouter-style routers); absent = it says nothing */
+  lifecycle?: boolean;
 }
 
 /** One provider with one page of its models: the listing (or the matches for `q`) from `cursor`, at most `limit` long. */
@@ -216,6 +221,14 @@ export function isUsableOpenCodeModel(m: OpenCodeModelEntry): boolean {
   return !(price?.input?.price === 0 && price?.output?.price === 0);
 }
 
+/** The model with what its provider's listing says about retiring it, when it says anything. */
+function withRetirement(m: CatalogModel, retirement: ModelRetirement | undefined): CatalogModel {
+  return retirement ? { ...m, retirement } : m;
+}
+
+/** The AI Gateway's public listing: the only place it gives retirement dates (the SDK's /config drops them). */
+const GATEWAY_PUBLIC_MODELS = "https://ai-gateway.vercel.sh/v1/models";
+
 /** Keep the chat-capable OpenAI models out of a /v1/models dump that also lists TTS, embeddings, images. */
 function isOpenAiLanguageModel(id: string) {
   if (!/^(gpt-|o[1-9]|chatgpt-)/.test(id)) return false;
@@ -243,6 +256,27 @@ export function createModelCatalog(
     return (await res.json()) as any;
   };
   const root = (base: string) => base.replace(/\/+$/, "").replace(/\/v1$/, "");
+  /**
+   * Gateway model id → retirement, from the public listing. Null when it cannot be read: the gateway's models
+   * still list (from the SDK), only without dates, and that is logged rather than failing the picker.
+   */
+  const gatewayRetirements = async (): Promise<Map<string, ModelRetirement> | null> => {
+    try {
+      const body: unknown = await get(GATEWAY_PUBLIC_MODELS);
+      const data: unknown = body && typeof body === "object" ? Reflect.get(body, "data") : undefined;
+      if (!Array.isArray(data)) throw new Error("the listing has no data array");
+      const out = new Map<string, ModelRetirement>();
+      for (const m of data) {
+        const id: unknown = m && typeof m === "object" ? Reflect.get(m, "id") : undefined;
+        const r = gatewayRetirement(m);
+        if (typeof id === "string" && r) out.set(id, r);
+      }
+      return out;
+    } catch (err) {
+      log.warn({ err, url: GATEWAY_PUBLIC_MODELS }, "gateway retirement dates unavailable");
+      return null;
+    }
+  };
 
   async function selfHosted(provider: string, baseUrl: string, apiKey: string | undefined, kind: CatalogKind): Promise<CatalogProvider> {
     const base = baseUrl.replace(/\/+$/, "");
@@ -305,12 +339,15 @@ export function createModelCatalog(
           ? (((await get(`${base}/models?output_modalities=transcription`, headers).catch(() => null)) as { data?: Listed[] } | null)?.data ?? [])
           : [];
       const seen = new Set<string>();
+      // OpenRouter (and routers that copy its listing) send expiration_date on every model, null when none is set
+      if (listsExpiration([...speechListed, ...listed])) out.lifecycle = true;
       for (const m of [...speechListed, ...listed]) {
         if (seen.has(m.id)) continue;
         seen.add(m.id);
         const outputs = outputModalities(m);
         const speech = outputs ? outputs.includes("transcription") : looksLikeSpeechModel(m.id);
-        if (kind === "transcription" ? speech : !speech && !/embed/i.test(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: true });
+        if (kind === "transcription" ? speech : !speech && !/embed/i.test(m.id))
+          out.models.push(withRetirement({ id: `${provider}:${m.id}`, label: m.id, installed: true }, expirationRetirement(m)));
       }
       return out;
     } catch (err) {
@@ -339,9 +376,10 @@ export function createModelCatalog(
     try {
       if (provider === "openai") {
         const data = ((await get("https://api.openai.com/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string }> }).data;
-        const ids = data.map((m) => m.id).sort();
-        if (kind === "language") for (const id of ids) if (isOpenAiLanguageModel(id)) out.models.push({ id: `openai:${id}`, label: id });
-        if (kind === "transcription") for (const id of ids) if (looksLikeSpeechModel(id)) out.models.push({ id: `openai:${id}`, label: id });
+        out.lifecycle = true;
+        const fits = kind === "language" ? isOpenAiLanguageModel : looksLikeSpeechModel;
+        for (const m of [...data].sort((a, b) => a.id.localeCompare(b.id)))
+          if (fits(m.id)) out.models.push(withRetirement({ id: `openai:${m.id}`, label: m.id }, openAiRetirement(m)));
       } else if (provider === "anthropic") {
         if (kind === "language") {
           const data = (
@@ -349,7 +387,8 @@ export function createModelCatalog(
               data: Array<{ id: string; display_name?: string }>;
             }
           ).data;
-          for (const m of data) out.models.push({ id: `anthropic:${m.id}`, label: m.id, note: m.display_name });
+          out.lifecycle = true;
+          for (const m of data) out.models.push(withRetirement({ id: `anthropic:${m.id}`, label: m.id, note: m.display_name }, anthropicRetirement(m)));
         }
       } else if (provider === "google") {
         if (kind === "language") {
@@ -384,12 +423,18 @@ export function createModelCatalog(
               : (err as Error).message,
           );
         });
-        const { models } = await gw.getAvailableModels();
+        const [{ models }, retiring] = await Promise.all([gw.getAvailableModels(), gatewayRetirements()]);
+        if (retiring) out.lifecycle = true;
         for (const m of models) {
           // the gateway types its models; untyped ones predate the field and are language models
           if ((m.modelType ?? "language") !== kind) continue;
           const price = kind === "language" && m.pricing ? perMillionTokens(Number(m.pricing.input) * 1e6, Number(m.pricing.output) * 1e6) : undefined;
-          out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
+          out.models.push(
+            withRetirement(
+              { id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined },
+              retiring?.get(m.id),
+            ),
+          );
         }
       } else if (provider === "opencode") {
         await listOpenCode(out, key, kind);

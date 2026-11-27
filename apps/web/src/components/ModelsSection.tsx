@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { ModelPicker } from "./ModelPicker";
+import { ModelRetirementLine } from "./ModelRetirement";
 import { PANEL_FOCUS_CLEARANCE, StickyPanelFooter } from "./StickyPanelFooter";
 import { ConfirmDialog, ProgressBar, Skeleton } from "./ui";
 import { formatBytes, formatDateTime, formatNumber } from "@reelsaw/shared";
@@ -205,6 +206,8 @@ export function ModelsSection() {
                 saving={saveCredentials.isPending || clearCredentials.isPending}
               />
               <p className="flex-1 text-[11px] leading-4 text-ink3">{help}</p>
+              {/* about the model running now, so it stays while a replacement is picked and until Save */}
+              <ModelRetirementLine model={s.current[kind]} />
               <div className="mt-auto flex min-w-0 gap-1 pt-1">
                 <button
                   type="button"
