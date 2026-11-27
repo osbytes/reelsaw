@@ -8,9 +8,9 @@
  *     (WHISPER_SPOKEN_LANGUAGES, generated from Whisper's own table), as is any listing that fails.
  * Answers are cached per model and credentials for a while: the list changes only with the model.
  */
-import { languageLabel, spokenCanonical, spokenLanguageCode, WHISPER_SPOKEN_LANGUAGES } from "@reelsaw/shared";
+import { languageLabel, providerOf, spokenCanonical, spokenLanguageCode, WHISPER_SPOKEN_LANGUAGES } from "@reelsaw/shared";
 import type { Services } from "../services.js";
-import { providerOf, redactUrl } from "./registry.js";
+import { redactUrl } from "./registry.js";
 
 export interface SpokenLanguages {
   /** the transcription model the list is for */

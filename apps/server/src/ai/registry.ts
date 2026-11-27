@@ -17,7 +17,7 @@ import {
   type VerdictStore,
   type WordTimestampVerdict,
 } from "./word-timestamps.js";
-import { plural } from "@reelsaw/shared";
+import { plural, providerOf } from "@reelsaw/shared";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
@@ -107,10 +107,6 @@ function withTranscription(provider: Parameters<typeof customProvider>[0]["fallb
     // customProvider does `modelId in transcriptionModels`, so the proxy must answer `has` as well
     transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, { has: () => true, get: (_t, id: string) => make(id) }),
   });
-}
-
-export function providerOf(id: string): string {
-  return id.split(":")[0]!;
 }
 
 /**

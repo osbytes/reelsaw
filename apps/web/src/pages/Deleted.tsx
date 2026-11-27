@@ -33,6 +33,7 @@ import { ConfirmDialog, MoreButton, Skeleton } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 import { pageTitle, useDocumentTitle } from "../lib/title";
+import { differenceInHours } from "date-fns";
 
 function kindLabel(kind: DeletedKind): string {
   return { project: t`Project`, clip: t`Clip`, asset: t`Library item`, template: t`Template` }[kind];
@@ -50,7 +51,8 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
  */
 function foreverWhen(purgeAt: string | null) {
   if (!purgeAt) return t`when you choose`;
-  const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
+  // started days, as before: a purge 5 hours away is "within a day", not "within the hour"
+  const days = Math.ceil(differenceInHours(purgeAt, Date.now()) / 24);
   if (days <= 0) return t`within the hour`;
   return days === 1 ? t`within a day` : t`in ${days} days`;
 }

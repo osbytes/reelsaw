@@ -218,7 +218,9 @@ project already hit the problem it prevents.
   primitive, look in this order: something in the repo already does it (`apps/*/src/lib`,
   `components`, `packages/shared`, the `reelsaw` CLI); a dependency already in a `package.json`
   does it (fuzzy search is Fuse.js, comboboxes are Radix + cmdk, schemas are zod, dates are
-  the platform); a canonical, maintained library does it. Only then write it, and put it where the
+  the platform with date-fns for date math, object paths, type guards and small utilities like `clamp`,
+  `chunk`, `escape` and `uniqBy` are lodash-es, waits are `node:timers/promises`); a canonical, maintained
+  library does it. `test/shared-helpers-guard.test.ts` fails on a local copy of one of those. Only then write it, and put it where the
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
 - **Generalise on the third use, and count it.** Copying or closely mirroring existing code on

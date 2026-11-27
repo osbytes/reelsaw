@@ -27,6 +27,7 @@
  * URLs never appear in logs; only `id`.
  */
 import { randomBytes } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   BrokenCircuitError,
   CircuitState,
@@ -397,7 +398,8 @@ export function createYtdlpProxyPool(
       if (!walk.length) {
         const busy = slots.some((s) => !exclude.has(s.candidate.id) && !hasSlot(s));
         if (busy) {
-          await sleep(slotWaitMs, signal);
+          // an abort ends the wait early; the loop then throws the signal's own reason (throwIfAborted)
+          await sleep(slotWaitMs, undefined, { signal }).catch(() => undefined);
           continue;
         }
         if (lastErr !== undefined) throw lastErr;
@@ -437,7 +439,8 @@ export function createYtdlpProxyPool(
         }
       }
       if (skippedBusy) {
-        await sleep(slotWaitMs, signal);
+        // an abort ends the wait early; the loop then throws the signal's own reason (throwIfAborted)
+        await sleep(slotWaitMs, undefined, { signal }).catch(() => undefined);
         continue;
       }
       // every remaining circuit is open and halfOpenAfter has not elapsed: last resort, bypass
@@ -488,19 +491,4 @@ export function createYtdlpProxyPool(
 function remember(slot: Slot, ok: boolean) {
   slot.results.push(ok);
   if (slot.results.length > PROXY_RESULT_WINDOW) slot.results.shift();
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
-      return;
-    }
-    const t = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(t);
-      reject(signal?.reason instanceof Error ? signal.reason : new Error("aborted"));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }

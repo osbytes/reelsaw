@@ -275,6 +275,10 @@ msgstr "; {more, plural, one {# more shared address} other {# more shared addres
 msgid "; {notRendered, plural, one {# picked clip} other {# picked clips}} are not rendered and were left out"
 msgstr "; {notRendered, plural, one {# picked clip} other {# picked clips}} are not rendered and were left out"
 
+#: src/ai/retirement.ts
+msgid "; {provider} suggests {replacement}"
+msgstr "; {provider} suggests {replacement}"
+
 #: src/cli.ts
 msgid "; {skipped} still preparing or rendering keep the old style (re-render them when done)"
 msgstr "; {skipped} still preparing or rendering keep the old style (re-render them when done)"
@@ -1342,6 +1346,10 @@ msgstr "Deleted. It can be restored {restorable}. It still uses {size} until you
 msgid "Deleted. restore_clip brings it back {restorable}."
 msgstr "Deleted. restore_clip brings it back {restorable}."
 
+#: src/ai/retirement.ts
+msgid "deprecated, no retirement date yet{instead}"
+msgstr "deprecated, no retirement date yet{instead}"
+
 #: src/cli.ts
 msgid "device present, no driver tools"
 msgstr "device present, no driver tools"
@@ -1720,6 +1728,10 @@ msgid "project.min_below_max"
 msgstr "minClipSeconds must be below maxClipSeconds"
 
 #: src/cli.ts
+msgid "model     {model} {state}"
+msgstr "model     {model} {state}"
+
+#: src/cli.ts
 msgid "models"
 msgstr "models"
 
@@ -1861,6 +1873,10 @@ msgstr "no clip or project with that id"
 msgid "clip.not_found"
 msgstr "No clip with that id in your account (deleted clips are under Deleted; restore_clip brings one back)."
 
+#: src/ai/retirement.ts
+msgid "no dates published by {provider}"
+msgstr "no dates published by {provider}"
+
 #: src/cli.ts
 msgid "no failed projects or clips"
 msgstr "no failed projects or clips"
@@ -1923,6 +1939,10 @@ msgstr "No project with that id in your account. A deleted project is gone for g
 #: src/cli.ts
 msgid "no rendered clips in this project"
 msgstr "no rendered clips in this project"
+
+#: src/ai/retirement.ts
+msgid "no retirement announced"
+msgstr "no retirement announced"
 
 #: src/media-links/service.ts
 msgid "No revoked or expired share links to clear."
@@ -2686,6 +2706,14 @@ msgstr "restored:"
 #: src/cli.ts
 msgid "resumed {id} at {queue}"
 msgstr "resumed {id} at {queue}"
+
+#: src/ai/retirement.ts
+msgid "RETIRED on {date}: calls may already fail{instead}"
+msgstr "RETIRED on {date}: calls may already fail{instead}"
+
+#: src/ai/retirement.ts
+msgid "retires {date} ({days, plural, one {in # day} other {in # days}}){instead}"
+msgstr "retires {date} ({days, plural, one {in # day} other {in # days}}){instead}"
 
 #: src/cli.ts
 msgid "retried {retried, plural, one {# project} other {# projects}}"
@@ -3501,6 +3529,10 @@ msgstr "Unknown or disabled provider \"{id}\". Providers with a key are hidden u
 #: src/trpc/router.ts
 msgid "provider.unknown"
 msgstr "Unknown provider \"{provider}\""
+
+#: src/ai/retirement.ts
+msgid "unknown: {provider} could not be listed ({error})"
+msgstr "unknown: {provider} could not be listed ({error})"
 
 #: src/cli.ts
 msgid "unlimited"

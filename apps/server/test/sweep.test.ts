@@ -15,7 +15,7 @@ import {
   type DbView,
   type ScratchProject,
 } from "../src/storage/sweep.js";
-import { chunk, mapLimit, keysetLoop, deadlineIn } from "../src/lib/batch.js";
+import { mapLimit, keysetLoop, deadlineIn } from "../src/lib/batch.js";
 import { duplicateSourceBytes, videoIdentity, youtubeId } from "../src/storage/usage.js";
 
 const NOW = 1_800_000_000_000;
@@ -232,15 +232,7 @@ describe("planSweep with a partial listing", () => {
   });
 });
 
-describe("chunk / mapLimit / keysetLoop", () => {
-  it("chunks 2,500 ids into 1,000 / 1,000 / 500", () => {
-    const sizes = chunk(
-      Array.from({ length: 2500 }, (_, i) => i),
-      1000,
-    ).map((c) => c.length);
-    assert.deepEqual(sizes, [1000, 1000, 500]);
-    assert.deepEqual(chunk([], 1000), []);
-  });
+describe("mapLimit / keysetLoop", () => {
   it("mapLimit never runs more than the limit at once and keeps order", async () => {
     let inFlight = 0;
     let peak = 0;

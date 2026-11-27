@@ -20,6 +20,7 @@
  * Time spent waiting for a slot is reported to the calling step (ai/slot-wait.ts), whose time limit pauses meanwhile:
  * a queue is not a slow model.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type pg from "pg";
 import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
@@ -89,12 +90,6 @@ class Semaphore {
   }
 }
 
-const sleep = (ms: number, signal?: AbortSignal) =>
-  new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
-  });
-
 /**
  * `isSelfHosted(provider)` is asked at call time (an admin can point a provider at a local server while running).
  * Explicit PROVIDER_CONCURRENCY entries win; otherwise self-hosted = SELF_HOSTED_DEFAULT (SELF_HOSTED_OPENAI_DEFAULT
@@ -152,7 +147,8 @@ export function createProviderGate(spec: string, compatName: string, isSelfHoste
             logged = true;
             log.debug({ provider, limit: n }, "waiting for a provider slot");
           }
-          await sleep(wait + Math.random() * 100, signal);
+          // an abort ends the wait early; the loop's throwIfAborted then throws the signal's own reason
+          await sleep(wait + Math.random() * 100, undefined, { signal }).catch(() => undefined);
         }
         acquired();
         return await fn();

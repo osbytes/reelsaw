@@ -13,10 +13,10 @@ import { transcribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
 import { loadConfig } from "../config.js";
 import { createLogger } from "../log.js";
-import { createAi, providerOf } from "../ai/registry.js";
+import { createAi } from "../ai/registry.js";
 import { toWords } from "../pipeline/transcript.js";
 import { extractEntities, biasProviderOptions, correctTranscript } from "../pipeline/entities.js";
-import type { Word } from "@reelsaw/shared";
+import { providerOf, type Word } from "@reelsaw/shared";
 
 interface Case {
   id: string;

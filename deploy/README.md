@@ -152,6 +152,11 @@ prints the same from the shell, and agents can ask with the `check_for_update` M
 asks GitHub's releases API every 6 hours (`UPDATE_CHECK_HOURS`) sending nothing but the request;
 `UPDATE_CHECK=false` turns it off.
 
+The models can change under a running install too: when a provider schedules a model in use for
+retirement, admins see a chip in the top bar and a dot on Settings → System, and `reelsaw version`
+names it (`reelsaw models retirements` lists every model in use; it exits 2 when one has retired or
+retires within 30 days, for a cron check).
+
 Back up first (see below): migrations only go forward, so pinning an older image after an upgrade
 is not a rollback unless that version's migrations match your database
 ([irreversible migrations](../docs/RELEASING.md#irreversible-migrations)).

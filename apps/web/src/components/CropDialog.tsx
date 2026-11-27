@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Modal, Segmented } from "./ui";
 import type { ContentRegion } from "@reelsaw/shared";
+import { clamp } from "lodash-es";
 
 /** Which crop of a section the dialog edits: the pane's fixed crop, or what a stack shows on top. */
 export type CropKey = "crop" | "crop2" | "contentCrop";
@@ -24,7 +25,6 @@ const fieldsOf = (r: ContentRegion): Fields => ({ left: pct(r.x1), top: pct(r.y1
 /** smallest crop, as a fraction of the source on each axis */
 const MIN = 0.05;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 /** A region kept inside the frame and at least MIN wide and tall. */
 function tidy(r: ContentRegion): ContentRegion {
   const w = clamp(r.x2 - r.x1, MIN, 1);

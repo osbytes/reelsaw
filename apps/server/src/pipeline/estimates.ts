@@ -8,10 +8,9 @@
  * expect"). There is no calibration step: the runs are the calibration.
  */
 import { sql } from "drizzle-orm";
-import { PIPELINE_STAGES, type PipelineStage } from "@reelsaw/shared";
+import { PIPELINE_STAGES, providerOf, type PipelineStage } from "@reelsaw/shared";
 import type { Db } from "../db/index.js";
 import type { Config } from "../config.js";
-import { providerOf } from "../ai/registry.js";
 import { firstStageSeconds, loadRunLogs, runsOf } from "./runs.js";
 import { processedSecOf } from "../projects/ranges.js";
 

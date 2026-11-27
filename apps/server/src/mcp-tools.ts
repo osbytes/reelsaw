@@ -888,6 +888,13 @@ export const TOOLS = {
     },
     annotations: { idempotentHint: true },
   },
+  check_model_retirements: {
+    title: "Check model retirements",
+    description:
+      "Admins only: the models in use and when their providers stop serving them, from the providers' own model lists (OpenAI, Anthropic, the AI Gateway, OpenRouter). Returns { retiring, worst, models: [{ model, uses, retirement: { retiresAt, status: retired|soon|scheduled|deprecated, daysLeft } | null, published, error }] }. published: false = the provider publishes no dates (unknown, not safe). Check a replacement with test_model, then switch under Settings → System → Models.",
+    inputSchema: { refresh: z.boolean().default(false).describe("true = ask the providers again instead of the answer from the last few hours") },
+    annotations: { readOnlyHint: true },
+  },
   list_models: {
     title: "List models",
     description:

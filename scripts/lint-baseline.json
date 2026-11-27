@@ -10,9 +10,9 @@
   "complexity/noBannedTypes": 1,
   "correctness/useExhaustiveDependencies": 126,
   "knip/exports": 313,
-  "knip/types": 218,
+  "knip/types": 217,
   "performance/noImgElement": 3,
-  "style/noNonNullAssertion": 2021,
+  "style/noNonNullAssertion": 2019,
   "suspicious/noArrayIndexKey": 58,
   "suspicious/noConfusingVoidType": 1,
   "suspicious/noExplicitAny": 10

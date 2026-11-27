@@ -31,6 +31,7 @@ import {
   type SourceOverlay,
   type SeamRun,
 } from "@reelsaw/shared";
+import { clamp } from "lodash-es";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -148,7 +149,6 @@ export function paneAspect(f: Framing, srcW: number, srcH: number, hit: PaneHit)
 export function paneRect(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { x: number; y: number; w: number; h: number } {
   const o = outOf(f);
   const halfAspect = (2 * o.w) / o.h; // a split / stack half is 1080x960 in 9:16
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const fixed = pane === 0 ? f.crop : f.crop2;
   if (fixed) return tileCrop(srcW, srcH, fixed);
   if (pane === 0 && f.layout === "fit" && f.inset) return tileCrop(srcW, srcH, f.inset);
@@ -1005,7 +1005,6 @@ function paint(
   // trust the element's real size over the probe (thumbnails are smaller than the video)
   const srcW = src instanceof HTMLVideoElement ? src.videoWidth : src.naturalWidth || sw0;
   const srcH = src instanceof HTMLVideoElement ? src.videoHeight : src.naturalHeight || sh0;
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const raw = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) => {
     try {
       ctx.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);

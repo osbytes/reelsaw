@@ -13,6 +13,7 @@ import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { disfluencyCases, type ExportedDecision } from "./cases.js";
 import { decisionScores } from "./scores.js";
 import type { UnitOfWork } from "../uow.js";
+import { pick } from "lodash-es";
 
 /** Words kept on each side of a fix: the window `eval/fixtures/disfluency` cases use. */
 export const FIX_CONTEXT_WORDS = 30;
@@ -283,13 +284,12 @@ export async function clipEditDecision(db: Db, projectId: string, before: ClipRo
   const b = clipSnapshot(before);
   const a = clipSnapshot(after);
   const keys = changed.flatMap((c) => EDIT_FIELDS[c] ?? []);
-  const pick = (s: Record<string, unknown>) => Object.fromEntries(keys.map((k) => [k, s[k]]));
   const [text] = await rangeTexts(db, projectId, [before]);
   return {
     kind: "clip.edit",
     clipId: before.id,
-    before: pick(b),
-    after: pick(a),
+    before: pick(b, keys),
+    after: pick(a, keys),
     context: {
       fields: changed,
       text: text ?? "",

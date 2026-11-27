@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MAX_RANGES, rangeSchema } from "./ranges.js";
 import { endsClause, endsSentence, textWidth, wordJoiner } from "./language-profile.js";
 import { outputShapeSchema } from "./shape.js";
+import { clamp } from "lodash-es";
 
 /** Canonical source repository (app UI, emails, update checks). */
 export const REPO_URL = "https://github.com/osbytes/reelsaw";
@@ -1659,7 +1660,6 @@ export function speakerCrop(
   face: { cy: number; size: number },
   avoid: Array<{ y1: number; y2: number }> = [],
 ): { w: number; h: number; y: number } {
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   // ~3.2 face-heights tall: head and shoulders, the usual podcast-clip framing
   let h = clamp((face.size || 0.3) * 3.2, 0.42, 1) * srcH;
   let w = h * aspect;
@@ -1976,6 +1976,7 @@ export * from "./captions-format.js";
 export * from "./releases.js";
 export * from "./decisions.js";
 export * from "./format.js";
+export * from "./model-id.js";
 export * from "./locale.js";
 export * from "./partial.js";
 export * from "./ranges.js";

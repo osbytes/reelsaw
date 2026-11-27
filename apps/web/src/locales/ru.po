@@ -743,6 +743,10 @@ msgstr "{clips} · {skipped} ещё заняты, не тронуты"
 msgid "{copyName} (copy)"
 msgstr "{copyName} (копия)"
 
+#: src/components/ModelRetirement.tsx
+msgid "{count, plural, one {# model in use is being retired} other {# models in use are being retired}}"
+msgstr ""
+
 #: src/components/SelectionBar.tsx
 msgid "{count}<0> selected</0>"
 msgstr "{count}<0> выбрано</0>"
@@ -771,6 +775,14 @@ msgstr "{days, plural, one {{clip} удалён (можно восстанови
 #: src/lib/activity.ts
 msgid "{days, plural, one {{clip} deleted: “{title}” (restorable for # day)} other {{clip} deleted: “{title}” (restorable for # days)}}"
 msgstr "{days, plural, one {{clip} удалён: «{title}» (можно восстановить в течение # дня)} few {{clip} удалён: «{title}» (можно восстановить в течение # дней)} many {{clip} удалён: «{title}» (можно восстановить в течение # дней)} other {{clip} удалён: «{title}» (можно восстановить в течение # дней)}}"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{days, plural, one {{name} retires in # day · Review} other {{name} retires in # days · Review}}"
+msgstr ""
+
+#: src/components/ModelRetirement.tsx
+msgid "{days, plural, one {{provider} retires this model on {date}, in # day. Pick another and Save.} other {{provider} retires this model on {date}, in # days. Pick another and Save.}}"
+msgstr ""
 
 #: src/lib/retention.ts
 msgid "{days, plural, one {for # day} other {for # days}}"
@@ -1212,6 +1224,10 @@ msgstr "{name} добавлено как наложение · перетащи�
 msgid "{name} added as b-roll · drag it on the preview"
 msgstr "{name} добавлено как b-roll · перетащите его на превью"
 
+#: src/components/HeaderAlerts.tsx
+msgid "{name} deprecated · Review"
+msgstr ""
+
 #: src/lib/uploads.tsx
 msgid "{name} is {size} MB, and this server accepts uploads up to {max} MB."
 msgstr "Размер {name} — {size} МБ, а этот сервер принимает файлы до {max} МБ."
@@ -1219,6 +1235,10 @@ msgstr "Размер {name} — {size} МБ, а этот сервер прини
 #: src/components/ClipEditor.tsx
 msgid "{name} now follows the person at {where}% (re-render to track them)"
 msgstr "{name} теперь следит за человеком на {where}% (перерендерьте, чтобы включить слежение)"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{name} retired · Review"
+msgstr ""
 
 #: src/components/ClipEditor.tsx
 msgid "{nCut, plural, one {# cut applied} other {# cuts applied}}"
@@ -1231,6 +1251,10 @@ msgstr "подготовлено {nDecided}"
 #: src/components/CommandPaletteDialog.tsx
 msgid "{ok, plural, one {Started # project} other {Started # projects}}"
 msgstr "{ok, plural, one {Запущен # проект} few {Запущено # проекта} many {Запущено # проектов} other {Запущено # проектов}}"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{others, plural, one {(+# more)} other {(+# more)}}"
+msgstr ""
 
 #: src/components/QueueSection.tsx
 msgid "{owner} · priority {prio}"
@@ -1297,6 +1321,14 @@ msgstr "{projects} проектов · {minutes} мин · {clips} клипов 
 #: src/components/ClipEditor.tsx
 msgid "{projectTitle} · clip #{0}"
 msgstr "{projectTitle} · клип #{0}"
+
+#: src/components/ModelRetirement.tsx
+msgid "{provider} has deprecated this model and not set a date yet. Plan to switch."
+msgstr ""
+
+#: src/components/ModelRetirement.tsx
+msgid "{provider} retired this model on {date}; calls may already fail. Pick another and Save."
+msgstr ""
 
 #: src/pages/Project.tsx
 msgid "{readyCount, plural, one {Export # clip} other {Export # clips}}"
@@ -1890,6 +1922,14 @@ msgstr "Логотип в первые секунды, призыв к дейс�
 #: src/components/ClipEditor.tsx
 msgid "A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole template of them fitted to the clip. Captions stay on top of images and video."
 msgstr "Логотип, стикер, фрагмент b-roll, строка текста, музыка или звуковой эффект из вашей библиотеки, добавленные на клип от курсора воспроизведения, либо целый шаблон из них, подобранный под клип. Субтитры всегда поверх изображений и видео."
+
+#: src/components/ModelRetirement.tsx
+msgid "A model in use is being retired by its provider"
+msgstr ""
+
+#: src/components/HeaderAlerts.tsx
+msgid "A model in use is being retired by its provider. Open Settings → System → Models to switch."
+msgstr ""
 
 #: src/components/HeaderAlerts.tsx
 msgid "A newer version is ready. Refreshing now would discard unsaved edits."
@@ -4378,6 +4418,10 @@ msgstr "Журнал доставки"
 #: src/pages/Consent.tsx
 msgid "Deny"
 msgstr "Отклонить"
+
+#: src/components/ModelRetirement.tsx
+msgid "deprecated, no date yet"
+msgstr ""
 
 #: src/components/ListToolbar.tsx
 msgid "Descending"
@@ -6910,6 +6954,7 @@ msgstr "Минут за этот период"
 msgid "Model pass for fillers"
 msgstr "Обработка слов-паразитов моделью"
 
+#: src/components/HeaderAlerts.tsx
 #: src/components/ModelsSection.tsx
 #: src/pages/Settings.tsx
 msgid "Models"
@@ -9411,6 +9456,14 @@ msgstr "Возобновление…"
 msgid "Retention"
 msgstr "Хранение"
 
+#: src/components/ModelRetirement.tsx
+msgid "retired {date}"
+msgstr ""
+
+#: src/components/ModelRetirement.tsx
+msgid "retires {date}"
+msgstr ""
+
 #: src/components/QueueSection.tsx
 msgid "Retried {retried}"
 msgstr "Повторено: {retried}"
@@ -10927,6 +10980,10 @@ msgstr "Прямой переход"
 #: src/components/ClipEditor.tsx
 msgid "Style"
 msgstr "Стиль"
+
+#: src/components/ModelRetirement.tsx
+msgid "Suggested: {replacement}"
+msgstr ""
 
 #: src/pages/AdminUsers.tsx
 msgid "Suspend"

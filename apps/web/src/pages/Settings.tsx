@@ -21,6 +21,7 @@ import { WorkersSection } from "../components/WorkersSection";
 import { FleetSummary } from "../components/FleetSummary";
 import { QueueSection } from "../components/QueueSection";
 import { ModelsSection } from "../components/ModelsSection";
+import { ModelRetirementDot } from "../components/ModelRetirement";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
@@ -138,8 +139,9 @@ export function SettingsPage() {
                 <NavLink to="/settings" end className={({ isActive }) => tab({ isActive: isActive || loc.pathname === BILLING_PATH })}>
                   <Trans>Account</Trans>
                 </NavLink>
-                <NavLink to="/settings/system" className={tab}>
+                <NavLink to="/settings/system" className={(s) => `${tab(s)} inline-flex items-center gap-1.5`}>
                   <Trans>System</Trans>
+                  <ModelRetirementDot />
                 </NavLink>
               </>
             )}
@@ -177,6 +179,7 @@ function SideNav({ sections, active, users }: { sections: Section[]; active: str
               className={linkClass(active === id)}
             >
               {t(label)}
+              {users && id === "models" && <ModelRetirementDot />}
             </a>
           ))}
           {users && (

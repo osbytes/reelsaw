@@ -11,6 +11,7 @@ import { createModelSettings, type ModelSettings } from "./ai/models.js";
 import { dbVerdictStore } from "./ai/word-timestamps.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
 import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
+import { createModelLifecycle, type ModelLifecycleChecker } from "./ai/retirement.js";
 import { createAsr, type Asr } from "./ai/asr.js";
 import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
 import { registerAiTelemetry } from "./ai/otel-ai.js";
@@ -65,6 +66,8 @@ export interface Services {
   providers: ProviderSettings;
   /** what the configured providers offer, and downloads onto Ollama / Speaches (ai/catalog.ts) */
   catalog: ModelCatalog;
+  /** when the models in use retire, from the providers' listings (ai/retirement.ts); shown to admins */
+  modelLifecycle: ModelLifecycleChecker;
   /** LLM call capture (LLM_TRACE) */
   llmTrace: LlmTracer;
   /** cached speech-to-text (content-addressed) */
@@ -204,6 +207,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return a;
   });
   const catalog = createModelCatalog(config, log.child({ module: "models" }), providers, (ids) => ai.wordTimestampVerdicts(ids));
+  const modelLifecycle = createModelLifecycle({ catalog, models, judge: config.ANALYZE_JUDGE_MODEL });
 
   // The on-device detectors serve pipeline stages, which only run in worker processes: a process with RUN_WORKERS=false
   // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the
@@ -448,6 +452,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     models,
     providers,
     catalog,
+    modelLifecycle,
     llmTrace,
     asr,
     media,

@@ -30,6 +30,7 @@ import { parseProfiles, type Profile } from "./profiles.js";
 import { percentile } from "./meter.js";
 import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 import { plural } from "@reelsaw/shared";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const argv = process.argv.slice(2);
 const flagValue = (name: string) => {
@@ -202,8 +203,6 @@ async function startProfile(profile: Profile, scratch: string, prevStt?: string)
   const logs = await compose([file], "logs", "--tail", "40", "app").catch(() => "");
   throw new Error(`bench app did not become healthy at ${BASE} (${last}). Last logs:\n${logs}`);
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * A session cookie. With BENCH_EMAIL / BENCH_PASSWORD set, signs in to that account (creating it on

@@ -743,6 +743,10 @@ msgstr "{clips} · {skipped} still busy, left alone"
 msgid "{copyName} (copy)"
 msgstr "{copyName} (copy)"
 
+#: src/components/ModelRetirement.tsx
+msgid "{count, plural, one {# model in use is being retired} other {# models in use are being retired}}"
+msgstr "{count, plural, one {# model in use is being retired} other {# models in use are being retired}}"
+
 #: src/components/SelectionBar.tsx
 msgid "{count}<0> selected</0>"
 msgstr "{count}<0> selected</0>"
@@ -771,6 +775,14 @@ msgstr "{days, plural, one {{clip} deleted (restorable for # day)} other {{clip}
 #: src/lib/activity.ts
 msgid "{days, plural, one {{clip} deleted: “{title}” (restorable for # day)} other {{clip} deleted: “{title}” (restorable for # days)}}"
 msgstr "{days, plural, one {{clip} deleted: “{title}” (restorable for # day)} other {{clip} deleted: “{title}” (restorable for # days)}}"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{days, plural, one {{name} retires in # day · Review} other {{name} retires in # days · Review}}"
+msgstr "{days, plural, one {{name} retires in # day · Review} other {{name} retires in # days · Review}}"
+
+#: src/components/ModelRetirement.tsx
+msgid "{days, plural, one {{provider} retires this model on {date}, in # day. Pick another and Save.} other {{provider} retires this model on {date}, in # days. Pick another and Save.}}"
+msgstr "{days, plural, one {{provider} retires this model on {date}, in # day. Pick another and Save.} other {{provider} retires this model on {date}, in # days. Pick another and Save.}}"
 
 #: src/lib/retention.ts
 msgid "{days, plural, one {for # day} other {for # days}}"
@@ -1212,6 +1224,10 @@ msgstr "{name} added as an overlay · drag it on the preview"
 msgid "{name} added as b-roll · drag it on the preview"
 msgstr "{name} added as b-roll · drag it on the preview"
 
+#: src/components/HeaderAlerts.tsx
+msgid "{name} deprecated · Review"
+msgstr "{name} deprecated · Review"
+
 #: src/lib/uploads.tsx
 msgid "{name} is {size} MB, and this server accepts uploads up to {max} MB."
 msgstr "{name} is {size} MB, and this server accepts uploads up to {max} MB."
@@ -1219,6 +1235,10 @@ msgstr "{name} is {size} MB, and this server accepts uploads up to {max} MB."
 #: src/components/ClipEditor.tsx
 msgid "{name} now follows the person at {where}% (re-render to track them)"
 msgstr "{name} now follows the person at {where}% (re-render to track them)"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{name} retired · Review"
+msgstr "{name} retired · Review"
 
 #: src/components/ClipEditor.tsx
 msgid "{nCut, plural, one {# cut applied} other {# cuts applied}}"
@@ -1231,6 +1251,10 @@ msgstr "{nDecided} staged"
 #: src/components/CommandPaletteDialog.tsx
 msgid "{ok, plural, one {Started # project} other {Started # projects}}"
 msgstr "{ok, plural, one {Started # project} other {Started # projects}}"
+
+#: src/components/HeaderAlerts.tsx
+msgid "{others, plural, one {(+# more)} other {(+# more)}}"
+msgstr "{others, plural, one {(+# more)} other {(+# more)}}"
 
 #: src/components/QueueSection.tsx
 msgid "{owner} · priority {prio}"
@@ -1297,6 +1321,14 @@ msgstr "{projects} projects · {minutes} min · {clips} clips · {stored}"
 #: src/components/ClipEditor.tsx
 msgid "{projectTitle} · clip #{0}"
 msgstr "{projectTitle} · clip #{0}"
+
+#: src/components/ModelRetirement.tsx
+msgid "{provider} has deprecated this model and not set a date yet. Plan to switch."
+msgstr "{provider} has deprecated this model and not set a date yet. Plan to switch."
+
+#: src/components/ModelRetirement.tsx
+msgid "{provider} retired this model on {date}; calls may already fail. Pick another and Save."
+msgstr "{provider} retired this model on {date}; calls may already fail. Pick another and Save."
 
 #: src/pages/Project.tsx
 msgid "{readyCount, plural, one {Export # clip} other {Export # clips}}"
@@ -1890,6 +1922,14 @@ msgstr "A logo in the first seconds, a call to action at the end, a watermark or
 #: src/components/ClipEditor.tsx
 msgid "A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole template of them fitted to the clip. Captions stay on top of images and video."
 msgstr "A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole template of them fitted to the clip. Captions stay on top of images and video."
+
+#: src/components/ModelRetirement.tsx
+msgid "A model in use is being retired by its provider"
+msgstr "A model in use is being retired by its provider"
+
+#: src/components/HeaderAlerts.tsx
+msgid "A model in use is being retired by its provider. Open Settings → System → Models to switch."
+msgstr "A model in use is being retired by its provider. Open Settings → System → Models to switch."
 
 #: src/components/HeaderAlerts.tsx
 msgid "A newer version is ready. Refreshing now would discard unsaved edits."
@@ -4378,6 +4418,10 @@ msgstr "Delivery log"
 #: src/pages/Consent.tsx
 msgid "Deny"
 msgstr "Deny"
+
+#: src/components/ModelRetirement.tsx
+msgid "deprecated, no date yet"
+msgstr "deprecated, no date yet"
 
 #: src/components/ListToolbar.tsx
 msgid "Descending"
@@ -6910,6 +6954,7 @@ msgstr "Minutes this period"
 msgid "Model pass for fillers"
 msgstr "Model pass for fillers"
 
+#: src/components/HeaderAlerts.tsx
 #: src/components/ModelsSection.tsx
 #: src/pages/Settings.tsx
 msgid "Models"
@@ -9411,6 +9456,14 @@ msgstr "Resuming…"
 msgid "Retention"
 msgstr "Retention"
 
+#: src/components/ModelRetirement.tsx
+msgid "retired {date}"
+msgstr "retired {date}"
+
+#: src/components/ModelRetirement.tsx
+msgid "retires {date}"
+msgstr "retires {date}"
+
 #: src/components/QueueSection.tsx
 msgid "Retried {retried}"
 msgstr "Retried {retried}"
@@ -10927,6 +10980,10 @@ msgstr "Straight cut"
 #: src/components/ClipEditor.tsx
 msgid "Style"
 msgstr "Style"
+
+#: src/components/ModelRetirement.tsx
+msgid "Suggested: {replacement}"
+msgstr "Suggested: {replacement}"
 
 #: src/pages/AdminUsers.tsx
 msgid "Suspend"

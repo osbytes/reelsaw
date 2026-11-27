@@ -275,6 +275,10 @@ msgstr ""
 msgid "; {notRendered, plural, one {# picked clip} other {# picked clips}} are not rendered and were left out"
 msgstr ""
 
+#: src/ai/retirement.ts
+msgid "; {provider} suggests {replacement}"
+msgstr ""
+
 #: src/cli.ts
 msgid "; {skipped} still preparing or rendering keep the old style (re-render them when done)"
 msgstr ""
@@ -1342,6 +1346,10 @@ msgstr ""
 msgid "Deleted. restore_clip brings it back {restorable}."
 msgstr ""
 
+#: src/ai/retirement.ts
+msgid "deprecated, no retirement date yet{instead}"
+msgstr ""
+
 #: src/cli.ts
 msgid "device present, no driver tools"
 msgstr ""
@@ -1720,6 +1728,10 @@ msgid "project.min_below_max"
 msgstr ""
 
 #: src/cli.ts
+msgid "model     {model} {state}"
+msgstr ""
+
+#: src/cli.ts
 msgid "models"
 msgstr ""
 
@@ -1861,6 +1873,10 @@ msgstr ""
 msgid "clip.not_found"
 msgstr ""
 
+#: src/ai/retirement.ts
+msgid "no dates published by {provider}"
+msgstr ""
+
 #: src/cli.ts
 msgid "no failed projects or clips"
 msgstr ""
@@ -1922,6 +1938,10 @@ msgstr ""
 
 #: src/cli.ts
 msgid "no rendered clips in this project"
+msgstr ""
+
+#: src/ai/retirement.ts
+msgid "no retirement announced"
 msgstr ""
 
 #: src/media-links/service.ts
@@ -2685,6 +2705,14 @@ msgstr ""
 
 #: src/cli.ts
 msgid "resumed {id} at {queue}"
+msgstr ""
+
+#: src/ai/retirement.ts
+msgid "RETIRED on {date}: calls may already fail{instead}"
+msgstr ""
+
+#: src/ai/retirement.ts
+msgid "retires {date} ({days, plural, one {in # day} other {in # days}}){instead}"
 msgstr ""
 
 #: src/cli.ts
@@ -3500,6 +3528,10 @@ msgstr ""
 #. js-lingui-explicit-id
 #: src/trpc/router.ts
 msgid "provider.unknown"
+msgstr ""
+
+#: src/ai/retirement.ts
+msgid "unknown: {provider} could not be listed ({error})"
 msgstr ""
 
 #: src/cli.ts

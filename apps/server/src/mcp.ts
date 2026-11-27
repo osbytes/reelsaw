@@ -682,6 +682,8 @@ export function createMcpServer(
 
   server.registerTool("list_models", TOOLS.list_models, (input) => run(() => api.admin.models.catalog(input)));
 
+  server.registerTool("check_model_retirements", TOOLS.check_model_retirements, ({ refresh }) => run(() => api.admin.models.lifecycle({ refresh })));
+
   server.registerTool("list_workers", TOOLS.list_workers, () => run(() => api.admin.workers.list()));
 
   server.registerTool("get_failure", TOOLS.get_failure, (input) => run(() => api.admin.failures.get(input)));

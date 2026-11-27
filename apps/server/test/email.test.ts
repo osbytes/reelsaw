@@ -20,7 +20,7 @@ describe("email templates", () => {
     const mail = templates.resetPassword("https://app.example.com/reset?token=x");
     assert.match(mail.text, /If not, ignore/);
     assert.match(mail.html, /Reset password/);
-    assert.match(mail.html, /didn't ask for this/);
+    assert.match(mail.html, /didn&#39;t ask for this/);
   });
 
   it("approved and waitingForApproval point at the app", () => {

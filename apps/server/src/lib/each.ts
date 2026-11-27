@@ -9,6 +9,7 @@ import { TRPCError } from "@trpc/server";
 import { msg } from "@lingui/core/runtime-macro";
 import { AppError } from "../i18n.js";
 import type { Services } from "../services.js";
+import { uniqBy } from "lodash-es";
 
 /** Most items one bulk call takes; the selection bars never send more. */
 export const BULK_CAP = 200;
@@ -27,16 +28,7 @@ function failMessage(svc: Services, e: unknown, module: string, action: string, 
 
 /** First `BULK_CAP` distinct items by `key`, in the order given. */
 export function uniqueBy<T>(items: readonly T[], key: (t: T) => string): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const it of items) {
-    const k = key(it);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-    if (out.length >= BULK_CAP) break;
-  }
-  return out;
+  return uniqBy(items, key).slice(0, BULK_CAP);
 }
 
 /**

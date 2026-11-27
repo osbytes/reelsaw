@@ -150,6 +150,7 @@ import {
   punchInLevel,
 } from "@reelsaw/shared";
 import { FadePresets, fadeText } from "./FadeField";
+import { clamp } from "lodash-es";
 
 export interface EditorClip {
   id: string;
@@ -1077,7 +1078,6 @@ export function ClipEditor(props: Props) {
         const fallback: PreviewLayout = clip.layout && clip.layout !== "mixed" ? (clip.layout as PreviewLayout) : "fit";
         // a shape too wide for two stacked panes (16:9) shows a split or stack whole, as the renderer does (`layoutForShape`)
         const lay: PreviewLayout = layoutForShape(sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode, style.shape);
-        const clamp = (v: number) => Math.max(0, Math.min(1, v));
         const subjectCrop = lay === "center" && sec.mode === "auto" && det?.focus === "subject" && !det.manual;
         const at = (tr: Array<[number, number]> | undefined): number | undefined => {
           if (!tr?.length) return undefined;
@@ -1103,7 +1103,7 @@ export function ClipEditor(props: Props) {
           const own = rendered(pane);
           // a split that has not been rendered yet has no second track: mirror the first speaker's spot for the bottom pane
           const first = rendered(0);
-          let base = own ? { x: own.x, y: own.y } : pane === 1 ? { x: clamp(1 - (first?.x ?? 0.5)), y: first?.y ?? 0.45 } : { x: 0.5, y: 0.45 };
+          let base = own ? { x: own.x, y: own.y } : pane === 1 ? { x: clamp(1 - (first?.x ?? 0.5), 0, 1), y: first?.y ?? 0.45 } : { x: 0.5, y: 0.45 };
           if (a.subjectX !== undefined && (own?.subject === undefined || Math.abs(own.subject - a.subjectX) > 0.02)) {
             // not rendered with this subject yet: follow whichever rendered track is that person, else hold the spot
             const other = rendered(pane === 0 ? 1 : 0);
@@ -1112,7 +1112,7 @@ export function ClipEditor(props: Props) {
           }
           // a centre crop is the frame's centre, unless an Auto section's render followed the shot's moving subject (no face)
           if (lay === "center" && !subjectCrop) base = { x: 0.5, y: base.y };
-          return { x: clamp(base.x + (a.offsetX ?? 0)), y: clamp(base.y + (a.offsetY ?? 0)) };
+          return { x: clamp(base.x + (a.offsetX ?? 0), 0, 1), y: clamp(base.y + (a.offsetY ?? 0), 0, 1) };
         };
         const c1 = centre(0);
         const c2 = lay === "split" ? centre(1) : undefined;

@@ -134,7 +134,7 @@ import {
   restoreOwnedAsset,
   purgeOwnedAsset,
 } from "../library/service.js";
-import { templateBumpersSchema } from "@reelsaw/shared";
+import { providerOf, templateBumpersSchema } from "@reelsaw/shared";
 import {
   applyLayerTemplate,
   applyLayerTemplateInput,
@@ -181,7 +181,6 @@ import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
 import { reportCapabilities } from "../report/capabilities.js";
 import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
-import { providerOf } from "../ai/registry.js";
 import { testModel } from "../ai/model-test.js";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
 import { msg, plural as icuPlural } from "@lingui/core/runtime-macro";
@@ -1269,6 +1268,10 @@ const restRouter = router({
     }),
     models: router({
       get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
+      /** The models in use and when their providers retire them (ai/retirement.ts). Same as check_model_retirements / `reelsaw models retirements`. */
+      lifecycle: adminProcedure
+        .input(z.object({ refresh: z.boolean().default(false) }).default({ refresh: false }))
+        .query(({ ctx, input }) => ctx.svc.modelLifecycle.get({ refresh: input.refresh })),
       /** A page of each provider's models (or one provider's, or the matches for q), the models in use first. Same as list_models / `reelsaw models`. */
       catalog: adminProcedure.input(catalogPageInput).query(async ({ ctx, input }) => {
         try {

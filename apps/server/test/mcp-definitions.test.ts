@@ -23,6 +23,7 @@ const EXPECTED = [
   "billing_checkout_url",
   "billing_portal_url",
   "check_for_update",
+  "check_model_retirements",
   "check_source",
   "clear_media_links",
   "create_clip",

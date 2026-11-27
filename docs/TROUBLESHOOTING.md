@@ -127,6 +127,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw align <projectId> <start> <end>` | word timestamps from the align model for a source window |
 | `reelsaw test-model <language\|transcription> <provider:model> [--json]` | one real call to check a model works here; transcription re-runs the word-timestamp test clip (same as Test under Settings → Models, test_model) |
 | `reelsaw models <language\|transcription> [--provider p] [--q text] [--cursor c] [--limit n] [--refresh] [--json]` | what each provider offers, a page per provider with the models in use first; --q searches, --provider + --cursor pages on (the Settings → Models picker, list_models) |
+| `reelsaw models retirements [--refresh] [--json] the models in use and when their providers retire them (check_model_retirements);` | exits 2 when one has retired or retires within 30 days |
 | `reelsaw hear <clipId> [start] [dur]` | transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags <projectId> [from] [to]` | transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |

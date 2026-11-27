@@ -13,6 +13,7 @@ import { bumperUsageCounts, purgeOwnedAsset, restoreOwnedAsset } from "./library
 import { listLayerTemplates, purgeLayerTemplate, restoreLayerTemplate, TEMPLATE_RESTORE_DAYS } from "./library/templates.js";
 import { ASSET_RESTORE_DAYS } from "./storage/sweep.js";
 import { purgeOwnedClip, purgeOwnedProject, restoreClip, restoreProject, type Actor } from "./projects/service.js";
+import { addDays } from "date-fns";
 
 const LIST_CAP = 200;
 
@@ -22,12 +23,7 @@ export const deletedItemRefSchema = z.object({
 });
 
 function until(from: Date, days: number): string | null {
-  if (days <= 0) return null;
-  return new Date(from.getTime() + days * 86_400_000).toISOString();
-}
-
-function iso(d: Date | null | undefined): string | null {
-  return d ? d.toISOString() : null;
+  return days > 0 ? addDays(from, days).toISOString() : null;
 }
 
 async function counted(n: Promise<Array<{ n: number }>>): Promise<number> {
@@ -144,7 +140,7 @@ export async function listDeleted(svc: Services, userId: string) {
       id: r.id,
       title: r.title,
       status: r.status,
-      deletedAt: iso(r.deletedAt)!,
+      deletedAt: r.deletedAt!.toISOString(),
       purgeAt: until(r.deletedAt!, keepDays),
       storedBytes: Number(r.storedBytes) || 0,
       canPurge: true,
@@ -156,7 +152,7 @@ export async function listDeleted(svc: Services, userId: string) {
       title: r.title,
       projectId: r.projectId,
       projectTitle: r.projectTitle,
-      deletedAt: iso(r.deletedAt)!,
+      deletedAt: r.deletedAt!.toISOString(),
       purgeAt: until(r.deletedAt!, keepDays),
       storedBytes: Number(r.storedBytes) || 0,
       canPurge: true,
@@ -169,7 +165,7 @@ export async function listDeleted(svc: Services, userId: string) {
         id: r.id,
         title: r.name,
         assetKind: r.kind,
-        deletedAt: iso(r.deletedAt)!,
+        deletedAt: r.deletedAt!.toISOString(),
         purgeAt: until(r.deletedAt!, ASSET_RESTORE_DAYS),
         storedBytes: r.sizeBytes,
         usedBy: u?.projects ?? 0,

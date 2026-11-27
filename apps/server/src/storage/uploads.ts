@@ -5,7 +5,8 @@ import { z } from "zod";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { chunk, deadlineIn, keysetLoop, mapLimit } from "../lib/batch.js";
+import { chunk } from "lodash-es";
+import { deadlineIn, keysetLoop, mapLimit } from "../lib/batch.js";
 
 /**
  * Drop an upload (row now, object after commit) once no project still needs it as its input.
