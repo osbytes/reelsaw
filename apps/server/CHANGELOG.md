@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.55.1
+
+### Patch Changes
+
+- [#391](https://github.com/osbytes/reelsaw/pull/391) [`23178d5`](https://github.com/osbytes/reelsaw/commit/23178d588a0e853d92a737d36f17c085ebf3c906) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A full-quality video download that stops making progress during a render is now stopped after 5 minutes and tried again. It used to hold the clip, and the rest of the project's clips waiting behind it, for up to an hour.
+
 ## 0.55.0
 
 ### Minor Changes
