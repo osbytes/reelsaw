@@ -46,22 +46,38 @@ export class DownloadTooLargeError extends Error {
   }
 }
 
+/** A yt-dlp download whose folder stopped growing: a hung connection would otherwise hold its job until the job expires. */
+export class DownloadStalledError extends Error {
+  constructor(readonly stallMs: number) {
+    super(`yt-dlp wrote nothing for ${Math.round(stallMs / 1000)} s; stopped it`);
+  }
+}
+
 export type YtdlpOptions = RunOptions & {
-  download: { dir: string; maxFileBytes: number } | "none";
+  /** `stallMs`: stop the download (DownloadStalledError) once the folder's bytes have not changed for that long */
+  download: { dir: string; maxFileBytes: number; stallMs?: number } | "none";
 };
 
 /** How often a download's files are measured: a fast link writes ~100 MB a second, so the overshoot stays small. */
 const DOWNLOAD_POLL_MS = 1000;
 
-/** The largest file in `dir` (yt-dlp's `.part` and fragment files included); 0 when the folder is empty or missing. */
-export async function largestFileBytes(dir: string): Promise<number> {
+/** The largest file in `dir` and all its files together (yt-dlp's `.part` and fragment files included); 0 when empty or missing. */
+export async function folderBytes(dir: string): Promise<{ largest: number; total: number }> {
   const names = await fs.readdir(dir).catch(() => [] as string[]);
-  let most = 0;
+  let largest = 0;
+  let total = 0;
   for (const name of names) {
     const st = await fs.stat(path.join(dir, name)).catch(() => null);
-    if (st?.isFile() && st.size > most) most = st.size;
+    if (!st?.isFile()) continue;
+    total += st.size;
+    if (st.size > largest) largest = st.size;
   }
-  return most;
+  return { largest, total };
+}
+
+/** The largest file in `dir`; 0 when the folder is empty or missing. */
+export async function largestFileBytes(dir: string): Promise<number> {
+  return (await folderBytes(dir)).largest;
 }
 
 export interface ProbeInfo {
@@ -522,13 +538,26 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
         throw new Error('ytdlp: download "none" needs --no-download or --simulate in the arguments');
       }
       // the file on disk is the bound, not what yt-dlp says: with no announced length its progress has no total
+      // and, with stallMs, a folder whose bytes stop changing: a hung connection never ends on its own
       const over = new AbortController();
+      let stalled = false;
+      let lastTotal = -1;
+      let lastChange = Date.now();
       const watch =
         download === "none"
           ? null
           : setInterval(() => {
-              void largestFileBytes(download.dir).then((n) => {
-                if (n > download.maxFileBytes && !over.signal.aborted) over.abort();
+              void folderBytes(download.dir).then(({ largest, total }) => {
+                if (over.signal.aborted) return;
+                if (largest > download.maxFileBytes) return over.abort();
+                const now = Date.now();
+                if (total !== lastTotal) {
+                  lastTotal = total;
+                  lastChange = now;
+                } else if (download.stallMs !== undefined && now - lastChange >= download.stallMs) {
+                  stalled = true;
+                  over.abort();
+                }
               });
             }, DOWNLOAD_POLL_MS);
       const signal = opts.signal ? AbortSignal.any([opts.signal, over.signal]) : over.signal;
@@ -548,7 +577,10 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
         );
         return { ...value, proxyId: id };
       } catch (err) {
-        if (over.signal.aborted && download !== "none" && !opts.signal?.aborted) throw new DownloadTooLargeError(download.maxFileBytes);
+        if (over.signal.aborted && download !== "none" && !opts.signal?.aborted) {
+          if (stalled) throw new DownloadStalledError(download.stallMs ?? 0);
+          throw new DownloadTooLargeError(download.maxFileBytes);
+        }
         throw err;
       } finally {
         if (watch) clearInterval(watch);
