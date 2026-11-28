@@ -31,6 +31,7 @@ import { NoEligibleProxyError } from "../ytdlp-proxy.js";
 import { type StageContext, DownloadFailedError } from "./common.js";
 import { describeDownloadFailure, sourceFormat } from "./ingest.js";
 import { ENCODE_PASS_CPU } from "../resources.js";
+import { DownloadStalledError } from "../media.js";
 
 /** Seconds fetched on each side of a clip: room for a keyframe before the start, and for small bound nudges. */
 export const WINDOW_PAD_SEC = 3;
@@ -73,6 +74,12 @@ export const MERGE_GAP_SEC = 15;
 export const MAX_WINDOW_SEC = 600;
 /** A missing stretch is fetched this far into what is already stored on each side, so the seam is inside both files. */
 export const SEAM_SEC = 2;
+/**
+ * A window download that writes nothing for this long is stopped and the render retried. A hung connection otherwise
+ * holds the render (and the project's window lock, so every other clip of the project) until the job expires, an hour.
+ * Long enough for yt-dlp to read the page and the playlist through a slow proxy before the first bytes land.
+ */
+const WINDOW_STALL_MS = 5 * 60 * 1000;
 
 /** Source seconds a clip's render may read: the clip and the room a window keeps on each side. */
 function clipSpan(clip: Clip): [number, number] {
@@ -378,13 +385,18 @@ async function downloadPiece(ctx: StageContext, project: Project, [start, end]: 
       ],
       {
         signal: ctx.signal,
-        download: { dir, maxFileBytes: svc.settings.get().MAX_SOURCE_FILE_MB * 1024 * 1024 },
+        download: { dir, maxFileBytes: svc.settings.get().MAX_SOURCE_FILE_MB * 1024 * 1024, stallMs: WINDOW_STALL_MS },
         onStderr: (line) => {
           stderrTail = `${stderrTail}\n${line}`.slice(-4000);
         },
       },
     )
     .catch((err: Error) => {
+      // a hung connection, not a refusal: the retry starts a fresh download (often through another exit)
+      if (err instanceof DownloadStalledError) {
+        ctx.log.warn({ range: [start, end], stallMs: err.stallMs }, "full-quality window download stalled; retrying");
+        throw new DownloadFailedError(`The full-quality download stopped making progress for ${Math.round(err.stallMs / 60_000)} minutes`);
+      }
       if (err instanceof NoEligibleProxyError)
         throw new WindowUnavailableError("no proxy in YTDLP_PROXY can fetch full-quality windows (they need an HTTP or HTTPS proxy, or direct)");
       const message = describeDownloadFailure(err, stderrTail);
